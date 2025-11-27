@@ -620,6 +620,27 @@ hydrix.colors = {
 
 ---
 
+## Next Steps
+
+### Immediate (Phase 2)
+- Copy config files from ~/dotfiles to configs/
+- Port essential scripts to scripts/
+- Adapt configs to use static color options
+- Test build: `nix build .#pentest-vm-base`
+
+### Soon (Phase 3)
+- Create router profile (from ~/splix)
+- Create additional VM type profiles (comms, browsing, dev)
+- Port deployment scripts
+- Test full workflow
+
+### Eventually
+- Deploy and test all VM types
+- Replace ~/dotfiles and ~/splix
+- Production use
+
+---
+
 ## References
 
 **Dotfiles**: `/home/traum/dotfiles`
