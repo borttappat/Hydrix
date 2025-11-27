@@ -539,8 +539,6 @@ Everything handles multiple monitors:
 
 ---
 
-## Next Actions
-
 ## Current Implementation
 
 ### Repository Structure
