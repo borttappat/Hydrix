@@ -541,22 +541,6 @@ Everything handles multiple monitors:
 
 ## Next Actions
 
-1. ✅ Initialize git repo
-2. ✅ Create directory structure
-3. ✅ Write this CLAUDE.md
-4. ✅ Create flake.nix with nixos-generators
-5. ✅ Extract base modules (nixos-base, users, networking, virt)
-6. ✅ Create static color scheme module (no pywal for VMs!)
-7. ✅ Extract WM module (i3 + all graphical packages)
-8. ✅ Extract shell modules (fish, packages)
-9. ✅ Create VM modules (qemu-guest, shaping)
-10. ✅ Create pentest profiles (base + full)
-11. ⏳ Fix host config (needs hardware-configuration.nix or boot/fs settings)
-12. ⏭️ Copy config files to configs/
-13. ⏭️ Port critical scripts to scripts/
-14. ⏭️ Test build: `nix build .#pentest-vm-base`
-15. ⏭️ Deploy and test VM
-
 ## Current Implementation
 
 ### Repository Structure
