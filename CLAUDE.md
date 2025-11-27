@@ -1,24 +1,32 @@
 # Hydrix Project - Technical Documentation
 
 **Last Updated**: 2025-11-27
-**Status**: Initial setup phase
-**Goal**: Create a clean, template-driven VM automation system based on learnings from ~/dotfiles and ~/splix
+**Status**: Foundation complete, ready for config/script porting
+**Goal**: Clean, declarative VM automation system that replaces both ~/dotfiles and ~/splix
 
 ---
 
 ## Project Vision
 
-Build a **new, streamlined repository** that:
-- Takes the best quality-of-life (QOL) configurations from ~/dotfiles
-- Uses template-driven approach for easy VM creation
-- Includes QOL configs in base images (no ultra-minimal → rebuild pattern)
-- Focuses on clean, maintainable code over experimental complexity
+Build a streamlined repository that:
+- Extracts best configurations from ~/dotfiles
+- Uses static, declarative theming (no pywal complexity)
+- Implements two-stage deployment: minimal base → first-boot shaping → purpose-specific system
+- Will replace both ~/dotfiles and ~/splix as single source of truth
 
-**Key Difference from Original PROJECT.md Plan**:
-- **Original**: Extend ~/dotfiles with VM building
-- **Current**: Fresh repo in ~/Hydrix that cherry-picks best practices
-- **Base images**: Include i3, polybar, dunst, fish, zoxide, etc. from the start
-- **Size**: Not critical - focus on avoiding rebuild cycles
+**Key Design Choices**:
+1. **Static Color Schemes**: Each VM type gets predefined colors (red for pentest, blue for comms, etc.)
+   - No runtime color generation, colors defined in Nix modules
+   - Visual differentiation built-in
+
+2. **Two-Stage System**:
+   - **Base Images**: Small, built once, include shaping service
+   - **First-Boot Shaping**: VM clones Hydrix repo, applies full profile
+   - **Full Profiles**: All packages and configs for specific purpose
+
+3. **Simple Module Organization**: Consolidated modules, not over-granular
+   - Only create separate modules for things that need actual configuration
+   - Group related packages together
 
 ---
 
@@ -535,16 +543,80 @@ Everything handles multiple monitors:
 
 1. ✅ Initialize git repo
 2. ✅ Create directory structure
-3. ⏳ Write this CLAUDE.md
-4. ⏭️ Create flake.nix based on dotfiles flake
-5. ⏭️ Extract base modules (users, networking, configuration)
-6. ⏭️ Extract desktop modules (i3, polybar, dunst, rofi, theming)
-7. ⏭️ Extract shell modules (fish, zoxide, cli-tools)
-8. ⏭️ Copy config files to configs/
-9. ⏭️ Port critical scripts to scripts/
-10. ⏭️ Create first profile: pentest-base.nix
-11. ⏭️ Test build: `nix build .#pentest-vm-base`
-12. ⏭️ Deploy and test VM
+3. ✅ Write this CLAUDE.md
+4. ✅ Create flake.nix with nixos-generators
+5. ✅ Extract base modules (nixos-base, users, networking, virt)
+6. ✅ Create static color scheme module (no pywal for VMs!)
+7. ✅ Extract WM module (i3 + all graphical packages)
+8. ✅ Extract shell modules (fish, packages)
+9. ✅ Create VM modules (qemu-guest, shaping)
+10. ✅ Create pentest profiles (base + full)
+11. ⏳ Fix host config (needs hardware-configuration.nix or boot/fs settings)
+12. ⏭️ Copy config files to configs/
+13. ⏭️ Port critical scripts to scripts/
+14. ⏭️ Test build: `nix build .#pentest-vm-base`
+15. ⏭️ Deploy and test VM
+
+## Current Implementation
+
+### Repository Structure
+```
+modules/
+├── base/          # Core system (nixos-base, users, networking, virt)
+├── wm/            # i3-gaps + all graphical packages
+├── shell/         # Fish + CLI tools
+├── theming/       # Static color scheme options
+└── vm/            # qemu-guest, shaping service
+
+profiles/
+├── pentest-base.nix    # Minimal base
+└── pentest-full.nix    # Full pentest system with red theme
+
+configs/           # (To be populated)
+scripts/           # (To be populated)
+```
+
+### How It Works
+
+**Build base image:**
+```bash
+nix build .#pentest-vm-base
+# Small image with: NixOS base + git + shaping service
+```
+
+**Deploy VM:**
+```bash
+./deploy-vm.sh --type pentest --name grief
+# Creates VM with hostname "pentest-grief"
+```
+
+**First boot:**
+1. Shaping service detects VM type from hostname
+2. Clones Hydrix repo to /etc/nixos/hydrix
+3. Runs: nixos-rebuild switch --flake .#vm-pentest
+4. Installs purpose-specific packages and configs
+5. Marks as shaped, won't run again
+
+**Updates:**
+```bash
+cd /etc/nixos/hydrix && git pull && nixos-rebuild switch --flake .#vm-pentest
+```
+
+### Static Theming
+
+Colors defined in profile, templated into configs:
+```nix
+hydrix.colors = {
+  accent = "#ea6c73";  # Red for pentest
+  # ... full palette
+};
+```
+
+**Planned schemes:**
+- Pentest: Red
+- Comms: Blue
+- Browsing: Green
+- Dev: Purple
 
 ---
 
