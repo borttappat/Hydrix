@@ -1,8 +1,69 @@
 # Hydrix Project - Technical Documentation
 
-**Last Updated**: 2025-11-27
-**Status**: Foundation complete, ready for config/script porting
+**Last Updated**: 2025-11-29
+**Status**: ⚠️ REQUIRES REBUILD - Implementation guide created, needs careful restructuring | ✅ nixbuild.sh fixed
 **Goal**: Clean, declarative VM automation system that replaces both ~/dotfiles and ~/splix
+
+---
+
+## 🚨 CRITICAL - READ FIRST
+
+**STOP**: Before making ANY changes to Hydrix, read `/home/traum/Hydrix/IMPLEMENTATION-GUIDE.md`
+
+**What Happened**: A system rebuild broke because assumptions were made instead of learning from the working dotfiles setup.
+
+**The Problem**:
+- Hydrix imported `/home/traum/dotfiles/modules/zephyrusconf.nix` (which is COMMENTED OUT in dotfiles)
+- This created a hard dependency on dotfiles, breaking standalone nature
+- Generated module was imported without understanding the base system
+
+**The Fix**:
+- Read and understand the working dotfiles configuration FIRST
+- Copy the exact module structure from dotfiles
+- Use hwconf.nix pattern (imports /etc/nixos/hardware-configuration.nix)
+- Machine profiles should NOT import hardware configs directly
+- Follow the implementation guide step-by-step
+
+**Key Learnings**:
+1. Dotfiles uses `hwconf.nix` wrapper for ALL machines (not machine-specific hardware configs)
+2. Machine profiles import router-generated configs, not hardware configs
+3. Many modules are intentionally commented out in dotfiles
+4. NEVER make assumptions - always read the working config first
+
+---
+
+## ✅ RESOLVED - nixbuild.sh Mode Switching Issue
+
+**Resolution Date**: 2025-11-29
+
+**What Was Fixed**:
+1. ✅ Removed problematic live mode-switching commands
+2. ✅ Implemented proper build strategy: `boot` for router/maximalism, `switch` for base/fallback
+3. ✅ Created reusable `detect_specialisation()` and `rebuild_with_specialisation()` functions
+4. ✅ Added Zenbook support with specialisation awareness
+5. ✅ Improved VM detection using both `Chassis` field and `Hardware Vendor`
+6. ✅ Updated templates with clear instructions for adding new machines
+
+**How It Works Now**:
+- **VM Detection**: Checks `Chassis: vm` or `Hardware Vendor: QEMU/VMware` → uses hostname pattern
+- **Physical Detection**: Uses `Hardware Model` keywords (Zephyrus, Zenbook, etc.)
+- **Specialisation Detection**:
+  - Primary: Check `/run/current-system/configuration-name` for mode labels
+  - Fallback: Check running VMs as last resort
+- **Rebuild Strategy**:
+  - Router/Maximalism modes: Use `nixos-rebuild boot` (requires reboot for kernel params)
+  - Base/Fallback modes: Use `nixos-rebuild switch` (safe to apply live)
+
+**Correct rebuild flow**:
+1. Boot into desired mode via bootloader (select specialisation at boot)
+2. Run `./nixbuild.sh` - detects current mode, rebuilds in that mode
+3. Router/maximalism: requires reboot to apply changes
+4. Base/fallback: applies changes live (no reboot needed)
+
+**Testing**:
+- Created `test-nixbuild-detection.sh` to verify detection logic
+- Tested successfully on Zephyrus (detects correctly)
+- Syntax validated with `bash -n`
 
 ---
 
@@ -645,4 +706,60 @@ hydrix.colors = {
 
 ---
 
+## 🔄 CORRECT IMPLEMENTATION APPROACH (2025-11-27)
+
+### Phase 1: Analysis (COMPLETED)
+- ✅ Read dotfiles flake.nix for zephyrus and zenbook
+- ✅ Identified hwconf.nix pattern (imports /etc/nixos/hardware-configuration.nix)
+- ✅ Documented all modules used in working setup
+- ✅ Understood base/machine-specific separation
+- ✅ Created comprehensive implementation guide
+
+### Phase 2: Base Modules (TODO)
+Copy these modules from dotfiles → Hydrix:
+- [ ] `configuration.nix` → `modules/base/configuration.nix`
+- [ ] `hwconf.nix` → `modules/base/hardware-config.nix`
+- [ ] `users.nix` → `modules/base/users.nix`
+- [ ] `services.nix` → `modules/base/services.nix`
+- [ ] `audio.nix` → `modules/base/audio.nix`
+- [ ] `virt.nix` → `modules/base/virt.nix`
+
+### Phase 3: Desktop Modules (TODO)
+Copy these modules from dotfiles → Hydrix:
+- [ ] `i3.nix` → `modules/desktop/i3.nix`
+- [ ] `packages.nix` → `modules/desktop/packages.nix`
+- [ ] `colors.nix` → `modules/desktop/colors.nix`
+
+### Phase 4: Machine Profiles (TODO)
+Create standalone machine profiles:
+- [ ] Create `profiles/machines/zephyrus.nix` based on dotfiles version
+  - Remove dotfiles import
+  - Import router-generated config relatively
+  - Keep all ASUS/NVIDIA/power configs
+- [ ] Create `profiles/machines/zenbook.nix` based on dotfiles version
+  - Follow same pattern as zephyrus
+
+### Phase 5: Update Flake (TODO)
+- [ ] Restructure flake.nix to match dotfiles pattern
+- [ ] Ensure all imports are relative to Hydrix
+- [ ] Match module list exactly to dotfiles (including commented modules)
+
+### Phase 6: Validation (TODO)
+- [ ] `nix flake check`
+- [ ] `nixos-rebuild dry-build --flake .#zephyrus --impure`
+- [ ] Test build on non-critical boot
+- [ ] Verify all functionality
+- [ ] Document any issues
+
+### Critical Rules for Implementation
+1. **READ FIRST, CODE SECOND**: Understand the working config before copying
+2. **EXACT REPLICATION**: Match dotfiles structure exactly
+3. **NO ASSUMPTIONS**: If unsure, read the source file
+4. **RELATIVE PATHS**: All imports must be relative to Hydrix
+5. **TEST INCREMENTALLY**: Build and test after each phase
+6. **UPDATE GUIDE**: Document learnings in IMPLEMENTATION-GUIDE.md
+
+---
+
 *This document will be updated as implementation progresses.*
+*Always refer to IMPLEMENTATION-GUIDE.md for detailed instructions.*

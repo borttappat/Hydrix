@@ -1,87 +1,244 @@
-# CLI tools and utilities
+#                    __                                     __
+#  .-----.---.-.----|  |--.---.-.-----.-----.-----.  .-----|__.--.--.
+#  |  _  |  _  |  __|    <|  _  |  _  |  -__|__ --|__|     |  |_   _|
+#  |   __|___._|____|__|__|___._|___  |_____|_____|__|__|__|__|__.__|
+#  |__|                         |_____|
+
 { config, pkgs, ... }:
 
 {
-  environment.systemPackages = with pkgs; [
-    # Editors
-    vim
 
-    # Compilers and interpreters
+# Editor-settings
+environment.variables = {
+    EDITOR = "vim";
+    VISUAL = "vim";
+};
+
+nixpkgs.config.packageOverrides = pkgs: {
+    librewolf = pkgs.librewolf.override {
+        extraPrefs = ''
+            pref("browser.startup.homepage", "https://borttappat.github.io/links.html");
+            pref("browser.newtab.url", "https://borttappat.github.io/links.html");
+            pref("browser.newtabpage.enabled", true);
+            pref("browser.newtab.preload", true);
+            pref("browser.newtabpage.enhanced", true);
+            pref("browser.newtabpage.activity-stream.showSearch", true);
+            pref("browser.newtabpage.activity-stream.default.sites", "");
+        '';
+    };
+  
+    firefox = pkgs.firefox.override {
+        extraPrefs = ''
+            pref("browser.startup.homepage", "https://borttappat.github.io/links.html");
+            pref("browser.newtab.url", "https://borttappat.github.io/links.html");
+            pref("browser.newtabpage.enabled", true);
+            pref("browser.newtab.preload", true);
+            pref("browser.newtabpage.enhanced", true);
+            pref("browser.newtabpage.activity-stream.showSearch", true);
+            pref("browser.newtabpage.activity-stream.default.sites", "");
+        '';
+    };
+};
+
+# Allowing unfree and unstable packages
+# I'm sorry, Stallman
+nixpkgs.config.allowUnfree = true;
+nixpkgs.config.allowUnstable = true;
+
+nix.package = pkgs.nixVersions.git;
+ 
+# Fonts
+fonts.packages = with pkgs; [
+    scientifica
+    gohufont
+    cozette
+   #hack-font
+    creep
+    cherry
+    envypn-font
+    tamsyn
+    tamzen
+    monocraft
+    miracode
+    termsyn
+    spleen
+    anakron
+];
+
+# Packages to install on a system-wide level
+environment.systemPackages = with pkgs; [
+
+# Editors
+    vim
+    #neovim
+    #helix
+    #inkscape
+    #obs-studio
+    #davinci-resolve
+
+# Compilers
     gcc
     python3
     jython
 
-    # Modern CLI replacements
-    eza           # better ls
-    bat           # better cat
-    ugrep         # better grep
-    du-dust       # better du
-    bottom        # better top
-    htop
+# Programs
+     (pkgs.burpsuite.override { proEdition = true; })
+    krita
+    #librewolf
+    firefox
+    #brave
+    #ungoogled-chromium
+    #google-chrome
+    mullvad
+    #nyxt
+    #qutebrowser
+    #mullvad-browser
+    mullvad-vpn
+    #tor
+    mpv
+    #pipewire
+    openssl
 
-    # Terminal utilities
+# Terminal stuff
+    #tmate
     unstable.nix-output-monitor
-    tmux
-    fzf
+    zsh
+    fish
+    #rsync 
+    starship
+    artem           #img-to-ascii
     asciinema
     cava
+    #mop
+    du-dust         #better version of du
+    tmux 
+    #zellij
+    #ripgrep
+    ugrep
+    #wiki-tui
+    fzf 
+    unstable.alacritty
+    #ghostty
+    warp-terminal
+    #thefuck         #Magnificent app which corrects your previous console command
+    #kitty
+    htop
+    #glances
+    bottom          # visual process monitor
+    #neofetch
     fastfetch
-    cbonsai
-    cmatrix
+    #bunnyfetch 
+    #nitch
+    cbonsai         # cli-gardening
+    cmatrix         # follow the white rabbit
     ranger
-    joshuto
-    figlet
-    ttyper
-    pipes-rs
+    zoxide          #cd without amnesia, sourced in config.fish
+    blesh           #Bash Line Editor
+    joshuto         #ranger-like file manager written in rust
+    figlet          #for outputting ascii-text in banners etc.
+    #ticker          #text-based price tracker
+    #tickrs          #visual price tracker
+    eza             #better ls
+    ttyper          #typing excercises
+    pipes-rs        #rust-written replacement
     clock-rs
+    #gurk-rs
+    #ddgr
+    bat
 
-    # File management
-    rsync
-    unzip
-    rar
+# WM
+    polybar
+    rofi
+    picom
+   #picom-pijulius
+    wpgtk
+    pywal
+    themix-gui
+    wallust
+    pywalfox-native
+    themechanger
+    #theme-sh
+    imagemagick
+    feh
+    #eww
+    #conky
+    #dunst
+    scrot
+    flameshot
+    i3lock-color
+    i3lock-fancy
+    #i3lock-fancy-rapid
+    #i3wsr
+    #autorandr
 
-    # Network tools
-    curl
-    wget
+# Tools
+    #dog                    #replacecment for cat
+    alsa-utils
+    #catppuccinifier-cli     #modify wallpapers with a catppucin style
+    bandwhich           #bandwith tracker
     iw
     wirelesstools
-    openvpn
-    bandwhich
-    gping
-    whois
-
-    # System tools
-    killall
+    #youtube-tui
+    ngrok           #web server running on local machine
+    #pgrok          #similar to the above
+    procs           #ps written in rust
+    #bottles        #client for running windows-software
+    gping           #graphical ping tool
+    openvpn         #openvpn-client
+    brightnessctl   #brightness-handler
+    obsidian        #note taking tool
+    #notesnook       #OS-alternative to obsidian
+    #light           #backlight-controller
+    #undervolt
+    git
+    gh              #git CLI tool
+    zathura         #pdf-reader
+    xdotool
+    #jq
+    killall 
+    rar             #RAR-archive tool
     pciutils
+    curl
+    wget
     lshw
     toybox
     findutils
     busybox
     inetutils
     udisks
-    brightnessctl
-
-    # Nix tools
     nix-prefetch
     nix-prefetch-github
-
-    # Development
-    git
-    gh
-
-    # Utilities
-    tealdeer      # tldr man pages
-    jq            # JSON processor
+    
+    ansible         #we be devs now
+    
+    signal-cli
+    whois
+    warpd           #click stuff without mouse input
+    ollama          #run llms locally
+    unstable.claude-code
+    #khoj
+    #aichat          #CLI gpt-chatbot 
+    unclutter       #hides mouse cursor when not in use
+    unzip           #zip-archiving tool 
+    tealdeer        #alternative to man
+    #udevil          #udisks replacement
+    jq              #JSON processor, do not remove, is unfortunately used in a few places
     envsubst
 
-    # X11 tools (if needed for scripts)
+    
+# X11
     xorg.xinit
     xorg.xrdb
     xorg.xorgserver
     xorg.xmodmap
+    xorg.xmessage
+    xorg.xcursorthemes
+    xorg.xdpyinfo
+    
 
-    # Audio
+
+# Uncategorized
     pulseaudioFull
-    alsa-utils
-  ];
+];
+
 }

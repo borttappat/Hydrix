@@ -1,0 +1,23 @@
+      # {{MACHINE_NAME}} - {{DESCRIPTION}}
+      # Build with: sudo nixos-rebuild switch --flake .#{{FLAKE_NAME}} --impure
+      {{FLAKE_NAME}} = nixpkgs.lib.nixosSystem {
+        system = "x86_64-linux";
+        modules = [
+          { nixpkgs.config.allowUnfree = true; }
+          { nixpkgs.overlays = [ overlay-unstable ]; }
+          nix-index-database.nixosModules.nix-index
+
+          # Import machine-specific profile
+          ./profiles/machines/{{FLAKE_NAME}}.nix
+
+          # Core modules
+          ./modules/base/nixos-base.nix
+          ./modules/base/users.nix
+          ./modules/base/virt.nix
+
+          # Desktop environment (to be enabled as modules are created)
+          # ./modules/wm/i3.nix
+          # ./modules/shell/fish.nix
+          # ./modules/shell/packages.nix
+        ];
+      };

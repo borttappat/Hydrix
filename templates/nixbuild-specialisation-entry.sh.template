@@ -1,0 +1,44 @@
+# For {{MACHINE_NAME}} machines (with specialisation support)
+if echo "$MODEL" | grep -qi "{{MODEL_PATTERN}}"; then
+    echo "Detected {{MACHINE_NAME}}"
+
+    # Detect current specialisation
+    CURRENT_SPEC="base"
+    if [[ -L /run/current-system/specialisation ]]; then
+        CURRENT_SPEC=$(readlink /run/current-system/specialisation | xargs basename 2>/dev/null || echo "base")
+    fi
+
+    echo "Current specialisation: $CURRENT_SPEC"
+
+    # Rebuild in current specialisation (maintain mode across rebuilds)
+    case "$CURRENT_SPEC" in
+        "router")
+            echo "Rebuilding in router mode..."
+            sudo nixos-rebuild switch --impure --show-trace --option warn-dirty false \
+                --flake "$FLAKE_DIR#{{FLAKE_NAME}}" --specialisation router
+            ;;
+        "maximalism")
+            echo "Rebuilding in maximalism mode..."
+            sudo nixos-rebuild switch --impure --show-trace --option warn-dirty false \
+                --flake "$FLAKE_DIR#{{FLAKE_NAME}}" --specialisation maximalism
+            ;;
+        *)
+            echo "Rebuilding in base mode..."
+            sudo nixos-rebuild switch --impure --show-trace --option warn-dirty false \
+                --flake "$FLAKE_DIR#{{FLAKE_NAME}}"
+            ;;
+    esac
+
+    echo ""
+    echo "✓ Build complete in $CURRENT_SPEC mode"
+    echo ""
+    echo "To switch modes:"
+    echo "  1. Reboot your system"
+    echo "  2. Select desired specialisation in bootloader menu"
+    echo "     - NixOS (base mode - normal laptop)"
+    echo "     - NixOS (router - router VM only)"
+    echo "     - NixOS (maximalism - router + pentest VMs)"
+    echo ""
+
+    exit $?
+fi

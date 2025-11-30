@@ -44,6 +44,42 @@
     # For installing Hydrix on physical machines
     nixosConfigurations = {
 
+      # Zephyrus ASUS laptop - full host system
+      # Build with: sudo nixos-rebuild switch --flake .#zephyrus --impure
+      zephyrus = nixpkgs.lib.nixosSystem {
+        system = "x86_64-linux";
+        modules = [
+          { nixpkgs.config.allowUnfree = true; }
+          { nixpkgs.overlays = [ overlay-unstable ]; }
+          nix-index-database.nixosModules.nix-index
+
+          # Base system configuration
+          ./modules/base/configuration.nix
+          ./modules/base/hardware-config.nix
+
+          # Machine-specific configuration
+          # This imports ../../generated/modules/zephyrus-consolidated.nix internally
+          ./profiles/machines/zephyrus.nix
+
+          # Core functionality modules (matching dotfiles exactly)
+          ./modules/wm/i3.nix
+          ./modules/shell/packages.nix
+          ./modules/base/services.nix
+          ./modules/base/users.nix
+          ./modules/theming/colors.nix
+          #./modules/hosts.nix  # Commented out in dotfiles
+          ./modules/base/virt.nix
+          #./modules/scripts.nix  # Commented out in dotfiles
+          ./modules/base/audio.nix
+
+          # Additional feature modules (all commented out in dotfiles)
+          #./modules/pentesting.nix
+          #./modules/proxychains.nix
+          #./modules/dev.nix
+          #./modules/steam.nix
+        ];
+      };
+
       # Lightweight host - runs VMs, minimal desktop
       host = nixpkgs.lib.nixosSystem {
         system = "x86_64-linux";
@@ -82,20 +118,6 @@
           ./modules/shell/packages.nix
 
           ./profiles/pentest-full.nix
-        ];
-      };
-
-      vm-router = nixpkgs.lib.nixosSystem {
-        system = "x86_64-linux";
-        modules = [
-          { nixpkgs.config.allowUnfree = true; }
-          { nixpkgs.overlays = [ overlay-unstable ]; }
-
-          ./modules/base/nixos-base.nix
-          ./modules/base/users.nix
-          ./modules/vm/qemu-guest.nix
-
-          ./profiles/router-full.nix
         ];
       };
 
@@ -161,36 +183,20 @@
     };
 
     # ========== VM BASE IMAGES ==========
-    # Minimal images with shaping service
+    # Minimal images with shaping service (except router which is single-stage)
     packages.x86_64-linux = {
 
-      router-vm = nixos-generators.nixosGenerate {
+      # Router VM - single-stage, exact copy of splix
+      # Build with: nix build .#router-vm-qcow
+      router-vm-qcow = nixos-generators.nixosGenerate {
         system = "x86_64-linux";
-        modules = [ ./profiles/router-base.nix ];
+        modules = [ ./modules/router-vm-config.nix ];
         format = "qcow";
       };
 
       pentest-vm-base = nixos-generators.nixosGenerate {
         system = "x86_64-linux";
         modules = [ ./profiles/pentest-base.nix ];
-        format = "qcow";
-      };
-
-      comms-vm-base = nixos-generators.nixosGenerate {
-        system = "x86_64-linux";
-        modules = [ ./profiles/comms-base.nix ];
-        format = "qcow";
-      };
-
-      browsing-vm-base = nixos-generators.nixosGenerate {
-        system = "x86_64-linux";
-        modules = [ ./profiles/browsing-base.nix ];
-        format = "qcow";
-      };
-
-      dev-vm-base = nixos-generators.nixosGenerate {
-        system = "x86_64-linux";
-        modules = [ ./profiles/dev-base.nix ];
         format = "qcow";
       };
     };
@@ -211,11 +217,8 @@
           shellHook = ''
             echo "Hydrix VM Automation System"
             echo "Available builds:"
+            echo "  nix build .#router-vm-qcow"
             echo "  nix build .#pentest-vm-base"
-            echo "  nix build .#router-vm"
-            echo "  nix build .#comms-vm-base"
-            echo "  nix build .#browsing-vm-base"
-            echo "  nix build .#dev-vm-base"
           '';
         };
       }

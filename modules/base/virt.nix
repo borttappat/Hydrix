@@ -14,6 +14,11 @@
         default = "traum";
         description = "Main user for virtualization permissions";
       };
+      enableLookingGlass = lib.mkOption {
+        type = lib.types.bool;
+        default = false;
+        description = "Enable Looking Glass for GPU passthrough";
+      };
     };
   };
 
@@ -65,9 +70,11 @@
     networking = {
       firewall = {
         allowedTCPPorts = [
-          16509 16514  # libvirt
+          16509 16514  # libvirt (secure)
           5900 5901 5902 5903  # VNC
           3389  # RDP
+        ] ++ lib.optionals config.virtualisation.enableLookingGlass [
+          9999  # Looking Glass SPICE
         ];
         allowedUDPPorts = [ 8472 ];
         checkReversePath = "loose";
@@ -111,6 +118,8 @@
     ] ++ lib.optionals config.virtualisation.useDocker [
       docker-compose
       lazydocker
+    ] ++ lib.optionals config.virtualisation.enableLookingGlass [
+      looking-glass-client
     ];
 
     # Add user to virtualization groups

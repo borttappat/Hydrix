@@ -1,9 +1,9 @@
 # Network configuration
-{ config, pkgs, ... }:
+{ config, pkgs, lib, ... }:
 
 {
-  # Default hostname (override in profiles)
-  networking.hostName = "hydrix";
+  # Default hostname (override in profiles with mkForce)
+  networking.hostName = lib.mkDefault "hydrix";
 
   # NetworkManager for easy network management
   networking.networkmanager.enable = true;

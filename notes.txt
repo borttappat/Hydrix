@@ -1,0 +1,78 @@
+
+ traum @ zeph in ~/Hydrix master [!+?ok] at 23:31:47
+ > sudo virsh list
+ Id   Name   State
+--------------------
+
+
+ traum @ zeph in ~/Hydrix master [!+?ok] at 23:31:50
+ > ./deploy-router-vm.sh
+[23:31:54] ERROR: This script must be run with sudo
+
+ traum @ zeph in ~/Hydrix master [!+?ok] at 23:31:54
+ X sudo ./deploy-router-vm.sh
+[23:31:58] Current mode: base-setup (detected from specialisation symlink)
+[23:31:58] ERROR: Must be in router or maximalism mode for VFIO passthrough
+
+ traum @ zeph in ~/Hydrix master [!+?ok] at 23:31:58
+ X
+
+
+
+
+
+
+
+
+
+ traum @ zeph in ~/Hydrix master [!+ok] at 12:03:43
+ > ./deploy-router-vm.sh
+[12:03:43] ERROR: This script must be run with sudo
+
+ traum @ zeph in ~/Hydrix master [!+ok] at 12:03:43
+ X sudo ./deploy-router-vm.sh
+[12:03:48] VM 'router-vm-passthrough' already exists
+Destroy and recreate? (y/N) y
+[12:03:51] Destroying existing VM...
+
+Domain 'router-vm-passthrough' destroyed
+
+
+[12:03:51] Copying VM image to /var/lib/libvirt/images/router-vm-passthrough.qcow2...
+[12:04:18] Creating router VM...
+[12:04:20] WiFi passthrough failed, creating without passthrough...
+ERROR    Disk /var/lib/libvirt/images/router-vm-passthrough.qcow2 is already in use by other guests ['router-vm-passthrough']. (Use --check path_in_use=off or --check all=off to override)
+
+ traum @ zeph in ~/Hydrix master [!+ok] took 33s at 12:04:21
+ X sudo virsh destroy router-vm-passthrough
+error: Failed to destroy domain 'router-vm-passthrough'
+error: Requested operation is not valid: domain is not running
+
+
+ traum @ zeph in ~/Hydrix master [!+ok] at 12:11:14
+ X sudo virsh list
+ Id   Name   State
+--------------------
+
+
+ traum @ zeph in ~/Hydrix master [!+ok] at 12:11:20
+ > sudo ./deploy-router-vm.sh
+[12:11:29] VM 'router-vm-passthrough' already exists
+Destroy and recreate? (y/N) y
+[12:11:32] Destroying existing VM...
+
+
+[12:11:33] Copying VM image to /var/lib/libvirt/images/router-vm-passthrough.qcow2...
+[12:11:41] Creating router VM...
+[12:11:43] WiFi passthrough failed, creating without passthrough...
+ERROR    Disk /var/lib/libvirt/images/router-vm-passthrough.qcow2 is already in use by other guests ['router-vm-passthrough']. (Use --check path_in_use=off or --check all=off to override)
+
+ traum @ zeph in ~/Hydrix master [!+ok] took 15s at 12:11:44
+ X
+
+
+
+
+
+
+

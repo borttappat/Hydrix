@@ -1,0 +1,32 @@
+# Nix build outputs
+result
+result-*
+router-vm-result
+base-image-result
+
+# Sensitive files
+*credentials.env
+router-credentials.env
+
+# Hardware detection results (may contain sensitive PCI IDs)
+hardware-results.env
+hardware-results.json
+
+# VM disk images
+*.qcow2
+*.img
+
+# Temporary files
+*.tmp
+*.bak
+*~
+
+# Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
