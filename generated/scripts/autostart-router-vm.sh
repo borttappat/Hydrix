@@ -30,25 +30,56 @@ case "$vm_state" in
     "running")
         log "Router VM is already running"
         ;;
+    "paused")
+        log "Router VM is paused, resuming..."
+        if $VIRSH --connect qemu:///system resume "$VM_NAME" 2>&1; then
+            log "Router VM resumed successfully"
+            sleep 2
+        else
+            # Check if VM is actually running (race condition)
+            sleep 1
+            current_state=$($VIRSH --connect qemu:///system domstate "$VM_NAME" || echo "unknown")
+            if [ "$current_state" = "running" ]; then
+                log "Router VM transitioned to running state (race condition handled)"
+            else
+                log "ERROR: Failed to resume router VM (current state: $current_state)"
+                exit 1
+            fi
+        fi
+        ;;
     "shut"|"shutoff")
         log "Starting router VM..."
-        if $VIRSH --connect qemu:///system start "$VM_NAME"; then
+        if $VIRSH --connect qemu:///system start "$VM_NAME" 2>&1; then
             log "Router VM started successfully"
-            sleep 3
+            sleep 2
         else
-            log "ERROR: Failed to start router VM"
-            exit 1
+            # Check if VM is actually running (race condition)
+            sleep 1
+            current_state=$($VIRSH --connect qemu:///system domstate "$VM_NAME" || echo "unknown")
+            if [ "$current_state" = "running" ]; then
+                log "Router VM transitioned to running state (race condition handled)"
+            else
+                log "ERROR: Failed to start router VM (current state: $current_state)"
+                exit 1
+            fi
         fi
         ;;
     *)
         log "Router VM in unexpected state: $vm_state"
         log "Attempting to start anyway..."
-        if $VIRSH --connect qemu:///system start "$VM_NAME"; then
+        if $VIRSH --connect qemu:///system start "$VM_NAME" 2>&1; then
             log "Router VM started despite unexpected state"
-            sleep 3
+            sleep 2
         else
-            log "ERROR: Failed to start router VM"
-            exit 1
+            # Check if VM is actually running (race condition)
+            sleep 1
+            current_state=$($VIRSH --connect qemu:///system domstate "$VM_NAME" || echo "unknown")
+            if [ "$current_state" = "running" ]; then
+                log "Router VM transitioned to running state (race condition handled)"
+            else
+                log "ERROR: Failed to start router VM (current state: $current_state)"
+                exit 1
+            fi
         fi
         ;;
 esac

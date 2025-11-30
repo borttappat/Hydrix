@@ -108,15 +108,6 @@
           { nixpkgs.overlays = [ overlay-unstable ]; }
           nix-index-database.nixosModules.nix-index
 
-          ./modules/base/nixos-base.nix
-          ./modules/base/users.nix
-          ./modules/base/networking.nix
-          ./modules/vm/qemu-guest.nix
-
-          ./modules/wm/i3.nix
-          ./modules/shell/fish.nix
-          ./modules/shell/packages.nix
-
           ./profiles/pentest-full.nix
         ];
       };
@@ -127,15 +118,6 @@
           { nixpkgs.config.allowUnfree = true; }
           { nixpkgs.overlays = [ overlay-unstable ]; }
           nix-index-database.nixosModules.nix-index
-
-          ./modules/base/nixos-base.nix
-          ./modules/base/users.nix
-          ./modules/base/networking.nix
-          ./modules/vm/qemu-guest.nix
-
-          ./modules/wm/i3.nix
-          ./modules/shell/fish.nix
-          ./modules/shell/packages.nix
 
           ./profiles/comms-full.nix
         ];
@@ -148,15 +130,6 @@
           { nixpkgs.overlays = [ overlay-unstable ]; }
           nix-index-database.nixosModules.nix-index
 
-          ./modules/base/nixos-base.nix
-          ./modules/base/users.nix
-          ./modules/base/networking.nix
-          ./modules/vm/qemu-guest.nix
-
-          ./modules/wm/i3.nix
-          ./modules/shell/fish.nix
-          ./modules/shell/packages.nix
-
           ./profiles/browsing-full.nix
         ];
       };
@@ -167,15 +140,6 @@
           { nixpkgs.config.allowUnfree = true; }
           { nixpkgs.overlays = [ overlay-unstable ]; }
           nix-index-database.nixosModules.nix-index
-
-          ./modules/base/nixos-base.nix
-          ./modules/base/users.nix
-          ./modules/base/networking.nix
-          ./modules/vm/qemu-guest.nix
-
-          ./modules/wm/i3.nix
-          ./modules/shell/fish.nix
-          ./modules/shell/packages.nix
 
           ./profiles/dev-full.nix
         ];
@@ -194,9 +158,11 @@
         format = "qcow";
       };
 
-      pentest-vm-base = nixos-generators.nixosGenerate {
+      # Universal base VM - shapes into any type based on hostname
+      # Build with: nix build .#base-vm-qcow
+      base-vm-qcow = nixos-generators.nixosGenerate {
         system = "x86_64-linux";
-        modules = [ ./profiles/pentest-base.nix ];
+        modules = [ ./profiles/base-vm.nix ];
         format = "qcow";
       };
     };
@@ -216,9 +182,16 @@
 
           shellHook = ''
             echo "Hydrix VM Automation System"
-            echo "Available builds:"
-            echo "  nix build .#router-vm-qcow"
-            echo "  nix build .#pentest-vm-base"
+            echo ""
+            echo "Base Images:"
+            echo "  nix build .#base-vm-qcow      # Universal base (shapes to any type)"
+            echo "  nix build .#router-vm-qcow    # Router VM (single-stage)"
+            echo ""
+            echo "Deploy VMs:"
+            echo "  ./scripts/build-vm.sh --type pentest --name google"
+            echo "  ./scripts/build-vm.sh --type comms --name signal"
+            echo "  ./scripts/build-vm.sh --type browsing --name leisure"
+            echo "  ./scripts/build-vm.sh --type dev --name rust"
           '';
         };
       }

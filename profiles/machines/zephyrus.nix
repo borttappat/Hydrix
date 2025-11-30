@@ -8,6 +8,10 @@ in
   # This contains router VM setup, maximalism mode, etc.
   imports = [
     ../../generated/modules/zephyrus-consolidated.nix
+
+    # Theming system (dynamic for host machine)
+    ../../modules/theming/dynamic.nix   # Full walrgb workflow for host
+    ../../modules/desktop/xinitrc.nix   # X session bootstrap + config deployment
   ];
 
   # Override hostname for this machine

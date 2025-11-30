@@ -1,0 +1,55 @@
+{ config, lib, pkgs, ... }:
+
+{
+  # Static color theming for VMs
+  #
+  # This module generates a static pywal color cache based on VM type
+  # The colors are generated once and remain consistent across reboots
+  #
+  # VM Types:
+  # - pentest:  Red theme (#ea6c73)   - Security/offensive focus
+  # - comms:    Blue theme (#6c89ea)  - Communication/messaging
+  # - browsing: Green theme (#73ea6c) - Web browsing/general use
+  # - dev:      Purple theme (#ba6cea) - Development/coding
+
+  imports = [ ./base.nix ];
+
+  # Define VM type option
+  options.hydrix.vmType = lib.mkOption {
+    type = lib.types.enum [ "pentest" "comms" "browsing" "dev" ];
+    description = "VM type for static color scheme generation";
+    default = "pentest";
+  };
+
+  config = {
+    # Add static color generator script to system
+    environment.systemPackages = [
+      (pkgs.writeScriptBin "vm-static-colors"
+        (builtins.readFile ../../scripts/vm-static-colors.sh))
+    ];
+
+    # Generate static pywal cache on first boot
+    # This runs once and creates a persistent color scheme
+    systemd.services.vm-static-colors = {
+      description = "Generate static color scheme for ${config.hydrix.vmType} VM";
+      wantedBy = [ "multi-user.target" ];
+      after = [ "network.target" ];
+
+      serviceConfig = {
+        Type = "oneshot";
+        RemainAfterExit = true;
+        User = "traum";
+        ExecStart = "${pkgs.bash}/bin/bash -c '${pkgs.writeScript "vm-colors-check" ''
+          #!/usr/bin/env bash
+          # Only generate if not already done
+          if [ ! -f /home/traum/.cache/wal/.static-colors-generated ]; then
+            echo "Generating static color scheme for ${config.hydrix.vmType}"
+            ${pkgs.writeScriptBin "vm-static-colors" (builtins.readFile ../../scripts/vm-static-colors.sh)}/bin/vm-static-colors ${config.hydrix.vmType}
+          else
+            echo "Static color scheme already generated, skipping"
+          fi
+        ''}'";
+      };
+    };
+  };
+}

@@ -1,0 +1,89 @@
+[selection]
+save_to_clipboard = true
+
+[general]
+live_config_reload = true
+ipc_socket = true
+
+[env]
+TERM = "xterm"
+${ALACRITTY_SCALE_FACTOR_LINE}
+
+[cursor]
+thickness = 0.35
+unfocused_hollow = false
+blink_timeout = 0
+blink_interval = 500
+style = { shape = "Underline", blinking = "Always" }
+
+[font]
+size = ${ALACRITTY_FONT_SIZE}
+builtin_box_drawing = false
+
+[font.bold]
+family = "${ALACRITTY_FONT}"
+style = "Bold"
+
+[font.bold_italic]
+family = "${ALACRITTY_FONT}"
+style = "Bold Italic"
+
+[font.italic]
+family = "${ALACRITTY_FONT}"
+style = "Italic"
+
+[font.normal]
+family = "${ALACRITTY_FONT}"
+style = "Regular"
+
+[font.offset]
+x = 0
+y = 0
+
+[[keyboard.bindings]]
+action = "Paste"
+key = "V"
+mods = "Control|Shift"
+
+[[keyboard.bindings]]
+action = "Copy"
+key = "C"
+mods = "Control|Shift"
+
+[[keyboard.bindings]]
+action = "PasteSelection"
+key = "Insert"
+mods = "Shift"
+
+[[keyboard.bindings]]
+action = "ResetFontSize"
+key = "Key0"
+mods = "Control"
+
+[[keyboard.bindings]]
+action = "IncreaseFontSize"
+key = "Equals"
+mods = "Control"
+
+[[keyboard.bindings]]
+action = "IncreaseFontSize"
+key = "Plus"
+mods = "Control"
+
+[[keyboard.bindings]]
+action = "DecreaseFontSize"
+key = "Minus"
+mods = "Control"
+
+[window]
+dynamic_padding = true
+opacity = 0.6
+resize_increments = true
+
+[window.class]
+general = "Alacritty"
+instance = "Alacritty"
+
+[window.padding]
+x = 10
+y = 8

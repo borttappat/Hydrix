@@ -22,6 +22,37 @@ See `ROUTER-VM-SUCCESS.md` for complete documentation.
 
 ---
 
+## 🎯 VM DEPLOYMENT SYSTEM - Production Ready (2025-11-30)
+
+**For complete VM deployment documentation, see `VM-DEPLOYMENT-GUIDE.md`**
+
+**Universal base image system with hostname-driven shaping:**
+
+### Quick Start:
+```bash
+# Deploy any VM type
+./scripts/build-vm.sh --type pentest --name google    # 75% resources, red theme
+./scripts/build-vm.sh --type dev --name rust          # 75% resources, purple theme
+./scripts/build-vm.sh --type browsing --name leisure  # 50% resources, green theme
+./scripts/build-vm.sh --type comms --name signal      # 25% resources, blue theme
+```
+
+### How It Works:
+1. **Single base image** (~2-3GB) with core desktop (i3, fish, alacritty)
+2. **Hostname-driven shaping** (e.g., "pentest-google" → applies pentest profile)
+3. **First boot**: Clones Hydrix, runs `nixbuild-vm`, installs type-specific packages
+4. **Updates**: `git pull` + `nixbuild-vm` inside VM
+
+### Architecture:
+- Base: `profiles/base-vm.nix` + `modules/core.nix`
+- Profiles: `pentest-full.nix`, `comms-full.nix`, `browsing-full.nix`, `dev-full.nix`
+- Shaping: `modules/vm/shaping.nix` (detects type from hostname)
+- Rebuild: `scripts/nixbuild-vm.sh` (hostname-aware)
+
+**See `VM-DEPLOYMENT-GUIDE.md` for detailed workflow, troubleshooting, and advanced usage.**
+
+---
+
 ## 🚨 CRITICAL - READ FIRST
 
 **STOP**: Before making ANY changes to Hydrix, read `/home/traum/Hydrix/IMPLEMENTATION-GUIDE.md`
@@ -702,9 +733,16 @@ hydrix.colors = {
 
 ## References
 
-**Dotfiles**: `/home/traum/dotfiles`
-**Splix**: `/home/traum/splix`
-**Original Plan**: `/home/traum/Hydrix/PROJECT.md` (note: plan changed to new repo approach)
+**Hydrix Documentation**:
+- `VM-DEPLOYMENT-GUIDE.md` - Complete VM deployment system documentation
+- `ROUTER-VM-SUCCESS.md` - Router VM setup and success documentation
+- `THEMING-MIGRATION-GUIDE.md` - Theming system migration and architecture (dotfiles → Hydrix)
+- `IMPLEMENTATION-GUIDE.md` - Implementation guidelines and best practices
+- `PROJECT.md` - Original project plan (note: plan changed to new repo approach)
+
+**External References**:
+- **Dotfiles**: `/home/traum/dotfiles`
+- **Splix**: `/home/traum/splix`
 
 **Key dotfiles modules to study**:
 - `modules/i3.nix` - WM setup
