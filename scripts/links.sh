@@ -51,11 +51,7 @@ declare -A FILE_MAPPINGS=(
     ["$DOTFILES_DIR/alacritty/alacritty.toml.template"]="$HOME/.config/alacritty"
     ["$DOTFILES_DIR/rofi/config.rasi.template"]="$HOME/.config/rofi"
     ["$DOTFILES_DIR/polybar/config.ini.template"]="$HOME/.config/polybar"
-    
-    ["$DOTFILES_DIR/firefox/profiles.ini"]="$HOME/.mozilla/firefox"
-    ["$DOTFILES_DIR/firefox/traum/chrome"]="$HOME/.mozilla/firefox/traum"
-    ["$DOTFILES_DIR/firefox/traum/user.js"]="$HOME/.mozilla/firefox/traum"
-    
+
     ["$DOTFILES_DIR/vim/.vimrc"]="$HOME"
     ["$DOTFILES_DIR/bash/.bashrc"]="$HOME"
     ["$DOTFILES_DIR/zsh/.zshrc"]="$HOME"

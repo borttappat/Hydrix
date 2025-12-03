@@ -1,0 +1,17 @@
+/* Force ${FIREFOX_FONT} font on all web pages */
+* {
+  font-family: "${FIREFOX_FONT}", monospace !important;
+  font-size: ${FIREFOX_FONT_SIZE}px !important;
+  line-height: ${FIREFOX_FONT_SIZE}px !important;
+  -webkit-font-smoothing: none !important;
+  -moz-osx-font-smoothing: unset !important;
+  font-smooth: never !important;
+  text-rendering: optimizeSpeed !important;
+  transform: none !important;
+}
+
+/* Slightly larger headings */
+h1, h2 {
+  font-size: ${FIREFOX_HEADER_FONT_SIZE}px !important;
+  line-height: ${FIREFOX_HEADER_FONT_SIZE}px !important;
+}

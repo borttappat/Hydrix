@@ -48,4 +48,20 @@ sed -e "s/${DUNST_FONT}/$DUNST_FONT/g" \
     -e "s/${DUNST_FRAME_WIDTH}/$DUNST_FRAME_WIDTH/g" \
     -e "s/${DUNST_ICON_SIZE}/$DUNST_ICON_SIZE/g" \
     ~/.config/dunst/dunstrc.template > ~/.config/dunst/dunstrc
+
+# Firefox font configuration
+mkdir -p ~/.mozilla/firefox/traum/chrome
+sed -e "s/\${FIREFOX_FONT}/$FIREFOX_FONT/g" \
+    -e "s/\${FIREFOX_FONT_SIZE}/$FIREFOX_FONT_SIZE/g" \
+    -e "s/\${FIREFOX_HEADER_FONT_SIZE}/$FIREFOX_HEADER_FONT_SIZE/g" \
+    ~/.config/firefox/traum/chrome/userChrome.css.template > ~/.mozilla/firefox/traum/chrome/userChrome.css
+sed -e "s/\${FIREFOX_FONT}/$FIREFOX_FONT/g" \
+    -e "s/\${FIREFOX_FONT_SIZE}/$FIREFOX_FONT_SIZE/g" \
+    -e "s/\${FIREFOX_HEADER_FONT_SIZE}/$FIREFOX_HEADER_FONT_SIZE/g" \
+    ~/.config/firefox/traum/chrome/userContent.css.template > ~/.mozilla/firefox/traum/chrome/userContent.css
+sed -e "s/\${FIREFOX_FONT}/$FIREFOX_FONT/g" \
+    -e "s/\${FIREFOX_FONT_SIZE}/$FIREFOX_FONT_SIZE/g" \
+    -e "s/\${FIREFOX_HEADER_FONT_SIZE}/$FIREFOX_HEADER_FONT_SIZE/g" \
+    ~/.config/firefox/traum/user.js.template > ~/.mozilla/firefox/traum/user.js
+
 exec i3

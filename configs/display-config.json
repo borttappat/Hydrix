@@ -4,7 +4,7 @@
       "polybar_font_size": 11,
       "polybar_height": 25,
       "polybar_line_size": 2,
-      "alacritty_font_size": 11,
+      "alacritty_font_size": 9.5,
       "rofi_font_size": 10,
       "i3_font_size": 8,
       "i3_border_thickness": 2,
@@ -18,7 +18,9 @@
       "dunst_frame_width": 2,
       "dunst_icon_size": 32,
       "obsidian_font_size": 11,
-      "obsidian_header_font_size": 22
+      "obsidian_header_font_size": 22,
+      "firefox_font_size": 13,
+      "firefox_header_font_size": 26
     },
     "1920x1200": {
       "polybar_font_size": 9,
@@ -38,7 +40,9 @@
       "dunst_frame_width": 2,
       "dunst_icon_size": 32,
       "obsidian_font_size": 13,
-      "obsidian_header_font_size": 26
+      "obsidian_header_font_size": 26,
+      "firefox_font_size": 13,
+      "firefox_header_font_size": 26
     },
     "2560x1440": {
       "polybar_font_size": 11,
@@ -58,7 +62,9 @@
       "dunst_frame_width": 2,
       "dunst_icon_size": 40,
       "obsidian_font_size": 13,
-      "obsidian_header_font_size": 26
+      "obsidian_header_font_size": 26,
+      "firefox_font_size": 13,
+      "firefox_header_font_size": 26
     },
     "2880x1800": {
       "polybar_font_size": 12,
@@ -78,7 +84,9 @@
       "dunst_frame_width": 3,
       "dunst_icon_size": 48,
       "obsidian_font_size": 14,
-      "obsidian_header_font_size": 28
+      "obsidian_header_font_size": 28,
+      "firefox_font_size": 14,
+      "firefox_header_font_size": 28
     },
     "3440x1440": {
       "polybar_font_size": 30,
@@ -98,7 +106,9 @@
       "dunst_frame_width": 1,
       "dunst_icon_size": 20,
       "obsidian_font_size": 20,
-      "obsidian_header_font_size": 40
+      "obsidian_header_font_size": 40,
+      "firefox_font_size": 20,
+      "firefox_header_font_size": 40
     },
     "3840x2160": {
       "polybar_font_size": 14,
@@ -118,7 +128,9 @@
       "dunst_frame_width": 3,
       "dunst_icon_size": 56,
       "obsidian_font_size": 16,
-      "obsidian_header_font_size": 32
+      "obsidian_header_font_size": 32,
+      "firefox_font_size": 16,
+      "firefox_header_font_size": 32
     }
   },
   "machine_overrides": {

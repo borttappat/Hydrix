@@ -1,0 +1,18 @@
+// Firefox font preferences
+// Force ${FIREFOX_FONT} font everywhere (dynamically loaded from display-config.json)
+
+// Set fonts for all language groups
+user_pref("font.name.monospace.x-western", "${FIREFOX_FONT}");
+user_pref("font.name.sans-serif.x-western", "${FIREFOX_FONT}");
+user_pref("font.name.serif.x-western", "${FIREFOX_FONT}");
+
+// Set font sizes
+user_pref("font.size.monospace.x-western", ${FIREFOX_FONT_SIZE});
+user_pref("font.size.variable.x-western", ${FIREFOX_FONT_SIZE});
+user_pref("font.minimum-size.x-western", ${FIREFOX_FONT_SIZE});
+
+// Prevent websites from overriding fonts
+user_pref("browser.display.use_document_fonts", 0);
+
+// Enable userChrome.css and userContent.css
+user_pref("toolkit.legacyUserProfileCustomizations.stylesheets", true);

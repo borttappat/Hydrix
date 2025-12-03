@@ -107,10 +107,27 @@ fi
 [ "$GAPS_INNER_EXTERNAL" = "null" ] && export GAPS_INNER_EXTERNAL=$(echo "$RES_DEFAULTS" | jq -r '.gaps_inner')
 [ "$ROFI_FONT_SIZE" = "null" ] && export ROFI_FONT_SIZE=$(echo "$RES_DEFAULTS" | jq -r '.rofi_font_size')
 
+# Dunst settings from resolution defaults
+export DUNST_FONT_SIZE=$(echo "$RES_DEFAULTS" | jq -r '.dunst_font_size')
+export DUNST_WIDTH=$(echo "$RES_DEFAULTS" | jq -r '.dunst_width')
+export DUNST_HEIGHT=$(echo "$RES_DEFAULTS" | jq -r '.dunst_height')
+export DUNST_OFFSET_X=$(echo "$RES_DEFAULTS" | jq -r '.dunst_offset_x')
+export DUNST_OFFSET_Y=$(echo "$RES_DEFAULTS" | jq -r '.dunst_offset_y')
+export DUNST_PADDING=$(echo "$RES_DEFAULTS" | jq -r '.dunst_padding')
+export DUNST_FRAME_WIDTH=$(echo "$RES_DEFAULTS" | jq -r '.dunst_frame_width')
+export DUNST_ICON_SIZE=$(echo "$RES_DEFAULTS" | jq -r '.dunst_icon_size')
+
+# Firefox settings from resolution defaults
+export FIREFOX_FONT_SIZE=$(echo "$RES_DEFAULTS" | jq -r '.firefox_font_size')
+export FIREFOX_HEADER_FONT_SIZE=$(echo "$RES_DEFAULTS" | jq -r '.firefox_header_font_size')
+
 export DISPLAY_RESOLUTION="$CURRENT_RESOLUTION"
 export DISPLAY_FONTS=$(jq -r '.fonts | join(",")' "$CONFIG_FILE")
 export POLYBAR_FONT=$(jq -r '.fonts[0]' "$CONFIG_FILE")
 export ALACRITTY_FONT=$(jq -r '.fonts[0]' "$CONFIG_FILE")
+export I3_FONT=$(jq -r '.fonts[0]' "$CONFIG_FILE")
+export DUNST_FONT=$(jq -r '.fonts[0]' "$CONFIG_FILE")
+export FIREFOX_FONT=$(jq -r '.fonts[0]' "$CONFIG_FILE")
 
 # Generate the WINIT_X11_SCALE_FACTOR line for alacritty if scale factor is set
 if [ "$ALACRITTY_SCALE_FACTOR" != "null" ] && [ "$ALACRITTY_SCALE_FACTOR" != "1" ]; then

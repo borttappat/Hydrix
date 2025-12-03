@@ -56,6 +56,34 @@
       source = ../../scripts/alacritty.sh;
       executable = true;
     };
+    home.file.".config/scripts/detect-monitors.sh" = {
+      source = ../../scripts/detect-monitors.sh;
+      executable = true;
+    };
+    home.file.".config/scripts/workspace-setup.sh" = {
+      source = ../../scripts/workspace-setup.sh;
+      executable = true;
+    };
+    home.file.".config/scripts/refresh-display-config.sh" = {
+      source = ../../scripts/refresh-display-config.sh;
+      executable = true;
+    };
+    home.file.".config/scripts/rofi.sh" = {
+      source = ../../scripts/rofi.sh;
+      executable = true;
+    };
+    home.file.".config/scripts/float_window.sh" = {
+      source = ../../scripts/float_window.sh;
+      executable = true;
+    };
+    home.file.".config/scripts/scaled-app" = {
+      source = ../../scripts/scaled-app;
+      executable = true;
+    };
+    home.file.".config/scripts/lock.sh" = {
+      source = ../../scripts/lock.sh;
+      executable = true;
+    };
 
     # Fish shell configuration
     home.file.".config/fish/config.fish".source = ../../configs/fish/config.fish;
@@ -90,12 +118,18 @@
 
     # Pywal dunst template
     home.file.".config/wal/templates/dunstrc".source = ../../configs/wal/templates/dunstrc;
+
+    # Firefox configuration templates (processed by .xinitrc)
+    home.file.".config/firefox/traum/chrome/userChrome.css.template".source = ../../configs/firefox/traum/chrome/userChrome.css.template;
+    home.file.".config/firefox/traum/chrome/userContent.css.template".source = ../../configs/firefox/traum/chrome/userContent.css.template;
+    home.file.".config/firefox/traum/user.js.template".source = ../../configs/firefox/traum/user.js.template;
+    home.file.".mozilla/firefox/profiles.ini".source = ../../configs/firefox/profiles.ini;
   };
 
   # Note: The .xinitrc script will:
   # 1. Restore pywal colors (wal -Rn)
   # 2. Detect VM vs host (hostname check)
   # 3. Load display configuration variables
-  # 4. Generate actual configs from templates using sed
+  # 4. Generate actual configs from templates using sed (i3, polybar, alacritty, dunst, firefox)
   # 5. Start i3 window manager
 }
