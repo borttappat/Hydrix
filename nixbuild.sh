@@ -10,9 +10,8 @@ FLAKE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Get system information
 ARCH=$(uname -m)
-VENDOR=$(hostnamectl | grep -i "Hardware Vendor" | awk -F': ' '{print $2}' | xargs)
-MODEL=$(hostnamectl | grep -i "Hardware Model" | awk -F': ' '{print $2}' | xargs)
 CHASSIS=$(hostnamectl | grep -i "Chassis" | awk -F': ' '{print $2}' | xargs)
+VENDOR=$(hostnamectl | grep -i "Hardware Vendor" | awk -F': ' '{print $2}' | xargs)
 HOSTNAME=$(hostnamectl hostname)
 
 echo "======================================"
@@ -21,209 +20,168 @@ echo "======================================"
 echo "Architecture: $ARCH"
 echo "Chassis: $CHASSIS"
 echo "Vendor: $VENDOR"
-echo "Model: $MODEL"
 echo "Hostname: $HOSTNAME"
 echo "======================================"
 
-# Check for ARM architecture
-if [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ] || [[ "$VENDOR" == *"Apple"* && ("$ARCH" == *"arm"* || "$ARCH" == *"aarch"*) ]]; then
-    echo "Detected ARM architecture, building ARM configuration"
-    sudo nixos-rebuild switch --impure --show-trace --option warn-dirty false --flake "$FLAKE_DIR#armVM"
-    exit $?
-fi
+# ========== HELPER FUNCTIONS ==========
 
-# === VM DETECTION ===
-# Check if running in a virtual machine (check both chassis and vendor)
-if [[ "$CHASSIS" == "vm" ]] || echo "$VENDOR" | grep -q "QEMU\|VMware"; then
-    echo "Detected Virtual Machine"
-
-    # Detect VM type from hostname pattern
-    # Expected patterns: pentest-*, comms-*, browsing-*, dev-*, router-*
-    if [[ "$HOSTNAME" =~ ^pentest- ]]; then
-        echo "Building pentest VM configuration..."
-        sudo nixos-rebuild switch --impure --show-trace --option warn-dirty false --flake "$FLAKE_DIR#vm-pentest"
-    elif [[ "$HOSTNAME" =~ ^comms- ]]; then
-        echo "Building comms VM configuration..."
-        sudo nixos-rebuild switch --impure --show-trace --option warn-dirty false --flake "$FLAKE_DIR#vm-comms"
-    elif [[ "$HOSTNAME" =~ ^browsing- ]]; then
-        echo "Building browsing VM configuration..."
-        sudo nixos-rebuild switch --impure --show-trace --option warn-dirty false --flake "$FLAKE_DIR#vm-browsing"
-    elif [[ "$HOSTNAME" =~ ^dev- ]]; then
-        echo "Building dev VM configuration..."
-        sudo nixos-rebuild switch --impure --show-trace --option warn-dirty false --flake "$FLAKE_DIR#vm-dev"
-    elif [[ "$HOSTNAME" =~ ^router- ]] || [[ "$HOSTNAME" == "router-vm" ]]; then
-        echo "Building router VM configuration..."
-        sudo nixos-rebuild switch --impure --show-trace --option warn-dirty false --flake "$FLAKE_DIR#vm-router"
+# List available NixOS configurations from flake
+list_available_configs() {
+    echo "Available configurations in flake:"
+    if command -v jq &> /dev/null; then
+        nix flake show "$FLAKE_DIR" --json 2>/dev/null | jq -r '.nixosConfigurations | keys[]' 2>/dev/null | \
+            while read -r config; do
+                echo "  - $config"
+            done
     else
-        echo "Unknown VM type (hostname: $HOSTNAME)"
-        echo "Please rename VM to match pattern: pentest-*, comms-*, browsing-*, dev-*, router-*"
+        # Fallback if jq not available
+        nix flake show "$FLAKE_DIR" 2>&1 | grep -A 100 "nixosConfigurations" | grep "├──\|└──" | \
+            awk '{print $2}' | sed 's/://g' | \
+            while read -r config; do
+                echo "  - $config"
+            done
+    fi
+}
+
+# Check if a flake configuration exists
+flake_config_exists() {
+    local config_name="$1"
+    nix flake show "$FLAKE_DIR" --json 2>/dev/null | grep -q "nixosConfigurations.*${config_name}"
+}
+
+# Interactive config selection
+select_config_interactively() {
+    echo ""
+    echo "No automatic match found for hostname: $HOSTNAME"
+    echo ""
+    list_available_configs
+    echo ""
+    read -p "Enter configuration name to build (or press Ctrl+C to cancel): " selected_config
+
+    if [[ -z "$selected_config" ]]; then
+        echo "ERROR: No configuration selected"
+        exit 1
+    fi
+
+    if flake_config_exists "$selected_config"; then
+        echo "$selected_config"
+    else
+        echo "ERROR: Configuration '$selected_config' not found"
+        exit 1
+    fi
+}
+
+# Detect current specialisation (for machines with router/maximalism modes)
+detect_specialisation() {
+    local CURRENT_SPEC="none"
+
+    # Primary: Check configuration-name file
+    if [[ -f /run/current-system/configuration-name ]]; then
+        if grep -q "maximalism" /run/current-system/configuration-name 2>/dev/null; then
+            CURRENT_SPEC="maximalism"
+        elif grep -q "router" /run/current-system/configuration-name 2>/dev/null; then
+            CURRENT_SPEC="router"
+        fi
+    fi
+
+    # Fallback: Check for running VMs (only if no label detected)
+    if [[ "$CURRENT_SPEC" == "none" ]]; then
+        local ROUTER_RUNNING=$(sudo virsh list --name 2>/dev/null | grep -c "router-vm" || true)
+        local PENTEST_RUNNING=$(sudo virsh list --name 2>/dev/null | grep -c "pentest" || true)
+
+        if [[ "$ROUTER_RUNNING" -gt 0 && "$PENTEST_RUNNING" -gt 0 ]]; then
+            CURRENT_SPEC="maximalism"
+        elif [[ "$ROUTER_RUNNING" -gt 0 ]]; then
+            CURRENT_SPEC="router"
+        fi
+    fi
+
+    echo "$CURRENT_SPEC"
+}
+
+# Rebuild with or without specialisation
+rebuild_system() {
+    local FLAKE_TARGET="$1"
+    local SPECIALISATION="$2"
+
+    if [[ "$SPECIALISATION" != "none" ]]; then
+        echo "Rebuilding with specialisation: $SPECIALISATION"
+        sudo nixos-rebuild switch --impure --show-trace --option warn-dirty false \
+            --flake "$FLAKE_DIR#$FLAKE_TARGET" --specialisation "$SPECIALISATION"
+    else
+        echo "Rebuilding base configuration"
+        sudo nixos-rebuild switch --impure --show-trace --option warn-dirty false \
+            --flake "$FLAKE_DIR#$FLAKE_TARGET"
+    fi
+}
+
+# ========== ARCHITECTURE CHECK ==========
+
+if [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ] || [[ "$VENDOR" == *"Apple"* && ("$ARCH" == *"arm"* || "$ARCH" == *"aarch"*) ]]; then
+    echo "Detected ARM architecture"
+    if flake_config_exists "armVM"; then
+        rebuild_system "armVM" "none"
+    else
+        echo "ERROR: No ARM configuration found in flake"
         exit 1
     fi
     exit $?
 fi
 
-# === PHYSICAL MACHINE DETECTION ===
+# ========== VM DETECTION ==========
 
-# === SPECIALISATION DETECTION FUNCTION ===
-# Shared function for machines with router/maximalism specialisations
-detect_specialisation() {
-    local CURRENT_LABEL="base-setup"
+if [[ "$CHASSIS" == "vm" ]] || echo "$VENDOR" | grep -q "QEMU\|VMware"; then
+    echo "Detected Virtual Machine"
 
-    # Primary: Check configuration-name file
-    if [[ -f /run/current-system/configuration-name ]]; then
-        if grep -q "maximalism" /run/current-system/configuration-name 2>/dev/null; then
-            CURRENT_LABEL="maximalism-setup"
-        elif grep -q "router" /run/current-system/configuration-name 2>/dev/null; then
-            CURRENT_LABEL="router-setup"
-        elif grep -q "fallback" /run/current-system/configuration-name 2>/dev/null; then
-            CURRENT_LABEL="fallback-setup"
-        fi
+    # Extract VM type from hostname pattern (e.g., "pentest-google" → "pentest")
+    VM_TYPE=""
+    if [[ "$HOSTNAME" =~ ^(pentest|comms|browsing|dev|router)- ]] || [[ "$HOSTNAME" == "router-vm" ]]; then
+        VM_TYPE="${BASH_REMATCH[1]}"
+        [[ "$HOSTNAME" == "router-vm" ]] && VM_TYPE="router"
     fi
 
-    # Fallback: Check for running VMs (last resort)
-    if [[ "$CURRENT_LABEL" == "base-setup" ]]; then
-        local ROUTER_RUNNING=$(sudo virsh list --name 2>/dev/null | grep -c "router-vm" || true)
-        local PENTEST_RUNNING=$(sudo virsh list --name 2>/dev/null | grep -c "pentest" || true)
-
-        if [[ "$ROUTER_RUNNING" -gt 0 && "$PENTEST_RUNNING" -gt 0 ]]; then
-            CURRENT_LABEL="maximalism-setup"
-        elif [[ "$ROUTER_RUNNING" -gt 0 ]]; then
-            CURRENT_LABEL="router-setup"
-        fi
+    if [[ -z "$VM_TYPE" ]]; then
+        echo "ERROR: VM hostname '$HOSTNAME' doesn't match expected pattern"
+        echo "Expected: pentest-*, comms-*, browsing-*, dev-*, router-*"
+        exit 1
     fi
 
-    echo "$CURRENT_LABEL"
-}
+    FLAKE_TARGET="vm-${VM_TYPE}"
+    echo "VM type: $VM_TYPE"
+    echo "Building: $FLAKE_TARGET"
 
-# === REBUILD STRATEGY FUNCTION ===
-# Shared rebuild logic for machines with specialisations
-rebuild_with_specialisation() {
-    local MACHINE="$1"
-    local CURRENT_LABEL="$2"
-
-    echo "Current mode: $CURRENT_LABEL"
-    echo ""
-
-    # Build strategy based on current mode
-    case "$CURRENT_LABEL" in
-        "maximalism-setup")
-            echo "Building $MACHINE in maximalism mode (requires reboot)..."
-            sudo nixos-rebuild boot --impure --show-trace --option warn-dirty false --flake "$FLAKE_DIR#$MACHINE"
-            echo ""
-            echo "✓ Configuration built successfully!"
-            echo "  Reboot required to apply maximalism mode changes"
-            echo ""
-            echo "  To activate: sudo reboot"
-            echo "  After reboot, select 'NixOS - Maximalism' in bootloader"
-            ;;
-        "router-setup")
-            echo "Building $MACHINE in router mode (requires reboot)..."
-            sudo nixos-rebuild boot --impure --show-trace --option warn-dirty false --flake "$FLAKE_DIR#$MACHINE"
-            echo ""
-            echo "✓ Configuration built successfully!"
-            echo "  Reboot required to apply router mode changes"
-            echo ""
-            echo "  To activate: sudo reboot"
-            echo "  After reboot, select 'NixOS - Router' in bootloader"
-            ;;
-        "fallback-setup")
-            echo "Building $MACHINE in fallback mode (live switch)..."
-            sudo nixos-rebuild switch --impure --show-trace --option warn-dirty false --flake "$FLAKE_DIR#$MACHINE"
-            echo ""
-            echo "✓ Fallback mode configuration applied successfully!"
-            echo "  System is ready to use (no reboot needed)"
-            ;;
-        "base-setup")
-            echo "Building $MACHINE in base mode (live switch)..."
-            sudo nixos-rebuild switch --impure --show-trace --option warn-dirty false --flake "$FLAKE_DIR#$MACHINE"
-            echo ""
-            echo "✓ Base mode configuration applied successfully!"
-            echo "  System is ready to use (no reboot needed)"
-            ;;
-        *)
-            echo "Building $MACHINE (unknown mode, treating as base)..."
-            sudo nixos-rebuild switch --impure --show-trace --option warn-dirty false --flake "$FLAKE_DIR#$MACHINE"
-            echo ""
-            echo "✓ Configuration built successfully!"
-            ;;
-    esac
-}
-
-# For ASUS Zephyrus machines (with specialisations)
-if echo "$MODEL" | grep -qi "zephyrus"; then
-    echo "Detected ASUS Zephyrus"
-    CURRENT_LABEL=$(detect_specialisation)
-    rebuild_with_specialisation "zephyrus" "$CURRENT_LABEL"
+    if flake_config_exists "$FLAKE_TARGET"; then
+        rebuild_system "$FLAKE_TARGET" "none"
+    else
+        echo "ERROR: Configuration '$FLAKE_TARGET' not found in flake"
+        exit 1
+    fi
     exit $?
 fi
 
-# For ASUS Zenbook machines (with specialisations)
-if echo "$MODEL" | grep -qi "zenbook"; then
-    echo "Detected ASUS Zenbook"
-    CURRENT_LABEL=$(detect_specialisation)
-    rebuild_with_specialisation "zenbook" "$CURRENT_LABEL"
-    exit $?
+# ========== PHYSICAL MACHINE ==========
+
+echo "Detected Physical Machine"
+
+# Use hostname as flake target
+FLAKE_TARGET="$HOSTNAME"
+
+# Check if hostname-based configuration exists
+if ! flake_config_exists "$FLAKE_TARGET"; then
+    # Try interactive selection
+    FLAKE_TARGET=$(select_config_interactively)
 fi
 
-# === ADD NEW PHYSICAL MACHINES HERE ===
-#
-# To add support for a new physical machine:
-#
-# WITHOUT specialisations (simple machine):
-# 1. Create profile in profiles/machines/{machine}.nix
-# 2. Add entry to flake.nix nixosConfigurations
-# 3. Add detection block here:
-#
-# if echo "$MODEL" | grep -qi "{keyword}"; then
-#     echo "Detected {Machine Name}"
-#     sudo nixos-rebuild switch --impure --show-trace --option warn-dirty false --flake "$FLAKE_DIR#{machine-name}"
-#     exit $?
-# fi
-#
-# WITH router/maximalism specialisations (advanced machine):
-# 1. Create profile in profiles/machines/{machine}.nix with specialisations
-# 2. Add entry to flake.nix nixosConfigurations
-# 3. Add detection block here:
-#
-# if echo "$MODEL" | grep -qi "{keyword}"; then
-#     echo "Detected {Machine Name}"
-#     CURRENT_LABEL=$(detect_specialisation)
-#     rebuild_with_specialisation "{machine-name}" "$CURRENT_LABEL"
-#     exit $?
-# fi
-#
-
-# For Razer machines
-if echo "$VENDOR" | grep -q "Razer"; then
-    echo "Detected Razer laptop"
-    sudo nixos-rebuild switch --impure --show-trace --option warn-dirty false --flake "$FLAKE_DIR#razer"
-    exit $?
-fi
-
-# For XMG/Schenker machines
-if echo "$VENDOR" | grep -q "Schenker"; then
-    echo "Detected Schenker/XMG laptop"
-    sudo nixos-rebuild switch --impure --show-trace --option warn-dirty false --flake "$FLAKE_DIR#xmg"
-    exit $?
-fi
-
-# For other ASUS machines
-if echo "$VENDOR" | grep -q "ASUS"; then
-    echo "Detected ASUS laptop (generic)"
-    sudo nixos-rebuild switch --impure --show-trace --option warn-dirty false --flake "$FLAKE_DIR#asus"
-    exit $?
-fi
-
-# === FALLBACK ===
 echo ""
-echo "⚠ Unknown hardware configuration"
-echo "Vendor: $VENDOR"
-echo "Model: $MODEL"
+echo "Building configuration: $FLAKE_TARGET"
+
+# Detect and apply specialisation
+CURRENT_SPEC=$(detect_specialisation)
+echo "Current specialisation: $CURRENT_SPEC"
 echo ""
-echo "To add support for this machine:"
-echo "1. Create a profile in profiles/machines/{name}.nix"
-echo "2. Add entry to flake.nix"
-echo "3. Add detection block in nixbuild.sh"
+
+rebuild_system "$FLAKE_TARGET" "$CURRENT_SPEC"
+
 echo ""
-echo "Building generic host configuration as fallback..."
-sudo nixos-rebuild switch --impure --show-trace --option warn-dirty false --flake "$FLAKE_DIR#host"
+echo "✓ Configuration applied successfully!"
+[[ "$CURRENT_SPEC" == "none" ]] && echo "  (Running in base mode)"

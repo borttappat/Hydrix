@@ -11,7 +11,7 @@
     };
 
     home-manager = {
-      url = "github:nix-community/home-manager";
+      url = "github:nix-community/home-manager/release-25.05";
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
@@ -45,13 +45,14 @@
     nixosConfigurations = {
 
       # Zephyrus ASUS laptop - full host system
-      # Build with: sudo nixos-rebuild switch --flake .#zephyrus --impure
-      zephyrus = nixpkgs.lib.nixosSystem {
+      # Build with: ./nixbuild.sh (hostname: zeph)
+      zeph = nixpkgs.lib.nixosSystem {
         system = "x86_64-linux";
         modules = [
           { nixpkgs.config.allowUnfree = true; }
           { nixpkgs.overlays = [ overlay-unstable ]; }
           nix-index-database.nixosModules.nix-index
+          home-manager.nixosModules.home-manager  # Add home-manager support
 
           # Base system configuration
           ./modules/base/configuration.nix
@@ -59,6 +60,7 @@
 
           # Machine-specific configuration
           # This imports ../../generated/modules/zephyrus-consolidated.nix internally
+          # Also imports theming/dynamic.nix and desktop/xinitrc.nix
           ./profiles/machines/zephyrus.nix
 
           # Core functionality modules (matching dotfiles exactly)
@@ -107,6 +109,7 @@
           { nixpkgs.config.allowUnfree = true; }
           { nixpkgs.overlays = [ overlay-unstable ]; }
           nix-index-database.nixosModules.nix-index
+          home-manager.nixosModules.home-manager  # Add home-manager support
 
           ./profiles/pentest-full.nix
         ];
@@ -118,6 +121,7 @@
           { nixpkgs.config.allowUnfree = true; }
           { nixpkgs.overlays = [ overlay-unstable ]; }
           nix-index-database.nixosModules.nix-index
+          home-manager.nixosModules.home-manager  # Add home-manager support
 
           ./profiles/comms-full.nix
         ];
@@ -129,6 +133,7 @@
           { nixpkgs.config.allowUnfree = true; }
           { nixpkgs.overlays = [ overlay-unstable ]; }
           nix-index-database.nixosModules.nix-index
+          home-manager.nixosModules.home-manager  # Add home-manager support
 
           ./profiles/browsing-full.nix
         ];
@@ -140,6 +145,7 @@
           { nixpkgs.config.allowUnfree = true; }
           { nixpkgs.overlays = [ overlay-unstable ]; }
           nix-index-database.nixosModules.nix-index
+          home-manager.nixosModules.home-manager  # Add home-manager support
 
           ./profiles/dev-full.nix
         ];

@@ -9,17 +9,15 @@
   # - Cache directory structure
   # - Template processing utilities
 
-  # Install theming dependencies
+  # Install theming dependencies and deploy scripts
   environment.systemPackages = with pkgs; [
     pywal            # Color scheme generator
     jq               # JSON parsing for display-config.json
     xorg.xrandr      # Display resolution detection/management
     imagemagick      # Image processing for pywal
-    sed              # Template variable substitution
-  ];
+    # sed is built-in, no need to install
 
-  # Deploy load-display-config.sh script to system PATH
-  environment.systemPackages = [
+    # Deploy load-display-config.sh script to system PATH
     (pkgs.writeScriptBin "load-display-config"
       (builtins.readFile ../../scripts/load-display-config.sh))
   ];

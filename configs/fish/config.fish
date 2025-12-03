@@ -237,9 +237,7 @@ abbr -a zas 'zenaudio speakers && zenaudio volume 75'
 abbr -a zab 'zenaudio bluetooth && zenaudio volume 75'
 
 # === VISUALS ===
-function walrgb
-    sh ~/dotfiles/scripts/bash/walrgb.sh $argv
-end
+# walrgb is in PATH via Hydrix theming/dynamic.nix - call directly
 
 function rgb
     openrgb --device 0 --mode static --color $argv
@@ -253,9 +251,7 @@ abbr -a xrandrrestore 'xrandr --output eDP-1 --mode 1920x1200 --output HDMI-1 --
 abbr -a nwshow 'nmcli dev wifi show'
 abbr -a nwconnect 'nmcli --ask dev wifi connect'
 
-function wifirestore
-    sh ~/dotfiles/scripts/bash/wifirestore.sh $argv
-end
+# wifirestore script - add to Hydrix scripts/ if needed
 
 # === TAILSCALE ===
 abbr -a tds 'sudo tailscale file cp'

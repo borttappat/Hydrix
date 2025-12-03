@@ -12,8 +12,14 @@
   # Enable startx
   services.xserver.displayManager.startx.enable = true;
 
+  # Automatically backup conflicting files when home-manager tries to manage them
+  home-manager.backupFileExtension = "hm-backup";
+
   # Deploy all config files to user home directory
   home-manager.users.traum = {
+    # Set home-manager state version (must match system stateVersion or use latest)
+    home.stateVersion = "25.05";
+
     # X session bootstrap
     home.file.".xinitrc" = {
       source = ../../configs/xorg/.xinitrc;
@@ -62,7 +68,7 @@
 
     # Other application configs
     home.file.".config/zathura/zathurarc".source = ../../configs/zathura/zathurarc;
-    home.file.".config/starship/starship.toml".source = ../../configs/starship/starship.toml;
+    home.file.".config/starship.toml".source = ../../configs/starship/starship.toml;  # Root level for starship
     home.file.".config/picom/picom.conf".source = ../../configs/picom/picom.conf;
     home.file.".config/htop/htoprc".source = ../../configs/htop/htoprc;
 
