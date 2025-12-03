@@ -1,5 +1,7 @@
-/* Force ${FIREFOX_FONT} font on all web pages */
-* {
+/* Force ${FIREFOX_FONT} font on all web pages - AGGRESSIVE MODE */
+
+/* Global wildcard - catch everything */
+*, *::before, *::after {
   font-family: "${FIREFOX_FONT}", monospace !important;
   font-size: ${FIREFOX_FONT_SIZE}px !important;
   line-height: ${FIREFOX_FONT_SIZE}px !important;
@@ -10,8 +12,65 @@
   transform: none !important;
 }
 
-/* Slightly larger headings */
-h1, h2 {
+/* Root and body */
+html, body {
+  font-family: "${FIREFOX_FONT}", monospace !important;
+  font-size: ${FIREFOX_FONT_SIZE}px !important;
+  line-height: ${FIREFOX_FONT_SIZE}px !important;
+}
+
+/* All text elements - multiple selectors for higher specificity */
+body *, div, div *, span, span *, p, p *, a, a *, li, li *, td, th, input, textarea, select, button, label, article, section, main, header, footer, nav, aside {
+  font-family: "${FIREFOX_FONT}", monospace !important;
+  font-size: ${FIREFOX_FONT_SIZE}px !important;
+  line-height: ${FIREFOX_FONT_SIZE}px !important;
+}
+
+/* All heading levels - with multiple specificity levels */
+h1, h2, h3, h4, h5, h6,
+h1 *, h2 *, h3 *, h4 *, h5 *, h6 *,
+.h1, .h2, .h3, .h4, .h5, .h6,
+[class*="heading"], [class*="title"], [class*="header"] {
+  font-family: "${FIREFOX_FONT}", monospace !important;
   font-size: ${FIREFOX_HEADER_FONT_SIZE}px !important;
   line-height: ${FIREFOX_HEADER_FONT_SIZE}px !important;
+}
+
+/* Override any inline styles */
+[style*="font-family"] {
+  font-family: "${FIREFOX_FONT}", monospace !important;
+}
+
+/* Override inline font-size on headings specifically first */
+h1[style*="font-size"],
+h2[style*="font-size"],
+h3[style*="font-size"],
+h4[style*="font-size"],
+h5[style*="font-size"],
+h6[style*="font-size"],
+h1 *[style*="font-size"],
+h2 *[style*="font-size"],
+h3 *[style*="font-size"],
+h4 *[style*="font-size"],
+h5 *[style*="font-size"],
+h6 *[style*="font-size"] {
+  font-size: ${FIREFOX_HEADER_FONT_SIZE}px !important;
+}
+
+/* Override inline font-size on non-heading elements */
+[style*="font-size"]:not(h1):not(h2):not(h3):not(h4):not(h5):not(h6) {
+  font-size: ${FIREFOX_FONT_SIZE}px !important;
+}
+
+/* Code and monospace elements */
+pre, code, kbd, samp, tt, var, pre *, code *, kbd *, samp * {
+  font-family: "${FIREFOX_FONT}", monospace !important;
+  font-size: ${FIREFOX_FONT_SIZE}px !important;
+  line-height: ${FIREFOX_FONT_SIZE}px !important;
+}
+
+/* Catch any SVG text elements */
+text, tspan {
+  font-family: "${FIREFOX_FONT}", monospace !important;
+  font-size: ${FIREFOX_FONT_SIZE}px !important;
 }

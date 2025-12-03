@@ -24,6 +24,7 @@
       (pkgs.writeScriptBin "nixwal" (builtins.readFile ../../scripts/nixwal.sh))
       (pkgs.writeScriptBin "wal-gtk" (builtins.readFile ../../scripts/wal-gtk.sh))
       (pkgs.writeScriptBin "zathuracolors" (builtins.readFile ../../scripts/zathuracolors.sh))
+      (pkgs.writeScriptBin "deploy-obsidian-config" (builtins.readFile ../../scripts/deploy-obsidian-config.sh))
 
       # Browser integration
       pywalfox-native

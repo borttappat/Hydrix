@@ -124,6 +124,10 @@
     home.file.".config/firefox/traum/chrome/userContent.css.template".source = ../../configs/firefox/traum/chrome/userContent.css.template;
     home.file.".config/firefox/traum/user.js.template".source = ../../configs/firefox/traum/user.js.template;
     home.file.".mozilla/firefox/profiles.ini".source = ../../configs/firefox/profiles.ini;
+
+    # Obsidian configuration templates (deployed by deploy-obsidian-config script)
+    home.file.".config/obsidian-templates/appearance.json.template".source = ../../configs/obsidian/appearance.json.template;
+    home.file.".config/obsidian-templates/snippets/cozette-font.css.template".source = ../../configs/obsidian/snippets/cozette-font.css.template;
   };
 
   # Note: The .xinitrc script will:

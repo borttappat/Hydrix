@@ -121,6 +121,10 @@ export DUNST_ICON_SIZE=$(echo "$RES_DEFAULTS" | jq -r '.dunst_icon_size')
 export FIREFOX_FONT_SIZE=$(echo "$RES_DEFAULTS" | jq -r '.firefox_font_size')
 export FIREFOX_HEADER_FONT_SIZE=$(echo "$RES_DEFAULTS" | jq -r '.firefox_header_font_size')
 
+# Obsidian settings from resolution defaults
+export OBSIDIAN_FONT_SIZE=$(echo "$RES_DEFAULTS" | jq -r '.obsidian_font_size')
+export OBSIDIAN_HEADER_FONT_SIZE=$(echo "$RES_DEFAULTS" | jq -r '.obsidian_header_font_size')
+
 export DISPLAY_RESOLUTION="$CURRENT_RESOLUTION"
 export DISPLAY_FONTS=$(jq -r '.fonts | join(",")' "$CONFIG_FILE")
 export POLYBAR_FONT=$(jq -r '.fonts[0]' "$CONFIG_FILE")
@@ -128,6 +132,7 @@ export ALACRITTY_FONT=$(jq -r '.fonts[0]' "$CONFIG_FILE")
 export I3_FONT=$(jq -r '.fonts[0]' "$CONFIG_FILE")
 export DUNST_FONT=$(jq -r '.fonts[0]' "$CONFIG_FILE")
 export FIREFOX_FONT=$(jq -r '.fonts[0]' "$CONFIG_FILE")
+export OBSIDIAN_FONT=$(jq -r '.obsidian_font' "$CONFIG_FILE")
 
 # Generate the WINIT_X11_SCALE_FACTOR line for alacritty if scale factor is set
 if [ "$ALACRITTY_SCALE_FACTOR" != "null" ] && [ "$ALACRITTY_SCALE_FACTOR" != "1" ]; then

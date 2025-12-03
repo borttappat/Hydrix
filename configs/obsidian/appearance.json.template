@@ -1,0 +1,13 @@
+{
+  "theme": "obsidian",
+  "cssTheme": "Nord",
+  "baseFontSize": ${OBSIDIAN_FONT_SIZE},
+  "baseFontSizeAction": true,
+  "nativeMenus": false,
+  "enabledCssSnippets": [
+    "cozette-font"
+  ],
+  "interfaceFontFamily": "",
+  "textFontFamily": "",
+  "monospaceFontFamily": ""
+}

@@ -20,7 +20,7 @@
       "obsidian_font_size": 11,
       "obsidian_header_font_size": 22,
       "firefox_font_size": 13,
-      "firefox_header_font_size": 26
+      "firefox_header_font_size": 20
     },
     "1920x1200": {
       "polybar_font_size": 9,
@@ -42,7 +42,7 @@
       "obsidian_font_size": 13,
       "obsidian_header_font_size": 26,
       "firefox_font_size": 13,
-      "firefox_header_font_size": 26
+      "firefox_header_font_size": 20
     },
     "2560x1440": {
       "polybar_font_size": 11,
@@ -64,7 +64,7 @@
       "obsidian_font_size": 13,
       "obsidian_header_font_size": 26,
       "firefox_font_size": 13,
-      "firefox_header_font_size": 26
+      "firefox_header_font_size": 20
     },
     "2880x1800": {
       "polybar_font_size": 12,
@@ -86,7 +86,7 @@
       "obsidian_font_size": 14,
       "obsidian_header_font_size": 28,
       "firefox_font_size": 14,
-      "firefox_header_font_size": 28
+      "firefox_header_font_size": 20
     },
     "3440x1440": {
       "polybar_font_size": 30,
@@ -108,7 +108,7 @@
       "obsidian_font_size": 20,
       "obsidian_header_font_size": 40,
       "firefox_font_size": 20,
-      "firefox_header_font_size": 40
+      "firefox_header_font_size": 20
     },
     "3840x2160": {
       "polybar_font_size": 14,
@@ -130,7 +130,7 @@
       "obsidian_font_size": 16,
       "obsidian_header_font_size": 32,
       "firefox_font_size": 16,
-      "firefox_header_font_size": 32
+      "firefox_header_font_size": 20
     }
   },
   "machine_overrides": {

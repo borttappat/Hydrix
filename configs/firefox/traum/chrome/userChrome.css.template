@@ -9,11 +9,29 @@
   transform: none !important;
 }
 
+/* Force font on toolbar and UI elements */
+toolbarbutton, menuitem, menu, tab, textbox, label, description, button {
+  font-family: "${FIREFOX_FONT}", monospace !important;
+  font-size: ${FIREFOX_FONT_SIZE}px !important;
+  line-height: ${FIREFOX_FONT_SIZE}px !important;
+}
+
+/* Force font in address bar and search bar */
+#urlbar, #urlbar-input, #searchbar, input[type="text"], input[type="search"] {
+  font-family: "${FIREFOX_FONT}", monospace !important;
+  font-size: ${FIREFOX_FONT_SIZE}px !important;
+  line-height: ${FIREFOX_FONT_SIZE}px !important;
+}
+
 /* Force font in about: pages and chrome:// URLs */
 @-moz-document url-prefix(about:), url-prefix(chrome://browser/content/) {
   * {
     font-family: "${FIREFOX_FONT}", monospace !important;
     font-size: ${FIREFOX_FONT_SIZE}px !important;
     line-height: ${FIREFOX_FONT_SIZE}px !important;
+  }
+
+  body, div, span, p, a, li, td, th, h1, h2, h3, h4, h5, h6 {
+    font-family: "${FIREFOX_FONT}", monospace !important;
   }
 }
