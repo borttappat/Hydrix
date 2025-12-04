@@ -1,5 +1,3 @@
-#!/usr/bin/env bash
-
 # Generates a static pywal cache for VMs based on VM type
 # This ensures VMs have consistent colors while using the same templates as the host
 

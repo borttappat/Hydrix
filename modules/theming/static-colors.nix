@@ -24,7 +24,7 @@
   config = {
     # Add static color generator script to system
     environment.systemPackages = [
-      (pkgs.writeScriptBin "vm-static-colors"
+      (pkgs.writeShellScriptBin "vm-static-colors"
         (builtins.readFile ../../scripts/vm-static-colors.sh))
     ];
 
@@ -48,7 +48,7 @@
 
       script = ''
         echo "Generating static color scheme for ${config.hydrix.vmType}"
-        ${pkgs.writeScriptBin "vm-static-colors" (builtins.readFile ../../scripts/vm-static-colors.sh)}/bin/vm-static-colors ${config.hydrix.vmType}
+        vm-static-colors ${config.hydrix.vmType}
       '';
     };
   };
