@@ -35,21 +35,21 @@
       wantedBy = [ "multi-user.target" ];
       after = [ "network.target" ];
 
+      # Only run if not already generated
+      unitConfig = {
+        ConditionPathExists = "!/home/traum/.cache/wal/.static-colors-generated";
+      };
+
       serviceConfig = {
         Type = "oneshot";
         RemainAfterExit = true;
         User = "traum";
-        ExecStart = "${pkgs.bash}/bin/bash -c '${pkgs.writeScript "vm-colors-check" ''
-          #!/usr/bin/env bash
-          # Only generate if not already done
-          if [ ! -f /home/traum/.cache/wal/.static-colors-generated ]; then
-            echo "Generating static color scheme for ${config.hydrix.vmType}"
-            ${pkgs.writeScriptBin "vm-static-colors" (builtins.readFile ../../scripts/vm-static-colors.sh)}/bin/vm-static-colors ${config.hydrix.vmType}
-          else
-            echo "Static color scheme already generated, skipping"
-          fi
-        ''}'";
       };
+
+      script = ''
+        echo "Generating static color scheme for ${config.hydrix.vmType}"
+        ${pkgs.writeScriptBin "vm-static-colors" (builtins.readFile ../../scripts/vm-static-colors.sh)}/bin/vm-static-colors ${config.hydrix.vmType}
+      '';
     };
   };
 }

@@ -44,12 +44,12 @@
 
     # Enable startx for "x" command
     displayManager.startx.enable = true;
+  };
 
-    # Auto-login to TTY
-    displayManager.autoLogin = {
-      enable = true;
-      user = "traum";
-    };
+  # Auto-login (moved to new location in NixOS 25.05)
+  services.displayManager.autoLogin = {
+    enable = true;
+    user = "traum";
   };
 
   # Auto-login to console (TTY1)
