@@ -1,9 +1,15 @@
 # Dev VM - Full profile (applied after shaping)
 # Software development and compilation system
-{ config, pkgs, lib, ... }:
+{ config, pkgs, lib, modulesPath, ... }:
 
 {
   imports = [
+    # QEMU guest profile
+    (modulesPath + "/profiles/qemu-guest.nix")
+
+    # Hardware configuration (generated on first boot)
+    /etc/nixos/hardware-configuration.nix
+
     # Base system
     ../modules/base/nixos-base.nix
     ../modules/base/users.nix
@@ -17,6 +23,13 @@
     ../modules/theming/static-colors.nix  # Static purple theme for dev
     ../modules/desktop/xinitrc.nix        # X session bootstrap + config deployment
   ];
+
+  # Boot loader configuration for VMs
+  boot.loader.grub = {
+    enable = true;
+    device = lib.mkForce "/dev/vda";
+    efiSupport = false;
+  };
 
   # Hostname is set during VM deployment (e.g., "dev-rust")
   # Do not override it here
