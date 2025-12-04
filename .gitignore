@@ -30,3 +30,8 @@ hardware-results.json
 # OS files
 .DS_Store
 Thumbs.db
+
+# Other files
+*.md
+*.txt
+*.env

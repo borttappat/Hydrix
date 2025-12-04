@@ -3,7 +3,10 @@ set -euo pipefail
 
 readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
-readonly BASE_IMAGE_RESULT="$PROJECT_DIR/result/nixos.qcow2"
+
+# Base image paths (set based on VM type)
+BASE_IMAGE_RESULT=""
+BASE_IMAGE_FLAKE=""
 
 # Host system detection
 HOST_CORES=$(nproc)
@@ -80,18 +83,26 @@ get_resource_allocation() {
     case "$type" in
         pentest)
             percent=75
+            BASE_IMAGE_FLAKE="${type}-vm-base"
+            BASE_IMAGE_RESULT="$PROJECT_DIR/${type}-vm-image/nixos.qcow2"
             log "Pentest VM - High performance allocation (75%)"
             ;;
         dev)
             percent=75
+            BASE_IMAGE_FLAKE="${type}-vm-base"
+            BASE_IMAGE_RESULT="$PROJECT_DIR/${type}-vm-image/nixos.qcow2"
             log "Dev VM - High performance allocation (75%)"
             ;;
         browsing)
             percent=50
+            BASE_IMAGE_FLAKE="${type}-vm-base"
+            BASE_IMAGE_RESULT="$PROJECT_DIR/${type}-vm-image/nixos.qcow2"
             log "Browsing VM - Moderate allocation (50%)"
             ;;
         comms)
             percent=25
+            BASE_IMAGE_FLAKE="${type}-vm-base"
+            BASE_IMAGE_RESULT="$PROJECT_DIR/${type}-vm-image/nixos.qcow2"
             log "Comms VM - Light allocation (25%)"
             ;;
         *)
@@ -224,12 +235,14 @@ check_base_image() {
 }
 
 build_base_image() {
-    log "=== Building Universal Base Image ==="
+    log "=== Building $VM_TYPE Base Image ==="
     log "This may take 10-15 minutes on first build..."
 
     cd "$PROJECT_DIR"
 
-    if ! nix build .#base-vm-qcow --print-build-logs; then
+    # Build with output link based on type
+    # Creates symlink: pentest-vm-image/ -> /nix/store/...-nixos.qcow2/
+    if ! nix build ".#$BASE_IMAGE_FLAKE" --out-link "${VM_TYPE}-vm-image" --print-build-logs; then
         error "Base image build failed"
     fi
 
@@ -266,14 +279,9 @@ create_vm_disk() {
     sudo cp "$BASE_IMAGE_RESULT" "$target_image"
     sudo qemu-img resize "$target_image" "$VM_DISK_SIZE"
 
-    # Set hostname in the image before first boot
-    log "Setting hostname to: $vm_hostname"
-    if command -v virt-customize >/dev/null 2>&1; then
-        sudo virt-customize -a "$target_image" --hostname "$vm_hostname"
-    else
-        log "WARNING: virt-customize not found, hostname may need manual configuration"
-        log "Install with: nix-shell -p libguestfs"
-    fi
+    # Hostname is baked into the base image (e.g., "pentest-vm")
+    # The base image already has the correct hostname set at build time
+    log "Base image hostname: ${VM_TYPE}-vm (baked in at build time)"
 
     # Set permissions
     if id "libvirt-qemu" >/dev/null 2>&1; then
@@ -343,13 +351,14 @@ VM Details:
   Allocation: $((VM_VCPUS * 100 / HOST_CORES))% CPU, $((VM_MEMORY * 100 / HOST_RAM_MB))% RAM
 
 First Boot Process:
-  1. VM boots with base image (i3, fish, core tools)
-  2. Shaping service detects hostname "$vm_hostname"
-  3. Extracts type "$VM_TYPE" from hostname
-  4. Clones Hydrix repo to /etc/nixos/hydrix
-  5. Runs: nixos-rebuild switch --flake .#vm-$VM_TYPE
-  6. System rebuilds with full $VM_TYPE profile
-  7. Ready to use with all $VM_TYPE-specific packages
+  1. VM boots with base image (hostname: ${VM_TYPE}-vm)
+  2. Hydrix repo is copied to /home/traum/Hydrix
+  3. Hardware configuration is auto-generated
+  4. Shaping service detects hostname "${VM_TYPE}-vm"
+  5. Extracts type "$VM_TYPE" from hostname
+  6. Runs: nixbuild-vm (rebuilds with flake .#vm-$VM_TYPE)
+  7. System rebuilds with full $VM_TYPE profile
+  8. Ready to use with all $VM_TYPE-specific packages and configs
 
 Connection:
   virt-manager → $vm_hostname

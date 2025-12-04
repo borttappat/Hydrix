@@ -1,4 +1,4 @@
-# VM shaping service - clones Hydrix repo and applies full profile
+# VM shaping service - applies full profile based on hostname
 { config, pkgs, lib, ... }:
 
 {
@@ -6,25 +6,23 @@
   systemd.services.hydrix-shape = {
     description = "Hydrix VM first-boot shaping";
     wantedBy = [ "multi-user.target" ];
-    after = [ "network-online.target" ];
+    after = [ "network-online.target" "hydrix-copy-to-home.service" "hydrix-hardware-setup.service" ];
     wants = [ "network-online.target" ];
+
+    # Only run once
+    unitConfig = {
+      ConditionPathExists = "!/var/lib/hydrix-shaped";
+    };
 
     serviceConfig = {
       Type = "oneshot";
       RemainAfterExit = true;
+      User = "traum";
     };
 
     script = ''
       #!/usr/bin/env bash
       set -euo pipefail
-
-      SHAPED_MARKER="/etc/nixos/.hydrix-shaped"
-
-      # Skip if already shaped
-      if [ -f "$SHAPED_MARKER" ]; then
-        echo "VM already shaped, skipping..."
-        exit 0
-      fi
 
       echo "=== Hydrix VM Shaping Started ==="
 
@@ -35,33 +33,19 @@
       echo "Hostname: $HOSTNAME"
       echo "VM Type: $VM_TYPE"
 
-      # Clone or update Hydrix repository
-      HYDRIX_DIR="/etc/nixos/hydrix"
-      if [ -d "$HYDRIX_DIR/.git" ]; then
-        echo "Hydrix repository exists, pulling latest changes..."
-        cd "$HYDRIX_DIR"
-        ${pkgs.git}/bin/git pull
-
-        if [ $? -eq 0 ]; then
-          echo "✓ Git repository updated successfully"
-        else
-          echo "✗ ERROR: Failed to pull latest changes"
-          exit 1
-        fi
-      else
-        echo "Cloning Hydrix repository..."
-        ${pkgs.git}/bin/git clone https://github.com/borttappat/Hydrix.git "$HYDRIX_DIR"
-
-        if [ -d "$HYDRIX_DIR/.git" ]; then
-          echo "✓ Git repository cloned successfully"
-        else
-          echo "✗ ERROR: .git directory missing after clone"
-          exit 1
-        fi
+      # Hydrix should already be at /home/traum/Hydrix (copied by hydrix-embed service)
+      HYDRIX_DIR="/home/traum/Hydrix"
+      if [ ! -d "$HYDRIX_DIR" ]; then
+        echo "✗ ERROR: Hydrix directory not found at $HYDRIX_DIR"
+        exit 1
       fi
+
+      echo "✓ Hydrix repository found at $HYDRIX_DIR"
 
       # Apply full VM profile using nixbuild-vm script
       echo "Applying full profile for VM type: $VM_TYPE"
+      cd "$HYDRIX_DIR"
+
       if ${pkgs.bash}/bin/bash /run/current-system/sw/bin/nixbuild-vm; then
         echo "✓ System rebuild completed"
       else
@@ -69,9 +53,12 @@
         exit 1
       fi
 
-      # Mark as shaped
-      touch "$SHAPED_MARKER"
       echo "=== Hydrix VM Shaping Completed ==="
+    '';
+
+    # Mark as complete after successful run
+    postStop = ''
+      ${pkgs.coreutils}/bin/touch /var/lib/hydrix-shaped
     '';
   };
 }

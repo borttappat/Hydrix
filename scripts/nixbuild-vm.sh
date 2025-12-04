@@ -4,7 +4,7 @@
 
 set -euo pipefail
 
-readonly HYDRIX_DIR="/etc/nixos/hydrix"
+readonly HYDRIX_DIR="/home/traum/Hydrix"
 
 log() { echo "[$(date +%H:%M:%S)] $*"; }
 error() { echo "[ERROR] $*" >&2; exit 1; }

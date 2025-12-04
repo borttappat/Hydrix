@@ -153,7 +153,8 @@
     };
 
     # ========== VM BASE IMAGES ==========
-    # Minimal images with shaping service (except router which is single-stage)
+    # Type-specific base images with shaping service
+    # Each image has hostname baked in for automatic shaping
     packages.x86_64-linux = {
 
       # Router VM - single-stage, exact copy of splix
@@ -164,11 +165,55 @@
         format = "qcow";
       };
 
-      # Universal base VM - shapes into any type based on hostname
-      # Build with: nix build .#base-vm-qcow
-      base-vm-qcow = nixos-generators.nixosGenerate {
+      # Pentest base VM - builds with "pentest-vm" hostname
+      # Build with: nix build .#pentest-vm-base
+      pentest-vm-base = nixos-generators.nixosGenerate {
         system = "x86_64-linux";
-        modules = [ ./profiles/base-vm.nix ];
+        modules = [
+          { nixpkgs.config.allowUnfree = true; }
+          { nixpkgs.overlays = [ overlay-unstable ]; }
+          ./profiles/base-vm.nix
+          { networking.hostName = "pentest-vm"; }
+        ];
+        format = "qcow";
+      };
+
+      # Comms base VM - builds with "comms-vm" hostname
+      # Build with: nix build .#comms-vm-base
+      comms-vm-base = nixos-generators.nixosGenerate {
+        system = "x86_64-linux";
+        modules = [
+          { nixpkgs.config.allowUnfree = true; }
+          { nixpkgs.overlays = [ overlay-unstable ]; }
+          ./profiles/base-vm.nix
+          { networking.hostName = "comms-vm"; }
+        ];
+        format = "qcow";
+      };
+
+      # Browsing base VM - builds with "browsing-vm" hostname
+      # Build with: nix build .#browsing-vm-base
+      browsing-vm-base = nixos-generators.nixosGenerate {
+        system = "x86_64-linux";
+        modules = [
+          { nixpkgs.config.allowUnfree = true; }
+          { nixpkgs.overlays = [ overlay-unstable ]; }
+          ./profiles/base-vm.nix
+          { networking.hostName = "browsing-vm"; }
+        ];
+        format = "qcow";
+      };
+
+      # Dev base VM - builds with "dev-vm" hostname
+      # Build with: nix build .#dev-vm-base
+      dev-vm-base = nixos-generators.nixosGenerate {
+        system = "x86_64-linux";
+        modules = [
+          { nixpkgs.config.allowUnfree = true; }
+          { nixpkgs.overlays = [ overlay-unstable ]; }
+          ./profiles/base-vm.nix
+          { networking.hostName = "dev-vm"; }
+        ];
         format = "qcow";
       };
     };
@@ -189,11 +234,14 @@
           shellHook = ''
             echo "Hydrix VM Automation System"
             echo ""
-            echo "Base Images:"
-            echo "  nix build .#base-vm-qcow      # Universal base (shapes to any type)"
+            echo "Base Images (one per VM type):"
+            echo "  nix build .#pentest-vm-base   # Pentest base image"
+            echo "  nix build .#comms-vm-base     # Comms base image"
+            echo "  nix build .#browsing-vm-base  # Browsing base image"
+            echo "  nix build .#dev-vm-base       # Dev base image"
             echo "  nix build .#router-vm-qcow    # Router VM (single-stage)"
             echo ""
-            echo "Deploy VMs:"
+            echo "Deploy VMs (auto-builds base image if needed):"
             echo "  ./scripts/build-vm.sh --type pentest --name google"
             echo "  ./scripts/build-vm.sh --type comms --name signal"
             echo "  ./scripts/build-vm.sh --type browsing --name leisure"
