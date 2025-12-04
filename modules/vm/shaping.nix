@@ -20,6 +20,10 @@
       # Run as root since we need privileges for nixos-rebuild
     };
 
+    environment = {
+      PATH = "/run/current-system/sw/bin:/usr/bin:/bin";
+    };
+
     script = ''
       #!/usr/bin/env bash
       set -euo pipefail

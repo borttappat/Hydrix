@@ -8,7 +8,7 @@
       "rofi_font_size": 10,
       "i3_font_size": 8,
       "i3_border_thickness": 2,
-      "gaps_inner": 15,
+      "gaps_inner": 10,
       "dunst_font_size": 10,
       "dunst_width": 300,
       "dunst_height": 300,
