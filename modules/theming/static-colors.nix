@@ -21,12 +21,12 @@
     default = "pentest";
   };
 
-  config = {
+  config = let
+    staticColorsScript = pkgs.writeShellScriptBin "vm-static-colors"
+      (builtins.readFile ../../scripts/vm-static-colors.sh);
+  in {
     # Add static color generator script to system
-    environment.systemPackages = [
-      (pkgs.writeShellScriptBin "vm-static-colors"
-        (builtins.readFile ../../scripts/vm-static-colors.sh))
-    ];
+    environment.systemPackages = [ staticColorsScript ];
 
     # Generate static pywal cache on first boot
     # This runs once and creates a persistent color scheme
@@ -48,7 +48,7 @@
 
       script = ''
         echo "Generating static color scheme for ${config.hydrix.vmType}"
-        vm-static-colors ${config.hydrix.vmType}
+        ${staticColorsScript}/bin/vm-static-colors ${config.hydrix.vmType}
       '';
     };
   };
