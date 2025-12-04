@@ -17,7 +17,7 @@
     serviceConfig = {
       Type = "oneshot";
       RemainAfterExit = true;
-      User = "traum";
+      # Run as root since we need privileges for nixos-rebuild
     };
 
     script = ''
@@ -69,10 +69,10 @@
       echo "Applying full profile: $FLAKE_ENTRY"
       cd "$HYDRIX_DIR"
 
-      if sudo nixos-rebuild switch --flake ".#$FLAKE_ENTRY" --impure; then
+      if nixos-rebuild switch --flake ".#$FLAKE_ENTRY" --impure; then
         echo "✓ System rebuild completed"
         echo "✓ Marking VM as shaped"
-        sudo touch /var/lib/hydrix-shaped
+        touch /var/lib/hydrix-shaped
       else
         echo "✗ ERROR: System rebuild failed"
         exit 1
@@ -81,7 +81,7 @@
       echo "=== Hydrix VM Shaping Completed ==="
       echo "System will reboot in 5 seconds..."
       sleep 5
-      sudo systemctl reboot
+      systemctl reboot
     '';
   };
 }
