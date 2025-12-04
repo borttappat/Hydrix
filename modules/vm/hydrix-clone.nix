@@ -7,8 +7,9 @@
   systemd.services.hydrix-clone = {
     description = "Clone Hydrix repository to user home directory";
     wantedBy = [ "multi-user.target" ];
-    after = [ "network-online.target" ];
+    after = [ "network-online.target" "nss-lookup.target" ];
     wants = [ "network-online.target" ];
+    requires = [ "network-online.target" ];
     before = [ "hydrix-hardware-setup.service" "hydrix-shape.service" ];
 
     # Only run once
@@ -24,7 +25,18 @@
     script = ''
       echo "=== Cloning Hydrix repository ==="
 
+      # Wait for network to be fully ready
+      for i in {1..30}; do
+        if ${pkgs.curl}/bin/curl -s --connect-timeout 2 https://github.com >/dev/null 2>&1; then
+          echo "✓ Network is ready"
+          break
+        fi
+        echo "Waiting for network... ($i/30)"
+        sleep 2
+      done
+
       # Clone Hydrix from GitHub
+      echo "Cloning from GitHub..."
       ${pkgs.git}/bin/git clone https://github.com/borttappat/Hydrix.git /home/traum/Hydrix
 
       if [ -d /home/traum/Hydrix/.git ]; then

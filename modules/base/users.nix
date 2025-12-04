@@ -14,6 +14,8 @@
     extraGroups = [ "docker" "audio" "networkmanager" "wheel" "wireshark" "adbusers" ];
     createHome = true;
     useDefaultShell = true;
+    # Default password for VMs (can be overridden per-profile)
+    password = "traum";
   };
 
   # Auto-login on TTY

@@ -28,15 +28,12 @@
   # Boot loader configuration for VMs
   boot.loader.grub = {
     enable = true;
-    device = "/dev/vda";
+    device = lib.mkForce "/dev/vda";
     efiSupport = false;
   };
 
-  # Root filesystem (will be on /dev/vda1 for qcow images)
-  fileSystems."/" = {
-    device = "/dev/vda1";
-    fsType = "ext4";
-  };
+  # Filesystem config is handled by nixos-generators qcow format
+  # It uses /dev/disk/by-label/nixos by default
 
   # VM kernel modules
   boot.initrd.availableKernelModules = [
@@ -56,6 +53,7 @@
 
     # Network diagnostics
     inetutils
+    curl
 
     # Tools for hardware detection
     util-linux
