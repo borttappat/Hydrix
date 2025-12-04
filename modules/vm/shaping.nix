@@ -20,13 +20,12 @@
       # Run as root since we need privileges for nixos-rebuild
     };
 
-    environment = {
-      PATH = "/run/current-system/sw/bin:/usr/bin:/bin";
-    };
-
     script = ''
       #!/usr/bin/env bash
       set -euo pipefail
+
+      # Ensure PATH includes system binaries for nixos-rebuild
+      export PATH="/run/current-system/sw/bin:$PATH"
 
       echo "=== Hydrix VM Shaping Started ==="
 
