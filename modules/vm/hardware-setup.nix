@@ -7,7 +7,7 @@
   systemd.services.hydrix-hardware-setup = {
     description = "Auto-generate VM hardware configuration";
     wantedBy = [ "multi-user.target" ];
-    after = [ "local-fs.target" "hydrix-copy-to-home.service" ];
+    after = [ "local-fs.target" "hydrix-clone.service" ];
     before = [ "hydrix-shape.service" ];  # Must run before shaping
 
     # Only run once on first boot

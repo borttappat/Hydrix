@@ -6,7 +6,7 @@
   systemd.services.hydrix-shape = {
     description = "Hydrix VM first-boot shaping";
     wantedBy = [ "multi-user.target" ];
-    after = [ "network-online.target" "hydrix-copy-to-home.service" "hydrix-hardware-setup.service" ];
+    after = [ "network-online.target" "hydrix-clone.service" "hydrix-hardware-setup.service" ];
     wants = [ "network-online.target" ];
 
     # Only run once
@@ -33,6 +33,29 @@
       echo "Hostname: $HOSTNAME"
       echo "VM Type: $VM_TYPE"
 
+      # Map VM type to flake entry
+      case "$VM_TYPE" in
+        pentest)
+          FLAKE_ENTRY="vm-pentest"
+          ;;
+        comms)
+          FLAKE_ENTRY="vm-comms"
+          ;;
+        browsing)
+          FLAKE_ENTRY="vm-browsing"
+          ;;
+        dev)
+          FLAKE_ENTRY="vm-dev"
+          ;;
+        *)
+          echo "✗ ERROR: Unknown VM type: $VM_TYPE"
+          echo "Expected: pentest, comms, browsing, or dev"
+          exit 1
+          ;;
+      esac
+
+      echo "Flake Entry: $FLAKE_ENTRY"
+
       # Hydrix should already be at /home/traum/Hydrix (copied by hydrix-embed service)
       HYDRIX_DIR="/home/traum/Hydrix"
       if [ ! -d "$HYDRIX_DIR" ]; then
@@ -42,23 +65,23 @@
 
       echo "✓ Hydrix repository found at $HYDRIX_DIR"
 
-      # Apply full VM profile using nixbuild-vm script
-      echo "Applying full profile for VM type: $VM_TYPE"
+      # Apply full VM profile using nixos-rebuild directly
+      echo "Applying full profile: $FLAKE_ENTRY"
       cd "$HYDRIX_DIR"
 
-      if ${pkgs.bash}/bin/bash /run/current-system/sw/bin/nixbuild-vm; then
+      if sudo nixos-rebuild switch --flake ".#$FLAKE_ENTRY" --impure; then
         echo "✓ System rebuild completed"
+        echo "✓ Marking VM as shaped"
+        sudo touch /var/lib/hydrix-shaped
       else
         echo "✗ ERROR: System rebuild failed"
         exit 1
       fi
 
       echo "=== Hydrix VM Shaping Completed ==="
-    '';
-
-    # Mark as complete after successful run
-    postStop = ''
-      ${pkgs.coreutils}/bin/touch /var/lib/hydrix-shaped
+      echo "System will reboot in 5 seconds..."
+      sleep 5
+      sudo systemctl reboot
     '';
   };
 }

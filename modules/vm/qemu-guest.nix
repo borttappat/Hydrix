@@ -5,7 +5,6 @@
   # VM guest services
   virtualisation.vmware.guest.enable = true;
   services.qemuGuest.enable = true;
-  services.qemu-guest-agent.enable = true;  # Modern QEMU guest agent for host-VM communication
   services.spice-vdagentd.enable = true;
 
   # X11 video drivers for VMs
