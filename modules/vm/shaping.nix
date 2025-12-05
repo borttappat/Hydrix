@@ -17,6 +17,7 @@
     serviceConfig = {
       Type = "oneshot";
       RemainAfterExit = true;
+      TimeoutStartSec = "infinity";  # Disable timeout - rebuild can take 30+ minutes
       # Run as root since we need privileges for nixos-rebuild
     };
 
