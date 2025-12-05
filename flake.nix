@@ -165,6 +165,17 @@
         format = "qcow";
       };
 
+      # Pentest MINIMAL base VM - truly minimal (~2GB)
+      # Build with: nix build .#pentest-vm-base-minimal
+      pentest-vm-base-minimal = nixos-generators.nixosGenerate {
+        system = "x86_64-linux";
+        modules = [
+          { nixpkgs.config.allowUnfree = true; }
+          ./profiles/pentest-base-minimal.nix
+        ];
+        format = "qcow";
+      };
+
       # Pentest base VM - builds with "pentest-vm" hostname
       # Build with: nix build .#pentest-vm-base
       pentest-vm-base = nixos-generators.nixosGenerate {
