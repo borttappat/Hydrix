@@ -72,6 +72,9 @@
       echo "Applying full profile: $FLAKE_ENTRY"
       cd "$HYDRIX_DIR"
 
+      # Set HOME for root (service runs as root)
+      export HOME=/root
+
       # Allow root to access git repo owned by traum (git security feature)
       ${pkgs.git}/bin/git config --global --add safe.directory "$HYDRIX_DIR"
 
