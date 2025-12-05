@@ -72,6 +72,9 @@
       echo "Applying full profile: $FLAKE_ENTRY"
       cd "$HYDRIX_DIR"
 
+      # Allow root to access git repo owned by traum (git security feature)
+      ${pkgs.git}/bin/git config --global --add safe.directory "$HYDRIX_DIR"
+
       if nixos-rebuild switch --flake ".#$FLAKE_ENTRY" --impure; then
         echo "✓ System rebuild completed"
         echo "✓ Marking VM as shaped"
