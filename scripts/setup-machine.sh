@@ -281,6 +281,14 @@ in
     };
   };
 
+  # ===== BOOT CONFIGURATION - Default to Maximalism =====
+  # This ensures the system boots into maximalism mode by default
+  # so router VM autostart works without manual bootloader selection
+  boot.loader.grub.default = "saved";
+  boot.loader.grub.extraConfig = ''
+    set default="NixOS - maximalism-setup"
+  '';
+
   # ===== ROUTER SPECIALIZATION =====
   specialisation.router.configuration = {
     system.nixos.label = lib.mkForce "router-setup";
@@ -808,6 +816,78 @@ AUTOSTARTEOF
     success "Autostart script generated: $script_path"
 }
 
+# ========== DEPLOY ROUTER VM ==========
+
+deploy_router_vm() {
+    log "Deploying router VM to libvirt..."
+
+    source "$PROJECT_DIR/hardware-results.env"
+
+    local vm_name="router-vm-passthrough"
+    local vm_image_source="$PROJECT_DIR/router-vm-result/nixos.qcow2"
+    local vm_image_dest="/var/lib/libvirt/images/$vm_name.qcow2"
+
+    if [[ ! -f "$vm_image_source" ]]; then
+        error "Router VM image not found: $vm_image_source"
+    fi
+
+    # Check if VM already exists
+    if sudo virsh --connect qemu:///system list --all 2>/dev/null | grep -q "$vm_name"; then
+        log "Router VM already deployed - removing for fresh deploy"
+        sudo virsh --connect qemu:///system destroy "$vm_name" 2>/dev/null || true
+        sudo virsh --connect qemu:///system undefine "$vm_name" --nvram 2>/dev/null || true
+        sudo rm -f "$vm_image_dest"
+    fi
+
+    # Copy VM image
+    log "Copying VM image to libvirt storage..."
+    sudo mkdir -p /var/lib/libvirt/images
+    sudo cp "$vm_image_source" "$vm_image_dest"
+    sudo chmod 644 "$vm_image_dest"
+
+    # Format PCI ID for virt-install (0000:00:14.3 -> 00:14.3)
+    local pci_short="${PRIMARY_PCI#0000:}"
+
+    log "Deploying router VM with WiFi passthrough (PCI: $pci_short)..."
+
+    # Note: This creates the VM definition but won't start it until bridges exist
+    # The VM will autostart when booted into maximalism mode
+    if sudo virt-install \
+        --connect qemu:///system \
+        --name "$vm_name" \
+        --memory 2048 \
+        --vcpus 2 \
+        --disk "$vm_image_dest,device=disk,bus=virtio" \
+        --os-variant nixos-unstable \
+        --boot hd \
+        --nographics \
+        --network bridge=virbr1,model=virtio \
+        --network bridge=virbr2,model=virtio \
+        --network bridge=virbr3,model=virtio \
+        --network bridge=virbr4,model=virtio \
+        --network bridge=virbr5,model=virtio \
+        --hostdev "$pci_short" \
+        --noautoconsole \
+        --import 2>/dev/null; then
+        success "Router VM deployed with WiFi passthrough!"
+    else
+        log "WiFi passthrough failed (bridges may not exist yet)"
+        log "Creating VM definition without passthrough - will work after reboot into maximalism"
+        sudo virt-install \
+            --connect qemu:///system \
+            --name "$vm_name" \
+            --memory 2048 \
+            --vcpus 2 \
+            --disk "$vm_image_dest,device=disk,bus=virtio" \
+            --os-variant nixos-unstable \
+            --boot hd \
+            --nographics \
+            --network network=default,model=virtio \
+            --noautoconsole \
+            --import 2>/dev/null || warn "VM definition creation deferred until after reboot"
+    fi
+}
+
 # ========== GIT STAGE FILES ==========
 
 git_stage_files() {
@@ -862,6 +942,14 @@ show_completion_summary() {
     else
         echo "  [!] Not built (run: nix build .#router-vm-qcow)"
     fi
+    if sudo virsh --connect qemu:///system list --all 2>/dev/null | grep -q "router-vm-passthrough"; then
+        echo "  [+] Deployed: router-vm-passthrough"
+    else
+        echo "  [!] Not deployed yet (will be created on first boot into maximalism)"
+    fi
+    echo ""
+    echo "Boot Configuration:"
+    echo "  [+] Default boot: maximalism-setup (router VM will autostart)"
     echo ""
     echo "========================================"
     echo "  NEXT STEPS"
@@ -870,16 +958,24 @@ show_completion_summary() {
     echo "1. Commit the changes:"
     echo "   git commit -m 'Add ${machine_name} machine configuration'"
     echo ""
-    echo "2. Build and switch to base mode (no router):"
-    echo "   sudo nixos-rebuild switch --flake ~/Hydrix#${machine_name} --impure"
+    echo "2. Rebuild the system (will configure GRUB for maximalism default):"
+    echo "   sudo nixos-rebuild boot --flake ~/Hydrix#${machine_name} --impure"
     echo ""
-    echo "3. (Optional) Deploy router VM:"
-    echo "   ./deploy-router-vm.sh"
+    echo "3. Reboot into maximalism mode:"
+    echo "   sudo reboot"
     echo ""
-    echo "4. (Optional) Switch to router mode:"
-    echo "   sudo nixos-rebuild switch --flake ~/Hydrix#${machine_name} --specialisation router --impure"
+    echo "   On reboot:"
+    echo "   - System boots into maximalism-setup (default)"
+    echo "   - WiFi driver is blacklisted for passthrough"
+    echo "   - Bridge interfaces (virbr1-5) are created"
+    echo "   - Router VM autostarts with WiFi passthrough"
+    echo "   - Internet via router VM on 192.168.100.253"
     echo ""
-    echo "5. Future rebuilds use ./nixbuild.sh automatically"
+    echo "4. Future rebuilds use ./nixbuild.sh automatically"
+    echo ""
+    echo "5. To switch to base mode (normal WiFi on host):"
+    echo "   Select 'NixOS - Default' at boot, or:"
+    echo "   sudo grub-reboot 'NixOS - Default' && sudo reboot"
     echo ""
 }
 
@@ -923,6 +1019,7 @@ main() {
     update_flake "$machine_name"
     build_router_vm
     generate_autostart_script
+    deploy_router_vm
     git_stage_files "$machine_name"
     show_completion_summary "$machine_name" "$cpu_platform"
 }
