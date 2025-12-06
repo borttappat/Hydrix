@@ -196,7 +196,7 @@ services.xserver.enable = true;
 services.xserver.displayManager.startx.enable = true;
 services.xserver.windowManager.i3.enable = true;
 
-# Configure keymap in X11
+#TODO: Manage this in some way that allows for other keyboard layout configurations keymap in X11
 services.xserver.xkb = {
     layout = "se";
     variant = "";

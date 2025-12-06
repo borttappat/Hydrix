@@ -73,6 +73,7 @@
           ./modules/base/virt.nix
           #./modules/scripts.nix  # Commented out in dotfiles
           ./modules/base/audio.nix
+          ./modules/desktop/firefox.nix
 
           # Additional feature modules (all commented out in dotfiles)
           #./modules/pentesting.nix

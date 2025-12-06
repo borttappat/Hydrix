@@ -639,6 +639,7 @@ update_flake() {
           ./modules/theming/colors.nix
           ./modules/base/virt.nix
           ./modules/base/audio.nix
+          ./modules/desktop/firefox.nix
         ];
       };
 FLAKEENTRY

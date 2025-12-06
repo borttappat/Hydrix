@@ -45,10 +45,10 @@
       "firefox_header_font_size": 20
     },
     "2560x1440": {
-      "polybar_font_size": 11,
-      "polybar_height": 35,
+      "polybar_font_size": 12,
+      "polybar_height": 30,
       "polybar_line_size": 2,
-      "alacritty_font_size": 13,
+      "alacritty_font_size": 10,
       "rofi_font_size": 12,
       "i3_font_size": 9,
       "i3_border_thickness": 1,
