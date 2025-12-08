@@ -722,6 +722,9 @@ generate_autostart_script() {
 set -euo pipefail
 
 readonly VM_NAME="router-vm-passthrough"
+readonly HYDRIX_DIR="/home/traum/Hydrix"
+readonly DEPLOY_SCRIPT="$HYDRIX_DIR/deploy-router-vm.sh"
+
 log() { echo "[$(date +%H:%M:%S)] Router Autostart: $*"; }
 
 VIRSH="/run/current-system/sw/bin/virsh"
@@ -737,10 +740,23 @@ fi
 
 sleep 2
 
+# Check if router VM exists, deploy if missing
 if ! $VIRSH --connect qemu:///system list --all | grep -q "$VM_NAME"; then
-    log "ERROR: Router VM '$VM_NAME' not found"
-    log "Please run deploy-router-vm.sh first"
-    exit 1
+    log "Router VM '$VM_NAME' not found - deploying..."
+
+    if [[ -x "$DEPLOY_SCRIPT" ]]; then
+        log "Running deploy-router-vm.sh..."
+        if "$DEPLOY_SCRIPT"; then
+            log "Router VM deployed successfully"
+            sleep 3
+        else
+            log "ERROR: deploy-router-vm.sh failed"
+            exit 1
+        fi
+    else
+        log "ERROR: Deploy script not found at $DEPLOY_SCRIPT"
+        exit 1
+    fi
 fi
 
 vm_state=$($VIRSH --connect qemu:///system list --all | grep "$VM_NAME" | awk '{print $3}' || echo "unknown")
@@ -888,6 +904,23 @@ deploy_router_vm() {
     fi
 }
 
+# ========== BUILD SYSTEM ==========
+
+build_system() {
+    local machine_name="$1"
+
+    log "Building system configuration and boot entries..."
+
+    cd "$PROJECT_DIR"
+
+    log "Running: sudo nixos-rebuild boot --flake .#${machine_name} --impure"
+    if sudo nixos-rebuild boot --flake ".#${machine_name}" --impure; then
+        success "System built successfully - boot entries created"
+    else
+        error "System build failed"
+    fi
+}
+
 # ========== GIT STAGE FILES ==========
 
 git_stage_files() {
@@ -942,11 +975,7 @@ show_completion_summary() {
     else
         echo "  [!] Not built (run: nix build .#router-vm-qcow)"
     fi
-    if sudo virsh --connect qemu:///system list --all 2>/dev/null | grep -q "router-vm-passthrough"; then
-        echo "  [+] Deployed: router-vm-passthrough"
-    else
-        echo "  [!] Not deployed yet (will be created on first boot into maximalism)"
-    fi
+    echo "  [i] Deployment: Automatic on first boot into maximalism"
     echo ""
     echo "Boot Configuration:"
     echo "  [+] Default boot: maximalism-setup (router VM will autostart)"
@@ -955,25 +984,23 @@ show_completion_summary() {
     echo "  NEXT STEPS"
     echo "========================================"
     echo ""
-    echo "1. Commit the changes:"
+    echo "1. (Optional) Commit the changes:"
     echo "   git commit -m 'Add ${machine_name} machine configuration'"
     echo ""
-    echo "2. Rebuild the system (will configure GRUB for maximalism default):"
-    echo "   sudo nixos-rebuild boot --flake ~/Hydrix#${machine_name} --impure"
-    echo ""
-    echo "3. Reboot into maximalism mode:"
+    echo "2. Reboot into maximalism mode:"
     echo "   sudo reboot"
     echo ""
     echo "   On reboot:"
     echo "   - System boots into maximalism-setup (default)"
     echo "   - WiFi driver is blacklisted for passthrough"
     echo "   - Bridge interfaces (virbr1-5) are created"
-    echo "   - Router VM autostarts with WiFi passthrough"
+    echo "   - Autostart service detects missing VM and deploys it"
+    echo "   - Router VM starts with WiFi passthrough"
     echo "   - Internet via router VM on 192.168.100.253"
     echo ""
-    echo "4. Future rebuilds use ./nixbuild.sh automatically"
+    echo "3. Future rebuilds use ./nixbuild.sh automatically"
     echo ""
-    echo "5. To switch to base mode (normal WiFi on host):"
+    echo "4. To switch to base mode (normal WiFi on host):"
     echo "   Select 'NixOS - Default' at boot, or:"
     echo "   sudo grub-reboot 'NixOS - Default' && sudo reboot"
     echo ""
@@ -1019,8 +1046,9 @@ main() {
     update_flake "$machine_name"
     build_router_vm
     generate_autostart_script
-    deploy_router_vm
+    # Router VM deployment is handled by autostart script on first boot into maximalism
     git_stage_files "$machine_name"
+    build_system "$machine_name"
     show_completion_summary "$machine_name" "$cpu_platform"
 }
 
