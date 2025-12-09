@@ -1,0 +1,28 @@
+{
+    "wallpaper": "/home/traum/Wallpapers/PageOut007.jpg",
+    "alpha": "100",
+
+    "special": {
+        "background": "#0f0b0c",
+        "foreground": "#9bceea",
+        "cursor": "#9bceea"
+    },
+    "colors": {
+        "color0": "#0f0b0c",
+        "color1": "#274E8F",
+        "color2": "#3457B5",
+        "color3": "#2A61AD",
+        "color4": "#3891D5",
+        "color5": "#3BAAE4",
+        "color6": "#53BCDF",
+        "color7": "#9bceea",
+        "color8": "#6c90a3",
+        "color9": "#274E8F",
+        "color10": "#3457B5",
+        "color11": "#2A61AD",
+        "color12": "#3891D5",
+        "color13": "#3BAAE4",
+        "color14": "#53BCDF",
+        "color15": "#9bceea"
+    }
+}

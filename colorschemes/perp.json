@@ -1,0 +1,28 @@
+{
+    "wallpaper": "/home/traum/Wallpapers/Nitto.jpg",
+    "alpha": "100",
+
+    "special": {
+        "background": "#08090D",
+        "foreground": "#c7c7db",
+        "cursor": "#c7c7db"
+    },
+    "colors": {
+        "color0": "#08090D",
+        "color1": "#3A4372",
+        "color2": "#4F4E6A",
+        "color3": "#4A518E",
+        "color4": "#505DB1",
+        "color5": "#5B61A1",
+        "color6": "#7F7FB5",
+        "color7": "#c7c7db",
+        "color8": "#8b8b99",
+        "color9": "#3A4372",
+        "color10": "#4F4E6A",
+        "color11": "#4A518E",
+        "color12": "#505DB1",
+        "color13": "#5B61A1",
+        "color14": "#7F7FB5",
+        "color15": "#c7c7db"
+    }
+}

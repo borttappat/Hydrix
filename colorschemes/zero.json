@@ -1,0 +1,28 @@
+{
+    "wallpaper": "/home/traum/Wallpapers/Zero.jpg",
+    "alpha": "100",
+
+    "special": {
+        "background": "#000202",
+        "foreground": "#9ff6f0",
+        "cursor": "#9ff6f0"
+    },
+    "colors": {
+        "color0": "#000202",
+        "color1": "#28704A",
+        "color2": "#2BAE55",
+        "color3": "#309960",
+        "color4": "#3CCD9D",
+        "color5": "#4DDBA9",
+        "color6": "#5AF8DA",
+        "color7": "#9ff6f0",
+        "color8": "#6faca8",
+        "color9": "#28704A",
+        "color10": "#2BAE55",
+        "color11": "#309960",
+        "color12": "#3CCD9D",
+        "color13": "#4DDBA9",
+        "color14": "#5AF8DA",
+        "color15": "#9ff6f0"
+    }
+}
