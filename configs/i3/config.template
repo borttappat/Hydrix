@@ -30,6 +30,9 @@ bindsym $mod+F3 exec "amixer set Master 5%+"
 # flameshot
 bindsym $mod+F12 exec "flameshot gui"
 
+# Detect external monitors and reconfigure
+bindsym $mod+Shift+v exec ~/.config/scripts/detect-monitors.sh
+
 # htop (monitor-aware terminal)
 bindsym $mod+Shift+u exec ~/.config/scripts/alacritty.sh -e htop
 
@@ -63,7 +66,7 @@ bindsym $mod+p exec polybar-msg cmd restart
 
 # Various bindings
 bindsym $mod+Shift+w exec feh --bg-fill ~/Wallpapers/Black.jpg
-bindsym $mod+Shift+e exec --no-startup-id sh $HOME/dotfiles/scripts/bash/lock.sh
+bindsym $mod+Shift+e exec --no-startup-id sh $HOME/.config/scripts/lock.sh
 bindsym $mod+Shift+s exec systemctl suspend
 bindsym $mod+w exec ~/.config/scripts/randomwalrgb.sh 
 
