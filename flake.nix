@@ -153,11 +153,29 @@
       };
     };
 
-    # ========== VM BASE IMAGES ==========
-    # Type-specific base images with shaping service
-    # Each image has hostname baked in for automatic shaping
+    # ========== VM IMAGES ==========
     packages.x86_64-linux = {
 
+      # ===== FULL IMAGES (recommended) =====
+      # Pre-built with all packages - instant first boot, fast updates
+
+      # Pentest VM - Full image with all tools pre-installed
+      # Build with: nix build '.#pentest-vm-full'
+      # Deploy with: ./scripts/deploy-full-vm.sh pentest myname
+      # Updates inside VM: rebuild (or: cd ~/Hydrix && git pull && nixos-rebuild switch --flake '.#vm-pentest' --impure)
+      pentest-vm-full = nixos-generators.nixosGenerate {
+        system = "x86_64-linux";
+        modules = [
+          { nixpkgs.config.allowUnfree = true; }
+          { nixpkgs.overlays = [ overlay-unstable ]; }
+          home-manager.nixosModules.home-manager
+          nix-index-database.nixosModules.nix-index
+          ./profiles/pentest-full-image.nix
+        ];
+        format = "qcow";
+      };
+
+      # ===== ROUTER VM =====
       # Router VM - single-stage, exact copy of splix
       # Build with: nix build .#router-vm-qcow
       router-vm-qcow = nixos-generators.nixosGenerate {
@@ -165,6 +183,10 @@
         modules = [ ./modules/router-vm-config.nix ];
         format = "qcow";
       };
+
+      # ===== BASE IMAGES (two-stage shaping) =====
+      # Smaller images that shape themselves on first boot
+      # Use these if you want smaller image files at the cost of first-boot time
 
       # Pentest MINIMAL base VM - truly minimal (~2GB)
       # Build with: nix build .#pentest-vm-base-minimal

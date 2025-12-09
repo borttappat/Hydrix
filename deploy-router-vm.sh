@@ -6,7 +6,7 @@ set -euo pipefail
 
 readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly VM_NAME="router-vm-passthrough"
-readonly VM_IMAGE_SOURCE="$SCRIPT_DIR/result/nixos.qcow2"
+readonly VM_IMAGE_SOURCE="$SCRIPT_DIR/router-vm-result/nixos.qcow2"
 readonly VM_IMAGE_DEST="/var/lib/libvirt/images/$VM_NAME.qcow2"
 readonly WIFI_PCI_ID="0000:00:14.3"
 
