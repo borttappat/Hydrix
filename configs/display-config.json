@@ -179,11 +179,21 @@
       "dunst_offset_y_external": 50,
       "dunst_padding_external": 8,
       "dunst_frame_width_external": 2,
-      "dunst_icon_size_external": 32
+      "dunst_icon_size_external": 32,
+      "firefox_font_size": 18,
+      "firefox_header_font_size": 24,
+      "firefox_font_size_external": 13,
+      "firefox_header_font_size_external": 18,
+      "obsidian_font_size": 18,
+      "obsidian_header_font_size": 28,
+      "obsidian_font_size_external": 13,
+      "obsidian_header_font_size_external": 22
     }
   },
-  "fonts": [
-    "tamzen"
-  ],
-  "obsidian_font": "CozetteVector"
+  "fonts": {
+    "default": "tamzen",
+    "dunst": "CozetteVector",
+    "firefox": "tamzen",
+    "obsidian": "CozetteVector"
+  }
 }

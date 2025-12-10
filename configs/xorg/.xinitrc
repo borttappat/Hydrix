@@ -38,15 +38,15 @@ sed -e "s/\${ALACRITTY_FONT_SIZE}/$ALACRITTY_FONT_SIZE/g" \
     -e "s/\${ALACRITTY_FONT}/$ALACRITTY_FONT/g" \
     -e "s/\${ALACRITTY_SCALE_FACTOR_LINE}/$ALACRITTY_SCALE_FACTOR_LINE/g" \
     ~/.config/alacritty/alacritty.toml.template > ~/.config/alacritty/alacritty.toml
-sed -e "s/${DUNST_FONT}/$DUNST_FONT/g" \
-    -e "s/${DUNST_FONT_SIZE}/$DUNST_FONT_SIZE/g" \
-    -e "s/${DUNST_WIDTH}/$DUNST_WIDTH/g" \
-    -e "s/${DUNST_HEIGHT}/$DUNST_HEIGHT/g" \
-    -e "s/${DUNST_OFFSET_X}/$DUNST_OFFSET_X/g" \
-    -e "s/${DUNST_OFFSET_Y}/$DUNST_OFFSET_Y/g" \
-    -e "s/${DUNST_PADDING}/$DUNST_PADDING/g" \
-    -e "s/${DUNST_FRAME_WIDTH}/$DUNST_FRAME_WIDTH/g" \
-    -e "s/${DUNST_ICON_SIZE}/$DUNST_ICON_SIZE/g" \
+sed -e "s/\${DUNST_FONT}/$DUNST_FONT/g" \
+    -e "s/\${DUNST_FONT_SIZE}/$DUNST_FONT_SIZE/g" \
+    -e "s/\${DUNST_WIDTH}/$DUNST_WIDTH/g" \
+    -e "s/\${DUNST_HEIGHT}/$DUNST_HEIGHT/g" \
+    -e "s/\${DUNST_OFFSET_X}/$DUNST_OFFSET_X/g" \
+    -e "s/\${DUNST_OFFSET_Y}/$DUNST_OFFSET_Y/g" \
+    -e "s/\${DUNST_PADDING}/$DUNST_PADDING/g" \
+    -e "s/\${DUNST_FRAME_WIDTH}/$DUNST_FRAME_WIDTH/g" \
+    -e "s/\${DUNST_ICON_SIZE}/$DUNST_ICON_SIZE/g" \
     ~/.config/dunst/dunstrc.template > ~/.config/dunst/dunstrc
 
 # Firefox font configuration
