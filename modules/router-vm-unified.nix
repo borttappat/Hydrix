@@ -72,7 +72,8 @@ in {
     ];
 
     boot.kernelPackages = pkgs.linuxPackages_latest;
-    boot.extraModulePackages = with config.boot.kernelPackages; [ wireguard ];
+    # WireGuard is built into the kernel since 5.6, no external module needed
+    boot.extraModulePackages = [ ];
 
     system.stateVersion = "25.05";
 
