@@ -46,6 +46,7 @@
 
       # Zephyrus ASUS laptop - full host system
       # Build with: ./nixbuild.sh (hostname: zeph)
+      # Lockdown mode: nixos-rebuild switch --flake '.#zeph' --specialisation lockdown
       zeph = nixpkgs.lib.nixosSystem {
         system = "x86_64-linux";
         modules = [
@@ -80,6 +81,21 @@
           #./modules/proxychains.nix
           #./modules/dev.nix
           #./modules/steam.nix
+
+          # Lockdown specialisation - boot into isolated mode
+          # Select from GRUB menu or: nixos-rebuild switch --specialisation lockdown
+          {
+            specialisation.lockdown.configuration = {
+              imports = [ ./modules/lockdown/host-lockdown.nix ];
+              hydrix.lockdown = {
+                enable = true;
+                hostHasInternet = false;
+                # Set this to your WiFi/Ethernet interface for WAN bridging
+                # wanInterface = "wlp2s0";
+              };
+              system.nixos.tags = [ "lockdown" ];
+            };
+          }
         ];
       };
 
@@ -176,11 +192,20 @@
       };
 
       # ===== ROUTER VM =====
-      # Router VM - single-stage, exact copy of splix
-      # Build with: nix build .#router-vm-qcow
+      # Unified Router VM - supports both standard and lockdown modes
+      # Auto-detects mode based on network topology
+      # Build with: nix build '.#router-vm'
+      # Deploy with: ./scripts/deploy-router.sh
+      router-vm = nixos-generators.nixosGenerate {
+        system = "x86_64-linux";
+        modules = [ ./modules/router-vm-unified.nix ];
+        format = "qcow";
+      };
+
+      # Legacy alias for compatibility
       router-vm-qcow = nixos-generators.nixosGenerate {
         system = "x86_64-linux";
-        modules = [ ./modules/router-vm-config.nix ];
+        modules = [ ./modules/router-vm-unified.nix ];
         format = "qcow";
       };
 

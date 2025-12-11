@@ -22,12 +22,51 @@ VM_NAME=""
 VM_MEMORY=""
 VM_VCPUS=""
 VM_DISK_SIZE="100G"
-VM_BRIDGE="virbr2"
+VM_BRIDGE=""  # Will be auto-detected based on mode
+VM_MODE="auto"  # auto, standard, or lockdown
 FORCE_REBUILD=false
+
+# Bridge mappings for lockdown mode (VM type → bridge)
+declare -A LOCKDOWN_BRIDGES=(
+    ["pentest"]="br-pentest"
+    ["office"]="br-office"
+    ["comms"]="br-office"      # comms uses office network
+    ["browsing"]="br-browse"
+    ["dev"]="br-dev"
+)
+
+# Bridge mappings for standard mode
+declare -A STANDARD_BRIDGES=(
+    ["pentest"]="virbr2"
+    ["office"]="virbr3"
+    ["comms"]="virbr3"
+    ["browsing"]="virbr4"
+    ["dev"]="virbr5"
+)
 
 log() { echo "[$(date +%H:%M:%S)] $*"; }
 error() { echo "[ERROR] $*" >&2; exit 1; }
 success() { echo "[SUCCESS] $*"; }
+
+detect_mode() {
+    # Detect if we're in lockdown mode by checking for lockdown bridges
+    if ip link show br-pentest &>/dev/null && ip link show br-mgmt &>/dev/null; then
+        echo "lockdown"
+    else
+        echo "standard"
+    fi
+}
+
+get_bridge_for_type() {
+    local type=$1
+    local mode=$2
+
+    if [[ "$mode" == "lockdown" ]]; then
+        echo "${LOCKDOWN_BRIDGES[$type]:-br-dev}"
+    else
+        echo "${STANDARD_BRIDGES[$type]:-virbr2}"
+    fi
+}
 
 print_usage() {
     cat << EOF
@@ -43,7 +82,8 @@ Required Arguments:
 Optional Arguments:
   --force-rebuild       Rebuild base image even if it exists
   --disk SIZE          Disk size (default: 100G)
-  --bridge BRIDGE      Network bridge (default: virbr2)
+  --bridge BRIDGE      Network bridge (overrides auto-detection)
+  --mode MODE          Network mode: auto, standard, lockdown (default: auto)
   -h, --help           Show this help
 
 VM Types and Resource Allocation:
@@ -52,25 +92,37 @@ VM Types and Resource Allocation:
   browsing   - Web browsing/media (50% CPU/RAM) - Green theme
   dev        - Development tools (75% CPU/RAM) - Purple theme
 
+Network Modes:
+  auto       - Auto-detect based on available bridges
+  standard   - Use virbr* bridges (192.168.x.x networks)
+  lockdown   - Use br-* bridges (10.100.x.x isolated networks)
+
+Lockdown Mode Bridge Mapping:
+  pentest  → br-pentest (10.100.1.x, VPN routed)
+  comms    → br-office  (10.100.2.x, VPN routed)
+  browsing → br-browse  (10.100.3.x, VPN routed)
+  dev      → br-dev     (10.100.4.x, direct/configurable)
+
 Host System:
   CPU Cores: $HOST_CORES
   RAM: ${HOST_RAM_MB}MB (~$((HOST_RAM_MB / 1024))GB)
 
 Examples:
-  # Deploy pentest VM named "google" (hostname: pentest-google)
+  # Deploy pentest VM (auto-detects mode)
   $0 --type pentest --name google
 
-  # Deploy comms VM named "signal" (hostname: comms-signal)
-  $0 --type comms --name signal
+  # Deploy for lockdown mode explicitly
+  $0 --type pentest --name google --mode lockdown
 
-  # Deploy dev VM with custom disk size
-  $0 --type dev --name rust --disk 200G
+  # Deploy with custom bridge
+  $0 --type dev --name rust --bridge br-dev
 
 Workflow:
   1. Check if base image exists (builds if missing)
-  2. Calculate resources based on VM type
-  3. Create VM with hostname "<type>-<name>"
-  4. First boot: shaping service applies full profile
+  2. Auto-detect network mode (standard vs lockdown)
+  3. Calculate resources based on VM type
+  4. Create VM with hostname "<type>-<name>"
+  5. First boot: shaping service applies full profile
 
 EOF
     exit 0
@@ -153,6 +205,11 @@ parse_args() {
             --bridge)
                 [[ -z "${2:-}" ]] && error "--bridge requires a value"
                 VM_BRIDGE="$2"
+                shift 2
+                ;;
+            --mode)
+                [[ -z "${2:-}" ]] && error "--mode requires a value"
+                VM_MODE="$2"
                 shift 2
                 ;;
             --force-rebuild)
@@ -347,6 +404,8 @@ show_info() {
 VM Details:
   Hostname: $vm_hostname
   Type: $VM_TYPE
+  Mode: $VM_MODE
+  Bridge: $VM_BRIDGE
   Resources: ${VM_VCPUS}/${HOST_CORES} cores, ${VM_MEMORY}MB/${HOST_RAM_MB}MB RAM
   Allocation: $((VM_VCPUS * 100 / HOST_CORES))% CPU, $((VM_MEMORY * 100 / HOST_RAM_MB))% RAM
 
@@ -360,6 +419,29 @@ First Boot Process:
   7. System rebuilds with full $VM_TYPE profile
   8. Ready to use with all $VM_TYPE-specific packages and configs
 
+EOF
+
+    if [[ "$VM_MODE" == "lockdown" ]]; then
+        cat << EOF
+Lockdown Mode Network:
+  Bridge: $VM_BRIDGE
+  Network: $(case $VM_BRIDGE in
+    br-pentest) echo "10.100.1.x - Routed through assigned VPN" ;;
+    br-office)  echo "10.100.2.x - Routed through corporate VPN" ;;
+    br-browse)  echo "10.100.3.x - Routed through privacy VPN" ;;
+    br-dev)     echo "10.100.4.x - Direct or configurable routing" ;;
+    *)          echo "Custom bridge" ;;
+  esac)
+  Router: SSH to traum@10.100.0.253 for VPN management
+
+VPN Commands (on router):
+  vpn-status                    # Check routing status
+  vpn-assign $VM_TYPE <vpn>     # Route this network through VPN
+
+EOF
+    fi
+
+    cat << EOF
 Connection:
   virt-manager → $vm_hostname
   virt-viewer qemu:///system $vm_hostname
@@ -384,6 +466,19 @@ main() {
     log "Deploying: ${VM_TYPE}-${VM_NAME}"
 
     check_dependencies
+
+    # Auto-detect mode if not specified
+    if [[ "$VM_MODE" == "auto" ]]; then
+        VM_MODE=$(detect_mode)
+        log "Auto-detected network mode: $VM_MODE"
+    fi
+
+    # Set bridge if not explicitly specified
+    if [[ -z "$VM_BRIDGE" ]]; then
+        VM_BRIDGE=$(get_bridge_for_type "$VM_TYPE" "$VM_MODE")
+        log "Using bridge for $VM_TYPE in $VM_MODE mode: $VM_BRIDGE"
+    fi
+
     get_resource_allocation "$VM_TYPE"
     check_base_image
     create_vm_disk

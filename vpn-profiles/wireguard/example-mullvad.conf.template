@@ -1,0 +1,15 @@
+# Mullvad WireGuard Configuration Template
+# Rename to mullvad.conf and fill in your credentials
+#
+# Get your config from: https://mullvad.net/account/#/wireguard-config
+#
+[Interface]
+PrivateKey = YOUR_PRIVATE_KEY_HERE
+Address = 10.x.x.x/32
+DNS = 10.64.0.1
+
+[Peer]
+PublicKey = MULLVAD_SERVER_PUBLIC_KEY
+Endpoint = MULLVAD_SERVER:51820
+AllowedIPs = 0.0.0.0/0, ::/0
+PersistentKeepalive = 25
