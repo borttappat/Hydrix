@@ -287,6 +287,7 @@
             qemu
             libvirt
             virt-manager
+            virtiofsd  # Required for nixos-generators qcow format
             git
           ];
 

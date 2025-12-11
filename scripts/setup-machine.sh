@@ -695,6 +695,7 @@ in
     qemu
     OVMF
     spice-gtk
+    virtiofsd  # Required for nixos-generators qcow format builds
 
     # Status command for current mode detection
     (writeShellScriptBin "vm-status" ''
@@ -848,7 +849,8 @@ build_router_vm() {
     else
         log "Building router VM (this may take several minutes)..."
 
-        if ! nix build .#router-vm --out-link router-vm-result; then
+        # Use nix-shell to ensure virtiofsd is available for nixos-generators qcow format
+        if ! nix-shell -p virtiofsd --run "nix build .#router-vm --out-link router-vm-result"; then
             error "Router VM build failed"
         fi
 
