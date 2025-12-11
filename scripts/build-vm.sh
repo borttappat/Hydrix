@@ -26,8 +26,10 @@ VM_BRIDGE=""  # Will be auto-detected based on mode
 VM_MODE="auto"  # auto, standard, or lockdown
 FORCE_REBUILD=false
 
-# Bridge mappings for lockdown mode (VM type → bridge)
-declare -A LOCKDOWN_BRIDGES=(
+# Bridge mappings (unified naming - same bridges used in all modes)
+# Standard mode: 192.168.x.x subnets
+# Lockdown mode: 10.100.x.x subnets with VPN policy routing
+declare -A VM_BRIDGES=(
     ["pentest"]="br-pentest"
     ["office"]="br-office"
     ["comms"]="br-office"      # comms uses office network
@@ -35,37 +37,29 @@ declare -A LOCKDOWN_BRIDGES=(
     ["dev"]="br-dev"
 )
 
-# Bridge mappings for standard mode
-declare -A STANDARD_BRIDGES=(
-    ["pentest"]="virbr2"
-    ["office"]="virbr3"
-    ["comms"]="virbr3"
-    ["browsing"]="virbr4"
-    ["dev"]="virbr5"
-)
-
 log() { echo "[$(date +%H:%M:%S)] $*"; }
 error() { echo "[ERROR] $*" >&2; exit 1; }
 success() { echo "[SUCCESS] $*"; }
 
 detect_mode() {
-    # Detect if we're in lockdown mode by checking for lockdown bridges
-    if ip link show br-pentest &>/dev/null && ip link show br-mgmt &>/dev/null; then
+    # Detect if we're in lockdown mode by checking host IP on br-mgmt
+    # Lockdown: 10.100.0.x, Standard: 192.168.100.x
+    if ip addr show br-mgmt 2>/dev/null | grep -q "10.100.0"; then
         echo "lockdown"
-    else
+    elif ip addr show br-mgmt 2>/dev/null | grep -q "192.168.100"; then
         echo "standard"
+    elif ip link show br-mgmt &>/dev/null; then
+        # Bridge exists but no IP yet - check for any passthrough mode
+        echo "standard"
+    else
+        echo "base"
     fi
 }
 
 get_bridge_for_type() {
     local type=$1
-    local mode=$2
-
-    if [[ "$mode" == "lockdown" ]]; then
-        echo "${LOCKDOWN_BRIDGES[$type]:-br-dev}"
-    else
-        echo "${STANDARD_BRIDGES[$type]:-virbr2}"
-    fi
+    # Unified bridge naming - same in all modes
+    echo "${VM_BRIDGES[$type]:-br-dev}"
 }
 
 print_usage() {
@@ -93,15 +87,17 @@ VM Types and Resource Allocation:
   dev        - Development tools (75% CPU/RAM) - Purple theme
 
 Network Modes:
-  auto       - Auto-detect based on available bridges
-  standard   - Use virbr* bridges (192.168.x.x networks)
-  lockdown   - Use br-* bridges (10.100.x.x isolated networks)
+  auto       - Auto-detect based on host IP on br-mgmt
+  standard   - 192.168.x.x networks (simple NAT)
+  lockdown   - 10.100.x.x networks (VPN policy routing)
 
-Lockdown Mode Bridge Mapping:
-  pentest  → br-pentest (10.100.1.x, VPN routed)
-  comms    → br-office  (10.100.2.x, VPN routed)
-  browsing → br-browse  (10.100.3.x, VPN routed)
-  dev      → br-dev     (10.100.4.x, direct/configurable)
+Bridge Mapping (same bridges in all modes):
+  pentest  → br-pentest (192.168.101.x / 10.100.1.x)
+  comms    → br-office  (192.168.102.x / 10.100.2.x)
+  browsing → br-browse  (192.168.103.x / 10.100.3.x)
+  dev      → br-dev     (192.168.104.x / 10.100.4.x)
+
+In lockdown mode, pentest/comms/browsing are VPN-routed by the router VM.
 
 Host System:
   CPU Cores: $HOST_CORES
@@ -470,13 +466,23 @@ main() {
     # Auto-detect mode if not specified
     if [[ "$VM_MODE" == "auto" ]]; then
         VM_MODE=$(detect_mode)
+        if [[ "$VM_MODE" == "base" ]]; then
+            error "Not in a passthrough mode. Please switch to router/maximalism/lockdown first:
+  sudo nixos-rebuild switch --specialisation maximalism"
+        fi
         log "Auto-detected network mode: $VM_MODE"
     fi
 
-    # Set bridge if not explicitly specified
+    # Set bridge if not explicitly specified (unified naming)
     if [[ -z "$VM_BRIDGE" ]]; then
-        VM_BRIDGE=$(get_bridge_for_type "$VM_TYPE" "$VM_MODE")
-        log "Using bridge for $VM_TYPE in $VM_MODE mode: $VM_BRIDGE"
+        VM_BRIDGE=$(get_bridge_for_type "$VM_TYPE")
+        log "Using bridge for $VM_TYPE: $VM_BRIDGE"
+    fi
+
+    # Verify bridge exists
+    if ! ip link show "$VM_BRIDGE" &>/dev/null; then
+        error "Bridge $VM_BRIDGE does not exist. Are you in a passthrough mode?
+  sudo nixos-rebuild switch --specialisation maximalism"
     fi
 
     get_resource_allocation "$VM_TYPE"

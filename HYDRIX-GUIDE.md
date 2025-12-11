@@ -10,21 +10,19 @@ Hydrix is a NixOS-based VM automation system that provides network isolation thr
 │                                                                             │
 │  Physical NIC ──► VFIO Passthrough ──► Router VM                           │
 │                                                                             │
-│  Host has NO direct internet access in passthrough modes                   │
-│  All traffic flows through Router VM                                        │
+│  Host creates BRIDGES ONLY - Router VM handles ALL networking              │
 │                                                                             │
 │  ┌─────────────────────────────────────────────────────────────────────┐   │
-│  │ BRIDGES (created by specialisation)                                  │   │
+│  │ UNIFIED BRIDGES (same names in all modes)                            │   │
 │  │                                                                      │   │
-│  │ Standard Mode (router/maximalism):                                   │   │
-│  │   virbr1-5 → 192.168.100-104.x                                      │   │
+│  │   br-mgmt    → Management (host ↔ router communication)             │   │
+│  │   br-pentest → Pentest VMs                                          │   │
+│  │   br-office  → Office/Comms VMs                                     │   │
+│  │   br-browse  → Browsing VMs                                         │   │
+│  │   br-dev     → Development VMs                                      │   │
 │  │                                                                      │   │
-│  │ Lockdown Mode:                                                       │   │
-│  │   br-mgmt    → 10.100.0.x (management, no internet)                 │   │
-│  │   br-pentest → 10.100.1.x (routed through client VPN)               │   │
-│  │   br-office  → 10.100.2.x (routed through corp VPN)                 │   │
-│  │   br-browse  → 10.100.3.x (routed through privacy VPN)              │   │
-│  │   br-dev     → 10.100.4.x (direct or configurable)                  │   │
+│  │ Router/Maximalism: 192.168.100-104.x (simple NAT)                   │   │
+│  │ Lockdown:          10.100.0-4.x (VPN policy routing)                │   │
 │  └─────────────────────────────────────────────────────────────────────┘   │
 │                                                                             │
 │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐                   │
@@ -38,8 +36,8 @@ Hydrix is a NixOS-based VM automation system that provides network isolation thr
 │                    │  Router VM    │                                       │
 │                    │  (has NIC)    │                                       │
 │                    │               │                                       │
-│                    │ NAT/VPN/      │                                       │
-│                    │ Policy Route  │                                       │
+│                    │ DHCP/NAT/     │                                       │
+│                    │ VPN Routing   │                                       │
 │                    └───────────────┘                                       │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
@@ -250,25 +248,40 @@ vpn-assign pentest blocked       # Kill switch - no traffic allowed
 
 ## Network Reference
 
-### Lockdown Mode Networks
+### Unified Bridges (All Modes)
 
-| Bridge | Subnet | Router IP | Purpose |
-|--------|--------|-----------|---------|
-| br-mgmt | 10.100.0.0/24 | 10.100.0.253 | Management (no internet) |
-| br-pentest | 10.100.1.0/24 | 10.100.1.253 | Pentesting (VPN routed) |
-| br-office | 10.100.2.0/24 | 10.100.2.253 | Office/Comms (VPN routed) |
-| br-browse | 10.100.3.0/24 | 10.100.3.253 | Browsing (VPN routed) |
-| br-dev | 10.100.4.0/24 | 10.100.4.253 | Development (configurable) |
+All passthrough modes use the same bridge names. The router VM assigns different subnets based on detected mode.
 
-### Standard Mode Networks
+| Bridge | Purpose | Standard Mode | Lockdown Mode |
+|--------|---------|---------------|---------------|
+| br-mgmt | Management | 192.168.100.0/24 | 10.100.0.0/24 |
+| br-pentest | Pentesting | 192.168.101.0/24 | 10.100.1.0/24 (VPN) |
+| br-office | Office/Comms | 192.168.102.0/24 | 10.100.2.0/24 (VPN) |
+| br-browse | Browsing | 192.168.103.0/24 | 10.100.3.0/24 (VPN) |
+| br-dev | Development | 192.168.104.0/24 | 10.100.4.0/24 |
 
-| Bridge | Subnet | Router IP |
-|--------|--------|-----------|
-| virbr1 | 192.168.100.0/24 | 192.168.100.253 |
-| virbr2 | 192.168.101.0/24 | 192.168.101.253 |
-| virbr3 | 192.168.102.0/24 | 192.168.102.253 |
-| virbr4 | 192.168.103.0/24 | 192.168.103.253 |
-| virbr5 | 192.168.104.0/24 | 192.168.104.253 |
+### IP Assignments
+
+| Role | Standard Mode | Lockdown Mode |
+|------|---------------|---------------|
+| Host (br-mgmt) | 192.168.100.1 | 10.100.0.1 |
+| Router (br-mgmt) | 192.168.100.253 | 10.100.0.253 |
+| Host Internet | Via router | **NONE** |
+
+### Architecture Principle
+
+**Host responsibilities (minimal):**
+- Create bridge interfaces
+- Assign IP on br-mgmt only
+- Trust bridges in firewall
+- Block outbound traffic (lockdown)
+
+**Router VM responsibilities (all networking):**
+- Configure IPs on bridge interfaces
+- Run DHCP (dnsmasq) for all networks
+- NAT to internet via passthrough NIC
+- VPN policy routing (lockdown mode)
+- Inter-network isolation
 
 ## File Structure
 
@@ -411,24 +424,28 @@ sudo reboot
 │                                                                │
 │  BASE         Normal laptop, WiFi on host                     │
 │               ↕ REBOOT REQUIRED                                │
-│  ROUTER       NIC passthrough, basic routing                  │
+│  ROUTER       NIC passthrough, 192.168.x.x                    │
 │               ↕ switch --specialisation                        │
-│  MAXIMALISM   NIC passthrough, all VMs, 192.168.x.x          │
+│  MAXIMALISM   Same as router (default boot)                   │
 │               ↕ switch --specialisation                        │
-│  LOCKDOWN     NIC passthrough, isolated, VPN routing          │
+│  LOCKDOWN     NIC passthrough, 10.100.x.x, VPN routing        │
+│               Host has NO internet                             │
 │                                                                │
 ├────────────────────────────────────────────────────────────────┤
-│                     LOCKDOWN NETWORKS                          │
+│                     UNIFIED BRIDGES                            │
 ├────────────────────────────────────────────────────────────────┤
-│  br-mgmt     10.100.0.x   Management (SSH to router)          │
-│  br-pentest  10.100.1.x   → VPN routed (client VPN)           │
-│  br-office   10.100.2.x   → VPN routed (corp VPN)             │
-│  br-browse   10.100.3.x   → VPN routed (privacy VPN)          │
-│  br-dev      10.100.4.x   → Direct or configurable            │
+│  br-mgmt     Management    192.168.100.x / 10.100.0.x         │
+│  br-pentest  Pentesting    192.168.101.x / 10.100.1.x (VPN)   │
+│  br-office   Office        192.168.102.x / 10.100.2.x (VPN)   │
+│  br-browse   Browsing      192.168.103.x / 10.100.3.x (VPN)   │
+│  br-dev      Development   192.168.104.x / 10.100.4.x         │
 ├────────────────────────────────────────────────────────────────┤
 │                      KEY COMMANDS                              │
 ├────────────────────────────────────────────────────────────────┤
 │  vm-status                    Current mode & VMs               │
+│  router-status                Router mode info                 │
+│  maximalism-status            Maximalism mode info             │
+│  lockdown-status              Lockdown mode info               │
 │  vpn-status                   VPN routing (on router)          │
 │  vpn-assign <net> <vpn>       Assign network to VPN           │
 │  ./scripts/build-vm.sh        Deploy new VM                    │

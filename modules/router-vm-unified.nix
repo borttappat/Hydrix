@@ -2,20 +2,23 @@
 # Supports both standard mode (simple NAT) and lockdown mode (VPN policy routing)
 #
 # Build: nix build '.#router-vm'
-# Deploy: ./scripts/deploy-router.sh
+# Deploy: Automatic via host specialisation autostart services
 #
-# Mode detection:
-#   - Standard mode: Uses original 192.168.x.x networks, simple NAT
-#   - Lockdown mode: Uses 10.100.x.x isolated networks, VPN policy routing
+# Architecture:
+#   - Host creates bridges: br-mgmt, br-pentest, br-office, br-browse, br-dev
+#   - Router VM gets NIC via PCI passthrough (enp1s0 = WAN)
+#   - Router VM interfaces: enp2s0=mgmt, enp3s0=pentest, enp4s0=office, enp5s0=browse, enp6s0=dev
 #
-# The router auto-detects which mode based on connected interfaces/networks
+# Mode detection (automatic):
+#   - Standard mode: Host has 192.168.100.1 on br-mgmt → router uses 192.168.x.x
+#   - Lockdown mode: Host has 10.100.0.1 on br-mgmt → router uses 10.100.x.x with VPN routing
+#
+# The router auto-detects mode by checking what IP the host assigned to br-mgmt
 { config, lib, pkgs, modulesPath, ... }:
 
 with lib;
 
 let
-  # Check if we're in lockdown mode by looking at network configuration
-  # Lockdown mode uses 10.100.x.x networks, standard uses 192.168.x.x
   cfg = config.hydrix.router;
 in {
   imports = [
@@ -28,7 +31,7 @@ in {
       default = "auto";
       description = ''
         Router operating mode:
-        - auto: Detect based on connected networks
+        - auto: Detect based on host's IP on management bridge
         - standard: Simple NAT routing (192.168.x.x)
         - lockdown: VPN policy routing with kill switches (10.100.x.x)
       '';
@@ -79,13 +82,14 @@ in {
       enableIPv6 = false;
       networkmanager.enable = false;
 
-      # WAN interface - DHCP from upstream (works in both modes)
+      # WAN interface - gets internet via PCI passthrough NIC
+      # This is the physical NIC passed through from the host
       interfaces.enp1s0.useDHCP = true;
 
       firewall.enable = false;  # We use nftables directly
     };
 
-    # IP forwarding
+    # IP forwarding - router handles all traffic
     boot.kernel.sysctl = {
       "net.ipv4.ip_forward" = 1;
       "net.ipv4.conf.all.forwarding" = 1;
@@ -93,7 +97,7 @@ in {
       "net.ipv4.conf.all.rp_filter" = 0;
     };
 
-    # Routing tables for policy routing
+    # Routing tables for VPN policy routing (lockdown mode)
     environment.etc."iproute2/rt_tables".text = ''
       255     local
       254     main
@@ -107,6 +111,13 @@ in {
     '';
 
     # Dynamic network configuration based on detected mode
+    # Router VM interfaces map to host bridges:
+    #   enp1s0 = WAN (PCI passthrough NIC)
+    #   enp2s0 = br-mgmt
+    #   enp3s0 = br-pentest
+    #   enp4s0 = br-office
+    #   enp5s0 = br-browse
+    #   enp6s0 = br-dev
     systemd.services.router-network-setup = {
       description = "Configure router networking based on mode";
       after = [ "network.target" ];
@@ -123,59 +134,84 @@ in {
         STATE_DIR="/var/lib/hydrix-router"
         mkdir -p "$STATE_DIR"
 
-        # Detect mode based on interface naming and network topology
-        # In lockdown: bridges are br-pentest etc. In standard: virbr2 etc
+        # Detect mode by checking what subnet the host is using
+        # Host sets 192.168.100.1 for standard mode, 10.100.0.1 for lockdown
         detect_mode() {
-          # Check if any interface has 10.100.x.x configured upstream
-          # or if we're attached to br-* bridges
-          if ip addr show | grep -q "10.100"; then
-            echo "lockdown"
-          elif ip link show | grep -qE "enp[2-6]s0.*master br-"; then
-            echo "lockdown"
-          else
-            echo "standard"
+          # Wait for interfaces to come up
+          sleep 2
+
+          # Check for ARP entries or DHCP requests that indicate host's IP
+          # If we see 10.100.x.x traffic, we're in lockdown mode
+          # If we see 192.168.x.x traffic, we're in standard mode
+
+          # Method 1: Check if VM name contains "lockdown"
+          if [ -f /sys/class/dmi/id/product_name ]; then
+            if grep -qi "lockdown" /sys/class/dmi/id/product_name 2>/dev/null; then
+              echo "lockdown"
+              return
+            fi
           fi
+
+          # Method 2: Check hostname passed via QEMU
+          if hostname | grep -qi "lockdown"; then
+            echo "lockdown"
+            return
+          fi
+
+          # Method 3: Probe the management network
+          # Try to detect host's IP by listening for ARP
+          ${pkgs.iproute2}/bin/ip link set enp2s0 up 2>/dev/null || true
+          sleep 1
+
+          # Check ARP cache for clues
+          if ${pkgs.iproute2}/bin/ip neigh show dev enp2s0 2>/dev/null | grep -q "10.100"; then
+            echo "lockdown"
+            return
+          fi
+
+          # Default to standard mode
+          echo "standard"
         }
 
         MODE="${cfg.mode}"
         if [ "$MODE" = "auto" ]; then
-          MODE=$(detect_mode)
+          # Check environment variable set by VM definition
+          if [ -n "$HYDRIX_MODE" ]; then
+            MODE="$HYDRIX_MODE"
+          else
+            MODE=$(detect_mode)
+          fi
         fi
 
         echo "Router mode: $MODE"
         echo "$MODE" > "$STATE_DIR/mode"
 
+        # Bring up all LAN interfaces first
+        for iface in enp2s0 enp3s0 enp4s0 enp5s0 enp6s0; do
+          ${pkgs.iproute2}/bin/ip link set "$iface" up 2>/dev/null || true
+        done
+
         case "$MODE" in
           standard)
             # Standard mode: 192.168.x.x networks
-            ${pkgs.iproute2}/bin/ip addr add 192.168.100.253/24 dev enp2s0 2>/dev/null || true
-            ${pkgs.iproute2}/bin/ip addr add 192.168.101.253/24 dev enp3s0 2>/dev/null || true
-            ${pkgs.iproute2}/bin/ip addr add 192.168.102.253/24 dev enp4s0 2>/dev/null || true
-            ${pkgs.iproute2}/bin/ip addr add 192.168.103.253/24 dev enp5s0 2>/dev/null || true
-            ${pkgs.iproute2}/bin/ip addr add 192.168.104.253/24 dev enp6s0 2>/dev/null || true
-
-            ${pkgs.iproute2}/bin/ip link set enp2s0 up
-            ${pkgs.iproute2}/bin/ip link set enp3s0 up
-            ${pkgs.iproute2}/bin/ip link set enp4s0 up
-            ${pkgs.iproute2}/bin/ip link set enp5s0 up
-            ${pkgs.iproute2}/bin/ip link set enp6s0 up 2>/dev/null || true
+            # Router provides DHCP and NAT for host and VMs
+            ${pkgs.iproute2}/bin/ip addr add 192.168.100.253/24 dev enp2s0 2>/dev/null || true  # mgmt
+            ${pkgs.iproute2}/bin/ip addr add 192.168.101.253/24 dev enp3s0 2>/dev/null || true  # pentest
+            ${pkgs.iproute2}/bin/ip addr add 192.168.102.253/24 dev enp4s0 2>/dev/null || true  # office
+            ${pkgs.iproute2}/bin/ip addr add 192.168.103.253/24 dev enp5s0 2>/dev/null || true  # browse
+            ${pkgs.iproute2}/bin/ip addr add 192.168.104.253/24 dev enp6s0 2>/dev/null || true  # dev
             ;;
 
           lockdown)
             # Lockdown mode: 10.100.x.x isolated networks
+            # Router provides DHCP, NAT, and VPN policy routing
             ${pkgs.iproute2}/bin/ip addr add 10.100.0.253/24 dev enp2s0 2>/dev/null || true  # mgmt
             ${pkgs.iproute2}/bin/ip addr add 10.100.1.253/24 dev enp3s0 2>/dev/null || true  # pentest
             ${pkgs.iproute2}/bin/ip addr add 10.100.2.253/24 dev enp4s0 2>/dev/null || true  # office
             ${pkgs.iproute2}/bin/ip addr add 10.100.3.253/24 dev enp5s0 2>/dev/null || true  # browse
             ${pkgs.iproute2}/bin/ip addr add 10.100.4.253/24 dev enp6s0 2>/dev/null || true  # dev
 
-            ${pkgs.iproute2}/bin/ip link set enp2s0 up
-            ${pkgs.iproute2}/bin/ip link set enp3s0 up
-            ${pkgs.iproute2}/bin/ip link set enp4s0 up
-            ${pkgs.iproute2}/bin/ip link set enp5s0 up
-            ${pkgs.iproute2}/bin/ip link set enp6s0 up 2>/dev/null || true
-
-            # Set up policy routing rules for lockdown mode
+            # Set up policy routing rules for VPN routing
             ${pkgs.iproute2}/bin/ip rule del fwmark 100 table pentest 2>/dev/null || true
             ${pkgs.iproute2}/bin/ip rule del fwmark 101 table office 2>/dev/null || true
             ${pkgs.iproute2}/bin/ip rule del fwmark 102 table browse 2>/dev/null || true
@@ -192,7 +228,7 @@ in {
               ${pkgs.iproute2}/bin/ip route add default via "$WAN_GW" table dev 2>/dev/null || true
             fi
 
-            # Initialize VPN assignment state
+            # Initialize VPN assignment state (blocked by default for security)
             mkdir -p /var/lib/hydrix-vpn
             [ -f /var/lib/hydrix-vpn/pentest.assignment ] || echo "blocked" > /var/lib/hydrix-vpn/pentest.assignment
             [ -f /var/lib/hydrix-vpn/office.assignment ] || echo "blocked" > /var/lib/hydrix-vpn/office.assignment
