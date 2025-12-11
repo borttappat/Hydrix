@@ -33,6 +33,10 @@ hardware-results.json
 Thumbs.db
 
 # Other files
-*.md
 *.txt
 *.env
+
+# Markdown - ignore most but keep key docs
+*.md
+!HYDRIX-GUIDE.md
+!README.md
