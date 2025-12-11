@@ -424,6 +424,132 @@ in
     ];
   };
 
+  # ===== LOCKDOWN SPECIALIZATION =====
+  # Full network isolation - host has NO internet, NIC passed to router VM
+  # All VM traffic routes through router with VPN policy routing
+  specialisation.lockdown.configuration = {
+    system.nixos.label = lib.mkForce "lockdown-setup";
+
+    imports = [ ../../modules/lockdown/host-lockdown.nix ];
+
+    # NIC passthrough (same as router/maximalism - allows switching without reboot)
+    boot.blacklistedKernelModules = [ "${PRIMARY_DRIVER}" ];
+
+    # Enable lockdown mode
+    hydrix.lockdown = {
+      enable = true;
+      hostHasInternet = false;
+      autoStartRouter = true;
+    };
+
+    # Lockdown router VM autostart (uses lockdown bridges + passthrough)
+    systemd.services.lockdown-router-autostart = {
+      description = "Auto-start lockdown router VM with NIC passthrough";
+      after = [
+        "libvirtd.service"
+        "libvirt-lockdown-networks.service"
+        "network.target"
+      ];
+      wants = [ "libvirtd.service" ];
+      wantedBy = [ "multi-user.target" ];
+      serviceConfig = {
+        Type = "oneshot";
+        RemainAfterExit = true;
+        TimeoutStartSec = "120s";
+      };
+      script = ''
+        VM_NAME="lockdown-router"
+        VM_IMAGE="/var/lib/libvirt/images/router-vm.qcow2"
+        PCI_ADDR="${PRIMARY_PCI#0000:}"
+
+        # Wait for libvirt
+        sleep 3
+
+        # Check if VM exists
+        if ! /run/current-system/sw/bin/virsh dominfo "\$VM_NAME" >/dev/null 2>&1; then
+          echo "Defining lockdown router VM..."
+
+          if [ ! -f "\$VM_IMAGE" ]; then
+            echo "ERROR: Router VM image not found at \$VM_IMAGE"
+            echo "Build with: nix build '.#router-vm'"
+            echo "Copy with: sudo cp result/nixos.qcow2 \$VM_IMAGE"
+            exit 1
+          fi
+
+          # Create VM with passthrough NIC + lockdown bridges
+          /run/current-system/sw/bin/virt-install \
+            --connect qemu:///system \
+            --name "\$VM_NAME" \
+            --memory 2048 \
+            --vcpus 2 \
+            --disk "path=\$VM_IMAGE,format=qcow2,bus=virtio" \
+            --import \
+            --os-variant nixos-unstable \
+            --hostdev "\$PCI_ADDR" \
+            --network bridge=br-mgmt,model=virtio \
+            --network bridge=br-pentest,model=virtio \
+            --network bridge=br-office,model=virtio \
+            --network bridge=br-browse,model=virtio \
+            --network bridge=br-dev,model=virtio \
+            --graphics spice \
+            --video virtio \
+            --noautoconsole \
+            --autostart \
+            --print-xml > /tmp/lockdown-router.xml
+
+          /run/current-system/sw/bin/virsh define /tmp/lockdown-router.xml
+          rm /tmp/lockdown-router.xml
+        fi
+
+        # Start if not running
+        if [ "\$(/run/current-system/sw/bin/virsh domstate "\$VM_NAME" 2>/dev/null)" != "running" ]; then
+          echo "Starting lockdown router..."
+          /run/current-system/sw/bin/virsh start "\$VM_NAME"
+        fi
+
+        /run/current-system/sw/bin/virsh autostart "\$VM_NAME" 2>/dev/null || true
+        echo "Lockdown router started"
+      '';
+    };
+
+    # Lockdown status command
+    environment.systemPackages = with pkgs; lib.mkAfter [
+      (writeShellScriptBin "lockdown-status" ''
+        echo "LOCKDOWN MODE Status"
+        echo "===================="
+        echo ""
+
+        echo "Host Internet: DISABLED (NIC passed to router)"
+        echo "NIC Passthrough: ${PRIMARY_PCI} (${PRIMARY_ID})"
+        echo "Router VM: \$(sudo virsh domstate lockdown-router 2>/dev/null || echo 'Not deployed')"
+        echo ""
+
+        echo "Isolated Bridges:"
+        for br in br-mgmt br-pentest br-office br-browse br-dev; do
+          state=\$(ip link show \$br 2>/dev/null | grep -o 'state [A-Z]*' || echo 'NOT FOUND')
+          echo "  \$br: \$state"
+        done
+        echo ""
+
+        echo "VPN Management (SSH to router):"
+        echo "  ssh traum@10.100.0.253"
+        echo "  vpn-status"
+        echo "  vpn-assign pentest client-vpn"
+        echo "  vpn-assign browse mullvad"
+        echo ""
+
+        echo "Switch Modes (no reboot needed between passthrough modes):"
+        echo "  sudo nixos-rebuild switch --specialisation router"
+        echo "  sudo nixos-rebuild switch --specialisation maximalism"
+        echo "  sudo nixos-rebuild switch --specialisation lockdown"
+        echo ""
+        echo "To return to base mode (REQUIRES REBOOT):"
+        echo "  sudo nixos-rebuild boot --flake ~/Hydrix#${machine_name}"
+        echo "  sudo reboot"
+      '')
+    ];
+  };
+
   # ===== MAXIMALISM SPECIALIZATION =====
   specialisation.maximalism.configuration = {
     system.nixos.label = lib.mkForce "maximalism-setup";
@@ -580,21 +706,28 @@ in
       fi
       echo ""
 
-      echo "Available Specialisations:"
-      echo "  base        - Normal laptop mode (WiFi enabled)"
-      echo "  router      - Router VM only (WiFi passthrough)"
-      echo "  maximalism  - Router + Pentest VMs (full setup)"
+      echo "Available Modes:"
+      echo "  base        - Normal laptop mode (WiFi on host)"
+      echo "  router      - Router VM with WiFi passthrough"
+      echo "  maximalism  - Router + all VMs (standard bridges)"
+      echo "  lockdown    - Full isolation + VPN routing (isolated bridges)"
       echo ""
 
-      echo "Quick Switch Commands:"
-      echo "  sudo nixos-rebuild switch --flake ~/Hydrix#${machine_name}"
-      echo "  sudo nixos-rebuild switch --flake ~/Hydrix#${machine_name} --specialisation router"
-      echo "  sudo nixos-rebuild switch --flake ~/Hydrix#${machine_name} --specialisation maximalism"
+      echo "Switching Modes:"
+      echo ""
+      echo "  Between passthrough modes (no reboot):"
+      echo "    sudo nixos-rebuild switch --specialisation router"
+      echo "    sudo nixos-rebuild switch --specialisation maximalism"
+      echo "    sudo nixos-rebuild switch --specialisation lockdown"
+      echo ""
+      echo "  To/from base mode (REQUIRES REBOOT):"
+      echo "    sudo nixos-rebuild boot --flake ~/Hydrix#${machine_name}"
+      echo "    sudo reboot"
       echo ""
 
       # Show running VMs regardless of mode
-      echo "Currently Running VMs:"
-      sudo virsh list --name 2>/dev/null | grep -v '^\$' || echo "  No VMs running"
+      echo "Running VMs:"
+      sudo virsh list --name 2>/dev/null | grep -v '^\$' || echo "  (none)"
     '')
   ];
 }
@@ -998,11 +1131,26 @@ show_completion_summary() {
     echo "   - Router VM starts with WiFi passthrough"
     echo "   - Internet via router VM on 192.168.100.253"
     echo ""
-    echo "3. Future rebuilds use ./nixbuild.sh automatically"
+    echo "3. Available Modes (after first reboot):"
     echo ""
-    echo "4. To switch to base mode (normal WiFi on host):"
-    echo "   Select 'NixOS - Default' at boot, or:"
-    echo "   sudo grub-reboot 'NixOS - Default' && sudo reboot"
+    echo "   PASSTHROUGH MODES (switch without reboot):"
+    echo "     router     - Router VM only"
+    echo "     maximalism - Router + standard VM bridges (192.168.x.x)"
+    echo "     lockdown   - Isolated bridges + VPN routing (10.100.x.x)"
+    echo ""
+    echo "   Switch between them:"
+    echo "     sudo nixos-rebuild switch --specialisation router"
+    echo "     sudo nixos-rebuild switch --specialisation maximalism"
+    echo "     sudo nixos-rebuild switch --specialisation lockdown"
+    echo ""
+    echo "   BASE MODE (requires reboot):"
+    echo "     sudo nixos-rebuild boot --flake ~/Hydrix#${machine_name}"
+    echo "     sudo reboot"
+    echo ""
+    echo "4. Lockdown Mode VPN Management:"
+    echo "   ssh traum@10.100.0.253   # SSH to router"
+    echo "   vpn-status               # Check routing"
+    echo "   vpn-assign pentest mullvad"
     echo ""
 }
 
