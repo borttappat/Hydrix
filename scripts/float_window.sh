@@ -61,4 +61,4 @@ echo "$window_count $current_x $current_y" > "$state_file"
 echo "Launching floating terminal at position: $current_x,$current_y"
 
 # Use alacritty.sh with floating class and position overrides
-~/dotfiles/scripts/bash/alacritty.sh --class floating -o window.position.x=$current_x -o window.position.y=$current_y
+~/.config/scripts/alacritty.sh --class floating -o window.position.x=$current_x -o window.position.y=$current_y

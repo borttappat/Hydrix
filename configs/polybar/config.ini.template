@@ -54,7 +54,7 @@ separator-foreground= ${colors.color2}
 
 modules-left =  xworkspaces
 modules-center =   
-modules-right = battery essid nwup nwdown ip btc eth  volume memory cpu date 
+modules-right = battery essid nwup nwdown ip btc eth volume memory cpu date 
 ;filesystem uptime pomodoro btc eth sol
 
 cursor-click = pointer
