@@ -46,8 +46,7 @@ declare -A FILE_MAPPINGS=(
     ["$DOTFILES_DIR/scripts/bash/load-display-config.sh"]="$HOME/.config/scripts"
     ["$DOTFILES_DIR/scripts/bash/load-display-config.fish"]="$HOME/.config/scripts"
     
-    ["$DOTFILES_DIR/i3/config.template"]="$HOME/.config/i3"
-    ["$DOTFILES_DIR/i3/config.base"]="$HOME/.config/i3"
+    ["$DOTFILES_DIR/configs/i3/config.template"]="$HOME/.config/i3"
     ["$DOTFILES_DIR/alacritty/alacritty.toml.template"]="$HOME/.config/alacritty"
     ["$DOTFILES_DIR/rofi/config.rasi.template"]="$HOME/.config/rofi"
     ["$DOTFILES_DIR/polybar/config.ini.template"]="$HOME/.config/polybar"

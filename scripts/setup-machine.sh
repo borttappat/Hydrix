@@ -265,9 +265,8 @@ generate_consolidated_config() {
 #   - Host trusts bridges for firewall purposes
 #
 # Modes:
-#   - Base: Normal WiFi/network operation (no VFIO, no bridges)
-#   - Router: Bridges + Router VM with 192.168.x.x (simple NAT)
-#   - Maximalism: Same as router (default boot target)
+#   - Fallback: Normal WiFi/network operation (no VFIO, no bridges) - emergency escape hatch
+#   - Router: Bridges + Router VM with 192.168.x.x (simple NAT) [DEFAULT for development]
 #   - Lockdown: Bridges + Router VM with 10.100.x.x (VPN policy routing, host isolated)
 
 { config, lib, pkgs, ... }:
@@ -294,10 +293,10 @@ in
     };
   };
 
-  # ===== BOOT CONFIGURATION - Default to Maximalism =====
+  # ===== BOOT CONFIGURATION - Default to Router mode =====
   boot.loader.grub.default = "saved";
   boot.loader.grub.extraConfig = ''
-    set default="NixOS - maximalism-setup"
+    set default="NixOS - router-setup"
   '';
 
   # ===== ROUTER SPECIALIZATION =====
@@ -426,110 +425,40 @@ in
     ];
   };
 
-  # ===== MAXIMALISM SPECIALIZATION =====
-  # Same as router - this is the default boot target
-  specialisation.maximalism.configuration = {
-    system.nixos.label = lib.mkForce "maximalism-setup";
+  # ===== FALLBACK SPECIALIZATION =====
+  # Emergency escape hatch - normal WiFi/networking, no VFIO, no bridges
+  # Use this if router/lockdown modes fail
+  specialisation.fallback.configuration = {
+    system.nixos.label = lib.mkForce "fallback-setup";
 
-    boot.kernelParams = [
-      "${iommu_param}"
-      "iommu=pt"
-      "vfio-pci.ids=${PRIMARY_ID}"
-    ];
-    boot.kernelModules = [ "vfio" "vfio_iommu_type1" "vfio_pci" ];
-    boot.blacklistedKernelModules = [ "${PRIMARY_DRIVER}" ];
+    # No VFIO - use normal network driver
+    boot.blacklistedKernelModules = lib.mkForce [];
 
-    networking.bridges.br-mgmt.interfaces = [];
-    networking.bridges.br-pentest.interfaces = [];
-    networking.bridges.br-office.interfaces = [];
-    networking.bridges.br-browse.interfaces = [];
-    networking.bridges.br-dev.interfaces = [];
+    # Use regular DHCP networking
+    networking.useDHCP = lib.mkDefault true;
 
-    networking.interfaces.br-mgmt.ipv4.addresses = [{
-      address = "192.168.100.1";
-      prefixLength = 24;
-    }];
+    # No bridges in fallback mode
+    networking.bridges = lib.mkForce {};
 
-    networking.defaultGateway = {
-      address = "192.168.100.253";
-      interface = "br-mgmt";
-    };
-
+    # Standard firewall
     networking.firewall = {
       enable = true;
-      trustedInterfaces = [ "br-mgmt" "br-pentest" "br-office" "br-browse" "br-dev" ];
-    };
-
-    systemd.services.router-vm-autostart = {
-      description = "Auto-start router VM with NIC passthrough";
-      after = [ "libvirtd.service" "network.target" ];
-      wants = [ "libvirtd.service" ];
-      wantedBy = [ "multi-user.target" ];
-      serviceConfig = {
-        Type = "oneshot";
-        RemainAfterExit = true;
-        TimeoutStartSec = "120s";
-      };
-      script = ''
-        VM_NAME="router-vm"
-        VM_IMAGE="/var/lib/libvirt/images/router-vm.qcow2"
-        PCI_ADDR="${PRIMARY_PCI#0000:}"
-
-        sleep 3
-
-        if ! /run/current-system/sw/bin/virsh dominfo "\$VM_NAME" >/dev/null 2>&1; then
-          if [ ! -f "\$VM_IMAGE" ]; then
-            echo "ERROR: Router VM image not found"
-            exit 1
-          fi
-
-          /run/current-system/sw/bin/virt-install \
-            --connect qemu:///system \
-            --name "\$VM_NAME" \
-            --memory 2048 \
-            --vcpus 2 \
-            --disk "path=\$VM_IMAGE,format=qcow2,bus=virtio" \
-            --import \
-            --os-variant nixos-unstable \
-            --hostdev "\$PCI_ADDR" \
-            --network bridge=br-mgmt,model=virtio \
-            --network bridge=br-pentest,model=virtio \
-            --network bridge=br-office,model=virtio \
-            --network bridge=br-browse,model=virtio \
-            --network bridge=br-dev,model=virtio \
-            --graphics spice \
-            --video virtio \
-            --noautoconsole \
-            --autostart \
-            --print-xml > /tmp/router-vm.xml
-
-          /run/current-system/sw/bin/virsh define /tmp/router-vm.xml
-          rm /tmp/router-vm.xml
-        fi
-
-        if [ "\$(/run/current-system/sw/bin/virsh domstate "\$VM_NAME" 2>/dev/null)" != "running" ]; then
-          /run/current-system/sw/bin/virsh start "\$VM_NAME"
-        fi
-
-        /run/current-system/sw/bin/virsh autostart "\$VM_NAME" 2>/dev/null || true
-      '';
+      allowedTCPPorts = [ 22 ];
     };
 
     environment.systemPackages = with pkgs; lib.mkAfter [
-      virt-manager
-      (writeShellScriptBin "maximalism-status" ''
-        echo "MAXIMALISM MODE Status"
-        echo "======================"
+      (writeShellScriptBin "fallback-status" ''
+        echo "FALLBACK MODE Status"
+        echo "===================="
         echo ""
-        echo "Router VM: \$(sudo virsh domstate router-vm 2>/dev/null || echo 'Not running')"
-        echo "Host IP: 192.168.100.1 (br-mgmt)"
-        echo "Router IP: 192.168.100.253"
+        echo "This is emergency fallback mode - normal networking."
+        echo "No VFIO passthrough, no bridges, no router VM."
         echo ""
-        echo "Bridges (router provides DHCP on 192.168.x.x):"
-        for br in br-mgmt br-pentest br-office br-browse br-dev; do
-          state=\$(ip link show \$br 2>/dev/null | grep -o 'state [A-Z]*' || echo 'NOT FOUND')
-          echo "  \$br: \$state"
-        done
+        echo "Network interfaces:"
+        ip -br addr
+        echo ""
+        echo "To return to router mode:"
+        echo "  sudo nixos-rebuild switch --specialisation router"
       '')
     ];
   };
@@ -713,22 +642,15 @@ in
       echo ""
 
       echo "Available Modes:"
-      echo "  base        - Normal laptop mode (WiFi on host)"
-      echo "  router      - Router VM with WiFi passthrough"
-      echo "  maximalism  - Router + all VMs (standard bridges)"
-      echo "  lockdown    - Full isolation + VPN routing (isolated bridges)"
+      echo "  router      - Router VM with WiFi passthrough (192.168.x.x) [DEFAULT]"
+      echo "  lockdown    - Full isolation + VPN routing (10.100.x.x)"
+      echo "  fallback    - Emergency mode, normal WiFi, no VFIO"
       echo ""
 
       echo "Switching Modes:"
-      echo ""
-      echo "  Between passthrough modes (no reboot):"
-      echo "    sudo nixos-rebuild switch --specialisation router"
-      echo "    sudo nixos-rebuild switch --specialisation maximalism"
-      echo "    sudo nixos-rebuild switch --specialisation lockdown"
-      echo ""
-      echo "  To/from base mode (REQUIRES REBOOT):"
-      echo "    sudo nixos-rebuild boot --flake ~/Hydrix#${machine_name}"
-      echo "    sudo reboot"
+      echo "  sudo nixos-rebuild switch --specialisation router"
+      echo "  sudo nixos-rebuild switch --specialisation lockdown"
+      echo "  sudo nixos-rebuild switch --specialisation fallback"
       echo ""
 
       # Show running VMs regardless of mode
@@ -995,7 +917,7 @@ deploy_router_vm() {
     log "Deploying router VM with WiFi passthrough (PCI: $pci_short)..."
 
     # Note: This creates the VM definition but won't start it until bridges exist
-    # The VM will autostart when booted into maximalism mode
+    # The VM will autostart when booted into router mode
     if sudo virt-install \
         --connect qemu:///system \
         --name "$vm_name" \
@@ -1005,18 +927,18 @@ deploy_router_vm() {
         --os-variant nixos-unstable \
         --boot hd \
         --nographics \
-        --network bridge=virbr1,model=virtio \
-        --network bridge=virbr2,model=virtio \
-        --network bridge=virbr3,model=virtio \
-        --network bridge=virbr4,model=virtio \
-        --network bridge=virbr5,model=virtio \
+        --network bridge=br-mgmt,model=virtio \
+        --network bridge=br-pentest,model=virtio \
+        --network bridge=br-office,model=virtio \
+        --network bridge=br-browse,model=virtio \
+        --network bridge=br-dev,model=virtio \
         --hostdev "$pci_short" \
         --noautoconsole \
         --import 2>/dev/null; then
         success "Router VM deployed with WiFi passthrough!"
     else
         log "WiFi passthrough failed (bridges may not exist yet)"
-        log "Creating VM definition without passthrough - will work after reboot into maximalism"
+        log "Creating VM definition without passthrough - will work after reboot into router mode"
         sudo virt-install \
             --connect qemu:///system \
             --name "$vm_name" \
@@ -1037,14 +959,19 @@ deploy_router_vm() {
 build_system() {
     local machine_name="$1"
 
-    log "Building system configuration using nixbuild.sh..."
+    log "Building system configuration (boot entry only - no immediate switch)..."
 
     cd "$PROJECT_DIR"
 
-    # Use nixbuild.sh which handles specialisation detection and proper rebuild
-    log "Running: ./nixbuild.sh"
-    if ./nixbuild.sh; then
-        success "System built successfully"
+    # Use 'boot' instead of 'switch' for initial setup
+    # This creates a boot entry without switching immediately, which:
+    # - Preserves current network connectivity during setup
+    # - Allows the setup to complete without VFIO breaking networking
+    # - Requires a reboot to activate (safe transition)
+    log "Running: nixos-rebuild boot --flake .#${machine_name}"
+    if sudo nixos-rebuild boot --impure --show-trace --option warn-dirty false \
+        --flake "$PROJECT_DIR#$machine_name"; then
+        success "System built successfully - reboot to activate"
     else
         error "System build failed"
     fi
@@ -1104,7 +1031,7 @@ show_completion_summary() {
     else
         echo "  [!] Not installed (run setup again or: nix build .#router-vm)"
     fi
-    echo "  [i] Auto-starts on first boot into maximalism/lockdown"
+    echo "  [i] Auto-starts on first boot into router mode"
     echo ""
     echo "========================================"
     echo "  ARCHITECTURE"
@@ -1125,11 +1052,11 @@ show_completion_summary() {
     echo "1. (Optional) Commit the changes:"
     echo "   git commit -m 'Add ${machine_name} machine configuration'"
     echo ""
-    echo "2. Reboot into maximalism mode:"
+    echo "2. Reboot into router mode:"
     echo "   sudo reboot"
     echo ""
     echo "   On reboot:"
-    echo "   - System boots into maximalism-setup (default)"
+    echo "   - System boots into router-setup (default)"
     echo "   - NIC driver blacklisted for passthrough"
     echo "   - Bridges created: br-mgmt, br-pentest, br-office, br-browse, br-dev"
     echo "   - Router VM auto-starts with NIC passthrough"
@@ -1140,9 +1067,7 @@ show_completion_summary() {
     echo "  AVAILABLE MODES"
     echo "========================================"
     echo ""
-    echo "  PASSTHROUGH MODES (switch without reboot):"
-    echo ""
-    echo "    router/maximalism - Standard NAT routing"
+    echo "    router [DEFAULT] - Standard NAT routing"
     echo "      Host IP:   192.168.100.1"
     echo "      Router IP: 192.168.100.253"
     echo "      Networks:  192.168.100-104.0/24"
@@ -1153,14 +1078,14 @@ show_completion_summary() {
     echo "      Networks:  10.100.0-4.0/24"
     echo "      Host has NO internet access"
     echo ""
+    echo "    fallback - Emergency escape hatch"
+    echo "      Normal WiFi networking, no VFIO, no bridges"
+    echo "      Use if router/lockdown modes fail"
+    echo ""
     echo "  Switch between them:"
     echo "    sudo nixos-rebuild switch --specialisation router"
-    echo "    sudo nixos-rebuild switch --specialisation maximalism"
     echo "    sudo nixos-rebuild switch --specialisation lockdown"
-    echo ""
-    echo "  BASE MODE (requires reboot - normal laptop operation):"
-    echo "    sudo nixos-rebuild boot --flake ~/Hydrix#${machine_name}"
-    echo "    sudo reboot"
+    echo "    sudo nixos-rebuild switch --specialisation fallback"
     echo ""
     echo "========================================"
     echo "  LOCKDOWN MODE VPN MANAGEMENT"

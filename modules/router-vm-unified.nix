@@ -135,37 +135,13 @@ in {
         STATE_DIR="/var/lib/hydrix-router"
         mkdir -p "$STATE_DIR"
 
-        # Detect mode by checking what subnet the host is using
-        # Host sets 192.168.100.1 for standard mode, 10.100.0.1 for lockdown
+        # Simple mode detection: check VM name for "lockdown"
+        # The systemd service that starts the VM uses different names:
+        #   - router-vm = standard mode (192.168.x.x)
+        #   - lockdown-router = lockdown mode (10.100.x.x)
         detect_mode() {
-          # Wait for interfaces to come up
-          sleep 2
-
-          # Check for ARP entries or DHCP requests that indicate host's IP
-          # If we see 10.100.x.x traffic, we're in lockdown mode
-          # If we see 192.168.x.x traffic, we're in standard mode
-
-          # Method 1: Check if VM name contains "lockdown"
-          if [ -f /sys/class/dmi/id/product_name ]; then
-            if grep -qi "lockdown" /sys/class/dmi/id/product_name 2>/dev/null; then
-              echo "lockdown"
-              return
-            fi
-          fi
-
-          # Method 2: Check hostname passed via QEMU
+          # Check hostname - set by libvirt from VM name
           if hostname | grep -qi "lockdown"; then
-            echo "lockdown"
-            return
-          fi
-
-          # Method 3: Probe the management network
-          # Try to detect host's IP by listening for ARP
-          ${pkgs.iproute2}/bin/ip link set enp2s0 up 2>/dev/null || true
-          sleep 1
-
-          # Check ARP cache for clues
-          if ${pkgs.iproute2}/bin/ip neigh show dev enp2s0 2>/dev/null | grep -q "10.100"; then
             echo "lockdown"
             return
           fi
@@ -176,18 +152,13 @@ in {
 
         MODE="${cfg.mode}"
         if [ "$MODE" = "auto" ]; then
-          # Check environment variable set by VM definition
-          if [ -n "$HYDRIX_MODE" ]; then
-            MODE="$HYDRIX_MODE"
-          else
-            MODE=$(detect_mode)
-          fi
+          MODE=$(detect_mode)
         fi
 
         echo "Router mode: $MODE"
         echo "$MODE" > "$STATE_DIR/mode"
 
-        # Bring up all LAN interfaces first
+        # Bring up all LAN interfaces
         for iface in enp2s0 enp3s0 enp4s0 enp5s0 enp6s0; do
           ${pkgs.iproute2}/bin/ip link set "$iface" up 2>/dev/null || true
         done
@@ -195,7 +166,6 @@ in {
         case "$MODE" in
           standard)
             # Standard mode: 192.168.x.x networks
-            # Router provides DHCP and NAT for host and VMs
             ${pkgs.iproute2}/bin/ip addr add 192.168.100.253/24 dev enp2s0 2>/dev/null || true  # mgmt
             ${pkgs.iproute2}/bin/ip addr add 192.168.101.253/24 dev enp3s0 2>/dev/null || true  # pentest
             ${pkgs.iproute2}/bin/ip addr add 192.168.102.253/24 dev enp4s0 2>/dev/null || true  # office
@@ -204,8 +174,7 @@ in {
             ;;
 
           lockdown)
-            # Lockdown mode: 10.100.x.x isolated networks
-            # Router provides DHCP, NAT, and VPN policy routing
+            # Lockdown mode: 10.100.x.x isolated networks with VPN policy routing
             ${pkgs.iproute2}/bin/ip addr add 10.100.0.253/24 dev enp2s0 2>/dev/null || true  # mgmt
             ${pkgs.iproute2}/bin/ip addr add 10.100.1.253/24 dev enp3s0 2>/dev/null || true  # pentest
             ${pkgs.iproute2}/bin/ip addr add 10.100.2.253/24 dev enp4s0 2>/dev/null || true  # office

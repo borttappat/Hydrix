@@ -1,159 +1,177 @@
 #!/usr/bin/env bash
+# load-display-config.sh - Load display settings based on resolution
+#
+# Logic:
+#   1. If external monitor detected → use resolution_defaults for that resolution
+#   2. If internal only → use machine_overrides if present, else resolution_defaults
+#   3. Fallback to 1920x1080 defaults if resolution not found
 
 CONFIG_FILE="$HOME/.config/display-config.json"
 HOSTNAME=$(hostnamectl hostname | cut -d'-' -f1)
 
 if [ ! -f "$CONFIG_FILE" ]; then
-echo "Config file not found: $CONFIG_FILE"
-exit 1
+    echo "Config file not found: $CONFIG_FILE"
+    exit 1
 fi
 
-CURRENT_RESOLUTION=$(xrandr --listmonitors | awk '/\+\*/ {gsub(/\/[0-9]+/, "", $3); print $3}' | grep -oP '[0-9]{3,5}x[0-9]{3,5}' | head -n1)
+# Detect all connected monitors and their resolutions
+get_external_resolution() {
+    # Get all connected monitors except internal (eDP)
+    local external_res
+    external_res=$(xrandr --listmonitors 2>/dev/null | grep -v "eDP" | grep -oP '[0-9]{3,5}x[0-9]{3,5}' | head -n1)
+    echo "$external_res"
+}
 
-MACHINE_OVERRIDE=$(jq -r ".machine_overrides[\"$HOSTNAME\"] // null" "$CONFIG_FILE")
+get_internal_resolution() {
+    # Get internal display resolution (eDP)
+    local internal_res
+    internal_res=$(xrandr --listmonitors 2>/dev/null | grep "eDP" | grep -oP '[0-9]{3,5}x[0-9]{3,5}' | head -n1)
+    echo "$internal_res"
+}
 
-if [ "$MACHINE_OVERRIDE" != "null" ]; then
-FORCED_RES=$(echo "$MACHINE_OVERRIDE" | jq -r '.force_resolution // "null"')
-FORCED_DPI=$(echo "$MACHINE_OVERRIDE" | jq -r '.dpi // "null"')
-FORCED_GDK_SCALE=$(echo "$MACHINE_OVERRIDE" | jq -r '.gdk_scale // "null"')
-
-# Check for external monitors
-EXTERNAL_MONITOR_PATTERNS=$(echo "$MACHINE_OVERRIDE" | jq -r '.external_monitor_resolutions // [] | join("|")')
+# Check if external monitor is connected
+EXTERNAL_RES=$(get_external_resolution)
+INTERNAL_RES=$(get_internal_resolution)
 EXTERNAL_MONITOR=0
-if [ -n "$EXTERNAL_MONITOR_PATTERNS" ] && xrandr --listmonitors | grep -qE "(${EXTERNAL_MONITOR_PATTERNS}/)"; then
+
+if [ -n "$EXTERNAL_RES" ]; then
     EXTERNAL_MONITOR=1
-fi
-
-if [ "$FORCED_RES" != "null" ]; then
-CURRENT_RESOLUTION="$FORCED_RES"
-# Apply the forced resolution
-INTERNAL_DISPLAY=$(xrandr | grep "eDP" | cut -d' ' -f1 | head -n1)
-if [ -n "$INTERNAL_DISPLAY" ]; then
-if [ "$FORCED_DPI" != "null" ]; then
-xrandr --output "$INTERNAL_DISPLAY" --mode "$FORCED_RES" --dpi "$FORCED_DPI" 2>/dev/null || echo "Warning: Could not set resolution to $FORCED_RES"
+    CURRENT_RESOLUTION="$EXTERNAL_RES"
+    echo "External monitor detected: $EXTERNAL_RES"
+elif [ -n "$INTERNAL_RES" ]; then
+    CURRENT_RESOLUTION="$INTERNAL_RES"
+    echo "Internal display only: $INTERNAL_RES"
 else
-xrandr --output "$INTERNAL_DISPLAY" --mode "$FORCED_RES" 2>/dev/null || echo "Warning: Could not set resolution to $FORCED_RES"
-fi
-fi
-fi
-
-# Apply DPI scaling for HiDPI displays
-if [ "$FORCED_DPI" != "null" ]; then
-echo "Xft.dpi: $FORCED_DPI" | xrdb -merge
+    # Fallback - try to detect any resolution
+    CURRENT_RESOLUTION=$(xrandr --listmonitors | awk '/\+\*/ {gsub(/\/[0-9]+/, "", $3); print $3}' | grep -oP '[0-9]{3,5}x[0-9]{3,5}' | head -n1)
+    echo "Fallback resolution detection: $CURRENT_RESOLUTION"
 fi
 
-# Apply GTK/Qt scaling
-if [ "$FORCED_GDK_SCALE" != "null" ]; then
-export GDK_SCALE="$FORCED_GDK_SCALE"
-export QT_AUTO_SCREEN_SCALE_FACTOR=1
+# Initialize all exports to null
+init_exports() {
+    export POLYBAR_FONT_SIZE="null"
+    export POLYBAR_HEIGHT="null"
+    export POLYBAR_LINE_SIZE="null"
+    export ALACRITTY_FONT_SIZE="null"
+    export I3_FONT_SIZE="null"
+    export I3_BORDER_THICKNESS="null"
+    export GAPS_INNER="null"
+    export ROFI_FONT_SIZE="null"
+    export ALACRITTY_SCALE_FACTOR="null"
+    export DUNST_FONT_SIZE="null"
+    export DUNST_WIDTH="null"
+    export DUNST_HEIGHT="null"
+    export DUNST_OFFSET_X="null"
+    export DUNST_OFFSET_Y="null"
+    export DUNST_PADDING="null"
+    export DUNST_FRAME_WIDTH="null"
+    export DUNST_ICON_SIZE="null"
+    export FIREFOX_FONT_SIZE="null"
+    export FIREFOX_HEADER_FONT_SIZE="null"
+    export OBSIDIAN_FONT_SIZE="null"
+    export OBSIDIAN_HEADER_FONT_SIZE="null"
+}
+
+init_exports
+
+# Apply machine overrides ONLY if no external monitor
+if [ "$EXTERNAL_MONITOR" -eq 0 ]; then
+    MACHINE_OVERRIDE=$(jq -r ".machine_overrides[\"$HOSTNAME\"] // null" "$CONFIG_FILE")
+
+    if [ "$MACHINE_OVERRIDE" != "null" ]; then
+        echo "Applying machine overrides for: $HOSTNAME"
+
+        # Apply forced resolution if set
+        FORCED_RES=$(echo "$MACHINE_OVERRIDE" | jq -r '.force_resolution // "null"')
+        FORCED_DPI=$(echo "$MACHINE_OVERRIDE" | jq -r '.dpi // "null"')
+        FORCED_GDK_SCALE=$(echo "$MACHINE_OVERRIDE" | jq -r '.gdk_scale // "null"')
+
+        if [ "$FORCED_RES" != "null" ]; then
+            CURRENT_RESOLUTION="$FORCED_RES"
+            INTERNAL_DISPLAY=$(xrandr | grep "eDP" | cut -d' ' -f1 | head -n1)
+            if [ -n "$INTERNAL_DISPLAY" ]; then
+                if [ "$FORCED_DPI" != "null" ]; then
+                    xrandr --output "$INTERNAL_DISPLAY" --mode "$FORCED_RES" --dpi "$FORCED_DPI" 2>/dev/null || echo "Warning: Could not set resolution to $FORCED_RES"
+                else
+                    xrandr --output "$INTERNAL_DISPLAY" --mode "$FORCED_RES" 2>/dev/null || echo "Warning: Could not set resolution to $FORCED_RES"
+                fi
+            fi
+        fi
+
+        # Apply DPI scaling for HiDPI displays
+        if [ "$FORCED_DPI" != "null" ]; then
+            echo "Xft.dpi: $FORCED_DPI" | xrdb -merge
+        fi
+
+        # Apply GTK/Qt scaling
+        if [ "$FORCED_GDK_SCALE" != "null" ]; then
+            export GDK_SCALE="$FORCED_GDK_SCALE"
+            export QT_AUTO_SCREEN_SCALE_FACTOR=1
+        fi
+
+        # Load machine-specific display settings
+        export POLYBAR_FONT_SIZE=$(echo "$MACHINE_OVERRIDE" | jq -r ".polybar_font_size // null")
+        export POLYBAR_HEIGHT=$(echo "$MACHINE_OVERRIDE" | jq -r ".polybar_height // null")
+        export POLYBAR_LINE_SIZE=$(echo "$MACHINE_OVERRIDE" | jq -r ".polybar_line_size // null")
+        export ALACRITTY_FONT_SIZE=$(echo "$MACHINE_OVERRIDE" | jq -r ".alacritty_font_size // null")
+        export I3_FONT_SIZE=$(echo "$MACHINE_OVERRIDE" | jq -r ".i3_font_size // null")
+        export I3_BORDER_THICKNESS=$(echo "$MACHINE_OVERRIDE" | jq -r ".i3_border_thickness // null")
+        export GAPS_INNER=$(echo "$MACHINE_OVERRIDE" | jq -r ".gaps_inner // null")
+        export ROFI_FONT_SIZE=$(echo "$MACHINE_OVERRIDE" | jq -r ".rofi_font_size // null")
+        export ALACRITTY_SCALE_FACTOR=$(echo "$MACHINE_OVERRIDE" | jq -r ".alacritty_scale_factor // null")
+        export DUNST_FONT_SIZE=$(echo "$MACHINE_OVERRIDE" | jq -r ".dunst_font_size // null")
+        export DUNST_WIDTH=$(echo "$MACHINE_OVERRIDE" | jq -r ".dunst_width // null")
+        export DUNST_HEIGHT=$(echo "$MACHINE_OVERRIDE" | jq -r ".dunst_height // null")
+        export DUNST_OFFSET_X=$(echo "$MACHINE_OVERRIDE" | jq -r ".dunst_offset_x // null")
+        export DUNST_OFFSET_Y=$(echo "$MACHINE_OVERRIDE" | jq -r ".dunst_offset_y // null")
+        export DUNST_PADDING=$(echo "$MACHINE_OVERRIDE" | jq -r ".dunst_padding // null")
+        export DUNST_FRAME_WIDTH=$(echo "$MACHINE_OVERRIDE" | jq -r ".dunst_frame_width // null")
+        export DUNST_ICON_SIZE=$(echo "$MACHINE_OVERRIDE" | jq -r ".dunst_icon_size // null")
+        export FIREFOX_FONT_SIZE=$(echo "$MACHINE_OVERRIDE" | jq -r ".firefox_font_size // null")
+        export FIREFOX_HEADER_FONT_SIZE=$(echo "$MACHINE_OVERRIDE" | jq -r ".firefox_header_font_size // null")
+        export OBSIDIAN_FONT_SIZE=$(echo "$MACHINE_OVERRIDE" | jq -r ".obsidian_font_size // null")
+        export OBSIDIAN_HEADER_FONT_SIZE=$(echo "$MACHINE_OVERRIDE" | jq -r ".obsidian_header_font_size // null")
+    fi
 fi
 
-# Use external monitor settings if external monitor is detected
-if [ "$EXTERNAL_MONITOR" -eq 1 ]; then
-export POLYBAR_FONT_SIZE=$(echo "$MACHINE_OVERRIDE" | jq -r ".polybar_font_size_external // .polybar_font_size // null")
-export POLYBAR_HEIGHT=$(echo "$MACHINE_OVERRIDE" | jq -r ".polybar_height_external // .polybar_height // null")
-export POLYBAR_LINE_SIZE=$(echo "$MACHINE_OVERRIDE" | jq -r ".polybar_line_size_external // .polybar_line_size // null")
-export ALACRITTY_FONT_SIZE=$(echo "$MACHINE_OVERRIDE" | jq -r ".alacritty_font_size_external // .alacritty_font_size // null")
-export I3_FONT_SIZE=$(echo "$MACHINE_OVERRIDE" | jq -r ".i3_font_size_external // .i3_font_size // null")
-# Export both internal and external border/gap values for per-workspace configuration
-export I3_BORDER_THICKNESS=$(echo "$MACHINE_OVERRIDE" | jq -r ".i3_border_thickness // null")
-export I3_BORDER_THICKNESS_EXTERNAL=$(echo "$MACHINE_OVERRIDE" | jq -r ".i3_border_thickness_external // .i3_border_thickness // null")
-export GAPS_INNER=$(echo "$MACHINE_OVERRIDE" | jq -r ".gaps_inner // null")
-export GAPS_INNER_EXTERNAL=$(echo "$MACHINE_OVERRIDE" | jq -r ".gaps_inner_external // .gaps_inner // null")
-export ROFI_FONT_SIZE=$(echo "$MACHINE_OVERRIDE" | jq -r ".rofi_font_size_external // .rofi_font_size // null")
-export ALACRITTY_SCALE_FACTOR=$(echo "$MACHINE_OVERRIDE" | jq -r ".alacritty_scale_factor_external // .alacritty_scale_factor // null")
-# Dunst external settings
-export DUNST_FONT_SIZE=$(echo "$MACHINE_OVERRIDE" | jq -r ".dunst_font_size_external // .dunst_font_size // null")
-export DUNST_WIDTH=$(echo "$MACHINE_OVERRIDE" | jq -r ".dunst_width_external // .dunst_width // null")
-export DUNST_HEIGHT=$(echo "$MACHINE_OVERRIDE" | jq -r ".dunst_height_external // .dunst_height // null")
-export DUNST_OFFSET_X=$(echo "$MACHINE_OVERRIDE" | jq -r ".dunst_offset_x_external // .dunst_offset_x // null")
-export DUNST_OFFSET_Y=$(echo "$MACHINE_OVERRIDE" | jq -r ".dunst_offset_y_external // .dunst_offset_y // null")
-export DUNST_PADDING=$(echo "$MACHINE_OVERRIDE" | jq -r ".dunst_padding_external // .dunst_padding // null")
-export DUNST_FRAME_WIDTH=$(echo "$MACHINE_OVERRIDE" | jq -r ".dunst_frame_width_external // .dunst_frame_width // null")
-export DUNST_ICON_SIZE=$(echo "$MACHINE_OVERRIDE" | jq -r ".dunst_icon_size_external // .dunst_icon_size // null")
-# Firefox external settings
-export FIREFOX_FONT_SIZE=$(echo "$MACHINE_OVERRIDE" | jq -r ".firefox_font_size_external // .firefox_font_size // null")
-export FIREFOX_HEADER_FONT_SIZE=$(echo "$MACHINE_OVERRIDE" | jq -r ".firefox_header_font_size_external // .firefox_header_font_size // null")
-# Obsidian external settings
-export OBSIDIAN_FONT_SIZE=$(echo "$MACHINE_OVERRIDE" | jq -r ".obsidian_font_size_external // .obsidian_font_size // null")
-export OBSIDIAN_HEADER_FONT_SIZE=$(echo "$MACHINE_OVERRIDE" | jq -r ".obsidian_header_font_size_external // .obsidian_header_font_size // null")
-else
-export POLYBAR_FONT_SIZE=$(echo "$MACHINE_OVERRIDE" | jq -r ".polybar_font_size // null")
-export POLYBAR_HEIGHT=$(echo "$MACHINE_OVERRIDE" | jq -r ".polybar_height // null")
-export POLYBAR_LINE_SIZE=$(echo "$MACHINE_OVERRIDE" | jq -r ".polybar_line_size // null")
-export ALACRITTY_FONT_SIZE=$(echo "$MACHINE_OVERRIDE" | jq -r ".alacritty_font_size // null")
-export I3_FONT_SIZE=$(echo "$MACHINE_OVERRIDE" | jq -r ".i3_font_size // null")
-export I3_BORDER_THICKNESS=$(echo "$MACHINE_OVERRIDE" | jq -r ".i3_border_thickness // null")
-export I3_BORDER_THICKNESS_EXTERNAL=$(echo "$MACHINE_OVERRIDE" | jq -r ".i3_border_thickness // null")
-export GAPS_INNER=$(echo "$MACHINE_OVERRIDE" | jq -r ".gaps_inner // null")
-export GAPS_INNER_EXTERNAL=$(echo "$MACHINE_OVERRIDE" | jq -r ".gaps_inner // null")
-export ROFI_FONT_SIZE=$(echo "$MACHINE_OVERRIDE" | jq -r ".rofi_font_size // null")
-export ALACRITTY_SCALE_FACTOR=$(echo "$MACHINE_OVERRIDE" | jq -r ".alacritty_scale_factor // null")
-# Dunst internal settings
-export DUNST_FONT_SIZE=$(echo "$MACHINE_OVERRIDE" | jq -r ".dunst_font_size // null")
-export DUNST_WIDTH=$(echo "$MACHINE_OVERRIDE" | jq -r ".dunst_width // null")
-export DUNST_HEIGHT=$(echo "$MACHINE_OVERRIDE" | jq -r ".dunst_height // null")
-export DUNST_OFFSET_X=$(echo "$MACHINE_OVERRIDE" | jq -r ".dunst_offset_x // null")
-export DUNST_OFFSET_Y=$(echo "$MACHINE_OVERRIDE" | jq -r ".dunst_offset_y // null")
-export DUNST_PADDING=$(echo "$MACHINE_OVERRIDE" | jq -r ".dunst_padding // null")
-export DUNST_FRAME_WIDTH=$(echo "$MACHINE_OVERRIDE" | jq -r ".dunst_frame_width // null")
-export DUNST_ICON_SIZE=$(echo "$MACHINE_OVERRIDE" | jq -r ".dunst_icon_size // null")
-# Firefox internal settings
-export FIREFOX_FONT_SIZE=$(echo "$MACHINE_OVERRIDE" | jq -r ".firefox_font_size // null")
-export FIREFOX_HEADER_FONT_SIZE=$(echo "$MACHINE_OVERRIDE" | jq -r ".firefox_header_font_size // null")
-# Obsidian internal settings
-export OBSIDIAN_FONT_SIZE=$(echo "$MACHINE_OVERRIDE" | jq -r ".obsidian_font_size // null")
-export OBSIDIAN_HEADER_FONT_SIZE=$(echo "$MACHINE_OVERRIDE" | jq -r ".obsidian_header_font_size // null")
-fi
-else
-export POLYBAR_FONT_SIZE="null"
-export POLYBAR_HEIGHT="null"
-export POLYBAR_LINE_SIZE="null"
-export ALACRITTY_FONT_SIZE="null"
-export I3_FONT_SIZE="null"
-export I3_BORDER_THICKNESS="null"
-export I3_BORDER_THICKNESS_EXTERNAL="null"
-export GAPS_INNER="null"
-export GAPS_INNER_EXTERNAL="null"
-export ROFI_FONT_SIZE="null"
-export ALACRITTY_SCALE_FACTOR="null"
-fi
-
+# Get resolution defaults - always fallback to these for any "null" values
 RES_DEFAULTS=$(jq -r ".resolution_defaults[\"$CURRENT_RESOLUTION\"] // null" "$CONFIG_FILE")
 
 if [ "$RES_DEFAULTS" = "null" ]; then
-echo "No defaults found for resolution: $CURRENT_RESOLUTION, using 1920x1080 defaults"
-RES_DEFAULTS=$(jq -r '.resolution_defaults["1920x1080"]' "$CONFIG_FILE")
+    echo "No defaults found for resolution: $CURRENT_RESOLUTION, using 1920x1080 defaults"
+    RES_DEFAULTS=$(jq -r '.resolution_defaults["1920x1080"]' "$CONFIG_FILE")
 fi
 
+# Fill in any remaining null values from resolution defaults
 [ "$POLYBAR_FONT_SIZE" = "null" ] && export POLYBAR_FONT_SIZE=$(echo "$RES_DEFAULTS" | jq -r '.polybar_font_size')
 [ "$POLYBAR_HEIGHT" = "null" ] && export POLYBAR_HEIGHT=$(echo "$RES_DEFAULTS" | jq -r '.polybar_height')
 [ "$POLYBAR_LINE_SIZE" = "null" ] && export POLYBAR_LINE_SIZE=$(echo "$RES_DEFAULTS" | jq -r '.polybar_line_size')
 [ "$ALACRITTY_FONT_SIZE" = "null" ] && export ALACRITTY_FONT_SIZE=$(echo "$RES_DEFAULTS" | jq -r '.alacritty_font_size')
 [ "$I3_FONT_SIZE" = "null" ] && export I3_FONT_SIZE=$(echo "$RES_DEFAULTS" | jq -r '.i3_font_size')
 [ "$I3_BORDER_THICKNESS" = "null" ] && export I3_BORDER_THICKNESS=$(echo "$RES_DEFAULTS" | jq -r '.i3_border_thickness')
-[ "$I3_BORDER_THICKNESS_EXTERNAL" = "null" ] && export I3_BORDER_THICKNESS_EXTERNAL=$(echo "$RES_DEFAULTS" | jq -r '.i3_border_thickness')
 [ "$GAPS_INNER" = "null" ] && export GAPS_INNER=$(echo "$RES_DEFAULTS" | jq -r '.gaps_inner')
-[ "$GAPS_INNER_EXTERNAL" = "null" ] && export GAPS_INNER_EXTERNAL=$(echo "$RES_DEFAULTS" | jq -r '.gaps_inner')
 [ "$ROFI_FONT_SIZE" = "null" ] && export ROFI_FONT_SIZE=$(echo "$RES_DEFAULTS" | jq -r '.rofi_font_size')
 
-# Dunst settings - fallback to resolution defaults if not set by machine override
-[ "$DUNST_FONT_SIZE" = "null" ] || [ -z "$DUNST_FONT_SIZE" ] && export DUNST_FONT_SIZE=$(echo "$RES_DEFAULTS" | jq -r '.dunst_font_size')
-[ "$DUNST_WIDTH" = "null" ] || [ -z "$DUNST_WIDTH" ] && export DUNST_WIDTH=$(echo "$RES_DEFAULTS" | jq -r '.dunst_width')
-[ "$DUNST_HEIGHT" = "null" ] || [ -z "$DUNST_HEIGHT" ] && export DUNST_HEIGHT=$(echo "$RES_DEFAULTS" | jq -r '.dunst_height')
-[ "$DUNST_OFFSET_X" = "null" ] || [ -z "$DUNST_OFFSET_X" ] && export DUNST_OFFSET_X=$(echo "$RES_DEFAULTS" | jq -r '.dunst_offset_x')
-[ "$DUNST_OFFSET_Y" = "null" ] || [ -z "$DUNST_OFFSET_Y" ] && export DUNST_OFFSET_Y=$(echo "$RES_DEFAULTS" | jq -r '.dunst_offset_y')
-[ "$DUNST_PADDING" = "null" ] || [ -z "$DUNST_PADDING" ] && export DUNST_PADDING=$(echo "$RES_DEFAULTS" | jq -r '.dunst_padding')
-[ "$DUNST_FRAME_WIDTH" = "null" ] || [ -z "$DUNST_FRAME_WIDTH" ] && export DUNST_FRAME_WIDTH=$(echo "$RES_DEFAULTS" | jq -r '.dunst_frame_width')
-[ "$DUNST_ICON_SIZE" = "null" ] || [ -z "$DUNST_ICON_SIZE" ] && export DUNST_ICON_SIZE=$(echo "$RES_DEFAULTS" | jq -r '.dunst_icon_size')
+# Dunst settings
+[ "$DUNST_FONT_SIZE" = "null" ] && export DUNST_FONT_SIZE=$(echo "$RES_DEFAULTS" | jq -r '.dunst_font_size')
+[ "$DUNST_WIDTH" = "null" ] && export DUNST_WIDTH=$(echo "$RES_DEFAULTS" | jq -r '.dunst_width')
+[ "$DUNST_HEIGHT" = "null" ] && export DUNST_HEIGHT=$(echo "$RES_DEFAULTS" | jq -r '.dunst_height')
+[ "$DUNST_OFFSET_X" = "null" ] && export DUNST_OFFSET_X=$(echo "$RES_DEFAULTS" | jq -r '.dunst_offset_x')
+[ "$DUNST_OFFSET_Y" = "null" ] && export DUNST_OFFSET_Y=$(echo "$RES_DEFAULTS" | jq -r '.dunst_offset_y')
+[ "$DUNST_PADDING" = "null" ] && export DUNST_PADDING=$(echo "$RES_DEFAULTS" | jq -r '.dunst_padding')
+[ "$DUNST_FRAME_WIDTH" = "null" ] && export DUNST_FRAME_WIDTH=$(echo "$RES_DEFAULTS" | jq -r '.dunst_frame_width')
+[ "$DUNST_ICON_SIZE" = "null" ] && export DUNST_ICON_SIZE=$(echo "$RES_DEFAULTS" | jq -r '.dunst_icon_size')
 
-# Firefox settings - fallback to resolution defaults if not set by machine override
-[ "$FIREFOX_FONT_SIZE" = "null" ] || [ -z "$FIREFOX_FONT_SIZE" ] && export FIREFOX_FONT_SIZE=$(echo "$RES_DEFAULTS" | jq -r '.firefox_font_size')
-[ "$FIREFOX_HEADER_FONT_SIZE" = "null" ] || [ -z "$FIREFOX_HEADER_FONT_SIZE" ] && export FIREFOX_HEADER_FONT_SIZE=$(echo "$RES_DEFAULTS" | jq -r '.firefox_header_font_size')
+# Firefox settings
+[ "$FIREFOX_FONT_SIZE" = "null" ] && export FIREFOX_FONT_SIZE=$(echo "$RES_DEFAULTS" | jq -r '.firefox_font_size')
+[ "$FIREFOX_HEADER_FONT_SIZE" = "null" ] && export FIREFOX_HEADER_FONT_SIZE=$(echo "$RES_DEFAULTS" | jq -r '.firefox_header_font_size')
 
-# Obsidian settings - fallback to resolution defaults if not set by machine override
-[ "$OBSIDIAN_FONT_SIZE" = "null" ] || [ -z "$OBSIDIAN_FONT_SIZE" ] && export OBSIDIAN_FONT_SIZE=$(echo "$RES_DEFAULTS" | jq -r '.obsidian_font_size')
-[ "$OBSIDIAN_HEADER_FONT_SIZE" = "null" ] || [ -z "$OBSIDIAN_HEADER_FONT_SIZE" ] && export OBSIDIAN_HEADER_FONT_SIZE=$(echo "$RES_DEFAULTS" | jq -r '.obsidian_header_font_size')
+# Obsidian settings
+[ "$OBSIDIAN_FONT_SIZE" = "null" ] && export OBSIDIAN_FONT_SIZE=$(echo "$RES_DEFAULTS" | jq -r '.obsidian_font_size')
+[ "$OBSIDIAN_HEADER_FONT_SIZE" = "null" ] && export OBSIDIAN_HEADER_FONT_SIZE=$(echo "$RES_DEFAULTS" | jq -r '.obsidian_header_font_size')
+
+# Alacritty scale factor defaults to 1.0 if not set
+[ "$ALACRITTY_SCALE_FACTOR" = "null" ] && export ALACRITTY_SCALE_FACTOR="1.0"
 
 export DISPLAY_RESOLUTION="$CURRENT_RESOLUTION"
 
@@ -168,10 +186,10 @@ export FIREFOX_FONT=$(jq -r '.fonts.firefox // .fonts.default' "$CONFIG_FILE")
 export OBSIDIAN_FONT=$(jq -r '.fonts.obsidian // .fonts.default' "$CONFIG_FILE")
 
 # Generate the WINIT_X11_SCALE_FACTOR line for alacritty if scale factor is set
-if [ "$ALACRITTY_SCALE_FACTOR" != "null" ] && [ "$ALACRITTY_SCALE_FACTOR" != "1" ]; then
-export ALACRITTY_SCALE_FACTOR_LINE="WINIT_X11_SCALE_FACTOR = \"$ALACRITTY_SCALE_FACTOR\""
+if [ "$ALACRITTY_SCALE_FACTOR" != "null" ] && [ "$ALACRITTY_SCALE_FACTOR" != "1" ] && [ "$ALACRITTY_SCALE_FACTOR" != "1.0" ]; then
+    export ALACRITTY_SCALE_FACTOR_LINE="WINIT_X11_SCALE_FACTOR = \"$ALACRITTY_SCALE_FACTOR\""
 else
-export ALACRITTY_SCALE_FACTOR_LINE=""
+    export ALACRITTY_SCALE_FACTOR_LINE=""
 fi
 
 echo "Loaded config for $HOSTNAME @ $DISPLAY_RESOLUTION: polybar=$POLYBAR_FONT_SIZE alacritty=$ALACRITTY_FONT_SIZE (scale=$ALACRITTY_SCALE_FACTOR) i3=$I3_FONT_SIZE gaps=$GAPS_INNER font=$POLYBAR_FONT external=$EXTERNAL_MONITOR"

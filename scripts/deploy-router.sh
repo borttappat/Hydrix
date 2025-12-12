@@ -1,11 +1,10 @@
 #!/usr/bin/env bash
 # Deploy Router VM for Hydrix
-# Supports both standard and lockdown modes
+# Supports router mode (default) and lockdown mode
 #
 # Usage:
-#   ./scripts/deploy-router.sh                    # Standard mode (virbr bridges)
-#   ./scripts/deploy-router.sh --lockdown         # Lockdown mode (br-* bridges)
-#   ./scripts/deploy-router.sh --lockdown --wan enp0s31f6  # With WAN interface
+#   ./scripts/deploy-router.sh                    # Router mode (br-* bridges, 192.168.x.x)
+#   ./scripts/deploy-router.sh --lockdown         # Lockdown mode (br-* bridges, 10.100.x.x)
 #
 set -euo pipefail
 
@@ -24,8 +23,7 @@ MEMORY=2048
 VCPUS=2
 DISK_SIZE="20G"
 IMAGE_DIR="/var/lib/libvirt/images"
-MODE="standard"
-WAN_INTERFACE=""
+MODE="router"
 FORCE_REBUILD=false
 
 usage() {
@@ -35,10 +33,9 @@ Usage: $(basename "$0") [OPTIONS]
 Deploy the Hydrix router VM.
 
 Options:
-  --lockdown           Deploy for lockdown mode (uses br-* bridges)
-  --standard           Deploy for standard mode (uses virbr* bridges) [default]
-  --wan INTERFACE      Physical interface for WAN (lockdown mode only)
-  --name NAME          VM name (default: router-vm)
+  --router             Deploy for router mode (192.168.x.x networks) [default]
+  --lockdown           Deploy for lockdown mode (10.100.x.x networks, host isolated)
+  --name NAME          VM name (default: router-vm, lockdown uses lockdown-router)
   --memory MB          Memory in MB (default: 2048)
   --vcpus N            Number of vCPUs (default: 2)
   --disk SIZE          Disk size (default: 20G)
@@ -46,9 +43,8 @@ Options:
   -h, --help           Show this help
 
 Examples:
-  $(basename "$0")                              # Standard mode
+  $(basename "$0")                              # Router mode (default)
   $(basename "$0") --lockdown                   # Lockdown mode
-  $(basename "$0") --lockdown --wan enp0s31f6   # Lockdown with WAN bridge
 
 EOF
 }
@@ -58,15 +54,13 @@ while [[ $# -gt 0 ]]; do
     case $1 in
         --lockdown)
             MODE="lockdown"
+            VM_NAME="lockdown-router"
             shift
             ;;
-        --standard)
-            MODE="standard"
+        --router)
+            MODE="router"
+            VM_NAME="router-vm"
             shift
-            ;;
-        --wan)
-            WAN_INTERFACE="$2"
-            shift 2
             ;;
         --name)
             VM_NAME="$2"
@@ -150,7 +144,26 @@ if sudo virsh dominfo "$VM_NAME" &>/dev/null; then
     fi
 fi
 
-# Build virt-install command based on mode
+# Check if bridges exist
+echo -e "${BLUE}Checking bridges...${NC}"
+BRIDGES_OK=true
+for br in br-mgmt br-pentest br-office br-browse br-dev; do
+    if ip link show "$br" &>/dev/null; then
+        echo -e "  ${GREEN}✓${NC} $br exists"
+    else
+        echo -e "  ${RED}✗${NC} $br missing"
+        BRIDGES_OK=false
+    fi
+done
+
+if [[ "$BRIDGES_OK" != "true" ]]; then
+    echo -e "${YELLOW}Warning: Some bridges are missing.${NC}"
+    echo -e "${YELLOW}Make sure you're running in router or lockdown specialisation.${NC}"
+    echo -e "${YELLOW}The VM will be defined but may not start until bridges exist.${NC}"
+fi
+
+# Build virt-install command - same bridges for both modes
+# Router VM auto-detects mode based on VM name or host IP
 VIRT_INSTALL_CMD=(
     sudo virt-install
     --name "$VM_NAME"
@@ -164,51 +177,12 @@ VIRT_INSTALL_CMD=(
     --channel spicevmc,target_type=virtio,name=com.redhat.spice.0
     --noautoconsole
     --autostart
+    --network bridge=br-mgmt,model=virtio
+    --network bridge=br-pentest,model=virtio
+    --network bridge=br-office,model=virtio
+    --network bridge=br-browse,model=virtio
+    --network bridge=br-dev,model=virtio
 )
-
-case "$MODE" in
-    standard)
-        echo -e "${BLUE}Configuring for standard mode (virbr bridges)...${NC}"
-        VIRT_INSTALL_CMD+=(
-            --network bridge=virbr0,model=virtio      # WAN (NAT from host)
-            --network bridge=virbr1,model=virtio      # Guest network 1
-            --network bridge=virbr2,model=virtio      # Guest network 2
-            --network bridge=virbr3,model=virtio      # Guest network 3
-            --network bridge=virbr4,model=virtio      # Guest network 4
-        )
-        ;;
-    lockdown)
-        echo -e "${BLUE}Configuring for lockdown mode (br-* bridges)...${NC}"
-
-        # Check if bridges exist
-        for br in br-wan br-mgmt br-pentest br-office br-browse br-dev; do
-            if ! ip link show "$br" &>/dev/null; then
-                echo -e "${YELLOW}Warning: Bridge $br does not exist${NC}"
-                echo -e "${YELLOW}Make sure you're running in lockdown specialisation${NC}"
-            fi
-        done
-
-        VIRT_INSTALL_CMD+=(
-            --network bridge=br-wan,model=virtio      # WAN (gets DHCP or upstream)
-            --network bridge=br-mgmt,model=virtio     # Management (10.100.0.x)
-            --network bridge=br-pentest,model=virtio  # Pentest (10.100.1.x)
-            --network bridge=br-office,model=virtio   # Office (10.100.2.x)
-            --network bridge=br-browse,model=virtio   # Browse (10.100.3.x)
-            --network bridge=br-dev,model=virtio      # Dev (10.100.4.x)
-        )
-
-        # If WAN interface specified, add physical interface to br-wan
-        if [[ -n "$WAN_INTERFACE" ]]; then
-            echo -e "${BLUE}Adding $WAN_INTERFACE to br-wan...${NC}"
-            if ip link show "$WAN_INTERFACE" &>/dev/null; then
-                sudo ip link set "$WAN_INTERFACE" master br-wan 2>/dev/null || true
-                sudo ip link set "$WAN_INTERFACE" up
-            else
-                echo -e "${RED}Warning: Interface $WAN_INTERFACE not found${NC}"
-            fi
-        fi
-        ;;
-esac
 
 # Create and start the VM
 echo -e "${BLUE}Creating VM...${NC}"
@@ -219,32 +193,38 @@ echo -e "${GREEN}=== Router VM Deployed Successfully ===${NC}"
 echo ""
 
 case "$MODE" in
-    standard)
-        echo -e "Networks:"
-        echo -e "  enp1s0 (virbr0): NAT to host internet"
-        echo -e "  enp2s0-enp5s0: Guest networks 192.168.100-103.x"
+    router)
+        echo -e "Mode: Router (standard)"
+        echo -e ""
+        echo -e "Networks (192.168.x.x):"
+        echo -e "  enp1s0 (br-mgmt):    192.168.100.x - Management + host"
+        echo -e "  enp2s0 (br-pentest): 192.168.101.x - Pentest VMs"
+        echo -e "  enp3s0 (br-office):  192.168.102.x - Office VMs"
+        echo -e "  enp4s0 (br-browse):  192.168.103.x - Browse VMs"
+        echo -e "  enp5s0 (br-dev):     192.168.104.x - Dev VMs"
         echo ""
         echo -e "Access:"
+        echo -e "  SSH: ssh traum@192.168.100.253"
         echo -e "  Console: sudo virsh console $VM_NAME"
         echo -e "  GUI: virt-manager → $VM_NAME"
         ;;
     lockdown)
-        echo -e "Networks:"
-        echo -e "  enp1s0 (br-wan):     WAN uplink"
-        echo -e "  enp2s0 (br-mgmt):    10.100.0.x - Management"
-        echo -e "  enp3s0 (br-pentest): 10.100.1.x - Pentest (VPN routed)"
-        echo -e "  enp4s0 (br-office):  10.100.2.x - Office (VPN routed)"
-        echo -e "  enp5s0 (br-browse):  10.100.3.x - Browse (VPN routed)"
-        echo -e "  enp6s0 (br-dev):     10.100.4.x - Dev (direct/configurable)"
+        echo -e "Mode: Lockdown (isolated)"
+        echo -e ""
+        echo -e "Networks (10.100.x.x):"
+        echo -e "  enp1s0 (br-mgmt):    10.100.0.x - Management (no internet)"
+        echo -e "  enp2s0 (br-pentest): 10.100.1.x - Pentest (VPN routed)"
+        echo -e "  enp3s0 (br-office):  10.100.2.x - Office (VPN routed)"
+        echo -e "  enp4s0 (br-browse):  10.100.3.x - Browse (VPN routed)"
+        echo -e "  enp5s0 (br-dev):     10.100.4.x - Dev (direct/configurable)"
         echo ""
         echo -e "Access:"
-        echo -e "  SSH: ssh traum@10.100.0.253 (from management network)"
+        echo -e "  SSH: ssh traum@10.100.0.253"
         echo -e "  Console: sudo virsh console $VM_NAME"
         echo ""
         echo -e "VPN Management (on router):"
         echo -e "  vpn-status                     # Show status"
         echo -e "  vpn-assign pentest mullvad     # Route pentest through Mullvad"
-        echo -e "  vpn-assign connect mullvad     # Connect VPN first"
         ;;
 esac
 

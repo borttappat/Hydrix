@@ -78,7 +78,8 @@
         ];
         allowedUDPPorts = [ 8472 ];
         checkReversePath = "loose";
-        trustedInterfaces = [ "virbr0" "virbr+" ];
+        # Trust both libvirt default bridge (virbr0) and Hydrix bridges (br-*)
+        trustedInterfaces = [ "virbr0" "br-mgmt" "br-pentest" "br-office" "br-browse" "br-dev" ];
       };
 
       nat = {

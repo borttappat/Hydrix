@@ -71,26 +71,28 @@ select_config_interactively() {
     fi
 }
 
-# Detect current specialisation (for machines with router/maximalism modes)
+# Detect current specialisation (for machines with router/lockdown/fallback modes)
 detect_specialisation() {
     local CURRENT_SPEC="none"
 
     # Primary: Check configuration-name file
     if [[ -f /run/current-system/configuration-name ]]; then
-        if grep -q "maximalism" /run/current-system/configuration-name 2>/dev/null; then
-            CURRENT_SPEC="maximalism"
+        if grep -q "lockdown" /run/current-system/configuration-name 2>/dev/null; then
+            CURRENT_SPEC="lockdown"
         elif grep -q "router" /run/current-system/configuration-name 2>/dev/null; then
             CURRENT_SPEC="router"
+        elif grep -q "fallback" /run/current-system/configuration-name 2>/dev/null; then
+            CURRENT_SPEC="fallback"
         fi
     fi
 
     # Fallback: Check for running VMs (only if no label detected)
     if [[ "$CURRENT_SPEC" == "none" ]]; then
+        local LOCKDOWN_ROUTER=$(sudo virsh list --name 2>/dev/null | grep -c "lockdown-router" || true)
         local ROUTER_RUNNING=$(sudo virsh list --name 2>/dev/null | grep -c "router-vm" || true)
-        local PENTEST_RUNNING=$(sudo virsh list --name 2>/dev/null | grep -c "pentest" || true)
 
-        if [[ "$ROUTER_RUNNING" -gt 0 && "$PENTEST_RUNNING" -gt 0 ]]; then
-            CURRENT_SPEC="maximalism"
+        if [[ "$LOCKDOWN_ROUTER" -gt 0 ]]; then
+            CURRENT_SPEC="lockdown"
         elif [[ "$ROUTER_RUNNING" -gt 0 ]]; then
             CURRENT_SPEC="router"
         fi
