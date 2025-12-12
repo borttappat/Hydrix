@@ -28,9 +28,8 @@
     home.file.".Xmodmap".source = ../../configs/xorg/.Xmodmap;
     home.file.".xsessionrc".source = ../../configs/xorg/.xsessionrc;
 
-    # Template files (processed by .xinitrc on X start)
+    # Template files (processed by i3launch.sh on X start)
     home.file.".config/i3/config.template".source = ../../configs/i3/config.template;
-    home.file.".config/i3/config.base".source = ../../configs/i3/config.base;
     home.file.".config/alacritty/alacritty.toml.template".source = ../../configs/alacritty/alacritty.toml.template;
     home.file.".config/polybar/config.ini.template".source = ../../configs/polybar/config.ini.template;
     home.file.".config/dunst/dunstrc.template".source = ../../configs/dunst/dunstrc.template;
