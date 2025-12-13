@@ -6,14 +6,14 @@
 #
 # Architecture:
 #   - Host creates bridges: br-mgmt, br-pentest, br-office, br-browse, br-dev
-#   - Router VM gets NIC via PCI passthrough (enp1s0 = WAN)
-#   - Router VM interfaces: enp2s0=mgmt, enp3s0=pentest, enp4s0=office, enp5s0=browse, enp6s0=dev
+#   - Router VM gets WiFi NIC via PCI passthrough (wlp* = WAN, auto-detected)
+#   - Virtio interfaces (in virt-install order): enp1s0=mgmt, enp2s0=pentest, enp3s0=office, enp4s0=browse, enp5s0=dev
 #
 # Mode detection (automatic):
 #   - Standard mode: Host has 192.168.100.1 on br-mgmt → router uses 192.168.x.x
 #   - Lockdown mode: Host has 10.100.0.1 on br-mgmt → router uses 10.100.x.x with VPN routing
 #
-# The router auto-detects mode by checking what IP the host assigned to br-mgmt
+# WAN interface detection: Automatically finds wireless (wlp*) or first non-virtio interface
 { config, lib, pkgs, modulesPath, ... }:
 
 with lib;
@@ -83,9 +83,9 @@ in {
       enableIPv6 = false;
       networkmanager.enable = false;
 
-      # WAN interface - gets internet via PCI passthrough NIC
-      # This is the physical NIC passed through from the host
-      interfaces.enp1s0.useDHCP = true;
+      # WAN interface is detected dynamically at runtime by router-network-setup
+      # It will be either wlp* (WiFi passthrough) or a physical ethernet device
+      # We don't configure it statically since the name varies by hardware
 
       firewall.enable = false;  # We use nftables directly
     };
@@ -112,13 +112,13 @@ in {
     '';
 
     # Dynamic network configuration based on detected mode
-    # Router VM interfaces map to host bridges:
-    #   enp1s0 = WAN (PCI passthrough NIC)
-    #   enp2s0 = br-mgmt
-    #   enp3s0 = br-pentest
-    #   enp4s0 = br-office
-    #   enp5s0 = br-browse
-    #   enp6s0 = br-dev
+    # Router VM interfaces (virtio NICs added by virt-install in order):
+    #   WAN = wlp* (WiFi passthrough) or other non-virtio interface, auto-detected
+    #   enp1s0 = br-mgmt (first virtio)
+    #   enp2s0 = br-pentest (second virtio)
+    #   enp3s0 = br-office (third virtio)
+    #   enp4s0 = br-browse (fourth virtio)
+    #   enp5s0 = br-dev (fifth virtio)
     systemd.services.router-network-setup = {
       description = "Configure router networking based on mode";
       after = [ "network.target" ];
@@ -135,14 +135,73 @@ in {
         STATE_DIR="/var/lib/hydrix-router"
         mkdir -p "$STATE_DIR"
 
-        # Simple mode detection: check VM name for "lockdown"
+        # Detect WAN interface (WiFi passthrough or first non-virtio interface)
+        detect_wan() {
+          # First, look for wireless interfaces (wlp*, wlan*)
+          for iface in $(ls /sys/class/net/ 2>/dev/null); do
+            if [[ "$iface" == wl* ]]; then
+              echo "$iface"
+              return
+            fi
+          done
+
+          # Fallback: find first interface that's not virtio (enp*) and not lo
+          for iface in $(ls /sys/class/net/ 2>/dev/null); do
+            if [[ "$iface" != "lo" && "$iface" != enp* ]]; then
+              echo "$iface"
+              return
+            fi
+          done
+
+          # Last resort: check for any interface with carrier on physical device
+          for iface in $(ls /sys/class/net/ 2>/dev/null); do
+            if [[ -d "/sys/class/net/$iface/device" && "$iface" != enp* ]]; then
+              echo "$iface"
+              return
+            fi
+          done
+
+          # Default fallback (shouldn't happen with proper passthrough)
+          echo "eth0"
+        }
+
+        WAN_IFACE=$(detect_wan)
+        echo "Detected WAN interface: $WAN_IFACE"
+        echo "$WAN_IFACE" > "$STATE_DIR/wan_interface"
+
+        # Mode detection: determine if we're in standard or lockdown mode
         # The systemd service that starts the VM uses different names:
         #   - router-vm = standard mode (192.168.x.x)
         #   - lockdown-router = lockdown mode (10.100.x.x)
         detect_mode() {
-          # Check hostname - set by libvirt from VM name
+          # Method 1: Check hostname - set by libvirt from VM name
           if hostname | grep -qi "lockdown"; then
             echo "lockdown"
+            return
+          fi
+
+          # Method 2: Check if we can detect host's IP on management bridge
+          # Give network time to come up
+          sleep 2
+
+          # Bring up enp1s0 temporarily to check for host (this is mgmt bridge)
+          ${pkgs.iproute2}/bin/ip link set enp1s0 up 2>/dev/null || true
+
+          # Check for lockdown host IP (10.100.0.1)
+          if ${pkgs.iproute2}/bin/ip neigh show dev enp1s0 2>/dev/null | grep -q "10.100.0.1"; then
+            echo "lockdown"
+            return
+          fi
+
+          # Try ARP ping to detect host IP
+          if ${pkgs.iputils}/bin/arping -c 1 -I enp1s0 10.100.0.1 >/dev/null 2>&1; then
+            echo "lockdown"
+            return
+          fi
+
+          # Method 3: Check /etc/router-mode file (can be set by cloud-init or metadata)
+          if [ -f /etc/router-mode ]; then
+            cat /etc/router-mode
             return
           fi
 
@@ -158,28 +217,46 @@ in {
         echo "Router mode: $MODE"
         echo "$MODE" > "$STATE_DIR/mode"
 
-        # Bring up all LAN interfaces
-        for iface in enp2s0 enp3s0 enp4s0 enp5s0 enp6s0; do
+        # Bring up WAN and get DHCP
+        ${pkgs.iproute2}/bin/ip link set "$WAN_IFACE" up 2>/dev/null || true
+
+        # For WiFi, we need to connect to a network first
+        if [[ "$WAN_IFACE" == wl* ]]; then
+          echo "WAN is WiFi - wpa_supplicant should handle connection"
+          # wpa_supplicant runs separately, just wait for link
+          for i in $(seq 1 30); do
+            if ${pkgs.iproute2}/bin/ip link show "$WAN_IFACE" | grep -q "state UP"; then
+              break
+            fi
+            sleep 1
+          done
+        fi
+
+        # Request DHCP on WAN interface
+        ${pkgs.dhcpcd}/bin/dhcpcd -b "$WAN_IFACE" 2>/dev/null || true
+
+        # Bring up all LAN interfaces (virtio NICs in order)
+        for iface in enp1s0 enp2s0 enp3s0 enp4s0 enp5s0; do
           ${pkgs.iproute2}/bin/ip link set "$iface" up 2>/dev/null || true
         done
 
         case "$MODE" in
           standard)
             # Standard mode: 192.168.x.x networks
-            ${pkgs.iproute2}/bin/ip addr add 192.168.100.253/24 dev enp2s0 2>/dev/null || true  # mgmt
-            ${pkgs.iproute2}/bin/ip addr add 192.168.101.253/24 dev enp3s0 2>/dev/null || true  # pentest
-            ${pkgs.iproute2}/bin/ip addr add 192.168.102.253/24 dev enp4s0 2>/dev/null || true  # office
-            ${pkgs.iproute2}/bin/ip addr add 192.168.103.253/24 dev enp5s0 2>/dev/null || true  # browse
-            ${pkgs.iproute2}/bin/ip addr add 192.168.104.253/24 dev enp6s0 2>/dev/null || true  # dev
+            ${pkgs.iproute2}/bin/ip addr add 192.168.100.253/24 dev enp1s0 2>/dev/null || true  # mgmt
+            ${pkgs.iproute2}/bin/ip addr add 192.168.101.253/24 dev enp2s0 2>/dev/null || true  # pentest
+            ${pkgs.iproute2}/bin/ip addr add 192.168.102.253/24 dev enp3s0 2>/dev/null || true  # office
+            ${pkgs.iproute2}/bin/ip addr add 192.168.103.253/24 dev enp4s0 2>/dev/null || true  # browse
+            ${pkgs.iproute2}/bin/ip addr add 192.168.104.253/24 dev enp5s0 2>/dev/null || true  # dev
             ;;
 
           lockdown)
             # Lockdown mode: 10.100.x.x isolated networks with VPN policy routing
-            ${pkgs.iproute2}/bin/ip addr add 10.100.0.253/24 dev enp2s0 2>/dev/null || true  # mgmt
-            ${pkgs.iproute2}/bin/ip addr add 10.100.1.253/24 dev enp3s0 2>/dev/null || true  # pentest
-            ${pkgs.iproute2}/bin/ip addr add 10.100.2.253/24 dev enp4s0 2>/dev/null || true  # office
-            ${pkgs.iproute2}/bin/ip addr add 10.100.3.253/24 dev enp5s0 2>/dev/null || true  # browse
-            ${pkgs.iproute2}/bin/ip addr add 10.100.4.253/24 dev enp6s0 2>/dev/null || true  # dev
+            ${pkgs.iproute2}/bin/ip addr add 10.100.0.253/24 dev enp1s0 2>/dev/null || true  # mgmt
+            ${pkgs.iproute2}/bin/ip addr add 10.100.1.253/24 dev enp2s0 2>/dev/null || true  # pentest
+            ${pkgs.iproute2}/bin/ip addr add 10.100.2.253/24 dev enp3s0 2>/dev/null || true  # office
+            ${pkgs.iproute2}/bin/ip addr add 10.100.3.253/24 dev enp4s0 2>/dev/null || true  # browse
+            ${pkgs.iproute2}/bin/ip addr add 10.100.4.253/24 dev enp5s0 2>/dev/null || true  # dev
 
             # Set up policy routing rules for VPN routing
             ${pkgs.iproute2}/bin/ip rule del fwmark 100 table pentest 2>/dev/null || true
@@ -193,7 +270,7 @@ in {
             ${pkgs.iproute2}/bin/ip rule add fwmark 103 table dev priority 103
 
             # Default dev network to direct WAN access
-            WAN_GW=$(${pkgs.iproute2}/bin/ip route | grep "default.*enp1s0" | awk '{print $3}')
+            WAN_GW=$(${pkgs.iproute2}/bin/ip route | grep "default.*$WAN_IFACE" | awk '{print $3}')
             if [ -n "$WAN_GW" ]; then
               ${pkgs.iproute2}/bin/ip route add default via "$WAN_GW" table dev 2>/dev/null || true
             fi
@@ -207,7 +284,7 @@ in {
             ;;
         esac
 
-        echo "Network setup complete for $MODE mode"
+        echo "Network setup complete for $MODE mode (WAN: $WAN_IFACE)"
       '';
     };
 
@@ -232,50 +309,57 @@ in {
         server=8.8.8.8
         EOF
 
+        # Interface mapping (virtio NICs in virt-install order):
+        #   enp1s0 = br-mgmt
+        #   enp2s0 = br-pentest
+        #   enp3s0 = br-office
+        #   enp4s0 = br-browse
+        #   enp5s0 = br-dev
+
         case "$MODE" in
           standard)
             cat >> /etc/dnsmasq.d/hydrix.conf << EOF
+        interface=enp1s0
         interface=enp2s0
         interface=enp3s0
         interface=enp4s0
-        interface=enp5s0
-        dhcp-range=enp2s0,192.168.100.10,192.168.100.200,24h
-        dhcp-range=enp3s0,192.168.101.10,192.168.101.200,24h
-        dhcp-range=enp4s0,192.168.102.10,192.168.102.200,24h
-        dhcp-range=enp5s0,192.168.103.10,192.168.103.200,24h
-        dhcp-option=enp2s0,option:router,192.168.100.253
-        dhcp-option=enp2s0,option:dns-server,192.168.100.253
-        dhcp-option=enp3s0,option:router,192.168.101.253
-        dhcp-option=enp3s0,option:dns-server,192.168.101.253
-        dhcp-option=enp4s0,option:router,192.168.102.253
-        dhcp-option=enp4s0,option:dns-server,192.168.102.253
-        dhcp-option=enp5s0,option:router,192.168.103.253
-        dhcp-option=enp5s0,option:dns-server,192.168.103.253
+        dhcp-range=enp1s0,192.168.100.10,192.168.100.200,24h
+        dhcp-range=enp2s0,192.168.101.10,192.168.101.200,24h
+        dhcp-range=enp3s0,192.168.102.10,192.168.102.200,24h
+        dhcp-range=enp4s0,192.168.103.10,192.168.103.200,24h
+        dhcp-option=enp1s0,option:router,192.168.100.253
+        dhcp-option=enp1s0,option:dns-server,192.168.100.253
+        dhcp-option=enp2s0,option:router,192.168.101.253
+        dhcp-option=enp2s0,option:dns-server,192.168.101.253
+        dhcp-option=enp3s0,option:router,192.168.102.253
+        dhcp-option=enp3s0,option:dns-server,192.168.102.253
+        dhcp-option=enp4s0,option:router,192.168.103.253
+        dhcp-option=enp4s0,option:dns-server,192.168.103.253
         EOF
             ;;
 
           lockdown)
             cat >> /etc/dnsmasq.d/hydrix.conf << EOF
+        interface=enp1s0
         interface=enp2s0
         interface=enp3s0
         interface=enp4s0
         interface=enp5s0
-        interface=enp6s0
-        dhcp-range=enp2s0,10.100.0.10,10.100.0.200,24h
-        dhcp-range=enp3s0,10.100.1.10,10.100.1.200,24h
-        dhcp-range=enp4s0,10.100.2.10,10.100.2.200,24h
-        dhcp-range=enp5s0,10.100.3.10,10.100.3.200,24h
-        dhcp-range=enp6s0,10.100.4.10,10.100.4.200,24h
-        dhcp-option=enp2s0,option:router,10.100.0.253
-        dhcp-option=enp2s0,option:dns-server,10.100.0.253
-        dhcp-option=enp3s0,option:router,10.100.1.253
-        dhcp-option=enp3s0,option:dns-server,10.100.1.253
-        dhcp-option=enp4s0,option:router,10.100.2.253
-        dhcp-option=enp4s0,option:dns-server,10.100.2.253
-        dhcp-option=enp5s0,option:router,10.100.3.253
-        dhcp-option=enp5s0,option:dns-server,10.100.3.253
-        dhcp-option=enp6s0,option:router,10.100.4.253
-        dhcp-option=enp6s0,option:dns-server,10.100.4.253
+        dhcp-range=enp1s0,10.100.0.10,10.100.0.200,24h
+        dhcp-range=enp2s0,10.100.1.10,10.100.1.200,24h
+        dhcp-range=enp3s0,10.100.2.10,10.100.2.200,24h
+        dhcp-range=enp4s0,10.100.3.10,10.100.3.200,24h
+        dhcp-range=enp5s0,10.100.4.10,10.100.4.200,24h
+        dhcp-option=enp1s0,option:router,10.100.0.253
+        dhcp-option=enp1s0,option:dns-server,10.100.0.253
+        dhcp-option=enp2s0,option:router,10.100.1.253
+        dhcp-option=enp2s0,option:dns-server,10.100.1.253
+        dhcp-option=enp3s0,option:router,10.100.2.253
+        dhcp-option=enp3s0,option:dns-server,10.100.2.253
+        dhcp-option=enp4s0,option:router,10.100.3.253
+        dhcp-option=enp4s0,option:dns-server,10.100.3.253
+        dhcp-option=enp5s0,option:router,10.100.4.253
+        dhcp-option=enp5s0,option:dns-server,10.100.4.253
         EOF
             ;;
         esac
@@ -301,14 +385,16 @@ in {
       };
       script = ''
         MODE=$(cat /var/lib/hydrix-router/mode 2>/dev/null || echo "standard")
-        WAN="enp1s0"
+        WAN=$(cat /var/lib/hydrix-router/wan_interface 2>/dev/null || echo "eth0")
+
+        echo "Configuring firewall for $MODE mode (WAN: $WAN)"
 
         # Flush existing rules
         ${pkgs.nftables}/bin/nft flush ruleset 2>/dev/null || true
 
         case "$MODE" in
           standard)
-            ${pkgs.nftables}/bin/nft -f - << 'EOF'
+            ${pkgs.nftables}/bin/nft -f - << EOF
         table inet router {
           chain input {
             type filter hook input priority filter; policy drop;
@@ -325,16 +411,13 @@ in {
 
           chain postrouting {
             type nat hook postrouting priority srcnat; policy accept;
-            oifname "enp1s0" masquerade
+            oifname "$WAN" masquerade
           }
         }
         EOF
             ;;
 
           lockdown)
-            # Get VPN interface names
-            VPN_IFACES=$(ip -o link show | awk -F': ' '{print $2}' | grep -E '^(wg-|tun)' | tr '\n' ',' | sed 's/,$//')
-
             ${pkgs.nftables}/bin/nft -f - << EOF
         table inet router {
           chain prerouting {
@@ -372,21 +455,21 @@ in {
             oifname "tun*" accept
 
             # Allow marked traffic to WAN (for "direct" assignments)
-            meta mark 103 oifname "enp1s0" accept
+            meta mark 103 oifname "$WAN" accept
           }
 
           chain postrouting {
             type nat hook postrouting priority srcnat; policy accept;
             oifname "wg-*" masquerade
             oifname "tun*" masquerade
-            oifname "enp1s0" masquerade
+            oifname "$WAN" masquerade
           }
         }
         EOF
             ;;
         esac
 
-        echo "Firewall configured for $MODE mode"
+        echo "Firewall configured for $MODE mode (WAN: $WAN)"
       '';
     };
 
@@ -428,11 +511,23 @@ in {
       nano
       tmux
       git
+      dhcpcd  # For dynamic WAN IP
+      wpa_supplicant  # For WiFi WAN
+      iw  # WiFi diagnostics
+      wireless-tools  # Additional WiFi tools
 
       # VPN management scripts
       (writeShellScriptBin "vpn-assign" (builtins.readFile ../scripts/vpn-assign.sh))
       (writeShellScriptBin "vpn-status" (builtins.readFile ../scripts/vpn-status.sh))
     ];
+
+    # WiFi support for WAN (wpa_supplicant)
+    # Config should be placed in /etc/wpa_supplicant/wpa_supplicant.conf
+    networking.wireless = {
+      enable = true;
+      # Allow wpa_supplicant to manage all wireless interfaces
+      interfaces = [ ];  # Empty = manage all
+    };
 
     # Config directories
     systemd.tmpfiles.rules = [
@@ -441,6 +536,7 @@ in {
       "d /var/lib/hydrix-vpn 0755 root root -"
       "d /var/lib/hydrix-router 0755 root root -"
       "d /etc/dnsmasq.d 0755 root root -"
+      "d /etc/wpa_supplicant 0700 root root -"
     ];
 
     # Banner service

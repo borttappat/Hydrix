@@ -329,30 +329,54 @@ generate_consolidated_config() {
   # Router VM autostart service
   systemd.services.router-vm-autostart = {
     description = "Auto-start router VM with NIC passthrough";
-    after = [ "libvirtd.service" "network.target" ];
+    after = [ "libvirtd.service" "network.target" "sys-devices-virtual-net-br\x2dmgmt.device" ];
     wants = [ "libvirtd.service" ];
+    requires = [ "sys-devices-virtual-net-br\x2dmgmt.device" ];
     wantedBy = [ "multi-user.target" ];
     serviceConfig = {
       Type = "oneshot";
       RemainAfterExit = true;
-      TimeoutStartSec = "120s";
+      TimeoutStartSec = "180s";
     };
     script = ''
+      set -euo pipefail
+
       VM_NAME="router-vm"
       VM_IMAGE="/var/lib/libvirt/images/router-vm.qcow2"
       PCI_ADDR="${PRIMARY_PCI#0000:}"
 
-      sleep 3
+      log() { echo "[router-vm-autostart] \$*"; }
 
+      # Wait for all bridges to exist (with timeout)
+      log "Waiting for bridges..."
+      TIMEOUT=60
+      ELAPSED=0
+      for br in br-mgmt br-pentest br-office br-browse br-dev; do
+        while ! /run/current-system/sw/bin/ip link show "\$br" >/dev/null 2>&1; do
+          if [ \$ELAPSED -ge \$TIMEOUT ]; then
+            log "ERROR: Timeout waiting for bridge \$br"
+            exit 1
+          fi
+          sleep 1
+          ELAPSED=\$((ELAPSED + 1))
+        done
+        log "  ✓ \$br exists"
+      done
+
+      # Check for router VM image
+      if [ ! -f "\$VM_IMAGE" ]; then
+        log "ERROR: Router VM image not found at \$VM_IMAGE"
+        log "Run: nix build ~/Hydrix#router-vm && sudo cp result/nixos.qcow2 \$VM_IMAGE"
+        exit 1
+      fi
+
+      # Define VM if not already defined
       if ! /run/current-system/sw/bin/virsh dominfo "\$VM_NAME" >/dev/null 2>&1; then
-        echo "Defining router VM..."
+        log "Defining router VM with PCI passthrough (\$PCI_ADDR)..."
 
-        if [ ! -f "\$VM_IMAGE" ]; then
-          echo "ERROR: Router VM image not found at \$VM_IMAGE"
-          echo "Router VM will not start. System still boots but without network."
-          exit 0
-        fi
-
+        # NOTE: Network interfaces MUST come before hostdev to ensure
+        # virtio NICs get lower PCI slots (enp1s0, enp2s0, etc.)
+        # WiFi passthrough will be named wlp* (wireless naming convention)
         /run/current-system/sw/bin/virt-install \
           --connect qemu:///system \
           --name "\$VM_NAME" \
@@ -361,12 +385,12 @@ generate_consolidated_config() {
           --disk "path=\$VM_IMAGE,format=qcow2,bus=virtio" \
           --import \
           --os-variant nixos-unstable \
-          --hostdev "\$PCI_ADDR" \
           --network bridge=br-mgmt,model=virtio \
           --network bridge=br-pentest,model=virtio \
           --network bridge=br-office,model=virtio \
           --network bridge=br-browse,model=virtio \
           --network bridge=br-dev,model=virtio \
+          --hostdev "\$PCI_ADDR" \
           --graphics spice \
           --video virtio \
           --noautoconsole \
@@ -374,15 +398,32 @@ generate_consolidated_config() {
           --print-xml > /tmp/router-vm.xml
 
         /run/current-system/sw/bin/virsh define /tmp/router-vm.xml
-        rm /tmp/router-vm.xml
+        rm -f /tmp/router-vm.xml
+        log "✓ Router VM defined"
+      else
+        log "Router VM already defined"
       fi
 
-      if [ "\$(/run/current-system/sw/bin/virsh domstate "\$VM_NAME" 2>/dev/null)" != "running" ]; then
+      # Start VM if not running
+      VM_STATE=\$(/run/current-system/sw/bin/virsh domstate "\$VM_NAME" 2>/dev/null || echo "unknown")
+      if [ "\$VM_STATE" != "running" ]; then
+        log "Starting router VM..."
         /run/current-system/sw/bin/virsh start "\$VM_NAME"
       fi
 
+      # Enable autostart
       /run/current-system/sw/bin/virsh autostart "\$VM_NAME" 2>/dev/null || true
-      echo "Router VM started (standard mode)"
+
+      # Verify VM is running
+      sleep 2
+      VM_STATE=\$(/run/current-system/sw/bin/virsh domstate "\$VM_NAME" 2>/dev/null || echo "unknown")
+      if [ "\$VM_STATE" = "running" ]; then
+        log "✓ Router VM running (standard mode)"
+        log "  Management: 192.168.100.253"
+      else
+        log "WARNING: Router VM state is \$VM_STATE"
+        exit 1
+      fi
     '';
   };
 
@@ -480,27 +521,54 @@ generate_consolidated_config() {
     # Lockdown router VM autostart (uses different VM name for lockdown mode)
     systemd.services.lockdown-router-autostart = {
       description = "Auto-start lockdown router VM with NIC passthrough";
-      after = [ "libvirtd.service" "network.target" ];
+      after = [ "libvirtd.service" "network.target" "sys-devices-virtual-net-br\x2dmgmt.device" ];
       wants = [ "libvirtd.service" ];
+      requires = [ "sys-devices-virtual-net-br\x2dmgmt.device" ];
       wantedBy = [ "multi-user.target" ];
       serviceConfig = {
         Type = "oneshot";
         RemainAfterExit = true;
-        TimeoutStartSec = "120s";
+        TimeoutStartSec = "180s";
       };
       script = ''
+        set -euo pipefail
+
         VM_NAME="lockdown-router"
         VM_IMAGE="/var/lib/libvirt/images/router-vm.qcow2"
         PCI_ADDR="${PRIMARY_PCI#0000:}"
 
-        sleep 3
+        log() { echo "[lockdown-router-autostart] \$*"; }
 
+        # Wait for all bridges to exist (with timeout)
+        log "Waiting for bridges..."
+        TIMEOUT=60
+        ELAPSED=0
+        for br in br-mgmt br-pentest br-office br-browse br-dev; do
+          while ! /run/current-system/sw/bin/ip link show "\$br" >/dev/null 2>&1; do
+            if [ \$ELAPSED -ge \$TIMEOUT ]; then
+              log "ERROR: Timeout waiting for bridge \$br"
+              exit 1
+            fi
+            sleep 1
+            ELAPSED=\$((ELAPSED + 1))
+          done
+          log "  ✓ \$br exists"
+        done
+
+        # Check for router VM image
+        if [ ! -f "\$VM_IMAGE" ]; then
+          log "ERROR: Router VM image not found at \$VM_IMAGE"
+          log "Run: nix build ~/Hydrix#router-vm && sudo cp result/nixos.qcow2 \$VM_IMAGE"
+          exit 1
+        fi
+
+        # Define VM if not already defined
         if ! /run/current-system/sw/bin/virsh dominfo "\$VM_NAME" >/dev/null 2>&1; then
-          if [ ! -f "\$VM_IMAGE" ]; then
-            echo "ERROR: Router VM image not found at \$VM_IMAGE"
-            exit 1
-          fi
+          log "Defining lockdown router VM with PCI passthrough (\$PCI_ADDR)..."
 
+          # NOTE: Network interfaces MUST come before hostdev to ensure
+          # virtio NICs get lower PCI slots (enp1s0, enp2s0, etc.)
+          # WiFi passthrough will be named wlp* (wireless naming convention)
           /run/current-system/sw/bin/virt-install \
             --connect qemu:///system \
             --name "\$VM_NAME" \
@@ -509,12 +577,12 @@ generate_consolidated_config() {
             --disk "path=\$VM_IMAGE,format=qcow2,bus=virtio" \
             --import \
             --os-variant nixos-unstable \
-            --hostdev "\$PCI_ADDR" \
             --network bridge=br-mgmt,model=virtio \
             --network bridge=br-pentest,model=virtio \
             --network bridge=br-office,model=virtio \
             --network bridge=br-browse,model=virtio \
             --network bridge=br-dev,model=virtio \
+            --hostdev "\$PCI_ADDR" \
             --graphics spice \
             --video virtio \
             --noautoconsole \
@@ -522,15 +590,32 @@ generate_consolidated_config() {
             --print-xml > /tmp/lockdown-router.xml
 
           /run/current-system/sw/bin/virsh define /tmp/lockdown-router.xml
-          rm /tmp/lockdown-router.xml
+          rm -f /tmp/lockdown-router.xml
+          log "✓ Lockdown router VM defined"
+        else
+          log "Lockdown router VM already defined"
         fi
 
-        if [ "\$(/run/current-system/sw/bin/virsh domstate "\$VM_NAME" 2>/dev/null)" != "running" ]; then
+        # Start VM if not running
+        VM_STATE=\$(/run/current-system/sw/bin/virsh domstate "\$VM_NAME" 2>/dev/null || echo "unknown")
+        if [ "\$VM_STATE" != "running" ]; then
+          log "Starting lockdown router VM..."
           /run/current-system/sw/bin/virsh start "\$VM_NAME"
         fi
 
+        # Enable autostart
         /run/current-system/sw/bin/virsh autostart "\$VM_NAME" 2>/dev/null || true
-        echo "Lockdown router started"
+
+        # Verify VM is running
+        sleep 2
+        VM_STATE=\$(/run/current-system/sw/bin/virsh domstate "\$VM_NAME" 2>/dev/null || echo "unknown")
+        if [ "\$VM_STATE" = "running" ]; then
+          log "✓ Lockdown router VM running"
+          log "  Management: 10.100.0.253"
+        else
+          log "WARNING: Lockdown router VM state is \$VM_STATE"
+          exit 1
+        fi
       '';
     };
 
