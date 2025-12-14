@@ -44,61 +44,6 @@
     # For installing Hydrix on physical machines
     nixosConfigurations = {
 
-      # Zephyrus ASUS laptop - full host system
-      # Build with: ./nixbuild.sh (hostname: zeph)
-      # Lockdown mode: nixos-rebuild switch --flake '.#zeph' --specialisation lockdown
-      zeph = nixpkgs.lib.nixosSystem {
-        system = "x86_64-linux";
-        modules = [
-          { nixpkgs.config.allowUnfree = true; }
-          { nixpkgs.overlays = [ overlay-unstable ]; }
-          nix-index-database.nixosModules.nix-index
-          home-manager.nixosModules.home-manager  # Add home-manager support
-
-          # Base system configuration
-          ./modules/base/configuration.nix
-          ./modules/base/hardware-config.nix
-
-          # Machine-specific configuration
-          # This imports ../../generated/modules/zephyrus-consolidated.nix internally
-          # Also imports theming/dynamic.nix and desktop/xinitrc.nix
-          ./profiles/machines/zephyrus.nix
-
-          # Core functionality modules (matching dotfiles exactly)
-          ./modules/wm/i3.nix
-          ./modules/shell/packages.nix
-          ./modules/base/services.nix
-          ./modules/base/users.nix
-          ./modules/theming/colors.nix
-          #./modules/hosts.nix  # Commented out in dotfiles
-          ./modules/base/virt.nix
-          #./modules/scripts.nix  # Commented out in dotfiles
-          ./modules/base/audio.nix
-          ./modules/desktop/firefox.nix
-
-          # Additional feature modules (all commented out in dotfiles)
-          #./modules/pentesting.nix
-          #./modules/proxychains.nix
-          #./modules/dev.nix
-          #./modules/steam.nix
-
-          # Lockdown specialisation - boot into isolated mode
-          # Select from GRUB menu or: nixos-rebuild switch --specialisation lockdown
-          {
-            specialisation.lockdown.configuration = {
-              imports = [ ./modules/lockdown/host-lockdown.nix ];
-              hydrix.lockdown = {
-                enable = true;
-                hostHasInternet = false;
-                # Set this to your WiFi/Ethernet interface for WAN bridging
-                # wanInterface = "wlp2s0";
-              };
-              system.nixos.tags = [ "lockdown" ];
-            };
-          }
-        ];
-      };
-
       # Lightweight host - runs VMs, minimal desktop
       host = nixpkgs.lib.nixosSystem {
         system = "x86_64-linux";
