@@ -114,23 +114,24 @@ in {
     ) (filterAttrs (_: b: b.enable) cfg.bridges);
 
     # Configure bridge networks - NO IP on host side (true isolation)
-    systemd.network.networks = mapAttrs' (name: bridgeCfg:
-      nameValuePair "20-${name}" {
-        matchConfig.Name = name;
-        networkConfig = {
-          # Host gets NO IP on these bridges - only VMs and router have IPs
-          # This prevents host from communicating on VM networks
-          ConfigureWithoutCarrier = true;
-          LinkLocalAddressing = "no";
-        };
-        linkConfig = {
-          RequiredForOnline = "no";
-        };
-      }
-    ) (filterAttrs (_: b: b.enable) cfg.bridges);
-
-    # If we have a WAN interface, add it to br-wan bridge for router VM
     systemd.network.networks = mkMerge [
+      # All enabled bridges get basic config
+      (mapAttrs' (name: bridgeCfg:
+        nameValuePair "20-${name}" {
+          matchConfig.Name = name;
+          networkConfig = {
+            # Host gets NO IP on these bridges - only VMs and router have IPs
+            # This prevents host from communicating on VM networks
+            ConfigureWithoutCarrier = true;
+            LinkLocalAddressing = "no";
+          };
+          linkConfig = {
+            RequiredForOnline = "no";
+          };
+        }
+      ) (filterAttrs (_: b: b.enable) cfg.bridges))
+
+      # If we have a WAN interface, add it to br-wan bridge for router VM
       (mkIf (cfg.wanBridgeInterface != null) {
         "10-wan-to-bridge" = {
           matchConfig.Name = cfg.wanBridgeInterface;
