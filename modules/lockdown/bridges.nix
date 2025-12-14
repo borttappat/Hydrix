@@ -180,9 +180,7 @@ in {
 
     # Kernel parameters for bridge filtering
     boot.kernel.sysctl = {
-      # Disable IP forwarding on host - router VM handles this
-      "net.ipv4.ip_forward" = mkIf (!cfg.hostHasInternet) (mkForce 0);
-
+      # Note: IP forwarding is controlled by host-lockdown.nix
       # Bridge netfilter settings
       "net.bridge.bridge-nf-call-iptables" = 0;
       "net.bridge.bridge-nf-call-ip6tables" = 0;
