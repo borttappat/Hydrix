@@ -372,6 +372,10 @@ generate_machine_profile() {
   specialisation.fallback.configuration = {
     system.nixos.label = lib.mkForce "fallback";
 
+    # Remove VFIO kernel parameters to release WiFi card from VFIO
+    boot.kernelParams = lib.mkOverride 10 [];
+    boot.kernelModules = lib.mkOverride 10 [];
+
     # Re-enable WiFi driver (un-blacklist)
     boot.blacklistedKernelModules = lib.mkOverride 10 [];
 
