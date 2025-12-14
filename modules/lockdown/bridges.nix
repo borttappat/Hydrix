@@ -107,10 +107,11 @@ in {
           Name = name;
           Kind = "bridge";
         };
-        bridgeConfig = {
-          STP = "no";  # No spanning tree for isolated networks
-          ForwardDelay = "0";
-        };
+        extraConfig = ''
+          [Bridge]
+          STP=no
+          ForwardDelay=0
+        '';
       }
     ) (filterAttrs (_: b: b.enable) cfg.bridges);
 
