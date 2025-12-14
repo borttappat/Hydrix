@@ -94,7 +94,8 @@ in {
 
   config = mkIf cfg.enable {
     # Disable NetworkManager on host - we manage bridges manually
-    networking.networkmanager.enable = mkForce false;
+    # Use mkDefault so host-lockdown.nix can override with mkForce if needed
+    networking.networkmanager.enable = mkDefault false;
 
     # Enable systemd-networkd for bridge management
     systemd.network.enable = true;
