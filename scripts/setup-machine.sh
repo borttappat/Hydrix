@@ -271,9 +271,8 @@ generate_machine_profile() {
   # Router VM autostart service
   systemd.services.router-vm-autostart = {
     description = "Auto-start router VM with NIC passthrough";
-    after = [ "libvirtd.service" "network.target" "sys-devices-virtual-net-br\\x2dmgmt.device" ];
-    wants = [ "libvirtd.service" ];
-    requires = [ "sys-devices-virtual-net-br\\x2dmgmt.device" ];
+    after = [ "libvirtd.service" "network.target" "network-online.target" ];
+    wants = [ "libvirtd.service" "network-online.target" ];
     wantedBy = [ "multi-user.target" ];
     serviceConfig = {
       Type = "oneshot";
@@ -312,8 +311,24 @@ generate_machine_profile() {
         exit 1
       fi
 
-      # Define VM if not already defined
+      # Check if VM needs to be (re)defined
+      NEEDS_DEFINE=false
       if ! /run/current-system/sw/bin/virsh dominfo "''\$VM_NAME" >/dev/null 2>&1; then
+        NEEDS_DEFINE=true
+        log "VM not defined - will create with PCI passthrough"
+      else
+        # VM exists - check if it has passthrough
+        if /run/current-system/sw/bin/virsh dumpxml "''\$VM_NAME" 2>/dev/null | grep -q "<hostdev"; then
+          log "Router VM already defined with passthrough"
+        else
+          log "Router VM exists but WITHOUT passthrough - redefining..."
+          NEEDS_DEFINE=true
+          /run/current-system/sw/bin/virsh destroy "''\$VM_NAME" 2>/dev/null || true
+          /run/current-system/sw/bin/virsh undefine "''\$VM_NAME" 2>/dev/null || true
+        fi
+      fi
+
+      if [ "''\$NEEDS_DEFINE" = true ]; then
         log "Defining router VM with PCI passthrough (''\$PCI_ADDR)..."
 
         /run/current-system/sw/bin/virt-install \\
@@ -338,9 +353,7 @@ generate_machine_profile() {
 
         /run/current-system/sw/bin/virsh define /tmp/router-vm.xml
         rm -f /tmp/router-vm.xml
-        log "+ Router VM defined"
-      else
-        log "Router VM already defined"
+        log "+ Router VM defined with passthrough"
       fi
 
       # Start VM if not running

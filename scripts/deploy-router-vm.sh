@@ -61,40 +61,68 @@ done
 detect_wifi_hardware() {
     log "Detecting WiFi hardware..."
 
-    # Find wireless interfaces
+    # Strategy 1: Use hardware-results.env if available (works in router mode)
+    if [[ -f "$PROJECT_DIR/hardware-results.env" ]]; then
+        source "$PROJECT_DIR/hardware-results.env"
+
+        if [[ -n "${PRIMARY_PCI:-}" && -n "${PRIMARY_ID:-}" ]]; then
+            WIFI_PCI="$PRIMARY_PCI"
+            WIFI_PCI_SHORT="${WIFI_PCI#0000:}"
+            WIFI_DEVICE_ID="$PRIMARY_ID"
+            WIFI_INTERFACE="${PRIMARY_INTERFACE:-unknown}"
+
+            log "  Using hardware-results.env:"
+            log "  Interface: $WIFI_INTERFACE"
+            log "  PCI Address: $WIFI_PCI"
+            log "  Device ID: $WIFI_DEVICE_ID"
+            return 0
+        fi
+    fi
+
+    # Strategy 2: Direct PCI scan for WiFi devices (works even if bound to VFIO)
+    local pci_line
+    pci_line=$(lspci -nn -d ::0280 2>/dev/null | head -1)  # Class 0280 = Network controller: Wireless
+
+    if [[ -n "$pci_line" ]]; then
+        local pci_addr
+        pci_addr=$(echo "$pci_line" | awk '{print $1}')
+        WIFI_PCI="0000:$pci_addr"
+        WIFI_PCI_SHORT="$pci_addr"
+        WIFI_DEVICE_ID=$(echo "$pci_line" | grep -o '\[[0-9a-f]\{4\}:[0-9a-f]\{4\}\]' | tr -d '[]')
+
+        log "  Found via PCI scan:"
+        log "  PCI Address: $WIFI_PCI"
+        log "  Device ID: $WIFI_DEVICE_ID"
+        return 0
+    fi
+
+    # Strategy 3: Try to find active WiFi interface (only works if not in router mode)
     local wifi_interface
     wifi_interface=$(find /sys/class/net -maxdepth 1 -name "wl*" -exec basename {} \; 2>/dev/null | head -1)
 
     if [[ -z "$wifi_interface" ]]; then
-        # Try alternative detection
         wifi_interface=$(iw dev 2>/dev/null | awk '/Interface/{print $2}' | head -1)
     fi
 
-    if [[ -z "$wifi_interface" ]]; then
-        warn "No WiFi interface found - VM will be created without passthrough"
-        return 1
+    if [[ -n "$wifi_interface" ]]; then
+        local pci_path
+        pci_path=$(readlink -f "/sys/class/net/$wifi_interface/device" 2>/dev/null)
+
+        if [[ -n "$pci_path" ]]; then
+            WIFI_PCI=$(basename "$pci_path")
+            WIFI_PCI_SHORT="${WIFI_PCI#0000:}"
+            WIFI_DEVICE_ID=$(lspci -n -s "$WIFI_PCI" 2>/dev/null | awk '{print $3}')
+
+            log "  Found via network interface:"
+            log "  Interface: $wifi_interface"
+            log "  PCI Address: $WIFI_PCI"
+            log "  Device ID: $WIFI_DEVICE_ID"
+            return 0
+        fi
     fi
 
-    # Get PCI address
-    local pci_path
-    pci_path=$(readlink -f "/sys/class/net/$wifi_interface/device" 2>/dev/null)
-
-    if [[ -z "$pci_path" ]]; then
-        warn "Could not determine PCI address for $wifi_interface"
-        return 1
-    fi
-
-    WIFI_PCI=$(basename "$pci_path")
-    WIFI_PCI_SHORT="${WIFI_PCI#0000:}"
-
-    # Get device ID for VFIO
-    WIFI_DEVICE_ID=$(lspci -n -s "$WIFI_PCI" 2>/dev/null | awk '{print $3}')
-
-    log "  Interface: $wifi_interface"
-    log "  PCI Address: $WIFI_PCI"
-    log "  Device ID: $WIFI_DEVICE_ID"
-
-    return 0
+    warn "No WiFi hardware detected - VM will be created without passthrough"
+    return 1
 }
 
 # Build router VM image if needed
