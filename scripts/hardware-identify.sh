@@ -5,11 +5,14 @@ set -euo pipefail
 
 # Check if we have existing hardware results and are in router mode
 if [[ -f "hardware-results.env" ]]; then
-    if ip addr show virbr1 >/dev/null 2>&1 && [[ "$(ip route | grep default | awk '{print $5}' | head -1)" == "virbr1" ]]; then
-        echo "Router mode detected - using existing hardware results"
+    # Check if we're likely in router mode (any virbr interface has default route)
+    default_iface=$(ip route | grep default | awk '{print $5}' | head -1)
+    if [[ "$default_iface" == virbr* ]] || [[ "$default_iface" == br-* ]]; then
+        echo "Router mode detected (default route via $default_iface) - using existing hardware results"
         source hardware-results.env
         if [[ -n "${PRIMARY_INTERFACE:-}" && -n "${PRIMARY_PCI:-}" && -n "${PRIMARY_ID:-}" ]]; then
             echo "✓ Found: $PRIMARY_INTERFACE ($PRIMARY_ID) on $PRIMARY_PCI"
+            echo "✓ Driver: ${PRIMARY_DRIVER:-unknown}"
             echo "✓ Compatibility: ${COMPATIBILITY_SCORE:-0}/10"
             exit 0
         fi
@@ -49,8 +52,19 @@ else
 fi
 echo
 
-# 2. Find all network interfaces
+# 2. Find all network interfaces (prioritize physical WiFi over virtual interfaces)
 echo "2. Network Interfaces:"
+
+# First pass: Find ALL physical WiFi interfaces (wlp*, wlan*, wlo*)
+WIFI_CANDIDATES=()
+while read -r interface; do
+    if [[ "$interface" == wl* ]] && [[ -d "/sys/class/net/$interface/device" ]]; then
+        WIFI_CANDIDATES+=("$interface")
+    fi
+done < <(ls /sys/class/net/)
+
+# Second pass: Examine all interfaces and collect data
+declare -A PHYSICAL_NICS=()
 while read -r interface; do
         # Initialize variables for each interface
         pci_slot="unknown"
@@ -58,41 +72,47 @@ while read -r interface; do
         driver="unknown"
     if [[ "$interface" != "lo" ]]; then
         echo "   Interface: $interface"
-        
+
         # Check if it's a physical device
         if [[ -d "/sys/class/net/$interface/device" ]]; then
             # Get PCI slot
             pci_slot=$(basename "$(readlink "/sys/class/net/$interface/device" 2>/dev/null)" 2>/dev/null || echo "unknown")
             echo "     PCI Slot: $pci_slot"
-            
+
             # Get device info
             if [[ "$pci_slot" != "unknown" ]]; then
                 device_info=$(lspci -nn -s "$pci_slot" 2>/dev/null || echo "Device info not available")
                 echo "     Device: $device_info"
-                
+
                 # Get vendor:device ID
                 vendor_device=$(echo "$device_info" | grep -o '\[[0-9a-f]\{4\}:[0-9a-f]\{4\}\]' | tr -d '[]' || echo "unknown")
                 echo "     ID: $vendor_device"
-                
+
                 # Check driver
                 if [[ -r "/sys/class/net/$interface/device/uevent" ]]; then
                     driver=$(grep "DRIVER=" "/sys/class/net/$interface/device/uevent" | cut -d= -f2 2>/dev/null || echo "unknown")
                     echo "     Driver: $driver"
                 fi
+
+                # Store physical NIC data for later analysis
+                PHYSICAL_NICS[$interface]="$pci_slot|$vendor_device|$driver"
             fi
         else
             echo "     Type: Virtual interface"
         fi
-        
+
         # Check if interface is up and has connectivity
         if ip link show "$interface" | grep -q "state UP"; then
             echo "     Status: UP"
-            if [[ "$interface" == $(ip route | grep default | awk '{print $5}' | head -1) ]]; then
-                echo "     Role: Primary (default route)"
+            # Only mark as primary if it's from default route AND physical
+            if [[ "$interface" == $(ip route | grep default | awk '{print $5}' | head -1) ]] && [[ -d "/sys/class/net/$interface/device" ]]; then
+                echo "     Role: Primary (default route, physical)"
                 PRIMARY_INTERFACE="$interface"
                 PRIMARY_PCI="$pci_slot"
                 PRIMARY_ID="$vendor_device"
                 PRIMARY_DRIVER="$driver"
+            elif [[ "$interface" == $(ip route | grep default | awk '{print $5}' | head -1) ]]; then
+                echo "     Role: Default route (virtual - will check physical NICs)"
             fi
         else
             echo "     Status: DOWN"
@@ -100,6 +120,88 @@ while read -r interface; do
         echo
     fi
 done < <(ls /sys/class/net/)
+
+# Smart selection: If PRIMARY is not set or is virtual, try to find the real WiFi NIC
+# Priority: WiFi interfaces > Ethernet with PCI passthrough capability
+if [[ -z "${PRIMARY_INTERFACE:-}" ]] || [[ ! -d "/sys/class/net/${PRIMARY_INTERFACE}/device" ]]; then
+    echo "Primary interface not detected or is virtual. Analyzing physical NICs..."
+
+    # Strategy 1: Use WiFi if found
+    if [[ ${#WIFI_CANDIDATES[@]} -gt 0 ]]; then
+        for wifi in "${WIFI_CANDIDATES[@]}"; do
+            if [[ -n "${PHYSICAL_NICS[$wifi]:-}" ]]; then
+                IFS='|' read -r pci_slot vendor_device driver <<< "${PHYSICAL_NICS[$wifi]}"
+                PRIMARY_INTERFACE="$wifi"
+                PRIMARY_PCI="$pci_slot"
+                PRIMARY_ID="$vendor_device"
+                PRIMARY_DRIVER="$driver"
+                echo "   → Selected WiFi interface: $wifi (PCI: $pci_slot)"
+                break
+            fi
+        done
+    fi
+
+    # Strategy 2: If still no primary, use first physical ethernet NIC
+    if [[ -z "${PRIMARY_INTERFACE:-}" ]]; then
+        for iface in "${!PHYSICAL_NICS[@]}"; do
+            if [[ "$iface" == en* || "$iface" == eth* ]]; then
+                IFS='|' read -r pci_slot vendor_device driver <<< "${PHYSICAL_NICS[$iface]}"
+                PRIMARY_INTERFACE="$iface"
+                PRIMARY_PCI="$pci_slot"
+                PRIMARY_ID="$vendor_device"
+                PRIMARY_DRIVER="$driver"
+                echo "   → Selected Ethernet interface: $iface (PCI: $pci_slot)"
+                break
+            fi
+        done
+    fi
+
+    # Strategy 3: If STILL no primary (device might be bound to VFIO already), scan PCI directly
+    if [[ -z "${PRIMARY_INTERFACE:-}" ]]; then
+        echo "   No active network interfaces found. Checking PCI devices for WiFi/Network cards..."
+
+        # Look for Network controllers in lspci (class 0280 = wireless, 0200 = ethernet)
+        while IFS= read -r line; do
+            # Extract PCI slot and device info
+            pci_addr=$(echo "$line" | awk '{print $1}')
+            device_desc=$(echo "$line" | cut -d' ' -f2-)
+
+            # Prefer wireless over ethernet
+            if echo "$line" | grep -qi "wireless\|wi-fi\|802.11"; then
+                # Extract vendor:device ID
+                vendor_device=$(echo "$line" | grep -o '\[[0-9a-f]\{4\}:[0-9a-f]\{4\}\]' | tr -d '[]')
+
+                # Check if bound to vfio-pci (means it's already passed through)
+                if [[ -e "/sys/bus/pci/devices/0000:$pci_addr/driver" ]]; then
+                    current_driver=$(basename "$(readlink "/sys/bus/pci/devices/0000:$pci_addr/driver" 2>/dev/null)" || echo "unknown")
+                else
+                    current_driver="none"
+                fi
+
+                # Infer interface name (wlp format: wlp<bus>s<slot>f<func>)
+                bus=$(echo "$pci_addr" | cut -d: -f1)
+                slot=$(echo "$pci_addr" | cut -d: -f2 | cut -d. -f1)
+                func=$(echo "$pci_addr" | cut -d. -f2)
+                inferred_name="wlp${bus#0}s${slot#0}"
+                if [[ "$func" != "0" ]]; then
+                    inferred_name="${inferred_name}f${func}"
+                fi
+
+                PRIMARY_INTERFACE="$inferred_name"
+                PRIMARY_PCI="0000:$pci_addr"
+                PRIMARY_ID="$vendor_device"
+                PRIMARY_DRIVER="$current_driver"
+
+                echo "   → Found WiFi PCI device: $pci_addr ($device_desc)"
+                echo "      Vendor:Device: $vendor_device"
+                echo "      Current driver: $current_driver"
+                echo "      Inferred interface name: $inferred_name"
+                break
+            fi
+        done < <(lspci -nn -d ::0280 2>/dev/null; lspci -nn -d ::0200 2>/dev/null)
+    fi
+    echo
+fi
 
 # 3. Check IOMMU groups for primary interface
 if [[ "${PRIMARY_INTERFACE:-}" && "${PRIMARY_PCI:-}" && "$PRIMARY_PCI" != "unknown" ]]; then
