@@ -373,22 +373,23 @@ generate_machine_profile() {
     system.nixos.label = lib.mkForce "fallback";
 
     # Re-enable WiFi driver (un-blacklist)
-    boot.blacklistedKernelModules = lib.mkForce [];
+    boot.blacklistedKernelModules = lib.mkOverride 10 [];
 
     # Re-enable NetworkManager for normal WiFi
-    networking.networkmanager.enable = lib.mkForce true;
-    networking.useDHCP = lib.mkForce true;
+    # mkOverride 10 beats mkForce (which is mkOverride 50)
+    networking.networkmanager.enable = lib.mkOverride 10 true;
+    networking.useDHCP = lib.mkOverride 10 true;
 
     # Remove bridges
-    networking.bridges = lib.mkForce {};
-    networking.interfaces = lib.mkForce {};
-    networking.defaultGateway = lib.mkForce null;
+    networking.bridges = lib.mkOverride 10 {};
+    networking.interfaces = lib.mkOverride 10 {};
+    networking.defaultGateway = lib.mkOverride 10 null;
 
     # Disable router VM autostart
-    systemd.services.router-vm-autostart.enable = lib.mkForce false;
+    systemd.services.router-vm-autostart.enable = lib.mkOverride 10 false;
 
     # Standard firewall
-    networking.firewall = lib.mkForce {
+    networking.firewall = lib.mkOverride 10 {
       enable = true;
       allowedTCPPorts = [ 22 ];
     };
@@ -413,21 +414,17 @@ generate_machine_profile() {
 
   # ===== LOCKDOWN SPECIALISATION =====
   # Full network isolation - host has NO internet access
-  # Router VM handles VPN policy routing on 10.100.x.x networks
+  # Inherits everything from base router config (bridges, VFIO, etc.)
+  # Only difference: host is completely blocked from internet
   specialisation.lockdown.configuration = {
     system.nixos.label = lib.mkForce "lockdown";
 
-    # Change host IP to lockdown range (10.100.x.x instead of 192.168.x.x)
-    networking.interfaces.br-mgmt.ipv4.addresses = lib.mkForce [{
-      address = "10.100.0.1";
-      prefixLength = 24;
-    }];
+    # NO default gateway - host is fully isolated from internet
+    # Bridges and router VM still work exactly like base config
+    networking.defaultGateway = lib.mkOverride 10 null;
 
-    # NO default gateway - host is fully isolated
-    networking.defaultGateway = lib.mkForce null;
-
-    # Strict firewall - host cannot reach internet
-    networking.firewall = lib.mkForce {
+    # Strict firewall - host cannot reach internet directly
+    networking.firewall = lib.mkOverride 10 {
       enable = true;
       trustedInterfaces = [ "br-mgmt" "br-pentest" "br-office" "br-browse" "br-dev" ];
       extraCommands = ''
@@ -447,119 +444,17 @@ generate_machine_profile() {
       '';
     };
 
-    # Disable IP forwarding on host
+    # Disable IP forwarding on host - router VM handles all routing
     boot.kernel.sysctl = {
-      "net.ipv4.ip_forward" = lib.mkForce 0;
-      "net.ipv6.conf.all.forwarding" = lib.mkForce 0;
-    };
-
-    # Disable base router-vm-autostart, use lockdown-router instead
-    systemd.services.router-vm-autostart.enable = lib.mkForce false;
-
-    # Lockdown router VM autostart
-    systemd.services.lockdown-router-autostart = {
-      description = "Auto-start lockdown router VM with NIC passthrough";
-      after = [ "libvirtd.service" "network.target" "sys-devices-virtual-net-br\\x2dmgmt.device" ];
-      wants = [ "libvirtd.service" ];
-      requires = [ "sys-devices-virtual-net-br\\x2dmgmt.device" ];
-      wantedBy = [ "multi-user.target" ];
-      serviceConfig = {
-        Type = "oneshot";
-        RemainAfterExit = true;
-        TimeoutStartSec = "180s";
-      };
-      script = ''
-        set -euo pipefail
-
-        VM_NAME="lockdown-router"
-        VM_IMAGE="/var/lib/libvirt/images/router-vm.qcow2"
-        PCI_ADDR="${PRIMARY_PCI#0000:}"
-
-        log() { echo "[lockdown-router-autostart] \\\$*"; }
-
-        # Wait for all bridges to exist (with timeout)
-        log "Waiting for bridges..."
-        TIMEOUT=60
-        ELAPSED=0
-        for br in br-mgmt br-pentest br-office br-browse br-dev; do
-          while ! /run/current-system/sw/bin/ip link show "\\\$br" >/dev/null 2>&1; do
-            if [ \\\$ELAPSED -ge \\\$TIMEOUT ]; then
-              log "ERROR: Timeout waiting for bridge \\\$br"
-              exit 1
-            fi
-            sleep 1
-            ELAPSED=\\\$((ELAPSED + 1))
-          done
-          log "  + \\\$br exists"
-        done
-
-        # Check for router VM image
-        if [ ! -f "\\\$VM_IMAGE" ]; then
-          log "ERROR: Router VM image not found at \\\$VM_IMAGE"
-          log "Run: nix build ~/Hydrix#router-vm && sudo cp result/nixos.qcow2 \\\$VM_IMAGE"
-          exit 1
-        fi
-
-        # Define VM if not already defined
-        if ! /run/current-system/sw/bin/virsh dominfo "\\\$VM_NAME" >/dev/null 2>&1; then
-          log "Defining lockdown router VM with PCI passthrough (\\\$PCI_ADDR)..."
-
-          /run/current-system/sw/bin/virt-install \\
-            --connect qemu:///system \\
-            --name "\\\$VM_NAME" \\
-            --memory 2048 \\
-            --vcpus 2 \\
-            --disk "path=\\\$VM_IMAGE,format=qcow2,bus=virtio" \\
-            --import \\
-            --os-variant nixos-unstable \\
-            --network bridge=br-mgmt,model=virtio \\
-            --network bridge=br-pentest,model=virtio \\
-            --network bridge=br-office,model=virtio \\
-            --network bridge=br-browse,model=virtio \\
-            --network bridge=br-dev,model=virtio \\
-            --hostdev "\\\$PCI_ADDR" \\
-            --graphics spice \\
-            --video virtio \\
-            --noautoconsole \\
-            --autostart \\
-            --print-xml > /tmp/lockdown-router.xml
-
-          /run/current-system/sw/bin/virsh define /tmp/lockdown-router.xml
-          rm -f /tmp/lockdown-router.xml
-          log "+ Lockdown router VM defined"
-        else
-          log "Lockdown router VM already defined"
-        fi
-
-        # Start VM if not running
-        VM_STATE=\\\$(/run/current-system/sw/bin/virsh domstate "\\\$VM_NAME" 2>/dev/null || echo "unknown")
-        if [ "\\\$VM_STATE" != "running" ]; then
-          log "Starting lockdown router VM..."
-          /run/current-system/sw/bin/virsh start "\\\$VM_NAME"
-        fi
-
-        # Enable autostart
-        /run/current-system/sw/bin/virsh autostart "\\\$VM_NAME" 2>/dev/null || true
-
-        # Verify VM is running
-        sleep 2
-        VM_STATE=\\\$(/run/current-system/sw/bin/virsh domstate "\\\$VM_NAME" 2>/dev/null || echo "unknown")
-        if [ "\\\$VM_STATE" = "running" ]; then
-          log "+ Lockdown router VM running"
-          log "  Management: 10.100.0.253"
-        else
-          log "WARNING: Lockdown router VM state is \\\$VM_STATE"
-          exit 1
-        fi
-      '';
+      "net.ipv4.ip_forward" = lib.mkOverride 10 0;
+      "net.ipv6.conf.all.forwarding" = lib.mkOverride 10 0;
     };
 
     # Lockdown indicator file
     environment.etc."LOCKDOWN_MODE".text = ''
       Lockdown mode enabled
       Host internet access: DISABLED
-      Management IP: 10.100.0.1
-      Router VM: 10.100.0.253
+      Router VM still handles all networking via bridges
     '';
 
     environment.systemPackages = with pkgs; lib.mkAfter [
@@ -567,16 +462,16 @@ generate_machine_profile() {
         echo "LOCKDOWN MODE Status"
         echo "===================="
         echo ""
-        echo "Host Internet: DISABLED (NIC passed to router VM)"
+        echo "Host Internet: DISABLED (blocked by firewall)"
+        echo "Router VM: \$(sudo virsh domstate router-vm 2>/dev/null || echo 'Not running')"
         echo "NIC Passthrough: ${PRIMARY_PCI} (${PRIMARY_ID})"
-        echo "Router VM: \$(sudo virsh domstate lockdown-router 2>/dev/null || echo 'Not running')"
         echo ""
-        echo "Isolated Networks (10.100.x.x - VPN policy routing):"
-        echo "  br-mgmt:    10.100.0.0/24 (management only, no internet)"
-        echo "  br-pentest: 10.100.1.0/24 (VPN routed)"
-        echo "  br-office:  10.100.2.0/24 (VPN routed)"
-        echo "  br-browse:  10.100.3.0/24 (VPN routed)"
-        echo "  br-dev:     10.100.4.0/24 (direct or VPN)"
+        echo "Network (same as router mode, host isolated):"
+        echo "  br-mgmt:    192.168.100.0/24"
+        echo "  br-pentest: 192.168.101.0/24"
+        echo "  br-office:  192.168.102.0/24"
+        echo "  br-browse:  192.168.103.0/24"
+        echo "  br-dev:     192.168.104.0/24"
         echo ""
         echo "Bridges:"
         for br in br-mgmt br-pentest br-office br-browse br-dev; do
@@ -584,10 +479,8 @@ generate_machine_profile() {
           echo "  \$br: \$state"
         done
         echo ""
-        echo "VPN Management (SSH to router):"
-        echo "  ssh traum@10.100.0.253"
-        echo "  vpn-status"
-        echo "  vpn-assign pentest mullvad"
+        echo "Host firewall blocks all outbound except bridge traffic."
+        echo "VMs can still access internet through router VM."
       '')
     ];
   };
@@ -631,13 +524,13 @@ generate_machine_profile() {
       echo "  WiFi:    \$(ip link show ${PRIMARY_INTERFACE} 2>/dev/null && echo 'Present (fallback mode?)' || echo 'Passed to VM')"
       echo ""
 
-      echo "Router VM: \$(sudo virsh domstate router-vm 2>/dev/null || sudo virsh domstate lockdown-router 2>/dev/null || echo 'Not running')"
+      echo "Router VM: \$(sudo virsh domstate router-vm 2>/dev/null || echo 'Not running')"
       echo ""
 
       echo "Available Modes:"
-      echo "  (default)  - Router mode: 192.168.x.x, router VM handles networking"
+      echo "  (default)  - Router mode: router VM handles networking, host has internet"
       echo "  fallback   - Emergency: Re-enables WiFi, normal NetworkManager"
-      echo "  lockdown   - Isolated: 10.100.x.x, VPN routing, host blocked"
+      echo "  lockdown   - Isolated: Same as router but host blocked from internet"
       echo ""
 
       echo "Switching Modes (requires reboot for kernel changes):"
@@ -1101,37 +994,25 @@ show_completion_summary() {
     echo "  AVAILABLE MODES"
     echo "========================================"
     echo ""
-    echo "    router [DEFAULT] - Standard NAT routing"
+    echo "    [DEFAULT] - Router mode"
+    echo "      Router VM handles all networking"
     echo "      Host IP:   192.168.100.1"
     echo "      Router IP: 192.168.100.253"
-    echo "      Networks:  192.168.100-104.0/24"
+    echo "      Host has internet access via router"
     echo ""
-    echo "    lockdown - Full isolation + VPN policy routing"
-    echo "      Host IP:   10.100.0.1 (management only)"
-    echo "      Router IP: 10.100.0.253"
-    echo "      Networks:  10.100.0-4.0/24"
-    echo "      Host has NO internet access"
+    echo "    lockdown - Host isolation"
+    echo "      Same bridges and router VM as default"
+    echo "      Host firewall blocks all outbound traffic"
+    echo "      VMs can still access internet via router"
     echo ""
     echo "    fallback - Emergency escape hatch"
     echo "      Normal WiFi networking, no VFIO, no bridges"
     echo "      Use if router/lockdown modes fail"
     echo ""
     echo "  Switch between them:"
-    echo "    sudo nixos-rebuild switch --specialisation router"
-    echo "    sudo nixos-rebuild switch --specialisation lockdown"
-    echo "    sudo nixos-rebuild switch --specialisation fallback"
-    echo ""
-    echo "========================================"
-    echo "  LOCKDOWN MODE VPN MANAGEMENT"
-    echo "========================================"
-    echo ""
-    echo "  SSH to router: ssh traum@10.100.0.253"
-    echo ""
-    echo "  Commands on router:"
-    echo "    vpn-status                    # Check VPN assignments"
-    echo "    vpn-assign pentest mullvad    # Route pentest through Mullvad"
-    echo "    vpn-assign browse direct      # Direct internet for browsing"
-    echo "    vpn-assign office blocked     # Block office network"
+    echo "    sudo nixos-rebuild boot --flake ~/Hydrix#${machine_name}"
+    echo "    sudo nixos-rebuild boot --flake ~/Hydrix#${machine_name} --specialisation lockdown"
+    echo "    sudo nixos-rebuild boot --flake ~/Hydrix#${machine_name} --specialisation fallback"
     echo ""
 }
 
