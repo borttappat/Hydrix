@@ -72,17 +72,17 @@ in {
   };
 
   config = mkIf cfg.enable {
-    # Force-disable NetworkManager's external connectivity
-    networking = mkIf cfg.disableHostNetworking {
+    # Networking configuration for lockdown
+    networking = {
       # Remove default gateway - host cannot reach internet
-      defaultGateway = mkForce null;
-      defaultGateway6 = mkForce null;
+      defaultGateway = mkIf cfg.disableHostNetworking (mkForce null);
+      defaultGateway6 = mkIf cfg.disableHostNetworking (mkForce null);
 
       # Disable DHCP on physical interfaces
-      useDHCP = mkForce false;
+      useDHCP = mkIf cfg.disableHostNetworking (mkForce false);
 
       # Keep NetworkManager but in a restricted mode
-      networkmanager = {
+      networkmanager = mkIf cfg.disableHostNetworking {
         enable = mkForce true;
         # Don't manage our isolated bridges
         unmanaged = [
@@ -90,20 +90,10 @@ in {
           "interface-name:virbr*"
         ];
       };
-    };
 
-    # Give host an IP on management bridge for VM access
-    systemd.network.networks."25-br-mgmt-host" = mkIf cfg.enable {
-      matchConfig.Name = "br-mgmt";
-      address = [ "${cfg.managementBridgeHostIP}/24" ];
-      networkConfig = {
-        ConfigureWithoutCarrier = true;
-      };
-    };
-
-    # Firewall adjustments for lockdown
-    networking.firewall = mkIf cfg.enable {
-      enable = mkForce true;
+      # Firewall adjustments for lockdown
+      firewall = {
+        enable = mkForce true;
 
       # Only allow inbound from management network
       extraCommands = mkAfter ''
@@ -126,6 +116,16 @@ in {
         # Block everything else outbound
         iptables -A OUTPUT -j DROP
       '';
+      };
+    };
+
+    # Give host an IP on management bridge for VM access
+    systemd.network.networks."25-br-mgmt-host" = {
+      matchConfig.Name = "br-mgmt";
+      address = [ "${cfg.managementBridgeHostIP}/24" ];
+      networkConfig = {
+        ConfigureWithoutCarrier = true;
+      };
     };
 
     # Disable IP forwarding on host (router VM does this)
