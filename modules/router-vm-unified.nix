@@ -77,15 +77,22 @@ in {
 
     system.stateVersion = "25.05";
 
+    # Enable all firmware for WiFi card support (especially iwlwifi for Intel WiFi)
+    hardware.enableAllFirmware = true;
+    hardware.enableRedistributableFirmware = true;
+
     networking = {
       hostName = "router-vm";
       useDHCP = false;
       enableIPv6 = false;
-      networkmanager.enable = false;
+      # Use NetworkManager for WiFi - it automatically handles WiFi connections
+      # This is much simpler than wpa_supplicant which requires manual config files
+      networkmanager.enable = true;
+      wireless.enable = false;  # Disable wpa_supplicant (NetworkManager handles WiFi)
 
       # WAN interface is detected dynamically at runtime by router-network-setup
       # It will be either wlp* (WiFi passthrough) or a physical ethernet device
-      # We don't configure it statically since the name varies by hardware
+      # NetworkManager will automatically connect to known WiFi networks
 
       firewall.enable = false;  # We use nftables directly
     };
@@ -217,26 +224,29 @@ in {
         echo "Router mode: $MODE"
         echo "$MODE" > "$STATE_DIR/mode"
 
-        # Bring up WAN and get DHCP
-        ${pkgs.iproute2}/bin/ip link set "$WAN_IFACE" up 2>/dev/null || true
-
-        # For WiFi, we need to connect to a network first
+        # NetworkManager handles WiFi and DHCP automatically
+        # Just mark the WAN interface as unmanaged for non-WiFi or let it manage WiFi
         if [[ "$WAN_IFACE" == wl* ]]; then
-          echo "WAN is WiFi - wpa_supplicant should handle connection"
-          # wpa_supplicant runs separately, just wait for link
-          for i in $(seq 1 30); do
-            if ${pkgs.iproute2}/bin/ip link show "$WAN_IFACE" | grep -q "state UP"; then
+          echo "WAN is WiFi - NetworkManager will handle connection"
+          # NetworkManager automatically connects to known networks
+          # Wait for connection to establish
+          for i in $(seq 1 60); do
+            if ${pkgs.networkmanager}/bin/nmcli device show "$WAN_IFACE" 2>/dev/null | grep -q "connected"; then
+              echo "WiFi connected via NetworkManager"
               break
             fi
             sleep 1
           done
+        else
+          echo "WAN is ethernet - bringing up manually"
+          ${pkgs.iproute2}/bin/ip link set "$WAN_IFACE" up 2>/dev/null || true
+          ${pkgs.dhcpcd}/bin/dhcpcd -b "$WAN_IFACE" 2>/dev/null || true
         fi
 
-        # Request DHCP on WAN interface
-        ${pkgs.dhcpcd}/bin/dhcpcd -b "$WAN_IFACE" 2>/dev/null || true
-
         # Bring up all LAN interfaces (virtio NICs in order)
+        # Mark them as unmanaged by NetworkManager so we can configure them statically
         for iface in enp1s0 enp2s0 enp3s0 enp4s0 enp5s0; do
+          ${pkgs.networkmanager}/bin/nmcli device set "$iface" managed no 2>/dev/null || true
           ${pkgs.iproute2}/bin/ip link set "$iface" up 2>/dev/null || true
         done
 
@@ -511,23 +521,15 @@ in {
       nano
       tmux
       git
-      dhcpcd  # For dynamic WAN IP
-      wpa_supplicant  # For WiFi WAN
+      dhcpcd  # For dynamic WAN IP (though NetworkManager usually handles this)
       iw  # WiFi diagnostics
-      wireless-tools  # Additional WiFi tools
+      wirelesstools  # Additional WiFi tools
+      networkmanager  # Ensure nmcli is available
 
       # VPN management scripts
       (writeShellScriptBin "vpn-assign" (builtins.readFile ../scripts/vpn-assign.sh))
       (writeShellScriptBin "vpn-status" (builtins.readFile ../scripts/vpn-status.sh))
     ];
-
-    # WiFi support for WAN (wpa_supplicant)
-    # Config should be placed in /etc/wpa_supplicant/wpa_supplicant.conf
-    networking.wireless = {
-      enable = true;
-      # Allow wpa_supplicant to manage all wireless interfaces
-      interfaces = [ ];  # Empty = manage all
-    };
 
     # Config directories
     systemd.tmpfiles.rules = [
@@ -536,7 +538,6 @@ in {
       "d /var/lib/hydrix-vpn 0755 root root -"
       "d /var/lib/hydrix-router 0755 root root -"
       "d /etc/dnsmasq.d 0755 root root -"
-      "d /etc/wpa_supplicant 0700 root root -"
     ];
 
     # Banner service
