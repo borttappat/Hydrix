@@ -333,10 +333,12 @@ in {
         interface=enp2s0
         interface=enp3s0
         interface=enp4s0
+        interface=enp5s0
         dhcp-range=enp1s0,192.168.100.10,192.168.100.200,24h
         dhcp-range=enp2s0,192.168.101.10,192.168.101.200,24h
         dhcp-range=enp3s0,192.168.102.10,192.168.102.200,24h
         dhcp-range=enp4s0,192.168.103.10,192.168.103.200,24h
+        dhcp-range=enp5s0,192.168.104.10,192.168.104.200,24h
         dhcp-option=enp1s0,option:router,192.168.100.253
         dhcp-option=enp1s0,option:dns-server,192.168.100.253
         dhcp-option=enp2s0,option:router,192.168.101.253
@@ -345,6 +347,8 @@ in {
         dhcp-option=enp3s0,option:dns-server,192.168.102.253
         dhcp-option=enp4s0,option:router,192.168.103.253
         dhcp-option=enp4s0,option:dns-server,192.168.103.253
+        dhcp-option=enp5s0,option:router,192.168.104.253
+        dhcp-option=enp5s0,option:dns-server,192.168.104.253
         EOF
             ;;
 
@@ -410,6 +414,11 @@ in {
             type filter hook input priority filter; policy drop;
             iif lo accept
             ct state established,related accept
+
+            # Allow DHCP requests (from 0.0.0.0 and broadcast)
+            udp dport 67 accept
+
+            # Allow traffic from LAN networks
             ip saddr { 192.168.100.0/24, 192.168.101.0/24, 192.168.102.0/24, 192.168.103.0/24, 192.168.104.0/24 } accept
             ip protocol icmp accept
           }
@@ -443,6 +452,11 @@ in {
             type filter hook input priority filter; policy drop;
             iif lo accept
             ct state established,related accept
+
+            # Allow DHCP requests (from 0.0.0.0 and broadcast)
+            udp dport 67 accept
+
+            # Allow traffic from LAN networks
             ip saddr { 10.100.0.0/24, 10.100.1.0/24, 10.100.2.0/24, 10.100.3.0/24, 10.100.4.0/24 } accept
             ip protocol icmp accept
           }

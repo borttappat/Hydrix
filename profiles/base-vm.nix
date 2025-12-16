@@ -20,6 +20,7 @@
     ../modules/vm/hardware-setup.nix   # Auto-generates hardware-configuration.nix on first boot
     ../modules/vm/hydrix-clone.nix     # Clones Hydrix on first boot
     ../modules/vm/shaping.nix          # First-boot shaping service
+    ../modules/vm/networking.nix       # VM networking override (DHCP instead of NetworkManager)
 
     # Core desktop environment (i3, fish, alacritty, etc.)
     ../modules/core.nix
