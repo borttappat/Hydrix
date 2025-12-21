@@ -13,7 +13,7 @@
     description = "A";
     extraGroups = [ "docker" "audio" "networkmanager" "wheel" "wireshark" "adbusers" ];
     createHome = true;
-    useDefaultShell = true;
+    shell = pkgs.fish;  # Explicitly use fish shell
     # Default password for VMs (can be overridden per-profile)
     password = "traum";
   };

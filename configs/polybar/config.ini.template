@@ -72,45 +72,48 @@ format-prefix = "HOST "
 format-prefix-foreground = ${colors.color3}
 format-prefix-underline = ${colors.color2}
 
-[module/btc]
-type = custom/script
-exec = ~/dotfiles/scripts/bash/btc_price.sh
-interval = 30 
-label-underline = ${colors.color2}
-format-prefix = "BTC "
-format-prefix-foreground = ${colors.color3}
-format-prefix-underline = ${colors.color2}
+# Crypto price modules - disabled (scripts not in Hydrix)
+# To enable, create scripts in ~/Hydrix/scripts/ and update paths below
+#[module/btc]
+#type = custom/script
+#exec = ~/Hydrix/scripts/btc_price.sh
+#interval = 30
+#label-underline = ${colors.color2}
+#format-prefix = "BTC "
+#format-prefix-foreground = ${colors.color3}
+#format-prefix-underline = ${colors.color2}
 
-[module/eth]
-type = custom/script
-exec = ~/dotfiles/scripts/bash/eth_price.sh
-interval = 40 
-label-underline = ${colors.color2}
-format-prefix = "ETH "
-format-prefix-foreground = ${colors.color3}
-format-prefix-underline = ${colors.color2}
+#[module/eth]
+#type = custom/script
+#exec = ~/Hydrix/scripts/eth_price.sh
+#interval = 40
+#label-underline = ${colors.color2}
+#format-prefix = "ETH "
+#format-prefix-foreground = ${colors.color3}
+#format-prefix-underline = ${colors.color2}
 
-[module/sol]
-type = custom/script
-exec = ~/dotfiles/scripts/bash/sol_price.sh
-interval = 50 
-label-underline = ${colors.color2}
-format-prefix = "SOL "
-format-prefix-foreground = ${colors.color3}
-format-prefix-underline = ${colors.color2}
+#[module/sol]
+#type = custom/script
+#exec = ~/Hydrix/scripts/sol_price.sh
+#interval = 50
+#label-underline = ${colors.color2}
+#format-prefix = "SOL "
+#format-prefix-foreground = ${colors.color3}
+#format-prefix-underline = ${colors.color2}
 
-[module/pomodoro]
-type = custom/script
-exec = ~/dotfiles/scripts/bash/pomodoro.sh
-interval = 1
-label = %output%
-click-left = ~/.local/bin/pomo toggle
-click-right = ~/.local/bin/pomo stop
-click-middle = ~/.local/bin/pomo start
-label-underline = ${colors.color2}
-format-prefix= "POMO "
-format-prefix-foreground = ${colors.color3}
-format-prefix-underline = ${colors.color2}
+# Pomodoro module - disabled (script not in Hydrix)
+#[module/pomodoro]
+#type = custom/script
+#exec = ~/Hydrix/scripts/pomodoro.sh
+#interval = 1
+#label = %output%
+#click-left = ~/.local/bin/pomo toggle
+#click-right = ~/.local/bin/pomo stop
+#click-middle = ~/.local/bin/pomo start
+#label-underline = ${colors.color2}
+#format-prefix= "POMO "
+#format-prefix-foreground = ${colors.color3}
+#format-prefix-underline = ${colors.color2}
 
 [module/uptime]
 type = custom/script

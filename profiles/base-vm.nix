@@ -24,7 +24,23 @@
 
     # Core desktop environment (i3, fish, alacritty, etc.)
     ../modules/core.nix
+    ../modules/desktop/xinitrc.nix     # X session bootstrap + config deployment (needed for startx)
+
+    # Theming (colors will be applied based on hostname-derived VM type)
+    ../modules/theming/static-colors.nix
   ];
+
+  # Set VM type based on hostname for color generation
+  # Hostname is set in flake.nix per VM type (e.g., "browsing-vm", "pentest-vm")
+  hydrix.vmType = lib.mkDefault (
+    let
+      hostname = config.networking.hostName;
+      vmType = builtins.head (lib.splitString "-" hostname);
+    in
+    if builtins.elem vmType ["pentest" "comms" "browsing" "dev"]
+    then vmType
+    else "pentest"  # fallback
+  );
 
   # Boot loader configuration for VMs
   boot.loader.grub = {

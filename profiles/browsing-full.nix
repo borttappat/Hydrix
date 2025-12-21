@@ -12,6 +12,7 @@
     ../modules/base/users.nix
     ../modules/base/networking.nix
     ../modules/vm/qemu-guest.nix
+    ../modules/vm/hydrix-clone.nix  # Clone Hydrix repo on first boot
 
     # Core desktop environment (i3, fish, etc.)
     ../modules/core.nix
@@ -19,6 +20,9 @@
     # Theming system
     ../modules/theming/static-colors.nix
     ../modules/desktop/xinitrc.nix
+
+    # Firefox with extensions
+    ../modules/desktop/firefox.nix
   ];
 
   # ===== Inline hardware configuration for QEMU VMs =====
@@ -56,34 +60,34 @@
 
   # Browsing and media packages
   environment.systemPackages = with pkgs; [
-    # Web browsers
-    firefox
-    google-chrome
-    chromium
-    brave
+    # Web browsers (Firefox is enabled via modules/desktop/firefox.nix)
+    #firefox
+    #google-chrome
+    #chromium
+    #brave
 
     # Media players
-    vlc
-    mpv
+    #vlc
+    #mpv
 
     # Image viewers/editors
-    feh
-    gimp
-    imagemagick
+    #feh
+    #gimp
+    #imagemagick
 
     # Document viewers
     zathura
-    evince
+    #evince
 
     # Download managers
-    yt-dlp
+    #yt-dlp
 
     # Screenshots
-    scrot
-    maim
+    #scrot
+    #maim
 
     # Office suite
-    libreoffice
+    #libreoffice
 
     # Archive tools
     unzip

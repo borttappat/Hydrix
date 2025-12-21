@@ -84,10 +84,9 @@
       executable = true;
     };
 
-    # Fish shell configuration
-    home.file.".config/fish/config.fish".source = ../../configs/fish/config.fish;
+    # Fish shell configuration is managed by fish-home.nix
+    # Only deploy fish_variables and functions here to avoid conflicts
     home.file.".config/fish/fish_variables".source = ../../configs/fish/fish_variables;
-    # Fish functions
     home.file.".config/fish/functions" = {
       source = ../../configs/fish/functions;
       recursive = true;
@@ -95,7 +94,7 @@
 
     # Other application configs
     home.file.".config/zathura/zathurarc".source = ../../configs/zathura/zathurarc;
-    home.file.".config/starship.toml".source = ../../configs/starship/starship.toml;  # Root level for starship
+    # starship.toml is deployed by fish-home.nix
     home.file.".config/picom/picom.conf".source = ../../configs/picom/picom.conf;
     home.file.".config/htop/htoprc".source = ../../configs/htop/htoprc;
 

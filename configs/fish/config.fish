@@ -5,7 +5,12 @@
 #
 # === INTERACTIVE BLOCK ===
 if status is-interactive
-    cat /home/traum/.cache/wal/sequences
+    # Apply pywal colors (sequences now managed by home-manager/Nix)
+    # The sequences file is generated with proper escape codes
+    if test -f /home/traum/.cache/wal/sequences
+        cat /home/traum/.cache/wal/sequences
+    end
+
     fish_vi_key_bindings
     
     # Auto-start recording if flag exists

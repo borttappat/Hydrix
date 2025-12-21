@@ -143,9 +143,9 @@ get_resource_allocation() {
             ;;
         browsing)
             percent=50
-            BASE_IMAGE_FLAKE="${type}-vm-base"
+            BASE_IMAGE_FLAKE="${type}-vm-full"
             BASE_IMAGE_RESULT="$PROJECT_DIR/${type}-vm-image/nixos.qcow2"
-            log "Browsing VM - Moderate allocation (50%)"
+            log "Browsing VM - Full image (50%)"
             ;;
         comms)
             percent=25

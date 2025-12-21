@@ -1,11 +1,25 @@
 #!/run/current-system/sw/bin/bash
 unclutter -grab &
-wal -Rn &
 
 find "$HOME" -maxdepth 1 -name ".serverauth.*" -type f -mtime +2 -delete 2>/dev/null
 
 hostname=$(hostnamectl | grep "Icon name:" | cut -d ":" -f2 | xargs)
 if [[ $hostname =~ [vV][mM] ]]; then
+    # VM mode - ensure color cache exists before starting X
+    if [ ! -f ~/.cache/wal/.static-colors-generated ]; then
+        echo "Generating VM color cache..."
+        # Check if custom colorscheme is set
+        if [ -f ~/.cache/wal/.static-colors-type ] && grep -q "CUSTOM_SCHEME" ~/.cache/wal/.static-colors-type; then
+            SCHEME_FILE=$(grep "CUSTOM_SCHEME" ~/.cache/wal/.static-colors-type | cut -d'=' -f2)
+            apply-colorscheme "$SCHEME_FILE"
+        else
+            # Use VM type from hostname or default
+            VM_TYPE=$(echo "$hostname" | grep -oE "(pentest|comms|browsing|dev)" | head -n1)
+            [ -z "$VM_TYPE" ] && VM_TYPE="browsing"
+            vm-static-colors "$VM_TYPE"
+        fi
+    fi
+
     spice-vdagent -x &
     VM_DISPLAY=$(xrandr | grep -E "(Virtual-1|qxl-0)" | grep " connected" | cut -d' ' -f1 | head -n1)
     if [ -n "$VM_DISPLAY" ]; then
@@ -16,6 +30,9 @@ else
     export MOD_KEY="Mod4"
     # Resolution will be set by load-display-config.sh based on machine overrides
 fi
+
+# Restore pywal colors (now guaranteed to exist)
+wal -Rn &
 
 sleep 0.5
 
@@ -48,6 +65,9 @@ sed -e "s/\${DUNST_FONT}/$DUNST_FONT/g" \
     -e "s/\${DUNST_FRAME_WIDTH}/$DUNST_FRAME_WIDTH/g" \
     -e "s/\${DUNST_ICON_SIZE}/$DUNST_ICON_SIZE/g" \
     ~/.config/dunst/dunstrc.template > ~/.config/dunst/dunstrc
+sed -e "s/\${ROFI_FONT}/$ROFI_FONT/g" \
+    -e "s/\${ROFI_FONT_SIZE}/$ROFI_FONT_SIZE/g" \
+    ~/.config/rofi/config.rasi.template > ~/.config/rofi/config.rasi
 
 # Firefox font configuration
 mkdir -p ~/.mozilla/firefox/traum/chrome

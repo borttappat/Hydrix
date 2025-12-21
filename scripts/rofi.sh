@@ -26,7 +26,7 @@ exit
 
 echo "Display: $CURRENT_DISPLAY on monitor: $MONITOR_NAME"
 
-CONFIG_FILE="$HOME/dotfiles/configs/display-config.json"
+CONFIG_FILE="$HOME/.config/display-config.json"
 HOSTNAME=$(hostnamectl hostname | cut -d'-' -f1)
 
 MACHINE_OVERRIDE=$(jq -r ".machine_overrides[\"$HOSTNAME\"] // null" "$CONFIG_FILE")
@@ -51,7 +51,7 @@ fi
 
 [ "$ROFI_FONT_SIZE" = "null" ] && ROFI_FONT_SIZE=$(echo "$RES_DEFAULTS" | jq -r '.rofi_font_size')
 
-ROFI_FONT=$(jq -r '.fonts[0]' "$CONFIG_FILE")
+ROFI_FONT=$(jq -r '.fonts.default' "$CONFIG_FILE")
 
 echo "Using rofi font: $ROFI_FONT size: $ROFI_FONT_SIZE for display $CURRENT_DISPLAY"
 

@@ -4,6 +4,7 @@ result-*
 router-vm-result
 base-image-result
 pentest-vm-image*
+browsing-vm-image*
 
 # Sensitive files
 *credentials.env

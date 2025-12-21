@@ -1,19 +1,3 @@
-# Firefox - Declarative browser configuration with privacy settings and extensions
-#
-# This module provides:
-# - Privacy-focused Firefox settings (telemetry disabled, tracking protection)
-# - Auto-installed extensions:
-#   - SingleFile (save complete webpages)
-#   - uBlock Origin (ad blocking)
-#   - Detach Tab (tab management)
-#   - Pywalfox (theming integration - CRITICAL for walrgb workflow)
-#   - FoxyProxy (proxy management)
-#   - Bitwarden (password manager)
-#   - Vimium (vim keybindings)
-#   - Wappalyzer (technology detection)
-#
-# Ported from ~/dotfiles/modules/firefox.nix
-
 { config, pkgs, ... }:
 let
   lock-false = {
@@ -48,59 +32,40 @@ in
       DisplayBookmarksToolbar = "never";
       DisplayMenuBar = "default-off";
       SearchBar = "unified";
-
-      # Auto-install extensions
-      ExtensionSettings = {
-        # SingleFile - Save complete webpages
-        "{531906d3-e22f-4a6c-a102-8057b88a1a63}" = {
-          install_url = "https://addons.mozilla.org/firefox/downloads/latest/single-file/latest.xpi";
-          installation_mode = "force_installed";
-        };
-
-        # uBlock Origin - Ad blocking
-        "uBlock0@raymondhill.net" = {
-          install_url = "https://addons.mozilla.org/firefox/downloads/latest/ublock-origin/latest.xpi";
-          installation_mode = "force_installed";
-        };
-
-        # Detach Tab - Tab management
-        "claymont@mail.com_detach-tab" = {
-          install_url = "https://addons.mozilla.org/firefox/downloads/latest/detach-tab/latest.xpi";
-          installation_mode = "force_installed";
-        };
-
-        # Pywalfox - CRITICAL for walrgb theming integration
-        "pywalfox@frewacom.org" = {
-          install_url = "https://addons.mozilla.org/firefox/downloads/latest/pywalfox/latest.xpi";
-          installation_mode = "force_installed";
-        };
-
-        # FoxyProxy - Proxy management (useful for pentesting)
-        "foxyproxy@eric.h.jung" = {
-          install_url = "https://addons.mozilla.org/firefox/downloads/latest/foxyproxy-standard/latest.xpi";
-          installation_mode = "force_installed";
-        };
-
-        # Bitwarden - Password manager
-        "{446900e4-71c2-419f-a6a7-df9c091e268b}" = {
+        ExtensionSettings = {
+         "{531906d3-e22f-4a6c-a102-8057b88a1a63}" = {
+            install_url = "https://addons.mozilla.org/firefox/downloads/latest/single-file/latest.xpi";
+            installation_mode = "force_installed";
+         };
+         "uBlock0@raymondhill.net" = {
+            install_url = "https://addons.mozilla.org/firefox/downloads/latest/ublock-origin/latest.xpi";
+            installation_mode = "force_installed";
+          };
+          "claymont@mail.com_detach-tab" = {
+            install_url = "https://addons.mozilla.org/firefox/downloads/latest/detach-tab/latest.xpi";
+            installation_mode = "force_installed";
+          };
+          "pywalfox@frewacom.org" = {
+            install_url = "https://addons.mozilla.org/firefox/downloads/latest/pywalfox/latest.xpi";
+            installation_mode = "force_installed";
+          };
+          "foxyproxy@eric.h.jung" = {
+            install_url = "https://addons.mozilla.org/firefox/downloads/latest/foxyproxy-standard/latest.xpi";
+            installation_mode = "force_installed";
+          };
+          "{446900e4-71c2-419f-a6a7-df9c091e268b}" = {
           install_url = "https://addons.mozilla.org/firefox/downloads/latest/bitwarden-password-manager/latest.xpi";
           installation_mode = "force_installed";
-        };
-
-        # Vimium - Vim keybindings for browser
-        "{d7742d87-e61d-4b78-b8a1-b469842139fa}" = {
-          install_url = "https://addons.mozilla.org/firefox/downloads/latest/vimium-ff/latest.xpi";
-          installation_mode = "force_installed";
-        };
-
-        # Wappalyzer - Technology detection
-        "wappalyzer@crunchlabz.com" = {
+          };
+          "{d7742d87-e61d-4b78-b8a1-b469842139fa}" = {
+            install_url = "https://addons.mozilla.org/firefox/downloads/latest/vimium-ff/latest.xpi";
+            installation_mode = "force_installed";
+          };
+          "wappalyzer@crunchlabz.com" = {
           install_url = "https://addons.mozilla.org/firefox/downloads/latest/wappalyzer/latest.xpi";
           installation_mode = "force_installed";
+          };
         };
-      };
-
-      # Privacy-focused preferences
       Preferences = {
         "browser.contentblocking.category" = { Value = "strict"; Status = "locked"; };
         "extensions.pocket.enabled" = lock-false;
@@ -122,5 +87,26 @@ in
         "browser.newtabpage.activity-stream.showSponsoredTopSites" = lock-false;
       };
     };
+  };
+
+  # Install pywalfox native messaging host on first boot
+  systemd.services.pywalfox-install = {
+    description = "Install pywalfox native messaging host";
+    wantedBy = [ "multi-user.target" ];
+    after = [ "network.target" ];
+
+    unitConfig = {
+      ConditionPathExists = "!/home/traum/.mozilla/native-messaging-hosts/pywalfox.json";
+    };
+
+    serviceConfig = {
+      Type = "oneshot";
+      RemainAfterExit = true;
+      User = "traum";
+    };
+
+    script = ''
+      ${pkgs.pywalfox-native}/bin/pywalfox install --browser firefox
+    '';
   };
 }

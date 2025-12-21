@@ -74,13 +74,13 @@
       BG=$(${pkgs.jq}/bin/jq -r '.special.background' "$SCHEME_JSON")
       FG=$(${pkgs.jq}/bin/jq -r '.special.foreground' "$SCHEME_JSON")
 
-      # Build escape sequences
+      # Build escape sequences (OSC - Operating System Command)
       SEQ=""
       for i in {0..15}; do
         COLOR=$(${pkgs.jq}/bin/jq -r ".colors.color$i" "$SCHEME_JSON")
-        SEQ="$SEQ]4;$i;$COLOR\\"
+        SEQ="$SEQ\e]4;$i;$COLOR\e\\"
       done
-      SEQ="$SEQ]10;$FG\\]11;$BG\\]12;$FG\\]708;$BG\\"
+      SEQ="$SEQ\e]10;$FG\e\\\e]11;$BG\e\\\e]12;$FG\e\\\e]708;$BG\e\\"
 
       printf '%s' "$SEQ" > ~/.cache/wal/sequences
 
@@ -99,6 +99,12 @@
     environment.systemPackages = [
       applySchemeScript
       vmTypeColorsScript
+
+      # Actual walrgb/randomwalrgb scripts for VMs (adapted to use saved colorschemes)
+      (pkgs.writeScriptBin "walrgb" (builtins.readFile ../../scripts/walrgb.sh))
+      (pkgs.writeScriptBin "randomwalrgb" (builtins.readFile ../../scripts/randomwalrgb.sh))
+      (pkgs.writeScriptBin "wal-gtk" (builtins.readFile ../../scripts/wal-gtk.sh))
+      (pkgs.writeScriptBin "zathuracolors" (builtins.readFile ../../scripts/zathuracolors.sh))
     ];
 
     # Generate static pywal cache on first boot

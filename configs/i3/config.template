@@ -12,11 +12,11 @@ set $mod ${MOD_KEY}
 #############
 # Autostart #
 #############
-exec_always --no-startup-id xrdb -merge ~/.Xresources
-exec_always --no-startup-id ~/.config/scripts/autostart.sh
 exec_always --no-startup-id wal -Rnq
+exec_always --no-startup-id xrdb -merge ~/.Xresources
 exec_always --no-startup-id ~/.fehbg &
 exec_always --no-startup-id sleep 2 && xmodmap ~/.Xmodmap
+exec_always --no-startup-id ~/.config/scripts/autostart.sh
 exec --no-startup-id dunst
 
 #########

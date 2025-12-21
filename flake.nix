@@ -205,6 +205,7 @@
         modules = [
           { nixpkgs.config.allowUnfree = true; }
           { nixpkgs.overlays = [ overlay-unstable ]; }
+          home-manager.nixosModules.home-manager
           ./profiles/base-vm.nix
           { networking.hostName = "pentest-vm"; }
         ];
@@ -218,6 +219,7 @@
         modules = [
           { nixpkgs.config.allowUnfree = true; }
           { nixpkgs.overlays = [ overlay-unstable ]; }
+          home-manager.nixosModules.home-manager
           ./profiles/base-vm.nix
           { networking.hostName = "comms-vm"; }
         ];
@@ -231,8 +233,22 @@
         modules = [
           { nixpkgs.config.allowUnfree = true; }
           { nixpkgs.overlays = [ overlay-unstable ]; }
+          home-manager.nixosModules.home-manager
           ./profiles/base-vm.nix
           { networking.hostName = "browsing-vm"; }
+        ];
+        format = "qcow";
+      };
+
+      # Browsing VM - Full image with all packages
+      # Build with: nix build .#browsing-vm-full
+      browsing-vm-full = nixos-generators.nixosGenerate {
+        system = "x86_64-linux";
+        modules = [
+          { nixpkgs.config.allowUnfree = true; }
+          { nixpkgs.overlays = [ overlay-unstable ]; }
+          home-manager.nixosModules.home-manager
+          ./profiles/browsing-full.nix
         ];
         format = "qcow";
       };
@@ -244,6 +260,7 @@
         modules = [
           { nixpkgs.config.allowUnfree = true; }
           { nixpkgs.overlays = [ overlay-unstable ]; }
+          home-manager.nixosModules.home-manager
           ./profiles/base-vm.nix
           { networking.hostName = "dev-vm"; }
         ];

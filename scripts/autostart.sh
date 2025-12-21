@@ -58,24 +58,38 @@ for monitor in $MONITORS; do
     MONITOR_RES=$(xrandr --query | grep "^${monitor} connected" | grep -oP '\d{3,5}x\d{3,5}' | head -n1)
     echo "$(date): Monitor $monitor resolution: $MONITOR_RES" >> "$AUTOSTART_LOG"
 
-    # Determine settings for this monitor (defaults from load-display-config.sh)
-    MONITOR_POLYBAR_FONT_SIZE="$POLYBAR_FONT_SIZE"
-    MONITOR_POLYBAR_HEIGHT="$POLYBAR_HEIGHT"
-    MONITOR_POLYBAR_LINE_SIZE="$POLYBAR_LINE_SIZE"
+    # Look up resolution-specific settings from display-config.json
+    RES_DEFAULTS=$(jq -r ".resolution_defaults[\"$MONITOR_RES\"] // null" ~/.config/display-config.json)
 
-    # Check if this monitor is an external monitor (for zen machine)
-    if [ "$HOSTNAME" = "zen" ]; then
-        EXTERNAL_MONITOR_PATTERNS=$(jq -r ".machine_overrides.zen.external_monitor_resolutions // [] | join(\"|\")" ~/.config/display-config.json)
-        if echo "$MONITOR_RES" | grep -qE "^(${EXTERNAL_MONITOR_PATTERNS})x"; then
-            # External monitor - use external settings
-            MONITOR_POLYBAR_FONT_SIZE=$(jq -r '.machine_overrides.zen.polybar_font_size_external // .machine_overrides.zen.polybar_font_size' ~/.config/display-config.json)
-            MONITOR_POLYBAR_HEIGHT=$(jq -r '.machine_overrides.zen.polybar_height_external // .machine_overrides.zen.polybar_height' ~/.config/display-config.json)
-            MONITOR_POLYBAR_LINE_SIZE=$(jq -r '.machine_overrides.zen.polybar_line_size_external // .machine_overrides.zen.polybar_line_size' ~/.config/display-config.json)
-        else
-            # Internal monitor - use standalone settings
-            MONITOR_POLYBAR_FONT_SIZE=$(jq -r '.machine_overrides.zen.polybar_font_size' ~/.config/display-config.json)
-            MONITOR_POLYBAR_HEIGHT=$(jq -r '.machine_overrides.zen.polybar_height' ~/.config/display-config.json)
-            MONITOR_POLYBAR_LINE_SIZE=$(jq -r '.machine_overrides.zen.polybar_line_size' ~/.config/display-config.json)
+    if [ "$RES_DEFAULTS" = "null" ]; then
+        echo "$(date): No defaults found for $MONITOR_RES, using 1920x1080 defaults" >> "$AUTOSTART_LOG"
+        RES_DEFAULTS=$(jq -r '.resolution_defaults["1920x1080"]' ~/.config/display-config.json)
+    fi
+
+    # Get resolution-specific polybar settings
+    MONITOR_POLYBAR_FONT_SIZE=$(echo "$RES_DEFAULTS" | jq -r '.polybar_font_size')
+    MONITOR_POLYBAR_HEIGHT=$(echo "$RES_DEFAULTS" | jq -r '.polybar_height')
+    MONITOR_POLYBAR_LINE_SIZE=$(echo "$RES_DEFAULTS" | jq -r '.polybar_line_size')
+
+    # Override with machine-specific settings if they exist
+    HOSTNAME=$(hostnamectl hostname | cut -d'-' -f1)
+    MACHINE_OVERRIDE=$(jq -r ".machine_overrides[\"$HOSTNAME\"] // null" ~/.config/display-config.json)
+
+    if [ "$MACHINE_OVERRIDE" != "null" ]; then
+        # Check for zen external monitor patterns
+        if [ "$HOSTNAME" = "zen" ]; then
+            EXTERNAL_MONITOR_PATTERNS=$(echo "$MACHINE_OVERRIDE" | jq -r ".external_monitor_resolutions // [] | join(\"|\")")
+            if [ -n "$EXTERNAL_MONITOR_PATTERNS" ] && echo "$MONITOR_RES" | grep -qE "^(${EXTERNAL_MONITOR_PATTERNS})x"; then
+                # External monitor - use external settings if available
+                MONITOR_POLYBAR_FONT_SIZE=$(echo "$MACHINE_OVERRIDE" | jq -r ".polybar_font_size_external // .polybar_font_size // $MONITOR_POLYBAR_FONT_SIZE")
+                MONITOR_POLYBAR_HEIGHT=$(echo "$MACHINE_OVERRIDE" | jq -r ".polybar_height_external // .polybar_height // $MONITOR_POLYBAR_HEIGHT")
+                MONITOR_POLYBAR_LINE_SIZE=$(echo "$MACHINE_OVERRIDE" | jq -r ".polybar_line_size_external // .polybar_line_size // $MONITOR_POLYBAR_LINE_SIZE")
+            else
+                # Use machine override settings
+                MONITOR_POLYBAR_FONT_SIZE=$(echo "$MACHINE_OVERRIDE" | jq -r ".polybar_font_size // $MONITOR_POLYBAR_FONT_SIZE")
+                MONITOR_POLYBAR_HEIGHT=$(echo "$MACHINE_OVERRIDE" | jq -r ".polybar_height // $MONITOR_POLYBAR_HEIGHT")
+                MONITOR_POLYBAR_LINE_SIZE=$(echo "$MACHINE_OVERRIDE" | jq -r ".polybar_line_size // $MONITOR_POLYBAR_LINE_SIZE")
+            fi
         fi
     fi
 
