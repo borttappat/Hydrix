@@ -109,6 +109,19 @@ security.pam.loginLimits = [
 # Enable all firmware
 hardware.enableAllFirmware = true;
 
+# Bluetooth support (useful for comms-vm passthrough later)
+hardware.bluetooth = {
+  enable = true;
+  powerOnBoot = true;
+  settings = {
+    General = {
+      Enable = "Source,Sink,Media,Socket";
+      Experimental = true;
+    };
+  };
+};
+services.blueman.enable = true;
+
 # Allowing for flakes and nix-command
 nix.settings.experimental-features = [
     "nix-command"
