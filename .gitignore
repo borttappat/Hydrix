@@ -6,6 +6,11 @@ base-image-result
 pentest-vm-image*
 browsing-vm-image*
 
+# Local configuration (secrets, user-specific settings)
+# See templates/local/ for examples
+local/
+!local/.gitkeep
+
 # Sensitive files
 *credentials.env
 router-credentials.env
@@ -42,3 +47,4 @@ Thumbs.db
 !HYDRIX-GUIDE.md
 !README.md
 !CLAUDE.md
+!templates/local/README.md
