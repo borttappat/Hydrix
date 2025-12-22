@@ -1,89 +1,77 @@
 # Hydrix Templates
 
-This directory contains templates used by setup.sh and other scripts to generate machine-specific configurations.
+This directory contains templates used by setup.sh to generate machine-specific configurations.
 
-## nixbuild.sh Templates
+## Generated/Modified Files
 
-### nixbuild-entry.sh.template
-**Use for**: Simple machines without specialisations
-- Generic laptops
-- Machines that don't need router/VM modes
-- Basic NixOS configurations
+When `scripts/setup.sh` runs, it:
+- Creates `profiles/machines/<hostname>.nix` - Machine profile from `machine-profile-full.nix.template`
+- Updates `modules/base/users.nix` - Replaces 'traum' with detected user (if different)
+- Creates `generated/scripts/autostart-router-vm.sh` - Router VM autostart script
 
-**Variables**:
-- `{{MACHINE_NAME}}` - Human-readable name (e.g., "ASUS Zenbook")
-- `{{MODEL_PATTERN}}` - Grep pattern to detect model (e.g., "zenbook")
-- `{{FLAKE_NAME}}` - Flake configuration name (e.g., "zenbook")
+## Templates
 
-**Example**:
-```nix
-# For ASUS Zenbook machines
-if echo "$MODEL" | grep -qi "zenbook"; then
-    echo "Detected ASUS Zenbook"
-    sudo nixos-rebuild switch --impure --flake "$FLAKE_DIR#zenbook"
-    exit $?
-fi
-```
-
-### nixbuild-specialisation-entry.sh.template
-**Use for**: Machines with specialisations (router/maximalism modes)
-- Machines with VFIO passthrough
-- Machines that run router VMs
-- Machines with multiple boot modes
+### machine-profile-full.nix.template
+**Used by**: `scripts/setup.sh`
+**Purpose**: Complete machine profile with VFIO passthrough, bridges, and specialisations
 
 **Variables**:
-- Same as above
+- `{{MACHINE_NAME}}` - Hostname/machine identifier
+- `{{DATE}}` - Generation timestamp
+- `{{CPU_PLATFORM}}` - CPU vendor (intel/amd)
+- `{{IS_ASUS}}` - Whether system is ASUS hardware (true/false)
+- `{{PRIMARY_ID}}` - WiFi device vendor:product ID (e.g., "8086:a0f0")
+- `{{PRIMARY_PCI}}` - WiFi PCI address (e.g., "0000:00:14.3")
+- `{{PRIMARY_PCI_SHORT}}` - Short PCI format for virt-install (e.g., "00:14.3")
+- `{{PRIMARY_DRIVER}}` - WiFi kernel driver to blacklist (e.g., "iwlwifi")
+- `{{PRIMARY_INTERFACE}}` - WiFi interface name (e.g., "wlan0")
+- `{{IOMMU_PARAM}}` - IOMMU kernel parameter (intel_iommu=on or amd_iommu=on)
+- `{{USER}}` - Detected username
+- `{{HW_IMPORTS}}` - Conditional hardware module imports (Intel, ASUS, user config)
 
-**Behavior**:
-- Detects current specialisation (base/router/maximalism)
-- Rebuilds in SAME mode (no live switching)
-- Shows instructions for changing modes via bootloader
-
-**Example**:
-```nix
-# For ASUS Zephyrus machines
-if echo "$MODEL" | grep -qi "zephyrus"; then
-    echo "Detected ASUS Zephyrus"
-
-    # Detect current specialisation
-    CURRENT_SPEC="base"
-    if [[ -L /run/current-system/specialisation ]]; then
-        CURRENT_SPEC=$(readlink /run/current-system/specialisation | xargs basename 2>/dev/null || echo "base")
-    fi
-
-    # Rebuild in current mode
-    case "$CURRENT_SPEC" in
-        "router")
-            sudo nixos-rebuild switch --flake "$FLAKE_DIR#zephyrus" --specialisation router
-            ;;
-        "maximalism")
-            sudo nixos-rebuild switch --flake "$FLAKE_DIR#zephyrus" --specialisation maximalism
-            ;;
-        *)
-            sudo nixos-rebuild switch --flake "$FLAKE_DIR#zephyrus"
-            ;;
-    esac
-
-    exit $?
-fi
-```
-
-## Other Templates
+**Generated Features**:
+- VFIO passthrough configuration for WiFi NIC
+- Network bridges (br-mgmt, br-pentest, br-office, br-browse, br-dev)
+- Router VM autostart systemd service
+- Fallback specialisation (re-enables WiFi, disables VFIO)
+- Lockdown specialisation (isolates host from internet)
+- Status commands (vm-status, router-status, lockdown-status, fallback-status)
 
 ### flake-entry.nix.template
-Template for adding new machine configurations to flake.nix
-
-### machine-profile.nix.template
-Template for creating machine-specific profile files in `profiles/machines/`
+Template for adding new machine configurations to flake.nix (reference only - setup.sh has its own inline version)
 
 ### router-vm-config.nix.template
-Template for router VM configuration (generated dynamically by setup.sh)
+Template for router VM configuration with user credential placeholders
+
+## How nixbuild.sh Works
+
+`scripts/nixbuild.sh` uses **hostname-based detection** - no templates needed:
+
+**Physical machines:**
+```bash
+# Uses hostname directly as flake target
+FLAKE_TARGET="$HOSTNAME"
+# Builds: nixos-rebuild switch --flake .#<hostname>
+```
+
+**VMs:**
+```bash
+# Extracts type from hostname pattern (e.g., "pentest-google" → "pentest")
+VM_TYPE="${hostname%%-*}"
+FLAKE_TARGET="vm-${VM_TYPE}"
+# Builds: nixos-rebuild switch --flake .#vm-pentest
+```
+
+**Specialisation handling:**
+- Detects current specialisation (lockdown/router/fallback)
+- Maintains same mode across rebuilds
+- Mode changes require reboot via bootloader
 
 ## Critical Rule: Mode Switching
 
-**⚠️ IMPORTANT**: Machines with specialisations that change kernel parameters or blacklist modules:
+**IMPORTANT**: Machines with specialisations that change kernel parameters or blacklist modules:
 - **CANNOT switch modes live** (requires reboot)
-- nixbuild.sh should **detect and maintain current mode**
+- nixbuild.sh **detects and maintains current mode**
 - Mode changes happen via **bootloader menu selection**
 
 **Why?**
@@ -93,5 +81,5 @@ Template for router VM configuration (generated dynamically by setup.sh)
 
 **Correct flow**:
 1. Boot into desired mode via bootloader
-2. Run `./nixbuild.sh` - rebuilds in current mode
+2. Run `scripts/nixbuild.sh` - rebuilds in current mode
 3. To change modes: reboot and select different specialisation in bootloader

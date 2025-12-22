@@ -4,7 +4,8 @@
 
 set -euo pipefail
 
-readonly HYDRIX_DIR="/home/traum/Hydrix"
+readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+readonly HYDRIX_DIR="$(dirname "$SCRIPT_DIR")"
 
 log() { echo "[$(date +%H:%M:%S)] $*"; }
 error() { echo "[ERROR] $*" >&2; exit 1; }

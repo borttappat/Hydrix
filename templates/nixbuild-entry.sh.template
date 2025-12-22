@@ -1,6 +1,0 @@
-# For {{MACHINE_NAME}} machines
-if echo "$MODEL" | grep -qi "{{MODEL_PATTERN}}"; then
-    echo "Detected {{MACHINE_NAME}}"
-    sudo nixos-rebuild switch --impure --show-trace --option warn-dirty false --flake "$FLAKE_DIR#{{FLAKE_NAME}}"
-    exit $?
-fi
