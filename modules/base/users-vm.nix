@@ -10,12 +10,7 @@
 { config, pkgs, lib, ... }:
 
 let
-  # VM user is intentionally simple and isolated from host
-  # VMs should not have access to host credentials
-  vmUser = "user";
-
-  # Try to read VM-specific secrets if available
-  # This allows VMs to have their own local config after cloning Hydrix
+  # Try to read shared config for username (shared across host and VMs)
   hydrixPath = builtins.getEnv "HYDRIX_PATH";
   sudoUser = builtins.getEnv "SUDO_USER";
   currentUser = builtins.getEnv "USER";
@@ -23,6 +18,15 @@ let
                   else if currentUser != "" && currentUser != "root" then currentUser
                   else "user";
   basePath = if hydrixPath != "" then hydrixPath else "/home/${effectiveUser}/Hydrix";
+
+  # Read shared config for username (username is not a secret, shared by all systems)
+  sharedConfigPath = "${basePath}/local/shared.nix";
+  sharedConfig = if builtins.pathExists sharedConfigPath
+    then import sharedConfigPath
+    else { username = "user"; };
+
+  # VM user uses shared username (consistent across host and VMs)
+  vmUser = sharedConfig.username or "user";
 
   # Determine VM type from hostname (e.g., "pentest-vm" → "pentest")
   vmType = let

@@ -140,11 +140,11 @@ in
     home.file.".config/wal/templates/dunstrc".source = ../../configs/wal/templates/dunstrc;
 
     # Firefox configuration templates (processed by .xinitrc)
-    # Note: Firefox profile directory may vary - using generic path
-    home.file.".config/firefox/${username}/chrome/userChrome.css.template".source = ../../configs/firefox/traum/chrome/userChrome.css.template;
-    home.file.".config/firefox/${username}/chrome/userContent.css.template".source = ../../configs/firefox/traum/chrome/userContent.css.template;
-    home.file.".config/firefox/${username}/user.js.template".source = ../../configs/firefox/traum/user.js.template;
-    home.file.".mozilla/firefox/profiles.ini".source = ../../configs/firefox/profiles.ini;
+    # Note: Firefox profile directory uses dynamic username
+    home.file.".config/firefox/${username}/chrome/userChrome.css.template".source = ../../configs/firefox/chrome/userChrome.css.template;
+    home.file.".config/firefox/${username}/chrome/userContent.css.template".source = ../../configs/firefox/chrome/userContent.css.template;
+    home.file.".config/firefox/${username}/user.js.template".source = ../../configs/firefox/user.js.template;
+    home.file.".config/firefox/profiles.ini.template".source = ../../configs/firefox/profiles.ini.template;
 
     # Obsidian configuration templates (deployed by deploy-obsidian-config script)
     home.file.".config/obsidian-templates/appearance.json.template".source = ../../configs/obsidian/appearance.json.template;

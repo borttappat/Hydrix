@@ -70,18 +70,24 @@ sed -e "s/\${ROFI_FONT}/$ROFI_FONT/g" \
     ~/.config/rofi/config.rasi.template > ~/.config/rofi/config.rasi
 
 # Firefox font configuration
-mkdir -p ~/.mozilla/firefox/traum/chrome
+# Use dynamic username instead of hardcoded "traum"
+FIREFOX_PROFILE_NAME="$USER"
+mkdir -p ~/.mozilla/firefox/$FIREFOX_PROFILE_NAME/chrome
 sed -e "s/\${FIREFOX_FONT}/$FIREFOX_FONT/g" \
     -e "s/\${FIREFOX_FONT_SIZE}/$FIREFOX_FONT_SIZE/g" \
     -e "s/\${FIREFOX_HEADER_FONT_SIZE}/$FIREFOX_HEADER_FONT_SIZE/g" \
-    ~/.config/firefox/traum/chrome/userChrome.css.template > ~/.mozilla/firefox/traum/chrome/userChrome.css
+    ~/.config/firefox/$FIREFOX_PROFILE_NAME/chrome/userChrome.css.template > ~/.mozilla/firefox/$FIREFOX_PROFILE_NAME/chrome/userChrome.css
 sed -e "s/\${FIREFOX_FONT}/$FIREFOX_FONT/g" \
     -e "s/\${FIREFOX_FONT_SIZE}/$FIREFOX_FONT_SIZE/g" \
     -e "s/\${FIREFOX_HEADER_FONT_SIZE}/$FIREFOX_HEADER_FONT_SIZE/g" \
-    ~/.config/firefox/traum/chrome/userContent.css.template > ~/.mozilla/firefox/traum/chrome/userContent.css
+    ~/.config/firefox/$FIREFOX_PROFILE_NAME/chrome/userContent.css.template > ~/.mozilla/firefox/$FIREFOX_PROFILE_NAME/chrome/userContent.css
 sed -e "s/\${FIREFOX_FONT}/$FIREFOX_FONT/g" \
     -e "s/\${FIREFOX_FONT_SIZE}/$FIREFOX_FONT_SIZE/g" \
     -e "s/\${FIREFOX_HEADER_FONT_SIZE}/$FIREFOX_HEADER_FONT_SIZE/g" \
-    ~/.config/firefox/traum/user.js.template > ~/.mozilla/firefox/traum/user.js
+    ~/.config/firefox/$FIREFOX_PROFILE_NAME/user.js.template > ~/.mozilla/firefox/$FIREFOX_PROFILE_NAME/user.js
+
+# Generate profiles.ini with dynamic username
+sed -e "s/\${FIREFOX_PROFILE_NAME}/$FIREFOX_PROFILE_NAME/g" \
+    ~/.config/firefox/profiles.ini.template > ~/.mozilla/firefox/profiles.ini
 
 exec i3

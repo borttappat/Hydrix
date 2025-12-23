@@ -3,12 +3,16 @@
 #   |   _|  |__ --|     |
 #   |__| |__|_____|__|__|
 #
+
+# Disable fish greeting
+set -g fish_greeting
+
 # === INTERACTIVE BLOCK ===
 if status is-interactive
     # Apply pywal colors (sequences now managed by home-manager/Nix)
     # The sequences file is generated with proper escape codes
-    if test -f /home/traum/.cache/wal/sequences
-        cat /home/traum/.cache/wal/sequences
+    if test -f ~/.cache/wal/sequences
+        cat ~/.cache/wal/sequences
     end
 
     fish_vi_key_bindings

@@ -1,7 +1,7 @@
 [Profile0]
 Name=default
 IsRelative=1
-Path=traum
+Path=${FIREFOX_PROFILE_NAME}
 Default=1
 
 [General]
