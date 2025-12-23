@@ -114,13 +114,14 @@
       after = [ "network.target" ];
 
       unitConfig = {
-        ConditionPathExists = "!/home/traum/.cache/wal/.static-colors-generated";
+        # Uses "user" - the standard VM user from users-vm.nix
+        ConditionPathExists = "!/home/user/.cache/wal/.static-colors-generated";
       };
 
       serviceConfig = {
         Type = "oneshot";
         RemainAfterExit = true;
-        User = "traum";
+        User = "user";
       };
 
       script = if hasCustomScheme then ''

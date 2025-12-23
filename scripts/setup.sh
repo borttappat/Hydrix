@@ -272,15 +272,42 @@ generate_host_config() {
         return
     fi
 
-    # Generate a password hash
-    # For initial setup, we'll use the username as password (user should change it)
+    # Prompt for password
     local hashed_password
     if command -v mkpasswd >/dev/null 2>&1; then
-        log "Generating password hash (default password: $username)"
-        hashed_password=$(echo "$username" | mkpasswd -m sha-512 -s)
+        echo ""
+        log "Set password for user: $username"
+        log "This will be your login password on the host system"
+        echo ""
+
+        local password1=""
+        local password2=""
+        local attempts=0
+
+        while [[ "$password1" != "$password2" ]] || [[ -z "$password1" ]]; do
+            if [[ $attempts -gt 0 ]]; then
+                warn "Passwords do not match or are empty. Please try again."
+            fi
+
+            read -s -p "Enter password: " password1
+            echo ""
+            read -s -p "Confirm password: " password2
+            echo ""
+
+            attempts=$((attempts + 1))
+
+            if [[ $attempts -gt 3 ]]; then
+                error "Too many failed attempts. Exiting."
+            fi
+        done
+
+        log "Generating secure password hash..."
+        hashed_password=$(echo "$password1" | mkpasswd -m sha-512 -s)
+        success "Password set successfully"
     else
         warn "mkpasswd not found - using placeholder password hash"
-        warn "Run 'mkpasswd -m sha-512' to generate a proper hash"
+        warn "Install with: nix-shell -p whois"
+        warn "Then run: mkpasswd -m sha-512 to generate a proper hash"
         hashed_password='$6$rounds=100000$PLACEHOLDER$CHANGE_ME'
     fi
 
@@ -295,8 +322,8 @@ generate_host_config() {
   # Primary user account
   username = "$username";
 
-  # Password hash (default: username as password - CHANGE THIS!)
-  # Generate with: mkpasswd -m sha-512
+  # Password hash (set during setup)
+  # To change: mkpasswd -m sha-512
   hashedPassword = "$hashed_password";
 
   # User description/full name
@@ -314,7 +341,6 @@ generate_host_config() {
 EOF
 
     success "Generated: $host_file"
-    warn "Default password is '$username' - please change it!"
 }
 
 # Generate local/vms/ directory structure

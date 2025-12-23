@@ -1,5 +1,6 @@
 # Hydrix repository cloning service
-# Clones Hydrix from GitHub to /home/traum/Hydrix on first boot
+# Clones Hydrix from GitHub to /home/user/Hydrix on first boot
+# Uses "user" - the standard VM user from users-vm.nix
 { config, pkgs, lib, ... }:
 
 {
@@ -14,7 +15,7 @@
 
     # Only run once
     unitConfig = {
-      ConditionPathExists = "!/home/traum/.hydrix-cloned";
+      ConditionPathExists = "!/home/user/.hydrix-cloned";
     };
 
     serviceConfig = {
@@ -37,22 +38,22 @@
 
       # Clone Hydrix from GitHub
       echo "Cloning from GitHub..."
-      ${pkgs.git}/bin/git clone https://github.com/borttappat/Hydrix.git /home/traum/Hydrix
+      ${pkgs.git}/bin/git clone https://github.com/borttappat/Hydrix.git /home/user/Hydrix
 
-      if [ -d /home/traum/Hydrix/.git ]; then
+      if [ -d /home/user/Hydrix/.git ]; then
         echo "✓ Hydrix cloned successfully"
 
         # Set ownership
-        chown -R traum:users /home/traum/Hydrix
+        chown -R user:users /home/user/Hydrix
 
         # Make scripts executable
-        if [ -d /home/traum/Hydrix/scripts ]; then
-          chmod +x /home/traum/Hydrix/scripts/*.sh 2>/dev/null || true
+        if [ -d /home/user/Hydrix/scripts ]; then
+          chmod +x /home/user/Hydrix/scripts/*.sh 2>/dev/null || true
         fi
 
         # Mark as cloned
-        touch /home/traum/.hydrix-cloned
-        chown traum:users /home/traum/.hydrix-cloned
+        touch /home/user/.hydrix-cloned
+        chown user:users /home/user/.hydrix-cloned
       else
         echo "✗ ERROR: Failed to clone Hydrix repository"
         exit 1

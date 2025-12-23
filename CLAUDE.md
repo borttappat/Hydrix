@@ -7,8 +7,9 @@ Hydrix is a NixOS-based VM isolation system designed for security-conscious work
 - Isolated network bridges for different VM categories (pentest, office, browsing, dev)
 - Specialisation-based boot modes (router, lockdown, fallback)
 - Template-based machine configuration generation
+- **Local secrets management** - Personal info abstracted to gitignored `local/` directory
 
-**Key Goal**: This setup should be usable by anyone, not just the original author. Personal info should be abstracted to local (gitignored) config files.
+**Key Goal**: This setup should be usable by anyone, not just the original author. Personal info is in `local/` (gitignored), allowing the repo to be public.
 
 ## Architecture
 
@@ -37,8 +38,8 @@ Router VM (WiFi passthrough)
 
 | Script | Purpose |
 |--------|---------|
-| `scripts/setup.sh` | Initial machine setup - detects hardware, creates configs from templates |
-| `scripts/nixbuild.sh` | Rebuilds host/VMs using hostname-based flake detection |
+| `scripts/setup.sh` | Initial machine setup - detects hardware, creates configs, prompts for password |
+| `scripts/nixbuild.sh` | Rebuilds host/VMs using hostname-based flake detection (uses --impure) |
 | `scripts/build-vm.sh` | Deploys VM instances from base images |
 | `scripts/hardware-identify.sh` | Detects WiFi hardware for VFIO passthrough |
 
@@ -60,33 +61,68 @@ Router VM (WiFi passthrough)
 - No hardcoded machine lists needed
 - VMs: hostname pattern `<type>-<name>` → flake `vm-<type>`
 
-### 4. Secrets Management (TODO)
-- Use local gitignored config file for secrets
-- setup.sh generates with detected/auto-generated values
-- Modules read via `--impure` mode
-- Goal: repo can be public, personal data stays local
+### 4. Secrets Management (✅ IMPLEMENTED)
+- Local gitignored `local/` directory contains all personal/sensitive data
+- Host secrets in `local/host.nix` (username, password hash, SSH keys)
+- VM secrets isolated per-type in `local/vms/<type>.nix`
+- Shared non-secret config in `local/shared.nix` (timezone, locale, keyboard)
+- Modules read via `--impure` flag (required for `builtins.getEnv`)
+- setup.sh auto-detects settings from `/etc/nixos/configuration.nix` and prompts for password
+- **Principle of least privilege**: VMs only access their specific secrets, never host secrets
+
+## Local Config Structure
+
+```
+local/                           # gitignored - your secrets
+├── host.nix                    # Host-only: username, password hash, SSH keys
+├── shared.nix                  # Non-secret: timezone, locale, keyboard (all systems)
+└── vms/
+    ├── router.nix              # Router VM secrets only
+    ├── pentest.nix             # Pentest VM secrets only
+    ├── browsing.nix            # Browsing VM secrets only
+    ├── office.nix              # Office VM secrets only
+    └── dev.nix                 # Dev VM secrets only
+
+templates/local/                 # committed - examples for new users
+├── README.md                   # Setup instructions
+├── host.nix.example
+├── shared.nix.example
+└── vms/
+    └── vm.nix.example
+```
+
+**Security Model**: Each VM only accesses its own secrets file. Host secrets are never exposed to VMs.
 
 ## Current TODO List
 
+### Immediate Priority - UI/UX Issues
+1. **Fix Firefox fonts in VMs** - Not rendering correctly in browsing VM
+2. **Fix terminal colors in VMs** - Showing default instead of VM-specific theme colors
+3. **Change font from Cozette to Tamzen** - Update across all VMs and host configs
+4. ✅ Resolution detection working correctly (1920x1200)
+
 ### High Priority - Core Functionality
-1. Create `modules/base/locale.nix` - Extract locale/keyboard from host `/etc/nixos/configuration.nix`
-2. Update setup.sh to detect and populate locale settings
-3. Create `modules/base/disk.nix` - LUKS/boot settings from host config
-4. Update setup.sh to detect LUKS/boot settings
+5. Set up shared folders between host and each VM (virtiofs or 9p)
+6. Isolate br-* bridges from each other (VMs on same bridge can communicate, not across bridges)
 
-### Secrets & Privacy
-5. Design secrets management (local gitignored `local/secrets.nix`)
-6. Implement local secrets file generation in setup.sh
+### Medium Priority - Polish
 7. Add LUKS encryption to VM builds with auto-generated passwords
-8. Abstract username/personal info to local config
-
-### VM Improvements
-9. Refactor VM configs - import base modules, remove duplicated settings
-10. Set up shared folders between host and each VM (virtiofs or 9p)
-11. Isolate br-* bridges from each other (VMs on same bridge can communicate, not across bridges)
+8. Create `modules/base/locale.nix` - Centralized locale/keyboard module (currently in local/shared.nix)
+9. Create `modules/base/disk.nix` - LUKS/boot settings module
 
 ### Cleanup (Deferred)
-12. Remove obsolete files: `add-machine.sh`, old templates, `.bak` files
+10. Remove obsolete files: `add-machine.sh`, old templates, `.bak` files
+11. Remove or update obsolete modules: `hydrix-embed.nix`, `shaping.nix` (replaced by full VM setup)
+
+## Recently Completed
+
+- ✅ Local secrets management system implemented
+- ✅ Password prompting during setup.sh
+- ✅ Dynamic username detection in all modules (host vs VM)
+- ✅ Per-VM secrets isolation
+- ✅ Auto-detection of locale/timezone/keyboard from system
+- ✅ All hardcoded "traum" references removed (except in obsolete files)
+- ✅ Host setup tested on Zenbook (Intel + ASUS)
 
 ## Files to Eventually Clean Up
 
@@ -96,60 +132,108 @@ Router VM (WiFi passthrough)
 | `scripts/setup-machine.sh.bak` | Keep for now | Backup of old script |
 | `templates/flake-entry.nix.template` | Keep for now | Only used by obsolete add-machine.sh |
 | `templates/router-vm-config.nix.template` | Keep for now | Not used - config is in modules/ |
+| `modules/vm/hydrix-embed.nix` | Obsolete | Replaced by full VM setup |
+| `modules/vm/shaping.nix` | Obsolete | Replaced by full VM setup |
 
 ## Module Structure
 
 ```
 modules/
 ├── base/
-│   ├── configuration.nix    # Core system config
-│   ├── hardware-config.nix  # Hardware (imported from /etc/nixos)
-│   ├── users.nix            # User accounts (setup.sh modifies for non-traum)
-│   ├── locale.nix           # TODO: Locale/keyboard settings
-│   ├── disk.nix             # TODO: LUKS/boot settings
-│   ├── services.nix         # System services
-│   ├── virt.nix             # Virtualization (libvirt, etc.)
-│   ├── audio.nix            # Audio configuration
+│   ├── configuration.nix       # Core system config
+│   ├── hardware-config.nix     # Hardware (imported from /etc/nixos)
+│   ├── users.nix               # Host user accounts (reads from local/host.nix)
+│   ├── users-vm.nix            # VM user accounts (isolated, uses "user")
+│   ├── local-config.nix        # Local config importer (with VM isolation)
+│   ├── system-config.nix       # Performance and desktop essentials
+│   ├── services.nix            # System services
+│   ├── virt.nix                # Virtualization (libvirt, etc.)
+│   ├── audio.nix               # Audio configuration
 │   └── hardware/
-│       ├── intel.nix        # Intel-specific (graphics, microcode)
-│       └── asus.nix         # ASUS-specific (asusd)
+│       ├── intel.nix           # Intel-specific (graphics, microcode)
+│       └── asus.nix            # ASUS-specific (asusd)
 ├── desktop/
-│   ├── firefox.nix
-│   └── xinitrc.nix
+│   ├── firefox.nix             # Firefox with extensions (dynamic username)
+│   └── xinitrc.nix             # X session and config deployment (dynamic username)
 ├── shell/
-│   └── packages.nix
+│   ├── fish.nix                # Fish shell configuration
+│   ├── fish-home.nix           # Fish home-manager config (dynamic username)
+│   └── packages.nix            # Shell packages
 ├── theming/
-│   ├── colors.nix
-│   └── dynamic.nix
+│   ├── base.nix                # Theming infrastructure (VM user: "user")
+│   ├── colors.nix              # Dynamic theming (host)
+│   ├── static-colors.nix       # Static VM colors (VM user: "user")
+│   └── dynamic.nix             # Dynamic pywal theming
 ├── wm/
-│   └── i3.nix
-├── router-vm-unified.nix    # Router VM configuration
+│   └── i3.nix                  # i3 window manager
+├── pentesting/
+│   └── pentesting.nix          # Pentest tools and setup (VM user: "user")
+├── core.nix                    # Core essentials for all systems (dynamic username)
+├── router-vm-unified.nix       # Router VM configuration
 └── lockdown/
-    └── router-vm-config.nix # Lockdown router variant
+    └── router-vm-config.nix    # Lockdown router variant
 ```
 
 ## VM Configuration Pattern
 
-VMs should follow this pattern:
+VMs use isolated user configuration and secrets:
+
 ```nix
 { config, pkgs, lib, ... }:
 {
   imports = [
     # Base modules (shared settings)
-    ../base/locale.nix      # TODO
-    ../base/disk.nix        # TODO
+    ../modules/base/users-vm.nix     # VM user ("user", not host user)
+    ../modules/base/networking.nix
     # ... other base modules
   ];
 
   # VM-specific overrides only
-  networking.hostName = "pentest-vm";
+  networking.hostName = "browsing-vm";
+  hydrix.vmType = "browsing";
 
   # Type-specific packages
   environment.systemPackages = with pkgs; [
-    # pentest tools...
+    # browsing-specific tools...
   ];
 }
 ```
+
+**Key Point**: VMs use `users-vm.nix` which creates user "user" and reads from `local/vms/<type>.nix` for secrets. Host uses `users.nix` which reads from `local/host.nix`.
+
+## Dynamic Username Pattern
+
+All modules that reference usernames now use dynamic detection:
+
+```nix
+let
+  hydrixPath = builtins.getEnv "HYDRIX_PATH";
+  sudoUser = builtins.getEnv "SUDO_USER";
+  currentUser = builtins.getEnv "USER";
+  effectiveUser = if sudoUser != "" then sudoUser
+                  else if currentUser != "" && currentUser != "root" then currentUser
+                  else "user";
+  basePath = if hydrixPath != "" then hydrixPath else "/home/${effectiveUser}/Hydrix";
+  hostConfigPath = "${basePath}/local/host.nix";
+
+  hostConfig = if builtins.pathExists hostConfigPath
+    then import hostConfigPath
+    else null;
+
+  username = if hostConfig != null && hostConfig ? username
+    then hostConfig.username
+    else "user";
+in
+  # Use ${username} in configurations
+```
+
+This pattern is used in:
+- `modules/base/users.nix`
+- `modules/base/system-config.nix`
+- `modules/desktop/firefox.nix`
+- `modules/desktop/xinitrc.nix`
+- `modules/shell/fish-home.nix`
+- `modules/core.nix`
 
 ## Bridge Isolation Requirements
 
@@ -172,15 +256,39 @@ Each VM should have access to a shared folder with the host:
 ```bash
 # Initial setup (new machine)
 ./scripts/setup.sh
+# - Detects hardware, locale, timezone, keyboard
+# - Prompts for password (secure, hashed)
+# - Generates local/ directory with your settings
+# - Creates machine profile
+# - Builds router VM and system
 
-# Rebuild current system
+# Rebuild current system (requires --impure for local config)
 ./scripts/nixbuild.sh
+# Automatically uses --impure flag
 
 # Deploy a VM
-./scripts/build-vm.sh --type pentest --name google
+./scripts/build-vm.sh --type browsing --name test
 
 # Switch boot modes (requires reboot)
-sudo nixos-rebuild boot --flake ~/Hydrix#<hostname>
-sudo nixos-rebuild boot --flake ~/Hydrix#<hostname> --specialisation lockdown
-sudo nixos-rebuild boot --flake ~/Hydrix#<hostname> --specialisation fallback
+sudo nixos-rebuild boot --flake ~/Hydrix#<hostname> --impure
+sudo nixos-rebuild boot --flake ~/Hydrix#<hostname> --specialisation lockdown --impure
+sudo nixos-rebuild boot --flake ~/Hydrix#<hostname> --specialisation fallback --impure
+
+# Change password after setup
+mkpasswd -m sha-512
+# Then edit ~/Hydrix/local/host.nix with the new hash
 ```
+
+## Known Issues
+
+1. **Firefox fonts in VMs** - Not displaying correctly
+2. **Terminal colors in VMs** - Using default instead of theme colors
+3. **Font should be Tamzen** - Currently using Cozette, need to change globally
+
+## Notes for Contributors
+
+- **Always use --impure** when rebuilding (local config requires it)
+- **Never commit local/** - Contains secrets and personal info
+- **Test on fresh install** - Use templates/local/*.example to verify portability
+- **VMs use "user"** - Standard VM username, never use hardcoded personal usernames
+- **Host uses local/host.nix** - Dynamic username from local config

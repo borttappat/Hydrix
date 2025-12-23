@@ -9,7 +9,7 @@
 
     # Base system
     ../modules/base/nixos-base.nix
-    ../modules/base/users.nix
+    ../modules/base/users-vm.nix  # VM-isolated user (not host secrets)
     ../modules/base/networking.nix
     ../modules/vm/qemu-guest.nix
     ../modules/vm/hydrix-clone.nix  # Clone Hydrix repo on first boot
@@ -101,7 +101,7 @@
     (pkgs.writeShellScriptBin "rebuild" ''
       #!/usr/bin/env bash
       set -e
-      cd /home/traum/Hydrix
+      cd ~/Hydrix
       echo "Pulling latest changes..."
       git pull
       echo "Rebuilding system..."

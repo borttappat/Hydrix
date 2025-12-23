@@ -9,7 +9,7 @@
 
     # Base system
     ../modules/base/nixos-base.nix
-    ../modules/base/users.nix
+    ../modules/base/users-vm.nix  # VM-isolated user (not host secrets)
     ../modules/base/networking.nix
     ../modules/vm/qemu-guest.nix
 
@@ -117,7 +117,7 @@
     (pkgs.writeShellScriptBin "rebuild" ''
       #!/usr/bin/env bash
       set -e
-      cd /home/traum/Hydrix
+      cd ~/Hydrix
       echo "Pulling latest changes..."
       git pull
       echo "Rebuilding system..."
@@ -131,8 +131,8 @@
     enableOnBoot = true;
   };
 
-  # Add user to docker group
-  users.users.traum.extraGroups = [ "docker" ];
+  # Add VM user to docker group
+  users.users.user.extraGroups = [ "docker" ];
 
   # Enable PostgreSQL for database development
   services.postgresql = {

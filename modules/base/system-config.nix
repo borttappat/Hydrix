@@ -2,6 +2,25 @@
 # This module contains settings that are NOT in /etc/nixos/configuration.nix
 { config, pkgs, lib, ... }:
 
+let
+  # Detect username dynamically from local config
+  hydrixPath = builtins.getEnv "HYDRIX_PATH";
+  sudoUser = builtins.getEnv "SUDO_USER";
+  currentUser = builtins.getEnv "USER";
+  effectiveUser = if sudoUser != "" then sudoUser
+                  else if currentUser != "" && currentUser != "root" then currentUser
+                  else "user";
+  basePath = if hydrixPath != "" then hydrixPath else "/home/${effectiveUser}/Hydrix";
+  hostConfigPath = "${basePath}/local/host.nix";
+
+  hostConfig = if builtins.pathExists hostConfigPath
+    then import hostConfigPath
+    else null;
+
+  username = if hostConfig != null && hostConfig ? username
+    then hostConfig.username
+    else "user";
+in
 {
   # ========== SYSTEMD SERVICES ==========
 
@@ -11,12 +30,12 @@
     before = [ "sleep.target" ];
     wantedBy = [ "sleep.target" ];
     serviceConfig = {
-      User = "traum";
+      User = username;
       Type = "forking";
       Environment = [
         "DISPLAY=:0"
-        "XAUTHORITY=/home/traum/.Xauthority"
-        "HOME=/home/traum"
+        "XAUTHORITY=/home/${username}/.Xauthority"
+        "HOME=/home/${username}"
         "PATH=/run/current-system/sw/bin"
       ];
       ExecStart = "${pkgs.i3lock-color}/bin/i3lock -c 000000";  # Simple black lock

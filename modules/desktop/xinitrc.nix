@@ -1,5 +1,27 @@
 { config, pkgs, lib, ... }:
 
+let
+  # Detect username dynamically
+  # For host: reads from local/host.nix
+  # For VMs: defaults to "user"
+  hydrixPath = builtins.getEnv "HYDRIX_PATH";
+  sudoUser = builtins.getEnv "SUDO_USER";
+  currentUser = builtins.getEnv "USER";
+  effectiveUser = if sudoUser != "" then sudoUser
+                  else if currentUser != "" && currentUser != "root" then currentUser
+                  else "user";
+  basePath = if hydrixPath != "" then hydrixPath else "/home/${effectiveUser}/Hydrix";
+  hostConfigPath = "${basePath}/local/host.nix";
+
+  # Use local config username if available (host), otherwise "user" (VM)
+  hostConfig = if builtins.pathExists hostConfigPath
+    then import hostConfigPath
+    else null;
+
+  username = if hostConfig != null && hostConfig ? username
+    then hostConfig.username
+    else "user";
+in
 {
   # X session bootstrap and config file deployment
   #
@@ -16,7 +38,7 @@
   home-manager.backupFileExtension = "hm-backup";
 
   # Deploy all config files to user home directory
-  home-manager.users.traum = {
+  home-manager.users.${username} = {
     # Set home-manager state version (must match system stateVersion or use latest)
     home.stateVersion = "25.05";
 
@@ -118,9 +140,10 @@
     home.file.".config/wal/templates/dunstrc".source = ../../configs/wal/templates/dunstrc;
 
     # Firefox configuration templates (processed by .xinitrc)
-    home.file.".config/firefox/traum/chrome/userChrome.css.template".source = ../../configs/firefox/traum/chrome/userChrome.css.template;
-    home.file.".config/firefox/traum/chrome/userContent.css.template".source = ../../configs/firefox/traum/chrome/userContent.css.template;
-    home.file.".config/firefox/traum/user.js.template".source = ../../configs/firefox/traum/user.js.template;
+    # Note: Firefox profile directory may vary - using generic path
+    home.file.".config/firefox/${username}/chrome/userChrome.css.template".source = ../../configs/firefox/traum/chrome/userChrome.css.template;
+    home.file.".config/firefox/${username}/chrome/userContent.css.template".source = ../../configs/firefox/traum/chrome/userContent.css.template;
+    home.file.".config/firefox/${username}/user.js.template".source = ../../configs/firefox/traum/user.js.template;
     home.file.".mozilla/firefox/profiles.ini".source = ../../configs/firefox/profiles.ini;
 
     # Obsidian configuration templates (deployed by deploy-obsidian-config script)

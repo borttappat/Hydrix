@@ -12,7 +12,7 @@
 
     # Base system configuration
     ../modules/base/nixos-base.nix
-    ../modules/base/users.nix
+    ../modules/base/users-vm.nix  # VM-isolated user (not host secrets)
     ../modules/base/networking.nix
 
     # VM-specific modules

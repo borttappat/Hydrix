@@ -8,10 +8,15 @@
 
 let
   # Import local host config if it exists (requires --impure)
+  # SUDO_USER preserves the original user when running with sudo
   hydrixPath = builtins.getEnv "HYDRIX_PATH";
-  basePath = if hydrixPath != "" then hydrixPath else
-    let user = builtins.getEnv "USER";
-    in if user != "" then "/home/${user}/Hydrix" else "/home/traum/Hydrix";
+  sudoUser = builtins.getEnv "SUDO_USER";
+  currentUser = builtins.getEnv "USER";
+  # Prefer SUDO_USER (set by sudo), fall back to USER, then "traum"
+  effectiveUser = if sudoUser != "" then sudoUser
+                  else if currentUser != "" && currentUser != "root" then currentUser
+                  else "traum";
+  basePath = if hydrixPath != "" then hydrixPath else "/home/${effectiveUser}/Hydrix";
 
   hostConfigPath = "${basePath}/local/host.nix";
 

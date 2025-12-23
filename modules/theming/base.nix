@@ -24,9 +24,10 @@
 
   # Ensure .cache/wal directory exists for pywal
   # This is created per-user to avoid permission issues
+  # Uses "user" - the standard VM user from users-vm.nix
   systemd.tmpfiles.rules = [
-    "d /home/traum/.cache 0755 traum users -"
-    "d /home/traum/.cache/wal 0755 traum users -"
+    "d /home/user/.cache 0755 user users -"
+    "d /home/user/.cache/wal 0755 user users -"
   ];
 
   # Note: Template files and actual config deployment happens in xinitrc.nix

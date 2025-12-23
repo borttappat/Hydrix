@@ -15,9 +15,14 @@
 
 let
   # Base path for local config - uses environment variable for flexibility
-  # Falls back to standard location if not set
+  # SUDO_USER preserves the original user when running with sudo
   hydrixPath = builtins.getEnv "HYDRIX_PATH";
-  basePath = if hydrixPath != "" then hydrixPath else "/home/${builtins.getEnv "USER"}/Hydrix";
+  sudoUser = builtins.getEnv "SUDO_USER";
+  currentUser = builtins.getEnv "USER";
+  effectiveUser = if sudoUser != "" then sudoUser
+                  else if currentUser != "" && currentUser != "root" then currentUser
+                  else "traum";
+  basePath = if hydrixPath != "" then hydrixPath else "/home/${effectiveUser}/Hydrix";
   localPath = "${basePath}/local";
 
   # Helper to safely import a file if it exists
