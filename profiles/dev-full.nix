@@ -12,6 +12,7 @@
     ../modules/base/users-vm.nix  # VM-isolated user (not host secrets)
     ../modules/base/networking.nix
     ../modules/vm/qemu-guest.nix
+    ../modules/vm/hydrix-clone.nix  # Clone Hydrix repo on first boot
 
     # Core desktop environment (i3, fish, etc.)
     ../modules/core.nix
@@ -19,6 +20,9 @@
     # Theming system
     ../modules/theming/static-colors.nix
     ../modules/desktop/xinitrc.nix
+
+    # Firefox browser
+    ../modules/desktop/firefox.nix
   ];
 
   # ===== Inline hardware configuration for QEMU VMs =====

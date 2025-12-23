@@ -10,23 +10,14 @@
 { config, pkgs, lib, ... }:
 
 let
-  # Try to read shared config for username (shared across host and VMs)
-  hydrixPath = builtins.getEnv "HYDRIX_PATH";
-  sudoUser = builtins.getEnv "SUDO_USER";
-  currentUser = builtins.getEnv "USER";
-  effectiveUser = if sudoUser != "" then sudoUser
-                  else if currentUser != "" && currentUser != "root" then currentUser
-                  else "user";
-  basePath = if hydrixPath != "" then hydrixPath else "/home/${effectiveUser}/Hydrix";
+  # VMs ALWAYS use "user" for simplicity and portability
+  # The local/ directory is gitignored and won't exist in VM clones,
+  # so we hardcode the username to avoid unpredictable behavior
+  # Users can customize this directly in this file if needed
+  vmUser = "user";
 
-  # Read shared config for username (username is not a secret, shared by all systems)
-  sharedConfigPath = "${basePath}/local/shared.nix";
-  sharedConfig = if builtins.pathExists sharedConfigPath
-    then import sharedConfigPath
-    else { username = "user"; };
-
-  # VM user uses shared username (consistent across host and VMs)
-  vmUser = sharedConfig.username or "user";
+  # Path to Hydrix repo in VM (always /home/user/Hydrix)
+  basePath = "/home/${vmUser}/Hydrix";
 
   # Determine VM type from hostname (e.g., "pentest-vm" → "pentest")
   vmType = let
