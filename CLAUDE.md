@@ -95,17 +95,17 @@ templates/local/                 # committed - examples for new users
 
 ## Current TODO List
 
-### Immediate Priority - UI/UX Issues
-1. **Fix Firefox fonts in VMs** - Not rendering correctly in browsing VM
-2. **Fix terminal colors in VMs** - Showing default instead of VM-specific theme colors
-3. **Change font from Cozette to Tamzen** - Update across all VMs and host configs
-4. ✅ Resolution detection working correctly (1920x1200)
+### Immediate Priority - VM Issues
+1. **Fix browsing VM colorscheme** - nvid.json exists but not applying to cursor/terminal like pentest VM (mardu.json) does
+2. **Remove git pull from VM rebuild scripts** - All VM profiles (pentest, browsing, comms, dev) auto-pull, breaking local changes
+3. **Commit fish config updates** - nb alias now calls ~/Hydrix/scripts/nixbuild.sh
 
 ### High Priority - Core Functionality
-5. Set up shared folders between host and each VM (virtiofs or 9p)
-6. Isolate br-* bridges from each other (VMs on same bridge can communicate, not across bridges)
+4. Set up shared folders between host and each VM (virtiofs or 9p)
+5. Isolate br-* bridges from each other (VMs on same bridge can communicate, not across bridges)
 
 ### Medium Priority - Polish
+6. Change font from Cozette to Tamzen - Update across all VMs and host configs
 7. Add LUKS encryption to VM builds with auto-generated passwords
 8. Create `modules/base/locale.nix` - Centralized locale/keyboard module (currently in local/shared.nix)
 9. Create `modules/base/disk.nix` - LUKS/boot settings module
@@ -118,11 +118,12 @@ templates/local/                 # committed - examples for new users
 
 - ✅ Local secrets management system implemented
 - ✅ Password prompting during setup.sh
-- ✅ Dynamic username detection in all modules (host vs VM)
 - ✅ Per-VM secrets isolation
 - ✅ Auto-detection of locale/timezone/keyboard from system
-- ✅ All hardcoded "traum" references removed (except in obsolete files)
 - ✅ Host setup tested on Zenbook (Intel + ASUS)
+- ✅ **VMs hardcoded to always use "user"** - Fixed unpredictable username switching (was picking up host env vars)
+- ✅ All VM profiles now have consistent setup (hydrix-clone, Firefox, static colors, xinitrc)
+- ✅ Fish config updated with `nb` alias for smart rebuilding
 
 ## Files to Eventually Clean Up
 
@@ -262,14 +263,20 @@ Each VM should have access to a shared folder with the host:
 # - Creates machine profile
 # - Builds router VM and system
 
-# Rebuild current system (requires --impure for local config)
-./scripts/nixbuild.sh
-# Automatically uses --impure flag
+# Rebuild (works on BOTH host and VMs - auto-detects)
+nb
+# Or: ~/Hydrix/scripts/nixbuild.sh
+# - On host: rebuilds host configuration with specialisation detection
+# - On VM: rebuilds VM without pulling (preserves local changes)
+# - Automatically uses --impure flag
+
+# Pull and rebuild (VMs only - when you want upstream changes)
+cd ~/Hydrix && git pull && nb
 
 # Deploy a VM
 ./scripts/build-vm.sh --type browsing --name test
 
-# Switch boot modes (requires reboot)
+# Switch boot modes (host only - requires reboot)
 sudo nixos-rebuild boot --flake ~/Hydrix#<hostname> --impure
 sudo nixos-rebuild boot --flake ~/Hydrix#<hostname> --specialisation lockdown --impure
 sudo nixos-rebuild boot --flake ~/Hydrix#<hostname> --specialisation fallback --impure
@@ -279,10 +286,21 @@ mkpasswd -m sha-512
 # Then edit ~/Hydrix/local/host.nix with the new hash
 ```
 
+## VM User Information
+
+**IMPORTANT**: VMs always use the username **"user"**, NOT the host username.
+
+- **Host**: Uses your personal username from `local/host.nix` (e.g., "traum")
+- **VMs**: Hardcoded to always use "user" (set in `modules/base/users-vm.nix`)
+- **Why**: VMs don't have access to `local/` directory (gitignored), so hardcoding prevents unpredictable behavior
+- **Custom usernames**: Edit `modules/base/users-vm.nix` directly if needed
+
+When you `su user` on the host, it fails because that user only exists in VMs. This is correct behavior!
+
 ## Known Issues
 
-1. **Firefox fonts in VMs** - Not displaying correctly
-2. **Terminal colors in VMs** - Using default instead of theme colors
+1. **Browsing VM colorscheme not applying** - nvid.json exists but cursor/terminal not using it (pentest VM works fine with mardu.json)
+2. **VM rebuild scripts auto-pull** - Breaking local changes, need to remove git pull from all VM profiles
 3. **Font should be Tamzen** - Currently using Cozette, need to change globally
 
 ## Notes for Contributors

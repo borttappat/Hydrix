@@ -283,8 +283,7 @@ function nu
     sh ~/dotfiles/scripts/bash/nixupdate.sh $argv
 end
 
-function nixbuild
-    sh ~/dotfiles/scripts/bash/nixbuild.sh $argv
-end
-
-abbr -a nb 'nixbuild'
+# === HYDRIX REBUILD ===
+# Smart rebuild - works on both host and VMs (auto-detects)
+# Does NOT pull from git (preserves local changes)
+abbr -a nb '~/Hydrix/scripts/nixbuild.sh'
