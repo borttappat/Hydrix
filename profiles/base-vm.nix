@@ -26,6 +26,9 @@
     ../modules/core.nix
     ../modules/desktop/xinitrc.nix     # X session bootstrap + config deployment (needed for startx)
 
+    # Firefox with extensions
+    ../modules/desktop/firefox.nix
+
     # Theming (colors will be applied based on hostname-derived VM type)
     ../modules/theming/static-colors.nix
   ];

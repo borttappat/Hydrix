@@ -108,7 +108,7 @@ abbr -a ... 'cd ../..'
 abbr -a j 'joshuto'
 abbr -a r 'ranger'
 abbr -a wp 'cd ~/Wallpapers && ranger'
-abbr -a dots 'cd ~/dotfiles && git status'
+abbr -a hyd 'cd ~/Hydrix && git status'
 
 function c
     cd $argv && ls
@@ -190,29 +190,25 @@ abbr -a p 'pipes-rs -f 25 -p 7 -r 1.0'
 abbr -a bw 'sudo bandwhich'
 abbr -a md 'mkdir -p'
 abbr -a ip 'ip -color'
-abbr -a cf 'clear && fastfetch --file ~/dotfiles/misc/grace.txt'
+abbr -a cf 'clear && fastfetch'
 abbr -a reload 'source ~/.config/fish/config.fish'
 
 # === CONFIG FILES ===
 abbr -a f 'vim ~/.config/fish/config.fish'
 abbr -a fishconf 'vim ~/.config/fish/config.fish'
-abbr -a flake 'vim ~/dotfiles/flake.nix'
-abbr -a nixconf 'vim ~/dotfiles/modules/configuration.nix'
-abbr -a nixpkgs 'vim ~/dotfiles/modules/packages.nix'
-abbr -a np 'vim ~/dotfiles/modules/packages.nix'
-abbr -a npp 'vim ~/dotfiles/modules/pentesting.nix'
-abbr -a nixsrv 'vim ~/dotfiles/modules/services.nix'
-abbr -a hosts 'vim ~/dotfiles/modules/hosts.nix'
-abbr -a nixhosts 'vim ~/dotfiles/modules/hosts.nix'
-abbr -a armconf 'vim ~/dotfiles/modules/arm-vm.nix'
-abbr -a asusconf 'vim ~/dotfiles/modules/asus.nix'
-abbr -a ac 'vim ~/dotfiles/alacritty/alacritty.toml'
-abbr -a alacrittyconf 'vim ~/dotfiles/alacritty/alacritty.toml'
-abbr -a pc 'vim ~/dotfiles/picom/picom.conf'
-abbr -a picomconf 'vim ~/dotfiles/picom/picom.conf'
-abbr -a poc 'vim ~/dotfiles/polybar/config.ini'
-abbr -a polyconf 'vim ~/dotfiles/polybar/config.ini'
-abbr -a zathconf 'vim ~/dotfiles/zathura/zathurarc'
+abbr -a flake 'vim ~/Hydrix/flake.nix'
+abbr -a nixconf 'vim ~/Hydrix/modules/base/configuration.nix'
+abbr -a npp 'vim ~/Hydrix/modules/pentesting/pentesting.nix'
+abbr -a nixsrv 'vim ~/Hydrix/modules/base/services.nix'
+abbr -a hosts 'vim ~/Hydrix/modules/pentesting/hosts.nix'
+abbr -a asusconf 'vim ~/Hydrix/modules/base/hardware/asus.nix'
+abbr -a ac 'vim ~/Hydrix/configs/alacritty/alacritty.toml.template'
+abbr -a alacrittyconf 'vim ~/Hydrix/configs/alacritty/alacritty.toml.template'
+abbr -a pc 'vim ~/Hydrix/configs/picom/picom.conf'
+abbr -a picomconf 'vim ~/Hydrix/configs/picom/picom.conf'
+abbr -a poc 'vim ~/Hydrix/configs/polybar/config.ini.template'
+abbr -a polyconf 'vim ~/Hydrix/configs/polybar/config.ini.template'
+abbr -a zathconf 'vim ~/Hydrix/configs/zathura/zathurarc'
 
 # === PENTESTING ===
 abbr -a msf 'figlet -f cricket "msf" && sudo msfconsole -q'
@@ -222,10 +218,10 @@ abbr -a htblabs 'sudo openvpn ~/Downloads/lab_griefhoundTCP.ovpn'
 abbr -a pyserver 'sudo python -m http.server 8002'
 
 # === DEV ENVIRONMENTS ===
-abbr -a bloodhound 'nix develop ~/dotfiles#bloodhound'
+abbr -a bloodhound 'nix develop ~/Hydrix#bloodhound'
 
 function pyenv
-    ~/dotfiles/scripts/bash/pyenvshell.sh $argv
+    ~/Hydrix/scripts/pyenvshell.sh $argv
 end
 
 # === APPLICATIONS ===
@@ -237,7 +233,7 @@ abbr -a nf 'nix search nixpkgs'
 
 # === AUDIO ===
 function zenaudio
-    sh ~/dotfiles/scripts/bash/zenaudio.sh $argv
+    sh ~/Hydrix/scripts/zenaudio.sh $argv
 end
 
 abbr -a za 'zenaudio'
@@ -271,19 +267,10 @@ abbr -a rc 'sudo virsh console router-vm-passthrough'
 abbr -a tui 'sh ~/splix/scripts/router-tui.sh'
 
 # === SCRIPTS ===
-function links
-    sh ~/dotfiles/scripts/bash/links.sh $argv
+function nixbuild
+    sh ~/Hydrix/scripts/nixbuild.sh $argv
 end
 
-function link
-    sudo python ~/dotfiles/scripts/python/link_file.py $argv
-end
-
-function nu
-    sh ~/dotfiles/scripts/bash/nixupdate.sh $argv
-end
-
-# === HYDRIX REBUILD ===
 # Smart rebuild - works on both host and VMs (auto-detects)
 # Does NOT pull from git (preserves local changes)
-abbr -a nb '~/Hydrix/scripts/nixbuild.sh'
+abbr -a nb 'nixbuild'

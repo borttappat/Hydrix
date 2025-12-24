@@ -131,15 +131,15 @@ get_resource_allocation() {
     case "$type" in
         pentest)
             percent=75
-            BASE_IMAGE_FLAKE="${type}-vm-base"
+            BASE_IMAGE_FLAKE="${type}-vm-full"
             BASE_IMAGE_RESULT="$PROJECT_DIR/${type}-vm-image/nixos.qcow2"
-            log "Pentest VM - High performance allocation (75%)"
+            log "Pentest VM - Full image, high performance (75%)"
             ;;
         dev)
             percent=75
-            BASE_IMAGE_FLAKE="${type}-vm-base"
+            BASE_IMAGE_FLAKE="${type}-vm-full"
             BASE_IMAGE_RESULT="$PROJECT_DIR/${type}-vm-image/nixos.qcow2"
-            log "Dev VM - High performance allocation (75%)"
+            log "Dev VM - Full image, high performance (75%)"
             ;;
         browsing)
             percent=50
@@ -149,9 +149,9 @@ get_resource_allocation() {
             ;;
         comms)
             percent=25
-            BASE_IMAGE_FLAKE="${type}-vm-base"
+            BASE_IMAGE_FLAKE="${type}-vm-full"
             BASE_IMAGE_RESULT="$PROJECT_DIR/${type}-vm-image/nixos.qcow2"
-            log "Comms VM - Light allocation (25%)"
+            log "Comms VM - Full image, light allocation (25%)"
             ;;
         *)
             error "Unknown VM type: $type. Valid types: pentest, comms, browsing, dev"

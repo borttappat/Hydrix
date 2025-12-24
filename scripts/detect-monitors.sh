@@ -25,4 +25,4 @@ done
 wal -R
 
 # Restart polybar
-~/dotfiles/scripts/bash/polybar-restart.sh
+~/Hydrix/scripts/polybar-restart.sh

@@ -97,22 +97,26 @@ templates/local/                 # committed - examples for new users
 
 ### Immediate Priority - VM Issues
 1. **Fix browsing VM colorscheme** - nvid.json exists but not applying to cursor/terminal like pentest VM (mardu.json) does
-2. **Remove git pull from VM rebuild scripts** - All VM profiles (pentest, browsing, comms, dev) auto-pull, breaking local changes
-3. **Commit fish config updates** - nb alias now calls ~/Hydrix/scripts/nixbuild.sh
+2. **Fix Firefox extensions not loading** - Extensions configured but not appearing in browser
 
 ### High Priority - Core Functionality
-4. Set up shared folders between host and each VM (virtiofs or 9p)
-5. Isolate br-* bridges from each other (VMs on same bridge can communicate, not across bridges)
+3. Set up shared folders between host and each VM (virtiofs or 9p)
+4. Isolate br-* bridges from each other (VMs on same bridge can communicate, not across bridges)
+5. **Per-VM-type Firefox extensions** - Different extension sets per VM type:
+   - **Core (all VMs)**: Vimium/Tridactyl (vim bindings)
+   - **Browsing VM**: uBlock Origin, Privacy Badger, privacy-focused extensions
+   - **Pentest VM**: Wappalyzer, cookie editors, HackTools, FoxyProxy, scanner extensions
+   - **Office VM**: Minimal, productivity-focused
+   - **Dev VM**: React/Vue devtools, JSON viewers, etc.
 
 ### Medium Priority - Polish
-6. Change font from Cozette to Tamzen - Update across all VMs and host configs
-7. Add LUKS encryption to VM builds with auto-generated passwords
-8. Create `modules/base/locale.nix` - Centralized locale/keyboard module (currently in local/shared.nix)
-9. Create `modules/base/disk.nix` - LUKS/boot settings module
+6. Add LUKS encryption to VM builds with auto-generated passwords
+7. Create `modules/base/locale.nix` - Centralized locale/keyboard module (currently in local/shared.nix)
+8. Create `modules/base/disk.nix` - LUKS/boot settings module
 
 ### Cleanup (Deferred)
-10. Remove obsolete files: `add-machine.sh`, old templates, `.bak` files
-11. Remove or update obsolete modules: `hydrix-embed.nix`, `shaping.nix` (replaced by full VM setup)
+9. Remove obsolete files: `add-machine.sh`, old templates, `.bak` files
+10. Remove or update obsolete modules: `hydrix-embed.nix`, `shaping.nix` (replaced by full VM setup)
 
 ## Recently Completed
 
@@ -124,6 +128,10 @@ templates/local/                 # committed - examples for new users
 - ✅ **VMs hardcoded to always use "user"** - Fixed unpredictable username switching (was picking up host env vars)
 - ✅ All VM profiles now have consistent setup (hydrix-clone, Firefox, static colors, xinitrc)
 - ✅ Fish config updated with `nb` alias for smart rebuilding
+- ✅ Firefox fonts fixed in VMs
+- ✅ Font changed from Cozette to Tamzen
+- ✅ Fish shell standalone (removed all dotfiles references)
+- ✅ BloodHound devShell added to flake.nix
 
 ## Files to Eventually Clean Up
 
@@ -300,8 +308,7 @@ When you `su user` on the host, it fails because that user only exists in VMs. T
 ## Known Issues
 
 1. **Browsing VM colorscheme not applying** - nvid.json exists but cursor/terminal not using it (pentest VM works fine with mardu.json)
-2. **VM rebuild scripts auto-pull** - Breaking local changes, need to remove git pull from all VM profiles
-3. **Font should be Tamzen** - Currently using Cozette, need to change globally
+2. **Firefox extensions not loading** - Configured extensions not appearing in browser (works in browsing VM, not in comms/pentest)
 
 ## Notes for Contributors
 
