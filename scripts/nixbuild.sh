@@ -109,12 +109,12 @@ rebuild_system() {
 
     if [[ "$SPECIALISATION" != "none" ]]; then
         echo "Rebuilding with specialisation: $SPECIALISATION"
-        sudo nixos-rebuild switch --impure --show-trace --option warn-dirty false \
-            --flake "$FLAKE_DIR#$FLAKE_TARGET" --specialisation "$SPECIALISATION"
+        echo "Running: sudo nixos-rebuild switch --flake ~/Hydrix#$FLAKE_TARGET --impure --specialisation $SPECIALISATION"
+        sudo nixos-rebuild switch --flake ~/Hydrix#"$FLAKE_TARGET" --impure --specialisation "$SPECIALISATION"
     else
         echo "Rebuilding base configuration"
-        sudo nixos-rebuild switch --impure --show-trace --option warn-dirty false \
-            --flake "$FLAKE_DIR#$FLAKE_TARGET"
+        echo "Running: sudo nixos-rebuild switch --flake ~/Hydrix#$FLAKE_TARGET --impure"
+        sudo nixos-rebuild switch --flake ~/Hydrix#"$FLAKE_TARGET" --impure
     fi
 }
 

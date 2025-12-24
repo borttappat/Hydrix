@@ -122,8 +122,6 @@
       #!/usr/bin/env bash
       set -e
       cd ~/Hydrix
-      echo "Pulling latest changes..."
-      git pull
       echo "Rebuilding system..."
       sudo nixos-rebuild switch --flake '.#vm-dev' --impure
     '')

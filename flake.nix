@@ -19,9 +19,15 @@
       url = "github:nix-community/nixos-generators";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+
+    burpsuite-nix = {
+      url = "github:Red-Flake/burpsuite-nix";
+      inputs.nixpkgs.follows = "nixpkgs";
+      inputs.home-manager.follows = "home-manager";
+    };
   };
 
-  outputs = { self, nixpkgs, nixpkgs-unstable, home-manager, nixos-generators, nix-index-database, ... }@inputs:
+  outputs = { self, nixpkgs, nixpkgs-unstable, home-manager, nixos-generators, nix-index-database, burpsuite-nix, ... }@inputs:
   let
     supportedSystems = [ "x86_64-linux" "aarch64-linux" ];
     forAllSystems = nixpkgs.lib.genAttrs supportedSystems;
@@ -125,6 +131,7 @@
 
       vm-pentest = nixpkgs.lib.nixosSystem {
         system = "x86_64-linux";
+        specialArgs = { inherit burpsuite-nix; };  # Pass burpsuite-nix to modules
         modules = [
           { nixpkgs.config.allowUnfree = true; }
           { nixpkgs.overlays = [ overlay-unstable ]; }
@@ -132,6 +139,7 @@
           home-manager.nixosModules.home-manager  # Add home-manager support
 
           ./profiles/pentest-full.nix
+          ./modules/pentesting/burpsuite.nix  # BurpSuite configuration
         ];
       };
 
@@ -184,12 +192,14 @@
       # Updates inside VM: rebuild (or: cd ~/Hydrix && git pull && nixos-rebuild switch --flake '.#vm-pentest' --impure)
       pentest-vm-full = nixos-generators.nixosGenerate {
         system = "x86_64-linux";
+        specialArgs = { inherit burpsuite-nix; };  # Pass burpsuite-nix to modules
         modules = [
           { nixpkgs.config.allowUnfree = true; }
           { nixpkgs.overlays = [ overlay-unstable ]; }
           home-manager.nixosModules.home-manager
           nix-index-database.nixosModules.nix-index
-          ./profiles/pentest-full-image.nix
+          ./profiles/pentest-full.nix
+          ./modules/pentesting/burpsuite.nix  # BurpSuite configuration
         ];
         format = "qcow";
       };
@@ -277,7 +287,36 @@
           { nixpkgs.config.allowUnfree = true; }
           { nixpkgs.overlays = [ overlay-unstable ]; }
           home-manager.nixosModules.home-manager
+          nix-index-database.nixosModules.nix-index
           ./profiles/browsing-full.nix
+        ];
+        format = "qcow";
+      };
+
+      # Comms VM - Full image with all packages
+      # Build with: nix build .#comms-vm-full
+      comms-vm-full = nixos-generators.nixosGenerate {
+        system = "x86_64-linux";
+        modules = [
+          { nixpkgs.config.allowUnfree = true; }
+          { nixpkgs.overlays = [ overlay-unstable ]; }
+          home-manager.nixosModules.home-manager
+          nix-index-database.nixosModules.nix-index
+          ./profiles/comms-full.nix
+        ];
+        format = "qcow";
+      };
+
+      # Dev VM - Full image with all packages
+      # Build with: nix build .#dev-vm-full
+      dev-vm-full = nixos-generators.nixosGenerate {
+        system = "x86_64-linux";
+        modules = [
+          { nixpkgs.config.allowUnfree = true; }
+          { nixpkgs.overlays = [ overlay-unstable ]; }
+          home-manager.nixosModules.home-manager
+          nix-index-database.nixosModules.nix-index
+          ./profiles/dev-full.nix
         ];
         format = "qcow";
       };
@@ -297,7 +336,7 @@
       };
     };
 
-    # ========== DEVELOPMENT SHELL ==========
+    # ========== DEVELOPMENT SHELLS ==========
     devShells = forAllSystems (system:
       let pkgs = pkgsForSystem system;
       in {
@@ -326,6 +365,25 @@
             echo "  ./scripts/build-vm.sh --type comms --name signal"
             echo "  ./scripts/build-vm.sh --type browsing --name leisure"
             echo "  ./scripts/build-vm.sh --type dev --name rust"
+          '';
+        };
+
+        # BloodHound - Active Directory security analysis tool
+        # Usage: nix develop ~/Hydrix#bloodhound
+        bloodhound = pkgs.mkShell {
+          buildInputs = with pkgs; [
+            bloodhound
+            neo4j
+            openjdk
+          ];
+
+          shellHook = ''
+            echo "BloodHound AD Security Analysis Environment"
+            echo ""
+            echo "Start Neo4j: neo4j console"
+            echo "Then launch: bloodhound"
+            echo ""
+            echo "Default credentials: neo4j/neo4j"
           '';
         };
       }

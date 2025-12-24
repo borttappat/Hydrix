@@ -1,6 +1,7 @@
 #!/run/current-system/sw/bin/bash
+# Note: This script needs work - workspace per-monitor assignments need rethinking
 
-CONFIG_FILE="$HOME/dotfiles/configs/display-config.json"
+CONFIG_FILE="$HOME/Hydrix/configs/display-config.json"
 HOSTNAME=$(hostnamectl hostname | cut -d'-' -f1)
 
 # Get machine override settings

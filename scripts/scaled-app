@@ -11,7 +11,7 @@ if [ $# -eq 0 ]; then
     exit 1
 fi
 
-CONFIG_FILE="$HOME/dotfiles/configs/display-config.json"
+CONFIG_FILE="$HOME/Hydrix/configs/display-config.json"
 HOSTNAME=$(hostnamectl hostname | cut -d'-' -f1)
 
 if [ ! -f "$CONFIG_FILE" ]; then

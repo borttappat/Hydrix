@@ -1,5 +1,5 @@
 #!/run/current-system/sw/bin/bash
-# Save as ~/dotfiles/scripts/bash/refresh-display-config.sh
+# Hydrix display config refresh script
 
 # Set MOD_KEY (same logic as .xinitrc)
 hostname=$(hostnamectl | grep "Icon name:" | cut -d ":" -f2 | xargs)
@@ -35,19 +35,25 @@ sed -e "s/\${ALACRITTY_FONT_SIZE}/$ALACRITTY_FONT_SIZE/g" \
     -e "s/\${ALACRITTY_SCALE_FACTOR_LINE}/$ALACRITTY_SCALE_FACTOR_LINE/g" \
     ~/.config/alacritty/alacritty.toml.template > ~/.config/alacritty/alacritty.toml
 
-# Regenerate Firefox configs
-sed -e "s/\${FIREFOX_FONT}/$FIREFOX_FONT/g" \
-    ~/dotfiles/firefox/traum/user.js.template > ~/dotfiles/firefox/traum/user.js
-sed -e "s/\${FIREFOX_FONT}/$FIREFOX_FONT/g" \
-    ~/dotfiles/firefox/traum/chrome/userChrome.css.template > ~/dotfiles/firefox/traum/chrome/userChrome.css
-sed -e "s/\${FIREFOX_FONT}/$FIREFOX_FONT/g" \
-    ~/dotfiles/firefox/traum/chrome/userContent.css.template > ~/dotfiles/firefox/traum/chrome/userContent.css
+# Regenerate Firefox configs (using Hydrix templates)
+FIREFOX_PROFILE=$(find ~/.mozilla/firefox -maxdepth 1 -name "*.default*" -type d | head -1)
+if [ -n "$FIREFOX_PROFILE" ]; then
+    mkdir -p "$FIREFOX_PROFILE/chrome"
+    sed -e "s/\${FIREFOX_FONT}/$FIREFOX_FONT/g" \
+        ~/Hydrix/configs/firefox/user.js.template > "$FIREFOX_PROFILE/user.js"
+    sed -e "s/\${FIREFOX_FONT}/$FIREFOX_FONT/g" \
+        ~/Hydrix/configs/firefox/chrome/userChrome.css.template > "$FIREFOX_PROFILE/chrome/userChrome.css"
+    sed -e "s/\${FIREFOX_FONT}/$FIREFOX_FONT/g" \
+        ~/Hydrix/configs/firefox/chrome/userContent.css.template > "$FIREFOX_PROFILE/chrome/userContent.css"
+fi
 
-# Regenerate Obsidian font config
-sed -e "s/\${OBSIDIAN_FONT}/$OBSIDIAN_FONT/g" \
-    -e "s/\${OBSIDIAN_FONT_SIZE}/$OBSIDIAN_FONT_SIZE/g" \
-    -e "s/\${OBSIDIAN_HEADER_FONT_SIZE}/$OBSIDIAN_HEADER_FONT_SIZE/g" \
-    ~/dotfiles/obsidian/font.css.template > ~/hack_the_world/.obsidian/snippets/font.css
+# Regenerate Obsidian font config (if obsidian vault exists)
+if [ -d ~/hack_the_world/.obsidian/snippets ]; then
+    sed -e "s/\${OBSIDIAN_FONT}/$OBSIDIAN_FONT/g" \
+        -e "s/\${OBSIDIAN_FONT_SIZE}/$OBSIDIAN_FONT_SIZE/g" \
+        -e "s/\${OBSIDIAN_HEADER_FONT_SIZE}/$OBSIDIAN_HEADER_FONT_SIZE/g" \
+        ~/Hydrix/configs/obsidian/snippets/cozette-font.css.template > ~/hack_the_world/.obsidian/snippets/font.css
+fi
 
 # Reload i3 (which will reload config including gaps and borders)
 i3-msg reload
@@ -77,13 +83,13 @@ else
         -e "s/\${DUNST_PADDING}/$DUNST_PADDING/g" \
         -e "s/\${DUNST_FRAME_WIDTH}/$DUNST_FRAME_WIDTH/g" \
         -e "s/\${DUNST_ICON_SIZE}/$DUNST_ICON_SIZE/g" \
-        ~/dotfiles/dunst/dunstrc.template > ~/.config/dunst/dunstrc
+        ~/Hydrix/configs/dunst/dunstrc.template > ~/.config/dunst/dunstrc
 fi
 
 # Restart dunst to apply new config
 killall dunst 2>/dev/null; dunst &
 
 # Reload polybar with per-monitor configs
-~/dotfiles/scripts/bash/polybar-restart.sh
+~/Hydrix/scripts/polybar-restart.sh
 
 notify-send "Display Config" "Reloaded: external=$EXTERNAL_MONITOR font=$POLYBAR_FONT_SIZE gaps=$GAPS_INNER border=$I3_BORDER_THICKNESS"

@@ -23,10 +23,10 @@
       "firefox_header_font_size": 20
     },
     "1920x1200": {
-      "polybar_font_size": 9,
+      "polybar_font_size": 10,
       "polybar_height": 30,
       "polybar_line_size": 2,
-      "alacritty_font_size": 13,
+      "alacritty_font_size": 11,
       "rofi_font_size": 10,
       "i3_font_size": 8,
       "i3_border_thickness": 2,
@@ -139,7 +139,7 @@
       "dpi": 192,
       "gdk_scale": 1.5,
       "gdk_dpi_scale": 0.5,
-      "alacritty_font_size": 9,
+      "alacritty_font_size": 6,
       "alacritty_scale_factor": "1.5",
       "polybar_font_size": 20,
       "polybar_height": 35,
@@ -163,9 +163,9 @@
     }
   },
   "fonts": {
-    "default": "tamzen",
+    "default": "iosevka",
     "dunst": "CozetteVector",
-    "firefox": "tamzen",
+    "firefox": "iosevka",
     "obsidian": "CozetteVector"
   }
 }

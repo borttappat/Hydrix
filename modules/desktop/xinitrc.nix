@@ -1,9 +1,12 @@
 { config, pkgs, lib, ... }:
 
 let
+  # Check if we're building for a VM (vmType is set)
+  isVM = (config.hydrix.vmType or null) != null;
+
   # Detect username dynamically
+  # For VMs: always "user"
   # For host: reads from local/host.nix
-  # For VMs: defaults to "user"
   hydrixPath = builtins.getEnv "HYDRIX_PATH";
   sudoUser = builtins.getEnv "SUDO_USER";
   currentUser = builtins.getEnv "USER";
@@ -18,7 +21,9 @@ let
     then import hostConfigPath
     else null;
 
-  username = if hostConfig != null && hostConfig ? username
+  # VMs always use "user", host uses detected username
+  username = if isVM then "user"
+    else if hostConfig != null && hostConfig ? username
     then hostConfig.username
     else "user";
 in

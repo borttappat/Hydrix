@@ -96,23 +96,31 @@ templates/local/                 # committed - examples for new users
 ## Current TODO List
 
 ### Immediate Priority - UI/UX Issues
-1. **Fix Firefox fonts in VMs** - Not rendering correctly in browsing VM
+1. ✅ **Fix Firefox fonts in VMs** - Fixed
 2. **Fix terminal colors in VMs** - Showing default instead of VM-specific theme colors
-3. **Change font from Cozette to Tamzen** - Update across all VMs and host configs
+3. ✅ **Change font from Cozette to Tamzen** - Fixed
 4. ✅ Resolution detection working correctly (1920x1200)
 
 ### High Priority - Core Functionality
-5. Set up shared folders between host and each VM (virtiofs or 9p)
-6. Isolate br-* bridges from each other (VMs on same bridge can communicate, not across bridges)
+5. ✅ **Make fish standalone** - Removed all dotfiles references, only uses scripts within Hydrix
+6. **Fix Firefox extensions not loading** - Extensions configured but not appearing in browser
+7. **Per-VM-type Firefox extensions** - Different extension sets per VM type:
+   - **Core (all VMs)**: Vimium/Tridactyl (vim bindings)
+   - **Browsing VM**: uBlock Origin, Privacy Badger, privacy-focused extensions
+   - **Pentest VM**: Wappalyzer, cookie editors, HackTools, FoxyProxy, scanner extensions
+   - **Office VM**: Minimal, productivity-focused
+   - **Dev VM**: React/Vue devtools, JSON viewers, etc.
+8. Set up shared folders between host and each VM (virtiofs or 9p)
+9. Isolate br-* bridges from each other (VMs on same bridge can communicate, not across bridges)
 
 ### Medium Priority - Polish
-7. Add LUKS encryption to VM builds with auto-generated passwords
-8. Create `modules/base/locale.nix` - Centralized locale/keyboard module (currently in local/shared.nix)
-9. Create `modules/base/disk.nix` - LUKS/boot settings module
+10. Add LUKS encryption to VM builds with auto-generated passwords
+11. Create `modules/base/locale.nix` - Centralized locale/keyboard module (currently in local/shared.nix)
+12. Create `modules/base/disk.nix` - LUKS/boot settings module
 
 ### Cleanup (Deferred)
-10. Remove obsolete files: `add-machine.sh`, old templates, `.bak` files
-11. Remove or update obsolete modules: `hydrix-embed.nix`, `shaping.nix` (replaced by full VM setup)
+13. Remove obsolete files: `add-machine.sh`, old templates, `.bak` files
+14. Remove or update obsolete modules: `hydrix-embed.nix`, `shaping.nix` (replaced by full VM setup)
 
 ## Recently Completed
 
@@ -123,6 +131,10 @@ templates/local/                 # committed - examples for new users
 - ✅ Auto-detection of locale/timezone/keyboard from system
 - ✅ All hardcoded "traum" references removed (except in obsolete files)
 - ✅ Host setup tested on Zenbook (Intel + ASUS)
+- ✅ Firefox fonts fixed in VMs
+- ✅ Font changed from Cozette to Tamzen
+- ✅ Fish shell standalone (removed all dotfiles references)
+- ✅ BloodHound devShell added to flake.nix
 
 ## Files to Eventually Clean Up
 
@@ -281,9 +293,8 @@ mkpasswd -m sha-512
 
 ## Known Issues
 
-1. **Firefox fonts in VMs** - Not displaying correctly
-2. **Terminal colors in VMs** - Using default instead of theme colors
-3. **Font should be Tamzen** - Currently using Cozette, need to change globally
+1. **Terminal colors in VMs** - Using default instead of theme colors
+2. **Firefox extensions not loading** - Configured extensions not appearing in browser (works in browsing VM, not in comms/pentest)
 
 ## Notes for Contributors
 
