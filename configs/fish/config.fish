@@ -263,7 +263,7 @@ abbr -a tds 'sudo tailscale file cp'
 abbr -a tdr 'sudo tailscale file get'
 
 # === VM/ROUTER ===
-abbr -a rc 'sudo virsh console router-vm-passthrough'
+abbr -a rc 'sudo virsh console router-vm'
 abbr -a tui 'sh ~/splix/scripts/router-tui.sh'
 
 # === SCRIPTS ===

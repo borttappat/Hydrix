@@ -29,12 +29,15 @@ FORCE_REBUILD=false
 # Bridge mappings (unified naming - same bridges used in all modes)
 # Standard mode: 192.168.x.x subnets
 # Lockdown mode: 10.100.x.x subnets with VPN policy routing
+# Note: Isolated bridges cannot talk to each other directly
+#       br-shared allows crosstalk between VMs
 declare -A VM_BRIDGES=(
     ["pentest"]="br-pentest"
     ["office"]="br-office"
     ["comms"]="br-office"      # comms uses office network
     ["browsing"]="br-browse"
     ["dev"]="br-dev"
+    ["shared"]="br-shared"     # shared bridge for VM crosstalk
 )
 
 log() { echo "[$(date +%H:%M:%S)] $*"; }
@@ -92,10 +95,16 @@ Network Modes:
   lockdown   - 10.100.x.x networks (VPN policy routing)
 
 Bridge Mapping (same bridges in all modes):
-  pentest  → br-pentest (192.168.101.x / 10.100.1.x)
-  comms    → br-office  (192.168.102.x / 10.100.2.x)
-  browsing → br-browse  (192.168.103.x / 10.100.3.x)
-  dev      → br-dev     (192.168.104.x / 10.100.4.x)
+  pentest  → br-pentest (192.168.101.x / 10.100.1.x) - ISOLATED
+  comms    → br-office  (192.168.102.x / 10.100.2.x) - ISOLATED
+  browsing → br-browse  (192.168.103.x / 10.100.3.x) - ISOLATED
+  dev      → br-dev     (192.168.104.x / 10.100.4.x) - ISOLATED
+  shared   → br-shared  (192.168.105.x / 10.100.5.x) - CROSSTALK ALLOWED
+
+Isolation:
+  VMs on isolated bridges (pentest, office, browse, dev) cannot
+  communicate directly with VMs on other isolated bridges.
+  Use --bridge br-shared to add a VM that needs to talk to other VMs.
 
 In lockdown mode, pentest/comms/browsing are VPN-routed by the router VM.
 
@@ -104,11 +113,14 @@ Host System:
   RAM: ${HOST_RAM_MB}MB (~$((HOST_RAM_MB / 1024))GB)
 
 Examples:
-  # Deploy pentest VM (auto-detects mode)
+  # Deploy pentest VM (auto-detects mode, uses isolated br-pentest)
   $0 --type pentest --name google
 
   # Deploy for lockdown mode explicitly
   $0 --type pentest --name google --mode lockdown
+
+  # Deploy a dev VM on the shared bridge (allows crosstalk with other VMs)
+  $0 --type dev --name shared-rust --bridge br-shared
 
   # Deploy with custom bridge
   $0 --type dev --name rust --bridge br-dev
@@ -417,15 +429,25 @@ First Boot Process:
 
 EOF
 
+    # Show isolation status
+    if [[ "$VM_BRIDGE" == "br-shared" ]]; then
+        echo "Network Isolation: DISABLED (br-shared allows crosstalk with all VMs)"
+    else
+        echo "Network Isolation: ENABLED (cannot reach VMs on other isolated bridges)"
+        echo "  To allow crosstalk: redeploy with --bridge br-shared"
+    fi
+    echo ""
+
     if [[ "$VM_MODE" == "lockdown" ]]; then
         cat << EOF
 Lockdown Mode Network:
   Bridge: $VM_BRIDGE
   Network: $(case $VM_BRIDGE in
-    br-pentest) echo "10.100.1.x - Routed through assigned VPN" ;;
-    br-office)  echo "10.100.2.x - Routed through corporate VPN" ;;
-    br-browse)  echo "10.100.3.x - Routed through privacy VPN" ;;
-    br-dev)     echo "10.100.4.x - Direct or configurable routing" ;;
+    br-pentest) echo "10.100.1.x - Routed through assigned VPN (isolated)" ;;
+    br-office)  echo "10.100.2.x - Routed through corporate VPN (isolated)" ;;
+    br-browse)  echo "10.100.3.x - Routed through privacy VPN (isolated)" ;;
+    br-dev)     echo "10.100.4.x - Direct or configurable routing (isolated)" ;;
+    br-shared)  echo "10.100.5.x - Direct routing, crosstalk allowed" ;;
     *)          echo "Custom bridge" ;;
   esac)
   Router: SSH to traum@10.100.0.253 for VPN management

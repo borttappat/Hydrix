@@ -63,11 +63,14 @@
   };
 
   # Create bridges for VM networking
+  # Isolated bridges (VMs cannot communicate directly between these)
   networking.bridges.br-mgmt.interfaces = [];
   networking.bridges.br-pentest.interfaces = [];
   networking.bridges.br-office.interfaces = [];
   networking.bridges.br-browse.interfaces = [];
   networking.bridges.br-dev.interfaces = [];
+  # Shared bridge (allows crosstalk between any VMs connected to it)
+  networking.bridges.br-shared.interfaces = [];
 
   # Host gets IP on management bridge only (for router VM communication)
   networking.interfaces.br-mgmt.ipv4.addresses = [{
@@ -84,7 +87,7 @@
   # Minimal firewall - trust bridges, router handles the rest
   networking.firewall = {
     enable = true;
-    trustedInterfaces = [ "br-mgmt" "br-pentest" "br-office" "br-browse" "br-dev" ];
+    trustedInterfaces = [ "br-mgmt" "br-pentest" "br-office" "br-browse" "br-dev" "br-shared" ];
   };
 
   # Router VM autostart service
@@ -111,7 +114,7 @@
       log "Waiting for bridges..."
       TIMEOUT=60
       ELAPSED=0
-      for br in br-mgmt br-pentest br-office br-browse br-dev; do
+      for br in br-mgmt br-pentest br-office br-browse br-dev br-shared; do
         while ! /run/current-system/sw/bin/ip link show "''$br" >/dev/null 2>&1; do
           if [ ''$ELAPSED -ge ''$TIMEOUT ]; then
             log "ERROR: Timeout waiting for bridge ''$br"
@@ -163,6 +166,7 @@
           --network bridge=br-office,model=virtio \
           --network bridge=br-browse,model=virtio \
           --network bridge=br-dev,model=virtio \
+          --network bridge=br-shared,model=virtio \
           --hostdev "''$PCI_ADDR" \
           --graphics spice \
           --video virtio \
@@ -262,7 +266,7 @@
     # Strict firewall - host cannot reach internet directly
     networking.firewall = lib.mkOverride 10 {
       enable = true;
-      trustedInterfaces = [ "br-mgmt" "br-pentest" "br-office" "br-browse" "br-dev" ];
+      trustedInterfaces = [ "br-mgmt" "br-pentest" "br-office" "br-browse" "br-dev" "br-shared" ];
       extraCommands = ''
         # Drop all forwarding - router VM handles this
         iptables -P FORWARD DROP
@@ -273,6 +277,7 @@
         iptables -A OUTPUT -o br-office -j ACCEPT
         iptables -A OUTPUT -o br-browse -j ACCEPT
         iptables -A OUTPUT -o br-dev -j ACCEPT
+        iptables -A OUTPUT -o br-shared -j ACCEPT
         iptables -A OUTPUT -o lo -j ACCEPT
         iptables -A OUTPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
         # Block everything else outbound from host
@@ -304,13 +309,14 @@
         echo ""
         echo "Network (same as router mode, host isolated):"
         echo "  br-mgmt:    192.168.100.0/24"
-        echo "  br-pentest: 192.168.101.0/24"
-        echo "  br-office:  192.168.102.0/24"
-        echo "  br-browse:  192.168.103.0/24"
-        echo "  br-dev:     192.168.104.0/24"
+        echo "  br-pentest: 192.168.101.0/24 (isolated)"
+        echo "  br-office:  192.168.102.0/24 (isolated)"
+        echo "  br-browse:  192.168.103.0/24 (isolated)"
+        echo "  br-dev:     192.168.104.0/24 (isolated)"
+        echo "  br-shared:  192.168.105.0/24 (allows crosstalk)"
         echo ""
         echo "Bridges:"
-        for br in br-mgmt br-pentest br-office br-browse br-dev; do
+        for br in br-mgmt br-pentest br-office br-browse br-dev br-shared; do
           state=$(ip link show $br 2>/dev/null | grep -o 'state [A-Z]*' || echo 'NOT FOUND')
           echo "  $br: $state"
         done
@@ -348,7 +354,7 @@
 
       echo "Network Status:"
       echo "  Bridges:"
-      for br in br-mgmt br-pentest br-office br-browse br-dev; do
+      for br in br-mgmt br-pentest br-office br-browse br-dev br-shared; do
         if ip link show $br &>/dev/null; then
           state=$(ip link show $br | grep -o 'state [A-Z]*')
           echo "    $br: $state"
@@ -384,17 +390,18 @@
       echo "Management IP: 192.168.100.1 (host) / 192.168.100.253 (router)"
       echo ""
       echo "Bridges:"
-      for br in br-mgmt br-pentest br-office br-browse br-dev; do
+      for br in br-mgmt br-pentest br-office br-browse br-dev br-shared; do
         state=$(ip link show $br 2>/dev/null | grep -o 'state [A-Z]*' || echo 'NOT FOUND')
         echo "  $br: $state"
       done
       echo ""
       echo "Networks (192.168.x.x - router provides DHCP):"
       echo "  br-mgmt:    192.168.100.0/24"
-      echo "  br-pentest: 192.168.101.0/24"
-      echo "  br-office:  192.168.102.0/24"
-      echo "  br-browse:  192.168.103.0/24"
-      echo "  br-dev:     192.168.104.0/24"
+      echo "  br-pentest: 192.168.101.0/24 (isolated)"
+      echo "  br-office:  192.168.102.0/24 (isolated)"
+      echo "  br-browse:  192.168.103.0/24 (isolated)"
+      echo "  br-dev:     192.168.104.0/24 (isolated)"
+      echo "  br-shared:  192.168.105.0/24 (allows crosstalk)"
     '')
   ];
 

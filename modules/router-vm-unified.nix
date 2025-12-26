@@ -122,10 +122,11 @@ in {
     # Router VM interfaces (virtio NICs added by virt-install in order):
     #   WAN = wlp* (WiFi passthrough) or other non-virtio interface, auto-detected
     #   enp1s0 = br-mgmt (first virtio)
-    #   enp2s0 = br-pentest (second virtio)
-    #   enp3s0 = br-office (third virtio)
-    #   enp4s0 = br-browse (fourth virtio)
-    #   enp5s0 = br-dev (fifth virtio)
+    #   enp2s0 = br-pentest (second virtio) - isolated
+    #   enp3s0 = br-office (third virtio) - isolated
+    #   enp4s0 = br-browse (fourth virtio) - isolated
+    #   enp5s0 = br-dev (fifth virtio) - isolated
+    #   enp6s0 = br-shared (sixth virtio) - allows crosstalk between VMs
     systemd.services.router-network-setup = {
       description = "Configure router networking based on mode";
       after = [ "network.target" ];
@@ -245,7 +246,7 @@ in {
 
         # Bring up all LAN interfaces (virtio NICs in order)
         # Mark them as unmanaged by NetworkManager so we can configure them statically
-        for iface in enp1s0 enp2s0 enp3s0 enp4s0 enp5s0; do
+        for iface in enp1s0 enp2s0 enp3s0 enp4s0 enp5s0 enp6s0; do
           ${pkgs.networkmanager}/bin/nmcli device set "$iface" managed no 2>/dev/null || true
           ${pkgs.iproute2}/bin/ip link set "$iface" up 2>/dev/null || true
         done
@@ -254,19 +255,21 @@ in {
           standard)
             # Standard mode: 192.168.x.x networks
             ${pkgs.iproute2}/bin/ip addr add 192.168.100.253/24 dev enp1s0 2>/dev/null || true  # mgmt
-            ${pkgs.iproute2}/bin/ip addr add 192.168.101.253/24 dev enp2s0 2>/dev/null || true  # pentest
-            ${pkgs.iproute2}/bin/ip addr add 192.168.102.253/24 dev enp3s0 2>/dev/null || true  # office
-            ${pkgs.iproute2}/bin/ip addr add 192.168.103.253/24 dev enp4s0 2>/dev/null || true  # browse
-            ${pkgs.iproute2}/bin/ip addr add 192.168.104.253/24 dev enp5s0 2>/dev/null || true  # dev
+            ${pkgs.iproute2}/bin/ip addr add 192.168.101.253/24 dev enp2s0 2>/dev/null || true  # pentest (isolated)
+            ${pkgs.iproute2}/bin/ip addr add 192.168.102.253/24 dev enp3s0 2>/dev/null || true  # office (isolated)
+            ${pkgs.iproute2}/bin/ip addr add 192.168.103.253/24 dev enp4s0 2>/dev/null || true  # browse (isolated)
+            ${pkgs.iproute2}/bin/ip addr add 192.168.104.253/24 dev enp5s0 2>/dev/null || true  # dev (isolated)
+            ${pkgs.iproute2}/bin/ip addr add 192.168.105.253/24 dev enp6s0 2>/dev/null || true  # shared (crosstalk)
             ;;
 
           lockdown)
             # Lockdown mode: 10.100.x.x isolated networks with VPN policy routing
             ${pkgs.iproute2}/bin/ip addr add 10.100.0.253/24 dev enp1s0 2>/dev/null || true  # mgmt
-            ${pkgs.iproute2}/bin/ip addr add 10.100.1.253/24 dev enp2s0 2>/dev/null || true  # pentest
-            ${pkgs.iproute2}/bin/ip addr add 10.100.2.253/24 dev enp3s0 2>/dev/null || true  # office
-            ${pkgs.iproute2}/bin/ip addr add 10.100.3.253/24 dev enp4s0 2>/dev/null || true  # browse
-            ${pkgs.iproute2}/bin/ip addr add 10.100.4.253/24 dev enp5s0 2>/dev/null || true  # dev
+            ${pkgs.iproute2}/bin/ip addr add 10.100.1.253/24 dev enp2s0 2>/dev/null || true  # pentest (isolated)
+            ${pkgs.iproute2}/bin/ip addr add 10.100.2.253/24 dev enp3s0 2>/dev/null || true  # office (isolated)
+            ${pkgs.iproute2}/bin/ip addr add 10.100.3.253/24 dev enp4s0 2>/dev/null || true  # browse (isolated)
+            ${pkgs.iproute2}/bin/ip addr add 10.100.4.253/24 dev enp5s0 2>/dev/null || true  # dev (isolated)
+            ${pkgs.iproute2}/bin/ip addr add 10.100.5.253/24 dev enp6s0 2>/dev/null || true  # shared (crosstalk)
 
             # Set up policy routing rules for VPN routing
             ${pkgs.iproute2}/bin/ip rule del fwmark 100 table pentest 2>/dev/null || true
@@ -321,10 +324,11 @@ in {
 
         # Interface mapping (virtio NICs in virt-install order):
         #   enp1s0 = br-mgmt
-        #   enp2s0 = br-pentest
-        #   enp3s0 = br-office
-        #   enp4s0 = br-browse
-        #   enp5s0 = br-dev
+        #   enp2s0 = br-pentest (isolated)
+        #   enp3s0 = br-office (isolated)
+        #   enp4s0 = br-browse (isolated)
+        #   enp5s0 = br-dev (isolated)
+        #   enp6s0 = br-shared (crosstalk allowed)
 
         case "$MODE" in
           standard)
@@ -334,11 +338,13 @@ in {
         interface=enp3s0
         interface=enp4s0
         interface=enp5s0
+        interface=enp6s0
         dhcp-range=enp1s0,192.168.100.10,192.168.100.200,24h
         dhcp-range=enp2s0,192.168.101.10,192.168.101.200,24h
         dhcp-range=enp3s0,192.168.102.10,192.168.102.200,24h
         dhcp-range=enp4s0,192.168.103.10,192.168.103.200,24h
         dhcp-range=enp5s0,192.168.104.10,192.168.104.200,24h
+        dhcp-range=enp6s0,192.168.105.10,192.168.105.200,24h
         dhcp-option=enp1s0,option:router,192.168.100.253
         dhcp-option=enp1s0,option:dns-server,192.168.100.253
         dhcp-option=enp2s0,option:router,192.168.101.253
@@ -349,6 +355,8 @@ in {
         dhcp-option=enp4s0,option:dns-server,192.168.103.253
         dhcp-option=enp5s0,option:router,192.168.104.253
         dhcp-option=enp5s0,option:dns-server,192.168.104.253
+        dhcp-option=enp6s0,option:router,192.168.105.253
+        dhcp-option=enp6s0,option:dns-server,192.168.105.253
         EOF
             ;;
 
@@ -359,11 +367,13 @@ in {
         interface=enp3s0
         interface=enp4s0
         interface=enp5s0
+        interface=enp6s0
         dhcp-range=enp1s0,10.100.0.10,10.100.0.200,24h
         dhcp-range=enp2s0,10.100.1.10,10.100.1.200,24h
         dhcp-range=enp3s0,10.100.2.10,10.100.2.200,24h
         dhcp-range=enp4s0,10.100.3.10,10.100.3.200,24h
         dhcp-range=enp5s0,10.100.4.10,10.100.4.200,24h
+        dhcp-range=enp6s0,10.100.5.10,10.100.5.200,24h
         dhcp-option=enp1s0,option:router,10.100.0.253
         dhcp-option=enp1s0,option:dns-server,10.100.0.253
         dhcp-option=enp2s0,option:router,10.100.1.253
@@ -374,6 +384,8 @@ in {
         dhcp-option=enp4s0,option:dns-server,10.100.3.253
         dhcp-option=enp5s0,option:router,10.100.4.253
         dhcp-option=enp5s0,option:dns-server,10.100.4.253
+        dhcp-option=enp6s0,option:router,10.100.5.253
+        dhcp-option=enp6s0,option:dns-server,10.100.5.253
         EOF
             ;;
         esac
@@ -418,14 +430,31 @@ in {
             # Allow DHCP requests (from 0.0.0.0 and broadcast)
             udp dport 67 accept
 
-            # Allow traffic from LAN networks
-            ip saddr { 192.168.100.0/24, 192.168.101.0/24, 192.168.102.0/24, 192.168.103.0/24, 192.168.104.0/24 } accept
+            # Allow traffic from LAN networks (including br-shared)
+            ip saddr { 192.168.100.0/24, 192.168.101.0/24, 192.168.102.0/24, 192.168.103.0/24, 192.168.104.0/24, 192.168.105.0/24 } accept
             ip protocol icmp accept
           }
 
           chain forward {
-            type filter hook forward priority filter; policy accept;
+            type filter hook forward priority filter; policy drop;
             ct state established,related accept
+
+            # br-shared (192.168.105.x) can talk to any network - allows crosstalk
+            ip saddr 192.168.105.0/24 accept
+            ip daddr 192.168.105.0/24 accept
+
+            # Block direct traffic between isolated bridges (pentest, office, browse, dev)
+            # pentest (101) cannot reach office (102), browse (103), dev (104)
+            ip saddr 192.168.101.0/24 ip daddr { 192.168.102.0/24, 192.168.103.0/24, 192.168.104.0/24 } drop
+            # office (102) cannot reach pentest (101), browse (103), dev (104)
+            ip saddr 192.168.102.0/24 ip daddr { 192.168.101.0/24, 192.168.103.0/24, 192.168.104.0/24 } drop
+            # browse (103) cannot reach pentest (101), office (102), dev (104)
+            ip saddr 192.168.103.0/24 ip daddr { 192.168.101.0/24, 192.168.102.0/24, 192.168.104.0/24 } drop
+            # dev (104) cannot reach pentest (101), office (102), browse (103)
+            ip saddr 192.168.104.0/24 ip daddr { 192.168.101.0/24, 192.168.102.0/24, 192.168.103.0/24 } drop
+
+            # Allow all traffic to WAN (internet access)
+            oifname "$WAN" accept
           }
 
           chain postrouting {
@@ -441,11 +470,13 @@ in {
         table inet router {
           chain prerouting {
             type filter hook prerouting priority mangle; policy accept;
-            # Mark packets by source network
+            # Mark packets by source network (for VPN policy routing)
             ip saddr 10.100.1.0/24 meta mark set 100
             ip saddr 10.100.2.0/24 meta mark set 101
             ip saddr 10.100.3.0/24 meta mark set 102
             ip saddr 10.100.4.0/24 meta mark set 103
+            # br-shared (10.100.5.x) gets same routing as dev (direct by default)
+            ip saddr 10.100.5.0/24 meta mark set 103
           }
 
           chain input {
@@ -456,8 +487,8 @@ in {
             # Allow DHCP requests (from 0.0.0.0 and broadcast)
             udp dport 67 accept
 
-            # Allow traffic from LAN networks
-            ip saddr { 10.100.0.0/24, 10.100.1.0/24, 10.100.2.0/24, 10.100.3.0/24, 10.100.4.0/24 } accept
+            # Allow traffic from LAN networks (including br-shared)
+            ip saddr { 10.100.0.0/24, 10.100.1.0/24, 10.100.2.0/24, 10.100.3.0/24, 10.100.4.0/24, 10.100.5.0/24 } accept
             ip protocol icmp accept
           }
 
@@ -468,7 +499,11 @@ in {
             # Management network: no forwarding to WAN
             ip saddr 10.100.0.0/24 drop
 
-            # Block inter-VM traffic (isolation)
+            # br-shared (10.100.5.x) can talk to any network - allows crosstalk
+            ip saddr 10.100.5.0/24 accept
+            ip daddr 10.100.5.0/24 accept
+
+            # Block direct traffic between isolated bridges (pentest, office, browse, dev)
             ip saddr 10.100.1.0/24 ip daddr { 10.100.2.0/24, 10.100.3.0/24, 10.100.4.0/24 } drop
             ip saddr 10.100.2.0/24 ip daddr { 10.100.1.0/24, 10.100.3.0/24, 10.100.4.0/24 } drop
             ip saddr 10.100.3.0/24 ip daddr { 10.100.1.0/24, 10.100.2.0/24, 10.100.4.0/24 } drop

@@ -17,16 +17,23 @@ Hydrix is a NixOS-based VM isolation system designed for security-conscious work
 ```
 Host Machine
 ├── br-mgmt     (192.168.100.x) - Management, host-router communication
-├── br-pentest  (192.168.101.x) - Pentesting VMs
-├── br-office   (192.168.102.x) - Office/comms VMs
-├── br-browse   (192.168.103.x) - Browsing VMs
-└── br-dev      (192.168.104.x) - Development VMs
+├── br-pentest  (192.168.101.x) - Pentesting VMs [ISOLATED]
+├── br-office   (192.168.102.x) - Office/comms VMs [ISOLATED]
+├── br-browse   (192.168.103.x) - Browsing VMs [ISOLATED]
+├── br-dev      (192.168.104.x) - Development VMs [ISOLATED]
+└── br-shared   (192.168.105.x) - Shared bridge [CROSSTALK ALLOWED]
 
 Router VM (WiFi passthrough)
 ├── Handles all internet connectivity
 ├── DHCP for each bridge
 ├── NAT to internet
-└── VPN policy routing (lockdown mode)
+├── VPN policy routing (lockdown mode)
+└── Bridge isolation enforcement (nftables)
+
+Bridge Isolation:
+  - Isolated bridges (pentest, office, browse, dev) cannot communicate directly
+  - br-shared allows VMs to talk to each other across bridge boundaries
+  - All VMs can still access internet through router VM
 ```
 
 ### Boot Modes (Specialisations)
@@ -95,14 +102,9 @@ templates/local/                 # committed - examples for new users
 
 ## Current TODO List
 
-### Immediate Priority - VM Issues
-1. **Fix browsing VM colorscheme** - nvid.json exists but not applying to cursor/terminal like pentest VM (mardu.json) does
-2. **Fix Firefox extensions not loading** - Extensions configured but not appearing in browser
-
 ### High Priority - Core Functionality
-3. Set up shared folders between host and each VM (virtiofs or 9p)
-4. Isolate br-* bridges from each other (VMs on same bridge can communicate, not across bridges)
-5. **Per-VM-type Firefox extensions** - Different extension sets per VM type:
+1. Set up shared folders between host and each VM (virtiofs or 9p)
+2. **Per-VM-type Firefox extensions** - Different extension sets per VM type:
    - **Core (all VMs)**: Vimium/Tridactyl (vim bindings)
    - **Browsing VM**: uBlock Origin, Privacy Badger, privacy-focused extensions
    - **Pentest VM**: Wappalyzer, cookie editors, HackTools, FoxyProxy, scanner extensions
@@ -110,16 +112,21 @@ templates/local/                 # committed - examples for new users
    - **Dev VM**: React/Vue devtools, JSON viewers, etc.
 
 ### Medium Priority - Polish
-6. Add LUKS encryption to VM builds with auto-generated passwords
-7. Create `modules/base/locale.nix` - Centralized locale/keyboard module (currently in local/shared.nix)
-8. Create `modules/base/disk.nix` - LUKS/boot settings module
+3. Add LUKS encryption to VM builds with auto-generated passwords
+4. Create `modules/base/locale.nix` - Centralized locale/keyboard module (currently in local/shared.nix)
+5. Create `modules/base/disk.nix` - LUKS/boot settings module
 
 ### Cleanup (Deferred)
-9. Remove obsolete files: `add-machine.sh`, old templates, `.bak` files
-10. Remove or update obsolete modules: `hydrix-embed.nix`, `shaping.nix` (replaced by full VM setup)
+6. Remove obsolete files: `add-machine.sh`, old templates, `.bak` files
+7. Remove or update obsolete modules: `hydrix-embed.nix`, `shaping.nix` (replaced by full VM setup)
 
 ## Recently Completed
 
+- ✅ **Bridge isolation implemented** - Isolated bridges (pentest, office, browse, dev) cannot communicate directly
+- ✅ **br-shared bridge added** - Allows crosstalk between VMs that need to communicate
+- ✅ **nftables firewall rules** - Enforces isolation in both standard and lockdown modes
+- ✅ **Browsing VM colorscheme fixed** - nvid.json now applying correctly
+- ✅ **Firefox extensions fixed** - Extensions now loading in all VM types
 - ✅ Local secrets management system implemented
 - ✅ Password prompting during setup.sh
 - ✅ Per-VM secrets isolation
@@ -244,13 +251,31 @@ This pattern is used in:
 - `modules/shell/fish-home.nix`
 - `modules/core.nix`
 
-## Bridge Isolation Requirements
+## Bridge Isolation (✅ IMPLEMENTED)
 
-Each br-* bridge should be isolated:
-- VMs on `br-pentest` can communicate with each other
-- VMs on `br-pentest` CANNOT reach VMs on `br-office`, `br-browse`, etc.
-- All bridges route through router VM for internet
-- Router VM manages inter-bridge policy (default: deny)
+Bridge isolation is enforced via nftables on the router VM:
+
+| Bridge | Subnet (Standard) | Subnet (Lockdown) | Isolation |
+|--------|-------------------|-------------------|-----------|
+| br-mgmt | 192.168.100.x | 10.100.0.x | Management only |
+| br-pentest | 192.168.101.x | 10.100.1.x | **ISOLATED** |
+| br-office | 192.168.102.x | 10.100.2.x | **ISOLATED** |
+| br-browse | 192.168.103.x | 10.100.3.x | **ISOLATED** |
+| br-dev | 192.168.104.x | 10.100.4.x | **ISOLATED** |
+| br-shared | 192.168.105.x | 10.100.5.x | **CROSSTALK ALLOWED** |
+
+How isolation works:
+- VMs on isolated bridges can only reach the router and internet
+- VMs on isolated bridges CANNOT reach VMs on other isolated bridges
+- VMs on `br-shared` can talk to any VM on any bridge
+- To allow two VMs to communicate, either:
+  - Put both on `br-shared`
+  - Or put one on `br-shared` and it can reach the other
+
+Deploy a VM to br-shared:
+```bash
+./scripts/build-vm.sh --type dev --name shared-vm --bridge br-shared
+```
 
 ## Shared Folders (TODO)
 
@@ -307,8 +332,7 @@ When you `su user` on the host, it fails because that user only exists in VMs. T
 
 ## Known Issues
 
-1. **Browsing VM colorscheme not applying** - nvid.json exists but cursor/terminal not using it (pentest VM works fine with mardu.json)
-2. **Firefox extensions not loading** - Configured extensions not appearing in browser (works in browsing VM, not in comms/pentest)
+*No critical issues currently tracked.*
 
 ## Notes for Contributors
 

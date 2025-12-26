@@ -120,6 +120,7 @@ in
     };
 
     # Other application configs
+    home.file.".vimrc".source = ../../configs/vim/.vimrc;
     home.file.".config/zathura/zathurarc".source = ../../configs/zathura/zathurarc;
     # starship.toml is deployed by fish-home.nix
     home.file.".config/picom/picom.conf".source = ../../configs/picom/picom.conf;
