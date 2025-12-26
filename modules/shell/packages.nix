@@ -49,6 +49,11 @@ nix.package = pkgs.nixVersions.git;
  
 # Fonts
 fonts.packages = with pkgs; [
+    # Main UI font (used by polybar, alacritty, i3, rofi)
+    iosevka
+    iosevka-bin
+
+    # Bitmap/pixel fonts
     scientifica
     gohufont
     cozette

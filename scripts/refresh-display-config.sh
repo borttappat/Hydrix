@@ -1,6 +1,14 @@
 #!/run/current-system/sw/bin/bash
 # Hydrix display config refresh script
 
+# Prefer Hydrix repo paths, fallback to ~/.config
+HYDRIX_BASE="$HOME/Hydrix"
+if [ -d "$HYDRIX_BASE/configs" ]; then
+    TEMPLATE_BASE="$HYDRIX_BASE/configs"
+else
+    TEMPLATE_BASE="$HOME/.config"
+fi
+
 # Set MOD_KEY (same logic as .xinitrc)
 hostname=$(hostnamectl | grep "Icon name:" | cut -d ":" -f2 | xargs)
 if [[ $hostname =~ [vV][mM] ]]; then
@@ -9,31 +17,33 @@ else
     export MOD_KEY="Mod4"
 fi
 
-# Reload display config
-source ~/.config/scripts/load-display-config.sh
+# Reload display config from Hydrix
+if [ -f "$HYDRIX_BASE/scripts/load-display-config.sh" ]; then
+    source "$HYDRIX_BASE/scripts/load-display-config.sh"
+else
+    source ~/.config/scripts/load-display-config.sh
+fi
 
 # Regenerate i3 config
 sed -e "s/\${MOD_KEY}/$MOD_KEY/g" \
     -e "s/\${I3_FONT}/$I3_FONT/g" \
     -e "s/\${I3_FONT_SIZE}/$I3_FONT_SIZE/g" \
-    -e "s/\${I3_BORDER_THICKNESS_EXTERNAL}/$I3_BORDER_THICKNESS_EXTERNAL/g" \
     -e "s/\${I3_BORDER_THICKNESS}/$I3_BORDER_THICKNESS/g" \
-    -e "s/\${GAPS_INNER_EXTERNAL}/$GAPS_INNER_EXTERNAL/g" \
     -e "s/\${GAPS_INNER}/$GAPS_INNER/g" \
-    ~/.config/i3/config.template > ~/.config/i3/config
+    "$TEMPLATE_BASE/i3/config.template" > ~/.config/i3/config
 
 # Regenerate polybar config (will be overridden by polybar-restart with per-monitor configs)
 sed -e "s/\${POLYBAR_FONT_SIZE}/$POLYBAR_FONT_SIZE/g" \
     -e "s/\${POLYBAR_FONT}/$POLYBAR_FONT/g" \
     -e "s/\${POLYBAR_HEIGHT}/$POLYBAR_HEIGHT/g" \
     -e "s/\${POLYBAR_LINE_SIZE}/$POLYBAR_LINE_SIZE/g" \
-    ~/.config/polybar/config.ini.template > ~/.config/polybar/config.ini
+    "$TEMPLATE_BASE/polybar/config.ini.template" > ~/.config/polybar/config.ini
 
 # Regenerate alacritty config
 sed -e "s/\${ALACRITTY_FONT_SIZE}/$ALACRITTY_FONT_SIZE/g" \
     -e "s/\${ALACRITTY_FONT}/$ALACRITTY_FONT/g" \
     -e "s/\${ALACRITTY_SCALE_FACTOR_LINE}/$ALACRITTY_SCALE_FACTOR_LINE/g" \
-    ~/.config/alacritty/alacritty.toml.template > ~/.config/alacritty/alacritty.toml
+    "$TEMPLATE_BASE/alacritty/alacritty.toml.template" > ~/.config/alacritty/alacritty.toml
 
 # Regenerate Firefox configs (using Hydrix templates)
 FIREFOX_PROFILE=$(find ~/.mozilla/firefox -maxdepth 1 -name "*.default*" -type d | head -1)

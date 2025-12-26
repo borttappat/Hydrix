@@ -5,6 +5,27 @@ LOGFILE="/tmp/polybar-restart.log"
 
 echo "$(date): Polybar restart called" >> "$LOGFILE"
 
+# Prefer Hydrix repo config, fallback to ~/.config (same pattern as load-display-config.sh)
+HYDRIX_CONFIG="$HOME/Hydrix/configs/display-config.json"
+FALLBACK_CONFIG="$HOME/.config/display-config.json"
+if [ -f "$HYDRIX_CONFIG" ]; then
+    CONFIG_FILE="$HYDRIX_CONFIG"
+elif [ -f "$FALLBACK_CONFIG" ]; then
+    CONFIG_FILE="$FALLBACK_CONFIG"
+else
+    echo "$(date): Config file not found at $HYDRIX_CONFIG or $FALLBACK_CONFIG" >> "$LOGFILE"
+    CONFIG_FILE=""
+fi
+
+# Prefer Hydrix repo template, fallback to ~/.config
+HYDRIX_TEMPLATE="$HOME/Hydrix/configs/polybar/config.ini.template"
+FALLBACK_TEMPLATE="$HOME/.config/polybar/config.ini.template"
+if [ -f "$HYDRIX_TEMPLATE" ]; then
+    POLYBAR_TEMPLATE="$HYDRIX_TEMPLATE"
+else
+    POLYBAR_TEMPLATE="$FALLBACK_TEMPLATE"
+fi
+
 # Check if already running (with proper locking)
 if ! mkdir "$LOCKFILE" 2>/dev/null; then
     echo "$(date): Already running, exiting" >> "$LOGFILE"
@@ -26,8 +47,12 @@ done
 # Small delay to ensure clean state
 sleep 0.2
 
-# Load display config to get font settings
-source ~/.config/scripts/load-display-config.sh
+# Load display config to get font settings (uses correct config path)
+if [ -f "$HOME/Hydrix/scripts/load-display-config.sh" ]; then
+    source "$HOME/Hydrix/scripts/load-display-config.sh"
+else
+    source ~/.config/scripts/load-display-config.sh
+fi
 
 # Launch polybar on each connected monitor
 MONITORS=$(xrandr --query | grep " connected" | cut -d' ' -f1)
@@ -45,19 +70,27 @@ for monitor in $MONITORS; do
     MONITOR_POLYBAR_HEIGHT="$POLYBAR_HEIGHT"
     MONITOR_POLYBAR_LINE_SIZE="$POLYBAR_LINE_SIZE"
 
-    # Check if this monitor is an external monitor (for zen machine)
-    if [ "$HOSTNAME" = "zen" ]; then
-        EXTERNAL_MONITOR_PATTERNS=$(jq -r ".machine_overrides.zen.external_monitor_resolutions // [] | join(\"|\")" ~/.config/display-config.json)
-        if echo "$MONITOR_RES" | grep -qE "^(${EXTERNAL_MONITOR_PATTERNS})x"; then
-            # External monitor - use external settings
-            MONITOR_POLYBAR_FONT_SIZE=$(jq -r '.machine_overrides.zen.polybar_font_size_external // .machine_overrides.zen.polybar_font_size' ~/.config/display-config.json)
-            MONITOR_POLYBAR_HEIGHT=$(jq -r '.machine_overrides.zen.polybar_height_external // .machine_overrides.zen.polybar_height' ~/.config/display-config.json)
-            MONITOR_POLYBAR_LINE_SIZE=$(jq -r '.machine_overrides.zen.polybar_line_size_external // .machine_overrides.zen.polybar_line_size' ~/.config/display-config.json)
+    # Check for machine overrides (works for any machine, not just zen)
+    MACHINE_OVERRIDE=$(jq -r ".machine_overrides[\"$HOSTNAME\"] // null" "$CONFIG_FILE")
+    if [ "$MACHINE_OVERRIDE" != "null" ]; then
+        # Check for external monitor patterns
+        EXTERNAL_MONITOR_PATTERNS=$(echo "$MACHINE_OVERRIDE" | jq -r ".external_monitor_resolutions // [] | join(\"|\")")
+        if [ -n "$EXTERNAL_MONITOR_PATTERNS" ] && echo "$MONITOR_RES" | grep -qE "^(${EXTERNAL_MONITOR_PATTERNS})$"; then
+            # External monitor - use external settings if available
+            EXT_FONT=$(echo "$MACHINE_OVERRIDE" | jq -r ".polybar_font_size_external // null")
+            EXT_HEIGHT=$(echo "$MACHINE_OVERRIDE" | jq -r ".polybar_height_external // null")
+            EXT_LINE=$(echo "$MACHINE_OVERRIDE" | jq -r ".polybar_line_size_external // null")
+            [ "$EXT_FONT" != "null" ] && MONITOR_POLYBAR_FONT_SIZE="$EXT_FONT"
+            [ "$EXT_HEIGHT" != "null" ] && MONITOR_POLYBAR_HEIGHT="$EXT_HEIGHT"
+            [ "$EXT_LINE" != "null" ] && MONITOR_POLYBAR_LINE_SIZE="$EXT_LINE"
         else
-            # Internal monitor - use standalone settings
-            MONITOR_POLYBAR_FONT_SIZE=$(jq -r '.machine_overrides.zen.polybar_font_size' ~/.config/display-config.json)
-            MONITOR_POLYBAR_HEIGHT=$(jq -r '.machine_overrides.zen.polybar_height' ~/.config/display-config.json)
-            MONITOR_POLYBAR_LINE_SIZE=$(jq -r '.machine_overrides.zen.polybar_line_size' ~/.config/display-config.json)
+            # Internal/default monitor - use machine override settings
+            OVERRIDE_FONT=$(echo "$MACHINE_OVERRIDE" | jq -r ".polybar_font_size // null")
+            OVERRIDE_HEIGHT=$(echo "$MACHINE_OVERRIDE" | jq -r ".polybar_height // null")
+            OVERRIDE_LINE=$(echo "$MACHINE_OVERRIDE" | jq -r ".polybar_line_size // null")
+            [ "$OVERRIDE_FONT" != "null" ] && MONITOR_POLYBAR_FONT_SIZE="$OVERRIDE_FONT"
+            [ "$OVERRIDE_HEIGHT" != "null" ] && MONITOR_POLYBAR_HEIGHT="$OVERRIDE_HEIGHT"
+            [ "$OVERRIDE_LINE" != "null" ] && MONITOR_POLYBAR_LINE_SIZE="$OVERRIDE_LINE"
         fi
     fi
 
@@ -69,7 +102,7 @@ for monitor in $MONITORS; do
         -e "s/\${POLYBAR_FONT}/$POLYBAR_FONT/g" \
         -e "s/\${POLYBAR_HEIGHT}/$MONITOR_POLYBAR_HEIGHT/g" \
         -e "s/\${POLYBAR_LINE_SIZE}/$MONITOR_POLYBAR_LINE_SIZE/g" \
-        ~/.config/polybar/config.ini.template > "$MONITOR_CONFIG"
+        "$POLYBAR_TEMPLATE" > "$MONITOR_CONFIG"
 
     # Launch polybar on this monitor with its config
     echo "$(date): Launching polybar on $monitor with config $MONITOR_CONFIG" >> "$LOGFILE"

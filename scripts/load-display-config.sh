@@ -6,26 +6,36 @@
 #   2. If internal only → use machine_overrides if present, else resolution_defaults
 #   3. Fallback to 1920x1080 defaults if resolution not found
 
-CONFIG_FILE="$HOME/.config/display-config.json"
-HOSTNAME=$(hostnamectl hostname | cut -d'-' -f1)
+# Read directly from Hydrix repo so changes take effect without rebuild
+# Falls back to ~/.config if repo not found (e.g., fresh VM before clone)
+HYDRIX_CONFIG="$HOME/Hydrix/configs/display-config.json"
+FALLBACK_CONFIG="$HOME/.config/display-config.json"
 
-if [ ! -f "$CONFIG_FILE" ]; then
-    echo "Config file not found: $CONFIG_FILE"
+if [ -f "$HYDRIX_CONFIG" ]; then
+    CONFIG_FILE="$HYDRIX_CONFIG"
+elif [ -f "$FALLBACK_CONFIG" ]; then
+    CONFIG_FILE="$FALLBACK_CONFIG"
+else
+    echo "Config file not found at $HYDRIX_CONFIG or $FALLBACK_CONFIG"
     exit 1
 fi
 
+HOSTNAME=$(hostnamectl hostname | cut -d'-' -f1)
+
 # Detect all connected monitors and their resolutions
+# xrandr --listmonitors format: "0: +*eDP-1 2880/302x1800/189+0+0  eDP-1"
+# where format is: width/widthMM x height/heightMM + offset
 get_external_resolution() {
     # Get all connected monitors except internal (eDP)
     local external_res
-    external_res=$(xrandr --listmonitors 2>/dev/null | grep -v "eDP" | grep -oP '[0-9]{3,5}x[0-9]{3,5}' | head -n1)
+    external_res=$(xrandr --listmonitors 2>/dev/null | grep -v "eDP" | grep -v "^Monitors:" | sed 's|.* \([0-9]*\)/[0-9]*x\([0-9]*\)/.*|\1x\2|' | head -n1)
     echo "$external_res"
 }
 
 get_internal_resolution() {
     # Get internal display resolution (eDP)
     local internal_res
-    internal_res=$(xrandr --listmonitors 2>/dev/null | grep "eDP" | grep -oP '[0-9]{3,5}x[0-9]{3,5}' | head -n1)
+    internal_res=$(xrandr --listmonitors 2>/dev/null | grep "eDP" | sed 's|.* \([0-9]*\)/[0-9]*x\([0-9]*\)/.*|\1x\2|' | head -n1)
     echo "$internal_res"
 }
 

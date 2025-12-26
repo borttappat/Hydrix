@@ -1,7 +1,31 @@
 { config, lib, pkgs, ... }:
 
+let
+  # Check if we're building for a VM (vmType is set and not "host")
+  isVM = (config.hydrix.vmType or null) != null && config.hydrix.vmType != "host";
+
+  # Detect username dynamically (same pattern as base.nix)
+  hydrixPath = builtins.getEnv "HYDRIX_PATH";
+  sudoUser = builtins.getEnv "SUDO_USER";
+  currentUser = builtins.getEnv "USER";
+  effectiveUser = if sudoUser != "" then sudoUser
+                  else if currentUser != "" && currentUser != "root" then currentUser
+                  else "user";
+  basePath = if hydrixPath != "" then hydrixPath else "/home/${effectiveUser}/Hydrix";
+  hostConfigPath = "${basePath}/local/host.nix";
+
+  hostConfig = if builtins.pathExists hostConfigPath
+    then import hostConfigPath
+    else null;
+
+  # VMs always use "user", host uses detected username
+  username = if isVM then "user"
+    else if hostConfig != null && hostConfig ? username
+    then hostConfig.username
+    else "user";
+in
 {
-  # Static color theming for VMs
+  # Static color theming for VMs and hosts
   #
   # Two modes:
   # 1. VM Type mode: Auto-generates colors based on vmType (pentest=red, etc.)
@@ -11,16 +35,16 @@
   #   wal -i /path/to/wallpaper.jpg
   #   ./scripts/save-colorscheme.sh my-theme
   #
-  # Then in your VM profile:
+  # Then in your VM/host profile:
   #   hydrix.colorscheme = "my-theme";
 
   imports = [ ./base.nix ];
 
   options.hydrix = {
     vmType = lib.mkOption {
-      type = lib.types.enum [ "pentest" "comms" "browsing" "dev" ];
-      description = "VM type for fallback color scheme generation";
-      default = "pentest";
+      type = lib.types.nullOr (lib.types.enum [ "pentest" "comms" "browsing" "dev" "host" ]);
+      description = "VM/host type for fallback color scheme generation";
+      default = null;
     };
 
     colorscheme = lib.mkOption {
@@ -114,22 +138,21 @@
       after = [ "network.target" ];
 
       unitConfig = {
-        # Uses "user" - the standard VM user from users-vm.nix
-        ConditionPathExists = "!/home/user/.cache/wal/.static-colors-generated";
+        ConditionPathExists = "!/home/${username}/.cache/wal/.static-colors-generated";
       };
 
       serviceConfig = {
         Type = "oneshot";
         RemainAfterExit = true;
-        User = "user";
+        User = username;
       };
 
       script = if hasCustomScheme then ''
         echo "Applying custom colorscheme: ${config.hydrix.colorscheme}"
         ${applySchemeScript}/bin/apply-colorscheme ${schemeFile}
       '' else ''
-        echo "Generating ${config.hydrix.vmType} color scheme"
-        ${vmTypeColorsScript}/bin/vm-static-colors ${config.hydrix.vmType}
+        echo "Generating ${if config.hydrix.vmType != null then config.hydrix.vmType else "host"} color scheme"
+        ${vmTypeColorsScript}/bin/vm-static-colors ${if config.hydrix.vmType != null then config.hydrix.vmType else "host"}
       '';
     };
   };

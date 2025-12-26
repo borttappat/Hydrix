@@ -16,7 +16,7 @@ exec_always --no-startup-id wal -Rnq
 exec_always --no-startup-id xrdb -merge ~/.Xresources
 exec_always --no-startup-id ~/.fehbg &
 exec_always --no-startup-id sleep 2 && xmodmap ~/.Xmodmap
-exec_always --no-startup-id ~/.config/scripts/autostart.sh
+exec_always --no-startup-id ~/Hydrix/scripts/autostart.sh
 exec --no-startup-id dunst
 
 #########
@@ -31,28 +31,28 @@ bindsym $mod+F3 exec "amixer set Master 5%+"
 bindsym $mod+F12 exec "flameshot gui"
 
 # Detect external monitors and reconfigure
-bindsym $mod+Shift+v exec ~/.config/scripts/detect-monitors.sh
+bindsym $mod+Shift+v exec ~/Hydrix/scripts/detect-monitors.sh
 
 # htop (monitor-aware terminal)
-bindsym $mod+Shift+u exec ~/.config/scripts/alacritty.sh -e htop
+bindsym $mod+Shift+u exec ~/Hydrix/scripts/alacritty.sh -e htop
 
 # btm (monitor-aware terminal)
-bindsym $mod+Shift+b exec ~/.config/scripts/alacritty.sh -e btm
+bindsym $mod+Shift+b exec ~/Hydrix/scripts/alacritty.sh -e btm
 
 # i3-config (edit template, then refresh to apply)
-bindsym $mod+Shift+i exec ~/.config/scripts/alacritty.sh -e vim ~/.config/i3/config.template
+bindsym $mod+Shift+i exec ~/Hydrix/scripts/alacritty.sh -e vim ~/.config/i3/config.template
 
 # polybar-config
-bindsym $mod+Shift+p exec ~/.config/scripts/alacritty.sh -e vim ~/.config/polybar/config.ini
+bindsym $mod+Shift+p exec ~/Hydrix/scripts/alacritty.sh -e vim ~/.config/polybar/config.ini
 
 # nix-packages (edit Hydrix)
-bindsym $mod+Shift+n exec ~/.config/scripts/alacritty.sh -e vim ~/Hydrix/flake.nix
+bindsym $mod+Shift+n exec ~/Hydrix/scripts/alacritty.sh -e vim ~/Hydrix/flake.nix
 
 # file-manager
-bindsym $mod+Shift+f exec ~/.config/scripts/alacritty.sh -e joshuto
+bindsym $mod+Shift+f exec ~/Hydrix/scripts/alacritty.sh -e joshuto
 
 # git status (Hydrix repo)
-bindsym $mod+Shift+g exec ~/.config/scripts/alacritty.sh -e /bin/sh -c "clear && cd ~/Hydrix && git status && exec fish"
+bindsym $mod+Shift+g exec ~/Hydrix/scripts/alacritty.sh -e /bin/sh -c "clear && cd ~/Hydrix && git status && exec fish"
 
 # Zathura
 bindsym $mod+z exec zathura
@@ -66,9 +66,9 @@ bindsym $mod+p exec polybar-msg cmd restart
 
 # Various bindings
 bindsym $mod+Shift+w exec feh --bg-fill ~/Wallpapers/Black.jpg
-bindsym $mod+Shift+e exec --no-startup-id sh $HOME/.config/scripts/lock.sh
+bindsym $mod+Shift+e exec --no-startup-id sh $HOME/Hydrix/scripts/lock.sh
 bindsym $mod+Shift+s exec systemctl suspend
-bindsym $mod+w exec ~/.config/scripts/randomwalrgb.sh 
+bindsym $mod+w exec ~/Hydrix/scripts/randomwalrgb.sh 
 
 # Browser settings
 set $browser firefox
@@ -86,9 +86,9 @@ bindsym $mod+F7 exec brightnessctl set 10%-
 bindsym $mod+Shift+F7 exec brightnessctl set 1%-
 
 # Terminal bindings
-bindsym $mod+Return exec ~/.config/scripts/alacritty.sh
-bindsym $mod+Shift+Return exec ~/.config/scripts/alacritty.sh; split toggle
-bindsym $mod+S exec ~/.config/scripts/float_window.sh
+bindsym $mod+Return exec ~/Hydrix/scripts/alacritty.sh
+bindsym $mod+Shift+Return exec ~/Hydrix/scripts/alacritty.sh; split toggle
+bindsym $mod+S exec ~/Hydrix/scripts/float_window.sh
 
 # Floating window settings
 for_window [instance="floating"] floating enabled
@@ -104,7 +104,7 @@ bindsym $mod+o exec obsidian
 bindsym $mod+m exec virt-manager
 
 # Start rofi
-bindsym $mod+d exec --no-startup-id ~/.config/scripts/rofi.sh -show drun
+bindsym $mod+d exec --no-startup-id ~/Hydrix/scripts/rofi.sh -show drun
 bindsym $mod+Shift+d exec --no-startup-id rofi -show run
 
 # Gap adjustment bindings
@@ -214,7 +214,7 @@ bindsym $mod+ctrl+h i3-msg resize width shrink 5 ppt
 bindsym $mod+ctrl+l i3-msg resize width grow 5 ppt
 
 # Reload the configuration file
-bindsym $mod+Shift+r exec ~/.config/scripts/refresh-display-config.sh
+bindsym $mod+Shift+r exec ~/Hydrix/scripts/refresh-display-config.sh
 
 # Colors
 set_from_resource $$fg i3wm.color4 #ffffff

@@ -4,22 +4,38 @@ unclutter -grab &
 find "$HOME" -maxdepth 1 -name ".serverauth.*" -type f -mtime +2 -delete 2>/dev/null
 
 hostname=$(hostnamectl | grep "Icon name:" | cut -d ":" -f2 | xargs)
-if [[ $hostname =~ [vV][mM] ]]; then
-    # VM mode - ensure color cache exists before starting X
-    if [ ! -f ~/.cache/wal/.static-colors-generated ]; then
-        echo "Generating VM color cache..."
-        # Check if custom colorscheme is set
-        if [ -f ~/.cache/wal/.static-colors-type ] && grep -q "CUSTOM_SCHEME" ~/.cache/wal/.static-colors-type; then
-            SCHEME_FILE=$(grep "CUSTOM_SCHEME" ~/.cache/wal/.static-colors-type | cut -d'=' -f2)
-            apply-colorscheme "$SCHEME_FILE"
-        else
-            # Use VM type from hostname or default
+
+# Prefer Hydrix repo paths for templates (changes take effect without rebuild)
+# Falls back to ~/.config/ for VMs before they clone the repo
+HYDRIX_CONFIGS="$HOME/Hydrix/configs"
+if [ -d "$HYDRIX_CONFIGS" ]; then
+    TEMPLATE_BASE="$HYDRIX_CONFIGS"
+else
+    TEMPLATE_BASE="$HOME/.config"
+fi
+
+# Ensure color cache exists before starting X (both VM and host)
+if [ ! -f ~/.cache/wal/.static-colors-generated ]; then
+    echo "Generating color cache..."
+    # Check if custom colorscheme is set
+    if [ -f ~/.cache/wal/.static-colors-type ] && grep -q "CUSTOM_SCHEME" ~/.cache/wal/.static-colors-type; then
+        SCHEME_FILE=$(grep "CUSTOM_SCHEME" ~/.cache/wal/.static-colors-type | cut -d'=' -f2)
+        apply-colorscheme "$SCHEME_FILE"
+    else
+        if [[ $hostname =~ [vV][mM] ]]; then
+            # Use VM type from hostname
             VM_TYPE=$(echo "$hostname" | grep -oE "(pentest|comms|browsing|dev)" | head -n1)
             [ -z "$VM_TYPE" ] && VM_TYPE="browsing"
             vm-static-colors "$VM_TYPE"
+        else
+            # Host mode - use default host colors
+            vm-static-colors "host"
         fi
     fi
+fi
 
+if [[ $hostname =~ [vV][mM] ]]; then
+    # VM-specific setup
     spice-vdagent -x &
     VM_DISPLAY=$(xrandr | grep -E "(Virtual-1|qxl-0)" | grep " connected" | cut -d' ' -f1 | head -n1)
     if [ -n "$VM_DISPLAY" ]; then
@@ -36,25 +52,30 @@ wal -Rn &
 
 sleep 0.5
 
-source ~/.config/scripts/load-display-config.sh
+# Source load-display-config from Hydrix or fallback to ~/.config
+if [ -f "$HOME/Hydrix/scripts/load-display-config.sh" ]; then
+    source "$HOME/Hydrix/scripts/load-display-config.sh"
+else
+    source ~/.config/scripts/load-display-config.sh
+fi
 
+# Process templates from Hydrix repo (or ~/.config as fallback)
+# Output always goes to ~/.config/ for app compatibility
 sed -e "s/\${MOD_KEY}/$MOD_KEY/g" \
     -e "s/\${I3_FONT}/$I3_FONT/g" \
     -e "s/\${I3_FONT_SIZE}/$I3_FONT_SIZE/g" \
-    -e "s/\${I3_BORDER_THICKNESS_EXTERNAL}/$I3_BORDER_THICKNESS_EXTERNAL/g" \
     -e "s/\${I3_BORDER_THICKNESS}/$I3_BORDER_THICKNESS/g" \
-    -e "s/\${GAPS_INNER_EXTERNAL}/$GAPS_INNER_EXTERNAL/g" \
     -e "s/\${GAPS_INNER}/$GAPS_INNER/g" \
-    ~/.config/i3/config.template > ~/.config/i3/config
+    "$TEMPLATE_BASE/i3/config.template" > ~/.config/i3/config
 sed -e "s/\${POLYBAR_FONT_SIZE}/$POLYBAR_FONT_SIZE/g" \
     -e "s/\${POLYBAR_FONT}/$POLYBAR_FONT/g" \
     -e "s/\${POLYBAR_HEIGHT}/$POLYBAR_HEIGHT/g" \
     -e "s/\${POLYBAR_LINE_SIZE}/$POLYBAR_LINE_SIZE/g" \
-    ~/.config/polybar/config.ini.template > ~/.config/polybar/config.ini
+    "$TEMPLATE_BASE/polybar/config.ini.template" > ~/.config/polybar/config.ini
 sed -e "s/\${ALACRITTY_FONT_SIZE}/$ALACRITTY_FONT_SIZE/g" \
     -e "s/\${ALACRITTY_FONT}/$ALACRITTY_FONT/g" \
     -e "s/\${ALACRITTY_SCALE_FACTOR_LINE}/$ALACRITTY_SCALE_FACTOR_LINE/g" \
-    ~/.config/alacritty/alacritty.toml.template > ~/.config/alacritty/alacritty.toml
+    "$TEMPLATE_BASE/alacritty/alacritty.toml.template" > ~/.config/alacritty/alacritty.toml
 sed -e "s/\${DUNST_FONT}/$DUNST_FONT/g" \
     -e "s/\${DUNST_FONT_SIZE}/$DUNST_FONT_SIZE/g" \
     -e "s/\${DUNST_WIDTH}/$DUNST_WIDTH/g" \
@@ -64,10 +85,10 @@ sed -e "s/\${DUNST_FONT}/$DUNST_FONT/g" \
     -e "s/\${DUNST_PADDING}/$DUNST_PADDING/g" \
     -e "s/\${DUNST_FRAME_WIDTH}/$DUNST_FRAME_WIDTH/g" \
     -e "s/\${DUNST_ICON_SIZE}/$DUNST_ICON_SIZE/g" \
-    ~/.config/dunst/dunstrc.template > ~/.config/dunst/dunstrc
+    "$TEMPLATE_BASE/dunst/dunstrc.template" > ~/.config/dunst/dunstrc
 sed -e "s/\${ROFI_FONT}/$ROFI_FONT/g" \
     -e "s/\${ROFI_FONT_SIZE}/$ROFI_FONT_SIZE/g" \
-    ~/.config/rofi/config.rasi.template > ~/.config/rofi/config.rasi
+    "$TEMPLATE_BASE/rofi/config.rasi.template" > ~/.config/rofi/config.rasi
 
 # Firefox font configuration
 # Use dynamic username instead of hardcoded "traum"
@@ -76,18 +97,18 @@ mkdir -p ~/.mozilla/firefox/$FIREFOX_PROFILE_NAME/chrome
 sed -e "s/\${FIREFOX_FONT}/$FIREFOX_FONT/g" \
     -e "s/\${FIREFOX_FONT_SIZE}/$FIREFOX_FONT_SIZE/g" \
     -e "s/\${FIREFOX_HEADER_FONT_SIZE}/$FIREFOX_HEADER_FONT_SIZE/g" \
-    ~/.config/firefox/$FIREFOX_PROFILE_NAME/chrome/userChrome.css.template > ~/.mozilla/firefox/$FIREFOX_PROFILE_NAME/chrome/userChrome.css
+    "$TEMPLATE_BASE/firefox/chrome/userChrome.css.template" > ~/.mozilla/firefox/$FIREFOX_PROFILE_NAME/chrome/userChrome.css
 sed -e "s/\${FIREFOX_FONT}/$FIREFOX_FONT/g" \
     -e "s/\${FIREFOX_FONT_SIZE}/$FIREFOX_FONT_SIZE/g" \
     -e "s/\${FIREFOX_HEADER_FONT_SIZE}/$FIREFOX_HEADER_FONT_SIZE/g" \
-    ~/.config/firefox/$FIREFOX_PROFILE_NAME/chrome/userContent.css.template > ~/.mozilla/firefox/$FIREFOX_PROFILE_NAME/chrome/userContent.css
+    "$TEMPLATE_BASE/firefox/chrome/userContent.css.template" > ~/.mozilla/firefox/$FIREFOX_PROFILE_NAME/chrome/userContent.css
 sed -e "s/\${FIREFOX_FONT}/$FIREFOX_FONT/g" \
     -e "s/\${FIREFOX_FONT_SIZE}/$FIREFOX_FONT_SIZE/g" \
     -e "s/\${FIREFOX_HEADER_FONT_SIZE}/$FIREFOX_HEADER_FONT_SIZE/g" \
-    ~/.config/firefox/$FIREFOX_PROFILE_NAME/user.js.template > ~/.mozilla/firefox/$FIREFOX_PROFILE_NAME/user.js
+    "$TEMPLATE_BASE/firefox/user.js.template" > ~/.mozilla/firefox/$FIREFOX_PROFILE_NAME/user.js
 
 # Generate profiles.ini with dynamic username
 sed -e "s/\${FIREFOX_PROFILE_NAME}/$FIREFOX_PROFILE_NAME/g" \
-    ~/.config/firefox/profiles.ini.template > ~/.mozilla/firefox/profiles.ini
+    "$TEMPLATE_BASE/firefox/profiles.ini.template" > ~/.mozilla/firefox/profiles.ini
 
 exec i3

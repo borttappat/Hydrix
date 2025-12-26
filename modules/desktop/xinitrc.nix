@@ -2,7 +2,7 @@
 
 let
   # Check if we're building for a VM (vmType is set)
-  isVM = (config.hydrix.vmType or null) != null;
+  isVM = (config.hydrix.vmType or null) != null && config.hydrix.vmType != "host";
 
   # Detect username dynamically
   # For VMs: always "user"
@@ -144,12 +144,8 @@ in
     # Pywal dunst template
     home.file.".config/wal/templates/dunstrc".source = ../../configs/wal/templates/dunstrc;
 
-    # Firefox configuration templates (processed by .xinitrc)
-    # Note: Firefox profile directory uses dynamic username
-    home.file.".config/firefox/${username}/chrome/userChrome.css.template".source = ../../configs/firefox/chrome/userChrome.css.template;
-    home.file.".config/firefox/${username}/chrome/userContent.css.template".source = ../../configs/firefox/chrome/userContent.css.template;
-    home.file.".config/firefox/${username}/user.js.template".source = ../../configs/firefox/user.js.template;
-    home.file.".config/firefox/profiles.ini.template".source = ../../configs/firefox/profiles.ini.template;
+    # Firefox templates are read directly from ~/Hydrix/configs/firefox/ by .xinitrc
+    # No need to deploy them to ~/.config/ - the repo is the source of truth
 
     # Obsidian configuration templates (deployed by deploy-obsidian-config script)
     home.file.".config/obsidian-templates/appearance.json.template".source = ../../configs/obsidian/appearance.json.template;

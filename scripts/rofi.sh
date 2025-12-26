@@ -1,5 +1,26 @@
 #!/run/current-system/sw/bin/bash
 
+# Prefer Hydrix repo config, fallback to ~/.config (same pattern as load-display-config.sh)
+HYDRIX_CONFIG="$HOME/Hydrix/configs/display-config.json"
+FALLBACK_CONFIG="$HOME/.config/display-config.json"
+if [ -f "$HYDRIX_CONFIG" ]; then
+    CONFIG_FILE="$HYDRIX_CONFIG"
+elif [ -f "$FALLBACK_CONFIG" ]; then
+    CONFIG_FILE="$FALLBACK_CONFIG"
+else
+    echo "Config file not found at $HYDRIX_CONFIG or $FALLBACK_CONFIG"
+    exit 1
+fi
+
+# Prefer Hydrix repo template, fallback to ~/.config
+HYDRIX_TEMPLATE="$HOME/Hydrix/configs/rofi/config.rasi.template"
+FALLBACK_TEMPLATE="$HOME/.config/rofi/config.rasi.template"
+if [ -f "$HYDRIX_TEMPLATE" ]; then
+    ROFI_TEMPLATE="$HYDRIX_TEMPLATE"
+else
+    ROFI_TEMPLATE="$FALLBACK_TEMPLATE"
+fi
+
 eval $(xdotool getmouselocation --shell)
 
 CURRENT_DISPLAY=$(xrandr --listmonitors | awk -v x="$X" -v y="$Y" '
@@ -25,8 +46,6 @@ exit
 }')
 
 echo "Display: $CURRENT_DISPLAY on monitor: $MONITOR_NAME"
-
-CONFIG_FILE="$HOME/.config/display-config.json"
 HOSTNAME=$(hostnamectl hostname | cut -d'-' -f1)
 
 MACHINE_OVERRIDE=$(jq -r ".machine_overrides[\"$HOSTNAME\"] // null" "$CONFIG_FILE")
@@ -57,6 +76,6 @@ echo "Using rofi font: $ROFI_FONT size: $ROFI_FONT_SIZE for display $CURRENT_DIS
 
 sed -e "s/\${ROFI_FONT}/$ROFI_FONT/g" \
     -e "s/\${ROFI_FONT_SIZE}/$ROFI_FONT_SIZE/g" \
-    ~/.config/rofi/config.rasi.template > ~/.config/rofi/config.rasi
+    "$ROFI_TEMPLATE" > ~/.config/rofi/config.rasi
 
 rofi "$@" -config ~/.config/rofi/config.rasi -m "$MONITOR_NAME"

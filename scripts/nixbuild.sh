@@ -107,6 +107,10 @@ rebuild_system() {
     local FLAKE_TARGET="$1"
     local SPECIALISATION="$2"
 
+    # Force fresh flake evaluation to ensure home-manager picks up changes
+    echo "Forcing fresh flake evaluation..."
+    sudo nix build "$FLAKE_DIR#nixosConfigurations.$FLAKE_TARGET.config.system.build.toplevel" --impure --no-link
+
     if [[ "$SPECIALISATION" != "none" ]]; then
         echo "Rebuilding with specialisation: $SPECIALISATION"
         echo "Running: sudo nixos-rebuild switch --flake ~/Hydrix#$FLAKE_TARGET --impure --specialisation $SPECIALISATION"

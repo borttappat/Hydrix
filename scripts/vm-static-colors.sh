@@ -6,14 +6,14 @@ set -euo pipefail
 VM_TYPE="${1:-}"
 
 if [ -z "$VM_TYPE" ]; then
-    echo "Usage: vm-static-colors.sh <pentest|comms|browsing|dev>"
+    echo "Usage: vm-static-colors.sh <pentest|comms|browsing|dev|host>"
     exit 1
 fi
 
 echo "Generating static color scheme for VM type: $VM_TYPE"
 
 # Color scheme definitions
-# Each VM type gets a distinctive accent color
+# Each VM/host type gets a distinctive accent color
 case "$VM_TYPE" in
     pentest)
         ACCENT_HEX="ea6c73"  # Red - aggressive, warning, security focus
@@ -31,9 +31,13 @@ case "$VM_TYPE" in
         ACCENT_HEX="ba6cea"  # Purple - creative, development, building
         WALLPAPER_NAME="dev-purple.jpg"
         ;;
+    host)
+        ACCENT_HEX="7aa2f7"  # Neutral blue - default host theme
+        WALLPAPER_NAME="host-default.jpg"
+        ;;
     *)
         echo "Unknown VM type: $VM_TYPE"
-        echo "Valid types: pentest, comms, browsing, dev"
+        echo "Valid types: pentest, comms, browsing, dev, host"
         exit 1
         ;;
 esac

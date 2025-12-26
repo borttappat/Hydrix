@@ -1,11 +1,24 @@
 #!/run/current-system/sw/bin/bash
 
-CONFIG_FILE="$HOME/.config/display-config.json"
-TEMPLATE_FILE="$HOME/.config/alacritty/alacritty.toml.template"
-
-if [ ! -f "$CONFIG_FILE" ]; then
-    echo "Config file not found: $CONFIG_FILE"
+# Prefer Hydrix repo config, fallback to ~/.config (same pattern as load-display-config.sh)
+HYDRIX_CONFIG="$HOME/Hydrix/configs/display-config.json"
+FALLBACK_CONFIG="$HOME/.config/display-config.json"
+if [ -f "$HYDRIX_CONFIG" ]; then
+    CONFIG_FILE="$HYDRIX_CONFIG"
+elif [ -f "$FALLBACK_CONFIG" ]; then
+    CONFIG_FILE="$FALLBACK_CONFIG"
+else
+    echo "Config file not found at $HYDRIX_CONFIG or $FALLBACK_CONFIG"
     exit 1
+fi
+
+# Prefer Hydrix repo template, fallback to ~/.config
+HYDRIX_TEMPLATE="$HOME/Hydrix/configs/alacritty/alacritty.toml.template"
+FALLBACK_TEMPLATE="$HOME/.config/alacritty/alacritty.toml.template"
+if [ -f "$HYDRIX_TEMPLATE" ]; then
+    TEMPLATE_FILE="$HYDRIX_TEMPLATE"
+else
+    TEMPLATE_FILE="$FALLBACK_TEMPLATE"
 fi
 
 # Get cursor position

@@ -10,7 +10,7 @@ let
   };
 
   # Check if we're building for a VM (vmType is set)
-  isVM = (config.hydrix.vmType or null) != null;
+  isVM = (config.hydrix.vmType or null) != null && config.hydrix.vmType != "host";
 
   # Detect username dynamically
   # For VMs: always "user"

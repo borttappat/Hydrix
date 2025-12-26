@@ -19,14 +19,14 @@
 
 {
   imports = [
-    # Theming system (dynamic for host machine)
-    ../../modules/theming/dynamic.nix
-    ../../modules/desktop/xinitrc.nix
-    # Intel hardware support (graphics, microcode, thermald)
+    # Hardware-specific modules for this machine
     ../../modules/base/hardware/intel.nix
-    # ASUS hardware support (asusd, battery management)
     ../../modules/base/hardware/asus.nix
+    # Note: static-colors.nix and xinitrc.nix are imported in flake.nix (same as VMs)
   ];
+
+  # Host theming - use "host" type or set a custom colorscheme
+  hydrix.vmType = "host";
 
   # Override hostname for this machine
   networking.hostName = lib.mkForce "zen";

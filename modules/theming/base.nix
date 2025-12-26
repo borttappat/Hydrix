@@ -1,5 +1,29 @@
 { config, pkgs, lib, ... }:
 
+let
+  # Check if we're building for a VM (vmType is set and not "host")
+  isVM = (config.hydrix.vmType or null) != null && config.hydrix.vmType != "host";
+
+  # Detect username dynamically
+  hydrixPath = builtins.getEnv "HYDRIX_PATH";
+  sudoUser = builtins.getEnv "SUDO_USER";
+  currentUser = builtins.getEnv "USER";
+  effectiveUser = if sudoUser != "" then sudoUser
+                  else if currentUser != "" && currentUser != "root" then currentUser
+                  else "user";
+  basePath = if hydrixPath != "" then hydrixPath else "/home/${effectiveUser}/Hydrix";
+  hostConfigPath = "${basePath}/local/host.nix";
+
+  hostConfig = if builtins.pathExists hostConfigPath
+    then import hostConfigPath
+    else null;
+
+  # VMs always use "user", host uses detected username
+  username = if isVM then "user"
+    else if hostConfig != null && hostConfig ? username
+    then hostConfig.username
+    else "user";
+in
 {
   # Base theming infrastructure shared by both static (VM) and dynamic (host) setups
   #
@@ -24,10 +48,9 @@
 
   # Ensure .cache/wal directory exists for pywal
   # This is created per-user to avoid permission issues
-  # Uses "user" - the standard VM user from users-vm.nix
   systemd.tmpfiles.rules = [
-    "d /home/user/.cache 0755 user users -"
-    "d /home/user/.cache/wal 0755 user users -"
+    "d /home/${username}/.cache 0755 ${username} users -"
+    "d /home/${username}/.cache/wal 0755 ${username} users -"
   ];
 
   # Note: Template files and actual config deployment happens in xinitrc.nix

@@ -1,12 +1,19 @@
 #!/usr/bin/env fish
 
-set CONFIG_FILE "$HOME/.config/display-config.json"
-set HOSTNAME (hostnamectl hostname | cut -d'-' -f1)
+# Prefer Hydrix repo config, fallback to ~/.config (same pattern as load-display-config.sh)
+set HYDRIX_CONFIG "$HOME/Hydrix/configs/display-config.json"
+set FALLBACK_CONFIG "$HOME/.config/display-config.json"
 
-if not test -f "$CONFIG_FILE"
-echo "Config file not found: $CONFIG_FILE"
-exit 1
+if test -f "$HYDRIX_CONFIG"
+    set CONFIG_FILE "$HYDRIX_CONFIG"
+else if test -f "$FALLBACK_CONFIG"
+    set CONFIG_FILE "$FALLBACK_CONFIG"
+else
+    echo "Config file not found at $HYDRIX_CONFIG or $FALLBACK_CONFIG"
+    exit 1
 end
+
+set HOSTNAME (hostnamectl hostname | cut -d'-' -f1)
 
 set CURRENT_RESOLUTION (xrandr --listmonitors | awk '/\+\*/ {gsub(/\/[0-9]+/, "", $3); print $3}' | grep -oP '[0-9]{3,5}x[0-9]{3,5}' | head -n1)
 

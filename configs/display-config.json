@@ -139,9 +139,9 @@
       "dpi": 192,
       "gdk_scale": 1.5,
       "gdk_dpi_scale": 0.5,
-      "alacritty_font_size": 6,
+      "alacritty_font_size": 9,
       "alacritty_scale_factor": "1.5",
-      "polybar_font_size": 20,
+      "polybar_font_size": 30,
       "polybar_height": 35,
       "polybar_line_size": 3,
       "rofi_font_size": 12,
@@ -163,9 +163,9 @@
     }
   },
   "fonts": {
-    "default": "iosevka",
+    "default": "tamzen",
     "dunst": "CozetteVector",
-    "firefox": "iosevka",
+    "firefox": "tamzen",
     "obsidian": "CozetteVector"
   }
 }

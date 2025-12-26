@@ -52,6 +52,7 @@
 
       # zen - Auto-generated configuration
       # Build with: ./nixbuild.sh (hostname: zen)
+      # Structure matches VM profiles for consistency
       zen = nixpkgs.lib.nixosSystem {
         system = "x86_64-linux";
         modules = [
@@ -61,21 +62,28 @@
           home-manager.nixosModules.home-manager
 
           # Base system configuration
-          ./modules/base/configuration.nix
+         # ./modules/base/configuration.nix
+	  ./modules/base/nixos-base.nix
           ./modules/base/hardware-config.nix
 
-          # Machine-specific configuration (imports generated consolidated module)
-          ./profiles/machines/zen.nix
-
-          # Core functionality modules
-          ./modules/wm/i3.nix
-          ./modules/shell/packages.nix
+          # Host-specific modules (not in core.nix)
           ./modules/base/services.nix
           ./modules/base/users.nix
-          ./modules/theming/colors.nix
           ./modules/base/virt.nix
           ./modules/base/audio.nix
+
+          # Core desktop environment - SAME as VMs
+          ./modules/core.nix
+
+          # Theming system - SAME as VMs
+          ./modules/theming/static-colors.nix
+          ./modules/desktop/xinitrc.nix
+
+          # Firefox - SAME as VMs
           ./modules/desktop/firefox.nix
+
+          # Machine-specific configuration (zen hardware, specialisations)
+          ./profiles/machines/zen.nix
         ];
       };
 
@@ -98,6 +106,7 @@
 
           # Core functionality modules
           ./modules/wm/i3.nix
+          ./modules/shell/fish.nix
           ./modules/shell/packages.nix
           ./modules/base/services.nix
           ./modules/base/users.nix

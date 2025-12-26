@@ -3,6 +3,27 @@
 AUTOSTART_LOG="/tmp/autostart.log"
 echo "$(date): ========== Autostart.sh invoked ==========" >> "$AUTOSTART_LOG"
 
+# Prefer Hydrix repo config, fallback to ~/.config (same pattern as load-display-config.sh)
+HYDRIX_CONFIG="$HOME/Hydrix/configs/display-config.json"
+FALLBACK_CONFIG="$HOME/.config/display-config.json"
+if [ -f "$HYDRIX_CONFIG" ]; then
+    CONFIG_FILE="$HYDRIX_CONFIG"
+elif [ -f "$FALLBACK_CONFIG" ]; then
+    CONFIG_FILE="$FALLBACK_CONFIG"
+else
+    echo "$(date): Config file not found at $HYDRIX_CONFIG or $FALLBACK_CONFIG" >> "$AUTOSTART_LOG"
+    CONFIG_FILE=""
+fi
+
+# Prefer Hydrix repo template, fallback to ~/.config
+HYDRIX_TEMPLATE="$HOME/Hydrix/configs/polybar/config.ini.template"
+FALLBACK_TEMPLATE="$HOME/.config/polybar/config.ini.template"
+if [ -f "$HYDRIX_TEMPLATE" ]; then
+    POLYBAR_TEMPLATE="$HYDRIX_TEMPLATE"
+else
+    POLYBAR_TEMPLATE="$FALLBACK_TEMPLATE"
+fi
+
 # Ensure dunst uses wal colors
 mkdir -p ~/.config/dunst
 ln -sf ~/.cache/wal/dunstrc ~/.config/dunst/dunstrc
@@ -40,7 +61,12 @@ wal -Rnq
 ~/.fehbg &
 fi
 
-source ~/.config/scripts/load-display-config.sh
+# Source load-display-config from Hydrix first (avoid stale symlinks)
+if [ -f "$HOME/Hydrix/scripts/load-display-config.sh" ]; then
+    source "$HOME/Hydrix/scripts/load-display-config.sh"
+else
+    source ~/.config/scripts/load-display-config.sh
+fi
 
 AUTOSTART_LOG="/tmp/autostart.log"
 echo "$(date): Autostart.sh starting" >> "$AUTOSTART_LOG"
@@ -59,11 +85,11 @@ for monitor in $MONITORS; do
     echo "$(date): Monitor $monitor resolution: $MONITOR_RES" >> "$AUTOSTART_LOG"
 
     # Look up resolution-specific settings from display-config.json
-    RES_DEFAULTS=$(jq -r ".resolution_defaults[\"$MONITOR_RES\"] // null" ~/.config/display-config.json)
+    RES_DEFAULTS=$(jq -r ".resolution_defaults[\"$MONITOR_RES\"] // null" "$CONFIG_FILE")
 
     if [ "$RES_DEFAULTS" = "null" ]; then
         echo "$(date): No defaults found for $MONITOR_RES, using 1920x1080 defaults" >> "$AUTOSTART_LOG"
-        RES_DEFAULTS=$(jq -r '.resolution_defaults["1920x1080"]' ~/.config/display-config.json)
+        RES_DEFAULTS=$(jq -r '.resolution_defaults["1920x1080"]' "$CONFIG_FILE")
     fi
 
     # Get resolution-specific polybar settings
@@ -73,23 +99,27 @@ for monitor in $MONITORS; do
 
     # Override with machine-specific settings if they exist
     HOSTNAME=$(hostnamectl hostname | cut -d'-' -f1)
-    MACHINE_OVERRIDE=$(jq -r ".machine_overrides[\"$HOSTNAME\"] // null" ~/.config/display-config.json)
+    MACHINE_OVERRIDE=$(jq -r ".machine_overrides[\"$HOSTNAME\"] // null" "$CONFIG_FILE")
 
     if [ "$MACHINE_OVERRIDE" != "null" ]; then
-        # Check for zen external monitor patterns
-        if [ "$HOSTNAME" = "zen" ]; then
-            EXTERNAL_MONITOR_PATTERNS=$(echo "$MACHINE_OVERRIDE" | jq -r ".external_monitor_resolutions // [] | join(\"|\")")
-            if [ -n "$EXTERNAL_MONITOR_PATTERNS" ] && echo "$MONITOR_RES" | grep -qE "^(${EXTERNAL_MONITOR_PATTERNS})x"; then
-                # External monitor - use external settings if available
-                MONITOR_POLYBAR_FONT_SIZE=$(echo "$MACHINE_OVERRIDE" | jq -r ".polybar_font_size_external // .polybar_font_size // $MONITOR_POLYBAR_FONT_SIZE")
-                MONITOR_POLYBAR_HEIGHT=$(echo "$MACHINE_OVERRIDE" | jq -r ".polybar_height_external // .polybar_height // $MONITOR_POLYBAR_HEIGHT")
-                MONITOR_POLYBAR_LINE_SIZE=$(echo "$MACHINE_OVERRIDE" | jq -r ".polybar_line_size_external // .polybar_line_size // $MONITOR_POLYBAR_LINE_SIZE")
-            else
-                # Use machine override settings
-                MONITOR_POLYBAR_FONT_SIZE=$(echo "$MACHINE_OVERRIDE" | jq -r ".polybar_font_size // $MONITOR_POLYBAR_FONT_SIZE")
-                MONITOR_POLYBAR_HEIGHT=$(echo "$MACHINE_OVERRIDE" | jq -r ".polybar_height // $MONITOR_POLYBAR_HEIGHT")
-                MONITOR_POLYBAR_LINE_SIZE=$(echo "$MACHINE_OVERRIDE" | jq -r ".polybar_line_size // $MONITOR_POLYBAR_LINE_SIZE")
-            fi
+        # Check for external monitor patterns (any machine can have these)
+        EXTERNAL_MONITOR_PATTERNS=$(echo "$MACHINE_OVERRIDE" | jq -r ".external_monitor_resolutions // [] | join(\"|\")")
+        if [ -n "$EXTERNAL_MONITOR_PATTERNS" ] && echo "$MONITOR_RES" | grep -qE "^(${EXTERNAL_MONITOR_PATTERNS})$"; then
+            # External monitor - use external settings if available
+            EXT_FONT=$(echo "$MACHINE_OVERRIDE" | jq -r ".polybar_font_size_external // null")
+            EXT_HEIGHT=$(echo "$MACHINE_OVERRIDE" | jq -r ".polybar_height_external // null")
+            EXT_LINE=$(echo "$MACHINE_OVERRIDE" | jq -r ".polybar_line_size_external // null")
+            [ "$EXT_FONT" != "null" ] && MONITOR_POLYBAR_FONT_SIZE="$EXT_FONT"
+            [ "$EXT_HEIGHT" != "null" ] && MONITOR_POLYBAR_HEIGHT="$EXT_HEIGHT"
+            [ "$EXT_LINE" != "null" ] && MONITOR_POLYBAR_LINE_SIZE="$EXT_LINE"
+        else
+            # Use machine override settings (fallback to resolution defaults if not set)
+            OVERRIDE_FONT=$(echo "$MACHINE_OVERRIDE" | jq -r ".polybar_font_size // null")
+            OVERRIDE_HEIGHT=$(echo "$MACHINE_OVERRIDE" | jq -r ".polybar_height // null")
+            OVERRIDE_LINE=$(echo "$MACHINE_OVERRIDE" | jq -r ".polybar_line_size // null")
+            [ "$OVERRIDE_FONT" != "null" ] && MONITOR_POLYBAR_FONT_SIZE="$OVERRIDE_FONT"
+            [ "$OVERRIDE_HEIGHT" != "null" ] && MONITOR_POLYBAR_HEIGHT="$OVERRIDE_HEIGHT"
+            [ "$OVERRIDE_LINE" != "null" ] && MONITOR_POLYBAR_LINE_SIZE="$OVERRIDE_LINE"
         fi
     fi
 
@@ -101,7 +131,7 @@ for monitor in $MONITORS; do
         -e "s/\${POLYBAR_FONT}/$POLYBAR_FONT/g" \
         -e "s/\${POLYBAR_HEIGHT}/$MONITOR_POLYBAR_HEIGHT/g" \
         -e "s/\${POLYBAR_LINE_SIZE}/$MONITOR_POLYBAR_LINE_SIZE/g" \
-        ~/.config/polybar/config.ini.template > "$MONITOR_CONFIG"
+        "$POLYBAR_TEMPLATE" > "$MONITOR_CONFIG"
 
     # Launch polybar on this monitor with its config
     echo "$(date): Launching polybar on $monitor with config $MONITOR_CONFIG" >> "$AUTOSTART_LOG"
