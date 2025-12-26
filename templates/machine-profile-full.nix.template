@@ -19,10 +19,12 @@
 
 {
   imports = [
-    # Theming system (dynamic for host machine)
-    ../../modules/theming/dynamic.nix
-    ../../modules/desktop/xinitrc.nix{{HW_IMPORTS}}
+    # Hardware-specific modules for this machine{{HW_IMPORTS}}
+    # Note: static-colors.nix and xinitrc.nix are imported in flake.nix (same as VMs)
   ];
+
+  # Host theming - use "host" type or set a custom colorscheme
+  hydrix.vmType = "host";
 
   # Override hostname for this machine
   networking.hostName = lib.mkForce "{{MACHINE_NAME}}";
