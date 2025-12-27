@@ -14,6 +14,18 @@ let
     "comms" = 14503;
     "dev" = 14504;
   }.${vmType} or 14500;
+
+  # Xpra start script
+  xpraStartScript = pkgs.writeShellScript "xpra-start" ''
+    ${pkgs.xpra}/bin/xpra start :100 \
+      --bind-tcp=0.0.0.0:${toString xpraPort} \
+      --no-daemon \
+      --no-notifications \
+      --no-mdns \
+      --no-pulseaudio \
+      --exit-with-children=no \
+      --html=off
+  '';
 in
 {
   # Open firewall port for Xpra
@@ -28,17 +40,7 @@ in
 
     serviceConfig = {
       Type = "simple";
-      ExecStart = ''
-        ${pkgs.xpra}/bin/xpra start :100 \
-          --bind-tcp=0.0.0.0:${toString xpraPort} \
-          --no-daemon \
-          --no-notifications \
-          --no-mdns \
-          --no-pulseaudio \
-          --start-child='' \
-          --exit-with-children=no \
-          --html=off
-      '';
+      ExecStart = "${xpraStartScript}";
       ExecStop = "${pkgs.xpra}/bin/xpra stop :100";
       Restart = "on-failure";
       RestartSec = "5s";
@@ -53,7 +55,6 @@ in
   environment.systemPackages = with pkgs; [
     # Script to run an app through Xpra (exported to host)
     (writeShellScriptBin "xpra-run" ''
-      #!/usr/bin/env bash
       # Run an application through Xpra so it can be viewed on host
       # Usage: xpra-run firefox
       DISPLAY=:100 "$@" &
@@ -63,7 +64,6 @@ in
 
     # Script to show Xpra connection info
     (writeShellScriptBin "xpra-info" ''
-      #!/usr/bin/env bash
       echo "=== Xpra Server Info ==="
       echo "VM Type: ${vmType}"
       echo "Xpra Port: ${toString xpraPort}"
