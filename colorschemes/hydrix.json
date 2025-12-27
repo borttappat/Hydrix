@@ -1,0 +1,28 @@
+{
+    "wallpaper": "/home/traum/Wallpapers/Hydrix.jpg",
+    "alpha": "100",
+
+    "special": {
+        "background": "#0B0E1B",
+        "foreground": "#91ded4",
+        "cursor": "#91ded4"
+    },
+    "colors": {
+        "color0": "#0B0E1B",
+        "color1": "#1B5D68",
+        "color2": "#156D73",
+        "color3": "#1E877A",
+        "color4": "#1C7787",
+        "color5": "#138C89",
+        "color6": "#26A19B",
+        "color7": "#91ded4",
+        "color8": "#659b94",
+        "color9": "#1B5D68",
+        "color10": "#156D73",
+        "color11": "#1E877A",
+        "color12": "#1C7787",
+        "color13": "#138C89",
+        "color14": "#26A19B",
+        "color15": "#91ded4"
+    }
+}
