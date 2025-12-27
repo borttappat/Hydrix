@@ -209,6 +209,7 @@ abbr -a picomconf 'vim ~/Hydrix/configs/picom/picom.conf'
 abbr -a poc 'vim ~/Hydrix/configs/polybar/config.ini.template'
 abbr -a polyconf 'vim ~/Hydrix/configs/polybar/config.ini.template'
 abbr -a zathconf 'vim ~/Hydrix/configs/zathura/zathurarc'
+abbr -a hydrix 'cd ~/Hydrix'
 
 # === PENTESTING ===
 abbr -a msf 'figlet -f cricket "msf" && sudo msfconsole -q'

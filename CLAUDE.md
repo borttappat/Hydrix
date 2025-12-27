@@ -251,6 +251,92 @@ This pattern is used in:
 - `modules/shell/fish-home.nix`
 - `modules/core.nix`
 
+## Theming System (✅ IMPLEMENTED)
+
+Hydrix uses a pywal-based theming system with static colorschemes for reproducible builds.
+
+### Colorscheme Flow
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                        COLORSCHEME SOURCES                          │
+├─────────────────────────────────────────────────────────────────────┤
+│  colorschemes/*.json     Named schemes (perp, nebula, nord, etc.)   │
+│  vmType fallback         Auto-generated from type (pentest=red...)  │
+└─────────────────────────────────────────────────────────────────────┘
+                                   │
+                                   ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                     CONFIGURATION (Nix)                             │
+├─────────────────────────────────────────────────────────────────────┤
+│  hydrix.colorscheme = "perp";   # Use named scheme from JSON        │
+│  hydrix.vmType = "host";        # Fallback if no colorscheme set    │
+│                                                                     │
+│  Priority: colorscheme > vmType fallback                            │
+│  Default stored in: /etc/hydrix-colorscheme                         │
+└─────────────────────────────────────────────────────────────────────┘
+                                   │
+                                   ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                     RUNTIME SCRIPTS                                 │
+├─────────────────────────────────────────────────────────────────────┤
+│  walrgb           Change colors on the fly (picks random wallpaper) │
+│  randomwalrgb     Random wallpaper + colors                         │
+│  restore-colorscheme   Restore to default from /etc/hydrix-colorscheme │
+│  apply-colorscheme <file.json>   Apply specific JSON colorscheme   │
+│  vm-static-colors <type>   Generate colors for vmType              │
+└─────────────────────────────────────────────────────────────────────┘
+                                   │
+                                   ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                     GENERATED FILES                                 │
+├─────────────────────────────────────────────────────────────────────┤
+│  ~/.cache/wal/colors.json       Full colorscheme                    │
+│  ~/.cache/wal/colors            Simple color list                   │
+│  ~/.cache/wal/colors.css        CSS variables                       │
+│  ~/.cache/wal/sequences         Terminal escape sequences           │
+│  ~/.cache/wal/.static-colors-generated   Marker file               │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+### Key Files
+
+| File | Purpose |
+|------|---------|
+| `modules/theming/static-colors.nix` | Colorscheme application logic, scripts |
+| `colorschemes/*.json` | Named colorschemes (pywal format) |
+| `configs/xorg/.xinitrc` | Applies colors on X startup |
+| `scripts/walrgb.sh` | Runtime colorscheme changer |
+| `scripts/save-colorscheme.sh` | Save current pywal colors as named scheme |
+
+### Usage
+
+**Set default colorscheme in machine profile:**
+```nix
+# In profiles/machines/<hostname>.nix
+hydrix.vmType = "host";
+hydrix.colorscheme = "perp";  # Uses colorschemes/perp.json
+```
+
+**Change colors on the fly:**
+```bash
+walrgb                    # Random wallpaper, generate colors
+randomwalrgb              # Same as walrgb
+restore-colorscheme       # Restore to default from config
+```
+
+**Save current colors as new scheme:**
+```bash
+wal -i /path/to/wallpaper.jpg
+./scripts/save-colorscheme.sh my-theme
+# Creates colorschemes/my-theme.json
+```
+
+### Template Default
+
+New machines created via `setup.sh` use `hydrix.colorscheme = "nvid"` by default.
+This is set in `templates/machine-profile-full.nix.template`.
+
 ## Bridge Isolation (✅ IMPLEMENTED)
 
 Bridge isolation is enforced via nftables on the router VM:

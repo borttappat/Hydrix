@@ -4,7 +4,8 @@
 # Auto-detects machine type and builds appropriate configuration
 # Works on both host machines and VMs
 
-set -e
+# Don't exit on error - we handle errors manually for better feedback
+set +e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FLAKE_DIR="$(dirname "$SCRIPT_DIR")"
@@ -73,30 +74,30 @@ select_config_interactively() {
 }
 
 # Detect current specialisation (for machines with router/lockdown/fallback modes)
+# NOTE: The base config IS router mode - "router" is NOT a specialisation!
+# Only "lockdown" and "fallback" are valid specialisations
 detect_specialisation() {
     local CURRENT_SPEC="none"
 
     # Primary: Check configuration-name file
     if [[ -f /run/current-system/configuration-name ]]; then
-        if grep -q "lockdown" /run/current-system/configuration-name 2>/dev/null; then
+        local CONFIG_NAME=$(cat /run/current-system/configuration-name 2>/dev/null)
+        if [[ "$CONFIG_NAME" == "lockdown" ]]; then
             CURRENT_SPEC="lockdown"
-        elif grep -q "router" /run/current-system/configuration-name 2>/dev/null; then
-            CURRENT_SPEC="router"
-        elif grep -q "fallback" /run/current-system/configuration-name 2>/dev/null; then
+        elif [[ "$CONFIG_NAME" == "fallback" ]]; then
             CURRENT_SPEC="fallback"
         fi
+        # Note: base/router mode has no configuration-name or empty
     fi
 
-    # Fallback: Check for running VMs (only if no label detected)
+    # Fallback: Check for running VMs to detect lockdown mode
+    # (router-vm running = base mode, lockdown-router = lockdown mode)
     if [[ "$CURRENT_SPEC" == "none" ]]; then
         local LOCKDOWN_ROUTER=$(sudo virsh list --name 2>/dev/null | grep -c "lockdown-router" || true)
-        local ROUTER_RUNNING=$(sudo virsh list --name 2>/dev/null | grep -c "router-vm" || true)
-
         if [[ "$LOCKDOWN_ROUTER" -gt 0 ]]; then
             CURRENT_SPEC="lockdown"
-        elif [[ "$ROUTER_RUNNING" -gt 0 ]]; then
-            CURRENT_SPEC="router"
         fi
+        # router-vm running = base mode (no specialisation needed)
     fi
 
     echo "$CURRENT_SPEC"
@@ -106,32 +107,72 @@ detect_specialisation() {
 rebuild_system() {
     local FLAKE_TARGET="$1"
     local SPECIALISATION="$2"
+    local REBUILD_STATUS=0
+
+    # Clean up home-manager backup files that block activation
+    # This MUST happen BEFORE nixos-rebuild because home-manager runs during activation
+    echo "Cleaning up home-manager backup files..."
+    find ~/.config -name "*.hm-backup" -type f -delete 2>/dev/null || true
+    rm -f ~/.xinitrc.hm-backup ~/.vimrc.hm-backup ~/.Xmodmap.hm-backup 2>/dev/null || true
 
     # Force fresh flake evaluation to ensure home-manager picks up changes
     # This pre-builds the system config which forces nix to evaluate everything fresh
     # Run WITHOUT sudo to use user's nix cache properly
     echo "Forcing fresh flake evaluation..."
-    nix build "$FLAKE_DIR#nixosConfigurations.$FLAKE_TARGET.config.system.build.toplevel" --impure --no-link
+    if ! nix build "$FLAKE_DIR#nixosConfigurations.$FLAKE_TARGET.config.system.build.toplevel" --impure --no-link; then
+        echo ""
+        echo "ERROR: Nix build failed! Check the output above for errors."
+        return 1
+    fi
 
+    # Run nixos-rebuild with output visible (no buffering issues)
     if [[ "$SPECIALISATION" != "none" ]]; then
         echo "Rebuilding with specialisation: $SPECIALISATION"
         echo "Running: sudo nixos-rebuild switch --flake ~/Hydrix#$FLAKE_TARGET --impure --specialisation $SPECIALISATION"
-        sudo nixos-rebuild switch --flake ~/Hydrix#"$FLAKE_TARGET" --impure --specialisation "$SPECIALISATION"
+        echo ""
+        sudo nixos-rebuild switch --flake ~/Hydrix#"$FLAKE_TARGET" --impure --specialisation "$SPECIALISATION" 2>&1
+        REBUILD_STATUS=$?
     else
         echo "Rebuilding base configuration"
         echo "Running: sudo nixos-rebuild switch --flake ~/Hydrix#$FLAKE_TARGET --impure"
-        sudo nixos-rebuild switch --flake ~/Hydrix#"$FLAKE_TARGET" --impure
+        echo ""
+        sudo nixos-rebuild switch --flake ~/Hydrix#"$FLAKE_TARGET" --impure 2>&1
+        REBUILD_STATUS=$?
     fi
 
-    # Ensure home-manager activation ran successfully
-    echo ""
-    echo "Checking home-manager status..."
-    if systemctl is-failed --quiet home-manager-$USER.service 2>/dev/null; then
-        echo "WARNING: home-manager failed! Check with: journalctl -u home-manager-$USER.service -n 20"
-        echo "Common fix: rm conflicting files, then: sudo systemctl restart home-manager-$USER.service"
-    else
-        echo "✓ Home-manager activated successfully"
+    if [[ $REBUILD_STATUS -ne 0 ]]; then
+        echo ""
+        echo "ERROR: nixos-rebuild failed with exit code $REBUILD_STATUS"
+        echo "Check the output above for errors."
+        return $REBUILD_STATUS
     fi
+
+    echo ""
+    echo "✓ System rebuild completed successfully"
+
+    # Check home-manager status (it runs during activation)
+    echo ""
+    if systemctl is-failed --quiet home-manager-$USER.service 2>/dev/null; then
+        echo "WARNING: home-manager failed during activation!"
+        echo "Check with: journalctl -u home-manager-$USER.service -n 20"
+        echo "Common fix: rm ~/.config/**/*.hm-backup and rebuild"
+    else
+        echo "✓ Home-manager configs applied successfully"
+    fi
+
+    # Force colorscheme re-application (enforces config-defined colorscheme)
+    if systemctl list-units --type=service | grep -q "hydrix-colorscheme"; then
+        echo ""
+        echo "Applying configured colorscheme..."
+        sudo systemctl restart hydrix-colorscheme.service 2>/dev/null || true
+        if systemctl is-failed --quiet hydrix-colorscheme.service 2>/dev/null; then
+            echo "WARNING: colorscheme service failed"
+        else
+            echo "✓ Colorscheme applied"
+        fi
+    fi
+
+    return 0
 }
 
 # ========== ARCHITECTURE CHECK ==========
@@ -139,12 +180,17 @@ rebuild_system() {
 if [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ] || [[ "$VENDOR" == *"Apple"* && ("$ARCH" == *"arm"* || "$ARCH" == *"aarch"*) ]]; then
     echo "Detected ARM architecture"
     if flake_config_exists "armVM"; then
-        rebuild_system "armVM" "none"
+        if rebuild_system "armVM" "none"; then
+            echo "✓ ARM configuration applied successfully!"
+            exit 0
+        else
+            echo "✗ ARM configuration failed - see errors above"
+            exit 1
+        fi
     else
         echo "ERROR: No ARM configuration found in flake"
         exit 1
     fi
-    exit $?
 fi
 
 # ========== VM DETECTION ==========
@@ -170,12 +216,17 @@ if [[ "$CHASSIS" == "vm" ]] || echo "$VENDOR" | grep -q "QEMU\|VMware"; then
     echo "Building: $FLAKE_TARGET"
 
     if flake_config_exists "$FLAKE_TARGET"; then
-        rebuild_system "$FLAKE_TARGET" "none"
+        if rebuild_system "$FLAKE_TARGET" "none"; then
+            echo "✓ VM configuration applied successfully!"
+            exit 0
+        else
+            echo "✗ VM configuration failed - see errors above"
+            exit 1
+        fi
     else
         echo "ERROR: Configuration '$FLAKE_TARGET' not found in flake"
         exit 1
     fi
-    exit $?
 fi
 
 # ========== PHYSICAL MACHINE ==========
@@ -199,8 +250,12 @@ CURRENT_SPEC=$(detect_specialisation)
 echo "Current specialisation: $CURRENT_SPEC"
 echo ""
 
-rebuild_system "$FLAKE_TARGET" "$CURRENT_SPEC"
-
-echo ""
-echo "✓ Configuration applied successfully!"
-[[ "$CURRENT_SPEC" == "none" ]] && echo "  (Running in base mode)"
+if rebuild_system "$FLAKE_TARGET" "$CURRENT_SPEC"; then
+    echo ""
+    echo "✓ Configuration applied successfully!"
+    [[ "$CURRENT_SPEC" == "none" ]] && echo "  (Running in base mode)"
+else
+    echo ""
+    echo "✗ Configuration failed - see errors above"
+    exit 1
+fi

@@ -47,11 +47,11 @@
     "2560x1440": {
       "polybar_font_size": 12,
       "polybar_height": 30,
-      "polybar_line_size": 2,
+      "polybar_line_size": 1,
       "alacritty_font_size": 10,
       "rofi_font_size": 12,
       "i3_font_size": 9,
-      "i3_border_thickness": 1,
+      "i3_border_thickness": 2,
       "gaps_inner": 5,
       "dunst_font_size": 13,
       "dunst_width": 350,
@@ -74,7 +74,7 @@
       "rofi_font_size": 14,
       "i3_font_size": 10,
       "i3_border_thickness": 3,
-      "gaps_inner": 5,
+      "gaps_inner": 15,
       "dunst_font_size": 14,
       "dunst_width": 400,
       "dunst_height": 400,
@@ -136,13 +136,13 @@
   "machine_overrides": {
     "zen": {
       "force_resolution": "2880x1800",
-      "dpi": 192,
-      "gdk_scale": 1.5,
-      "gdk_dpi_scale": 0.5,
-      "alacritty_font_size": 9,
-      "alacritty_scale_factor": "1.5",
-      "polybar_font_size": 30,
-      "polybar_height": 35,
+      "dpi": 144,
+      "gdk_scale": 1,
+      "gdk_dpi_scale": 1,
+      "alacritty_font_size": 16,
+      "alacritty_scale_factor": "1",
+      "polybar_font_size": 15,
+      "polybar_height": 40,
       "polybar_line_size": 3,
       "rofi_font_size": 12,
       "i3_font_size": 18,
@@ -163,9 +163,9 @@
     }
   },
   "fonts": {
-    "default": "tamzen",
-    "dunst": "CozetteVector",
-    "firefox": "tamzen",
+    "default": "Iosevka",
+    "dunst": "Iosevka",
+    "firefox": "Iosevka",
     "obsidian": "CozetteVector"
   }
 }

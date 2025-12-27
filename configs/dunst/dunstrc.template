@@ -33,19 +33,19 @@
     gap_size = 10
 
 [urgency_low]
-    background = "#101116"
-    foreground = "#b7c6d7"
-    frame_color = "#6E899E"
+    background = "${DUNST_BG}"
+    foreground = "${DUNST_FG}"
+    frame_color = "${DUNST_FRAME_LOW}"
     timeout = 3
-    
+
 [urgency_normal]
-    background = "#101116"
-    foreground = "#b7c6d7"
-    frame_color = "#7E9FC1"
+    background = "${DUNST_BG}"
+    foreground = "${DUNST_FG}"
+    frame_color = "${DUNST_FRAME_NORMAL}"
     timeout = 5
-    
+
 [urgency_critical]
-    background = "#637B92"
-    foreground = "#b7c6d7"
-    frame_color = "#637B92"
+    background = "${DUNST_BG_CRITICAL}"
+    foreground = "${DUNST_FG}"
+    frame_color = "${DUNST_FRAME_CRITICAL}"
     timeout = 0

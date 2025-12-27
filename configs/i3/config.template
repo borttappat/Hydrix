@@ -14,6 +14,7 @@ set $mod ${MOD_KEY}
 #############
 exec_always --no-startup-id wal -Rnq
 exec_always --no-startup-id xrdb -merge ~/.Xresources
+exec_always --no-startup-id xrdb -merge ~/.cache/wal/colors.Xresources
 exec_always --no-startup-id ~/.fehbg &
 exec_always --no-startup-id sleep 2 && xmodmap ~/.Xmodmap
 exec_always --no-startup-id ~/Hydrix/scripts/autostart.sh

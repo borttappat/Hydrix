@@ -67,6 +67,18 @@ services.tailscale.enable = true;
 # Enable i2c-bus
 hardware.i2c.enable = true;
 
+# Bluetooth (host only - VMs don't import services.nix)
+hardware.bluetooth = {
+  enable = true;
+  powerOnBoot = true;
+  settings = {
+    General = {
+      Enable = "Source,Sink,Media,Socket";
+    };
+  };
+};
+services.blueman.enable = true;
+
 # Undervolt
    # services.undervolt = {
    #     enable = false;

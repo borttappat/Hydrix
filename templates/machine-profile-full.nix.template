@@ -23,9 +23,9 @@
     # Note: static-colors.nix and xinitrc.nix are imported in flake.nix (same as VMs)
   ];
 
-  # Host theming - use "host" type with nvid colorscheme as default
+  # Host theming - use "host" type with hydrix colorscheme as default
   hydrix.vmType = "host";
-  hydrix.colorscheme = "nvid";  # Default colorscheme (see colorschemes/*.json)
+  hydrix.colorscheme = "hydrix";  # Default colorscheme (see colorschemes/*.json)
 
   # Override hostname for this machine
   networking.hostName = lib.mkForce "{{MACHINE_NAME}}";
