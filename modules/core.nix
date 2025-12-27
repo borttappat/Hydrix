@@ -63,6 +63,9 @@ in
 
     # Version control
     git
+
+    # Xpra for seamless window forwarding between VMs and host
+    xpra
   ];
 
   # X11 essentials for desktop environment

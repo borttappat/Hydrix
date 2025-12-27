@@ -31,6 +31,9 @@
 
     # Theming (colors will be applied based on hostname-derived VM type)
     ../modules/theming/static-colors.nix
+
+    # Xpra server for seamless window forwarding to host
+    ../modules/vm/xpra.nix
   ];
 
   # Set VM type based on hostname for color generation
