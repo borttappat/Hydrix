@@ -98,10 +98,9 @@ in
         vm-static-colors "$SCHEME_TYPE"
       fi
 
-      # Apply terminal colors directly to current terminal
-      if [ -f ~/.cache/wal/sequences ]; then
-        cat ~/.cache/wal/sequences
-      fi
+      # Restore pywal colors to all terminals
+      echo "Restoring terminal colors..."
+      ${pkgs.pywal}/bin/wal -R
 
       # Merge Xresources for polybar and terminal cursor colors
       if [ -f ~/.cache/wal/colors.Xresources ]; then

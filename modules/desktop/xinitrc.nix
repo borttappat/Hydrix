@@ -142,9 +142,6 @@ in
       executable = true;
     };
 
-    # Pywal dunst template
-    home.file.".config/wal/templates/dunstrc".source = ../../configs/wal/templates/dunstrc;
-
     # Firefox templates are read directly from ~/Hydrix/configs/firefox/ by .xinitrc
     # No need to deploy them to ~/.config/ - the repo is the source of truth
 
