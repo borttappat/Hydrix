@@ -16,3 +16,7 @@ user_pref("browser.display.use_document_fonts", 0);
 
 // Enable userChrome.css and userContent.css
 user_pref("toolkit.legacyUserProfileCustomizations.stylesheets", true);
+
+// UI scaling (layout.css.devPixelsPerPx)
+// -1 = auto, 1.0 = 100%, 1.5 = 150%, etc.
+user_pref("layout.css.devPixelsPerPx", "${FIREFOX_UI_SCALE}");

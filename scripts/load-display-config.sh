@@ -78,6 +78,7 @@ init_exports() {
     export DUNST_ICON_SIZE="null"
     export FIREFOX_FONT_SIZE="null"
     export FIREFOX_HEADER_FONT_SIZE="null"
+    export FIREFOX_UI_SCALE="null"
     export OBSIDIAN_FONT_SIZE="null"
     export OBSIDIAN_HEADER_FONT_SIZE="null"
 }
@@ -175,6 +176,7 @@ fi
 # Firefox settings
 [ "$FIREFOX_FONT_SIZE" = "null" ] && export FIREFOX_FONT_SIZE=$(echo "$RES_DEFAULTS" | jq -r '.firefox_font_size')
 [ "$FIREFOX_HEADER_FONT_SIZE" = "null" ] && export FIREFOX_HEADER_FONT_SIZE=$(echo "$RES_DEFAULTS" | jq -r '.firefox_header_font_size')
+[ "$FIREFOX_UI_SCALE" = "null" ] && export FIREFOX_UI_SCALE=$(echo "$RES_DEFAULTS" | jq -r '.firefox_ui_scale // "-1"')
 
 # Obsidian settings
 [ "$OBSIDIAN_FONT_SIZE" = "null" ] && export OBSIDIAN_FONT_SIZE=$(echo "$RES_DEFAULTS" | jq -r '.obsidian_font_size')

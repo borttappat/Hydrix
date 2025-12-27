@@ -129,6 +129,7 @@ sed -e "s/\${FIREFOX_FONT}/$FIREFOX_FONT/g" \
 sed -e "s/\${FIREFOX_FONT}/$FIREFOX_FONT/g" \
     -e "s/\${FIREFOX_FONT_SIZE}/$FIREFOX_FONT_SIZE/g" \
     -e "s/\${FIREFOX_HEADER_FONT_SIZE}/$FIREFOX_HEADER_FONT_SIZE/g" \
+    -e "s/\${FIREFOX_UI_SCALE}/$FIREFOX_UI_SCALE/g" \
     "$TEMPLATE_BASE/firefox/user.js.template" > ~/.mozilla/firefox/$FIREFOX_PROFILE_NAME/user.js
 
 # Generate profiles.ini with dynamic username

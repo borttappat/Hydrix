@@ -103,8 +103,10 @@ templates/local/                 # committed - examples for new users
 ## Current TODO List
 
 ### High Priority - Core Functionality
-1. Set up shared folders between host and each VM (virtiofs or 9p)
-2. **Per-VM-type Firefox extensions** - Different extension sets per VM type:
+1. **Test lockdown mode** - Verify host isolation while VMs retain internet access
+2. **VM workspace workflow** - Set up 1 VM per i3 workspace in fullscreen (virt-viewer integration)
+3. Set up shared folders between host and each VM (virtiofs or 9p)
+4. **Per-VM-type Firefox extensions** - Different extension sets per VM type:
    - **Core (all VMs)**: Vimium/Tridactyl (vim bindings)
    - **Browsing VM**: uBlock Origin, Privacy Badger, privacy-focused extensions
    - **Pentest VM**: Wappalyzer, cookie editors, HackTools, FoxyProxy, scanner extensions
