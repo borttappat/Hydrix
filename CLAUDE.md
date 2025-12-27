@@ -285,6 +285,34 @@ Each VM should have access to a shared folder with the host:
 - Host path: `/home/<user>/shared/<vm-type>/` or similar
 - Allows easy file transfer without network
 
+## Home-Manager Troubleshooting
+
+Home-manager runs as a NixOS module via `home-manager-<username>.service`. If configs aren't being applied:
+
+**Check status:**
+```bash
+systemctl status home-manager-traum.service
+journalctl -u home-manager-traum.service -n 30
+```
+
+**Common fix - file conflicts:**
+```bash
+# Remove conflicting files blocking home-manager
+rm ~/.xinitrc                              # If manually symlinked
+rm ~/.config/zathura/zathurarc.hm-backup   # Old backup blocking new backup
+
+# Restart home-manager
+sudo systemctl restart home-manager-traum.service
+```
+
+**Force fresh rebuild (if caching issues):**
+```bash
+nix build ~/Hydrix#nixosConfigurations.zen.config.system.build.toplevel --impure --no-link
+sudo nixos-rebuild switch --flake ~/Hydrix#zen --impure
+```
+
+**Note:** New bridges require a reboot to be created. If `router-vm-autostart` fails waiting for a bridge, reboot the system.
+
 ## Important Commands
 
 ```bash

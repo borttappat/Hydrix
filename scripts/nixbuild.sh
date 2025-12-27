@@ -108,8 +108,10 @@ rebuild_system() {
     local SPECIALISATION="$2"
 
     # Force fresh flake evaluation to ensure home-manager picks up changes
+    # This pre-builds the system config which forces nix to evaluate everything fresh
+    # Run WITHOUT sudo to use user's nix cache properly
     echo "Forcing fresh flake evaluation..."
-    sudo nix build "$FLAKE_DIR#nixosConfigurations.$FLAKE_TARGET.config.system.build.toplevel" --impure --no-link
+    nix build "$FLAKE_DIR#nixosConfigurations.$FLAKE_TARGET.config.system.build.toplevel" --impure --no-link
 
     if [[ "$SPECIALISATION" != "none" ]]; then
         echo "Rebuilding with specialisation: $SPECIALISATION"
@@ -119,6 +121,16 @@ rebuild_system() {
         echo "Rebuilding base configuration"
         echo "Running: sudo nixos-rebuild switch --flake ~/Hydrix#$FLAKE_TARGET --impure"
         sudo nixos-rebuild switch --flake ~/Hydrix#"$FLAKE_TARGET" --impure
+    fi
+
+    # Ensure home-manager activation ran successfully
+    echo ""
+    echo "Checking home-manager status..."
+    if systemctl is-failed --quiet home-manager-$USER.service 2>/dev/null; then
+        echo "WARNING: home-manager failed! Check with: journalctl -u home-manager-$USER.service -n 20"
+        echo "Common fix: rm conflicting files, then: sudo systemctl restart home-manager-$USER.service"
+    else
+        echo "✓ Home-manager activated successfully"
     fi
 }
 
