@@ -87,35 +87,6 @@
         ];
       };
 
-      # zeph - Auto-generated configuration
-      # Build with: ./nixbuild.sh (hostname: zeph)
-      zeph = nixpkgs.lib.nixosSystem {
-        system = "x86_64-linux";
-        modules = [
-          { nixpkgs.config.allowUnfree = true; }
-          { nixpkgs.overlays = [ overlay-unstable ]; }
-          nix-index-database.nixosModules.nix-index
-          home-manager.nixosModules.home-manager
-
-          # Base system configuration
-          ./modules/base/configuration.nix
-          ./modules/base/hardware-config.nix
-
-          # Machine-specific configuration (imports generated consolidated module)
-          ./profiles/machines/zeph.nix
-
-          # Core functionality modules
-          ./modules/wm/i3.nix
-          ./modules/shell/fish.nix
-          ./modules/shell/packages.nix
-          ./modules/base/services.nix
-          ./modules/base/users.nix
-          ./modules/theming/colors.nix
-          ./modules/base/virt.nix
-          ./modules/base/audio.nix
-          ./modules/desktop/firefox.nix
-        ];
-      };
 
       # Lightweight host - runs VMs, minimal desktop
       host = nixpkgs.lib.nixosSystem {
