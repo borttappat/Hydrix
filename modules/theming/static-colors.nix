@@ -63,6 +63,51 @@ in
 
     hasCustomScheme = config.hydrix.colorscheme != null && builtins.pathExists schemeFile;
 
+    # Determine default colorscheme name (for restore script)
+    defaultSchemeName = if config.hydrix.colorscheme != null
+      then config.hydrix.colorscheme
+      else if config.hydrix.vmType != null
+      then config.hydrix.vmType
+      else "host";
+
+    # Restore script - reads default from /etc and re-applies
+    restoreSchemeScript = pkgs.writeShellScriptBin "restore-colorscheme" ''
+      set -euo pipefail
+
+      HYDRIX_PATH="''${HYDRIX_PATH:-$HOME/Hydrix}"
+
+      # Read default colorscheme from /etc
+      if [ ! -f /etc/hydrix-colorscheme ]; then
+        echo "Error: /etc/hydrix-colorscheme not found"
+        echo "This system may not have a default colorscheme configured."
+        exit 1
+      fi
+
+      SCHEME_TYPE=$(cat /etc/hydrix-colorscheme)
+      echo "Default colorscheme: $SCHEME_TYPE"
+
+      # Check if it's a named colorscheme (JSON file exists)
+      SCHEME_JSON="$HYDRIX_PATH/colorschemes/$SCHEME_TYPE.json"
+
+      if [ -f "$SCHEME_JSON" ]; then
+        echo "Restoring colorscheme from: $SCHEME_JSON"
+        apply-colorscheme "$SCHEME_JSON"
+      else
+        # Fall back to vmType-based colors
+        echo "Generating colors for type: $SCHEME_TYPE"
+        vm-static-colors "$SCHEME_TYPE"
+      fi
+
+      # Refresh terminal colors
+      if [ -f ~/.cache/wal/sequences ]; then
+        cat ~/.cache/wal/sequences
+      fi
+
+      echo ""
+      echo "Colorscheme restored to default: $SCHEME_TYPE"
+      echo "Restart applications (or run 'wal -R') to fully apply."
+    '';
+
     # Script to apply custom colorscheme from JSON
     applySchemeScript = pkgs.writeShellScriptBin "apply-colorscheme" ''
       set -euo pipefail
@@ -120,9 +165,13 @@ in
       (builtins.readFile ../../scripts/vm-static-colors.sh);
 
   in {
+    # Store the default colorscheme name for restore-colorscheme script
+    environment.etc."hydrix-colorscheme".text = defaultSchemeName;
+
     environment.systemPackages = [
       applySchemeScript
       vmTypeColorsScript
+      restoreSchemeScript
 
       # Actual walrgb/randomwalrgb scripts for VMs (adapted to use saved colorschemes)
       (pkgs.writeScriptBin "walrgb" (builtins.readFile ../../scripts/walrgb.sh))
