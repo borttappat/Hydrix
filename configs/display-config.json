@@ -63,9 +63,9 @@
       "dunst_icon_size": 40,
       "obsidian_font_size": 13,
       "obsidian_header_font_size": 26,
-      "firefox_font_size": 10,
+      "firefox_font_size": 20,
       "firefox_header_font_size": 10,
-      "firefox_ui_scale": "0.5"
+      "firefox_ui_scale": "1"
     },
     "2560x1600": {
       "polybar_font_size": 20,
@@ -86,9 +86,9 @@
       "dunst_icon_size": 40,
       "obsidian_font_size": 13,
       "obsidian_header_font_size": 26,
-      "firefox_font_size": 10,
+      "firefox_font_size": 20,
       "firefox_header_font_size": 10,
-      "firefox_ui_scale": "0.5"
+      "firefox_ui_scale": "1"
     },
     "2880x1800": {
       "polybar_font_size": 12,

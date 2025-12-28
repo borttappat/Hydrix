@@ -1,0 +1,59 @@
+{
+  "_comment": "VM type to workspace mapping for auto-placement",
+  "workspaces": {
+    "1": {
+      "name": "1: host",
+      "type": null,
+      "description": "Host workspace - terminals, tools"
+    },
+    "2": {
+      "name": "2: pentest",
+      "type": "pentest",
+      "description": "Pentesting VM"
+    },
+    "3": {
+      "name": "3: browsing",
+      "type": "browsing",
+      "description": "Browsing/leisure VM"
+    },
+    "4": {
+      "name": "4: comms",
+      "type": "comms",
+      "description": "Communications VM"
+    },
+    "5": {
+      "name": "5: dev",
+      "type": "dev",
+      "description": "Development VM"
+    },
+    "6": {
+      "name": "6: office",
+      "type": "office",
+      "description": "Office/productivity VM"
+    },
+    "7": {
+      "name": "7",
+      "type": null,
+      "description": "Extra workspace"
+    },
+    "8": {
+      "name": "8",
+      "type": null,
+      "description": "Extra workspace"
+    },
+    "9": {
+      "name": "9",
+      "type": null,
+      "description": "Extra workspace"
+    },
+    "10": {
+      "name": "10",
+      "type": null,
+      "description": "Extra workspace"
+    }
+  },
+  "settings": {
+    "notify_on_conflict": true,
+    "manual_script": "vm-fullscreen.sh"
+  }
+}

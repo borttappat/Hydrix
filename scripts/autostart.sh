@@ -140,4 +140,13 @@ done
 
 notify-send "Display Setup" "Configuration complete!" -t 2000
 
+# Auto-start VMs on designated workspaces (host only)
+if [[ ! $hostname =~ [vV][mM] ]]; then
+    if [ -x "$HOME/Hydrix/scripts/vm-autostart.sh" ]; then
+        echo "$(date): Starting VM autostart..." >> "$AUTOSTART_LOG"
+        # Delay to let i3 and displays settle
+        (sleep 5 && "$HOME/Hydrix/scripts/vm-autostart.sh" >> "$AUTOSTART_LOG" 2>&1) &
+    fi
+fi
+
 echo "$(date): Autostart completed... Resolution: $DISPLAY_RESOLUTION, Polybar font: $POLYBAR_FONT_SIZE" >> "$AUTOSTART_LOG"
