@@ -30,7 +30,7 @@
 
   # Host theming - use "host" type or set a custom colorscheme
   hydrix.vmType = "host";
-  hydrix.colorscheme = "punk";
+  hydrix.colorscheme = "nvid";
 
   # Override hostname for this machine
   networking.hostName = lib.mkForce "zen";
