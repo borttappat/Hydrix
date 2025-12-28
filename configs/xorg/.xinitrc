@@ -42,6 +42,12 @@ if [[ $hostname =~ [vV][mM] ]]; then
         xrandr --output "$VM_DISPLAY" --mode 1920x1200 2>/dev/null || true
     fi
     export MOD_KEY="Mod1"
+
+    # Auto-start Xpra server for seamless window forwarding to host
+    if command -v xpra-start &> /dev/null; then
+        echo "Starting Xpra server for VM window forwarding..."
+        xpra-start &
+    fi
 else
     export MOD_KEY="Mod4"
     # Resolution will be set by load-display-config.sh based on machine overrides

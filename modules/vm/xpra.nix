@@ -15,48 +15,89 @@ let
     "dev" = 14504;
   }.${vmType} or 14500;
 
-  # Xpra start script
+  # Title prefix for origin indication
+  titlePrefix = {
+    "pentest" = "[PTX]";
+    "browsing" = "[BRW]";
+    "office" = "[OFC]";
+    "comms" = "[COM]";
+    "dev" = "[DEV]";
+  }.${vmType} or "[VM]";
+
+  # Xpra start script with optimizations
   xpraStartScript = pkgs.writeShellScript "xpra-start" ''
+    # Wait a moment for X to fully initialize
+    sleep 2
+
+    # Check if xpra is already running on :100
+    if ${pkgs.xpra}/bin/xpra list 2>/dev/null | grep -q ":100"; then
+      echo "Xpra already running on :100"
+      exit 0
+    fi
+
+    # Start xpra server with optimizations
     ${pkgs.xpra}/bin/xpra start :100 \
       --bind-tcp=0.0.0.0:${toString xpraPort} \
       --no-daemon \
-      --no-notifications \
       --no-mdns \
-      --no-pulseaudio \
+      --no-printing \
+      --no-webcam \
       --exit-with-children=no \
-      --html=off
+      --html=off \
+      --encoding=rgb \
+      --compress=0 \
+      --speed=100 \
+      --quality=100 \
+      --min-quality=80 \
+      --opengl=yes
+  '';
+
+  # Xpra stop script
+  xpraStopScript = pkgs.writeShellScript "xpra-stop" ''
+    ${pkgs.xpra}/bin/xpra stop :100 2>/dev/null || true
   '';
 in
 {
   # Open firewall port for Xpra
   networking.firewall.allowedTCPPorts = [ xpraPort ];
 
-  # Xpra server systemd service
-  # Starts after X is ready and listens for connections from host
-  systemd.user.services.xpra-server = {
-    description = "Xpra server for seamless window forwarding";
-    wantedBy = [ "graphical-session.target" ];
-    after = [ "graphical-session.target" ];
+  # dconf for GTK apps (fixes dconf warnings)
+  programs.dconf.enable = true;
 
-    serviceConfig = {
-      Type = "simple";
-      ExecStart = "${xpraStartScript}";
-      ExecStop = "${pkgs.xpra}/bin/xpra stop :100";
-      Restart = "on-failure";
-      RestartSec = "5s";
-    };
-
-    environment = {
-      DISPLAY = ":0";
-    };
-  };
-
-  # Helper scripts for Xpra
+  # Xpra dependencies for better performance
   environment.systemPackages = with pkgs; [
+    xpra
+    # Python deps that xpra complains about
+    python3Packages.numpy
+    python3Packages.pillow
+    python3Packages.pygobject3
+    # GTK/dbus deps for cleaner operation
+    dconf
+    glib
+    libnotify
+
+    # Script to start xpra server manually
+    (writeShellScriptBin "xpra-start" ''
+      ${xpraStartScript}
+    '')
+
+    # Script to stop xpra server
+    (writeShellScriptBin "xpra-stop" ''
+      ${xpraStopScript}
+    '')
+
     # Script to run an app through Xpra (exported to host)
     (writeShellScriptBin "xpra-run" ''
       # Run an application through Xpra so it can be viewed on host
       # Usage: xpra-run firefox
+
+      # Ensure xpra is running
+      if ! ${pkgs.xpra}/bin/xpra list 2>/dev/null | grep -q ":100"; then
+        echo "Starting Xpra server..."
+        ${xpraStartScript} &
+        sleep 2
+      fi
+
       DISPLAY=:100 "$@" &
       echo "Started $1 on Xpra display :100"
       echo "Connect from host with: xpra attach tcp://<vm-ip>:${toString xpraPort}"
@@ -66,7 +107,11 @@ in
     (writeShellScriptBin "xpra-info" ''
       echo "=== Xpra Server Info ==="
       echo "VM Type: ${vmType}"
+      echo "Title Prefix: ${titlePrefix}"
       echo "Xpra Port: ${toString xpraPort}"
+      echo ""
+      echo "Server Status:"
+      ${pkgs.xpra}/bin/xpra list 2>/dev/null || echo "  Not running"
       echo ""
       echo "VM IP addresses:"
       ip -4 addr show | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | grep -v '127.0.0.1'
@@ -78,6 +123,60 @@ in
       echo "To run apps through Xpra:"
       echo "  xpra-run firefox"
       echo "  xpra-run alacritty"
+      echo "  xpra-run obsidian"
+    '')
+
+    # Script to restart xpra with fresh settings
+    (writeShellScriptBin "xpra-restart" ''
+      echo "Stopping Xpra..."
+      ${xpraStopScript}
+      sleep 1
+      echo "Starting Xpra..."
+      ${xpraStartScript} &
+      sleep 2
+      echo "Xpra restarted"
+      ${pkgs.xpra}/bin/xpra list
+    '')
+
+    # Help/reference command
+    (writeShellScriptBin "xpra-help" ''
+      cat << 'EOF'
+================================================================================
+                        XPRA VM COMMANDS (${vmType} VM)
+================================================================================
+
+STARTING XPRA SERVER:
+  xpra-start          Start the Xpra server on display :100
+  xpra-stop           Stop the Xpra server
+  xpra-restart        Restart the Xpra server
+  xpra-info           Show server status and connection info
+
+RUNNING APPS (exported to host):
+  xpra-run <app>      Run an app through Xpra (visible on host)
+                      Examples:
+                        xpra-run firefox
+                        xpra-run alacritty
+                        xpra-run obsidian
+
+CONNECTION INFO:
+  VM Type:            ${vmType}
+  Xpra Port:          ${toString xpraPort}
+  Title Prefix:       ${titlePrefix}
+
+NOTES:
+  - Xpra auto-starts when X session begins (via .xinitrc)
+  - Apps run with xpra-run appear on the host when attached
+  - Use xpra-info to get the connection command for the host
+
+================================================================================
+EOF
     '')
   ];
+
+  # Create marker file with xpra info for host scripts to read
+  environment.etc."hydrix-xpra".text = ''
+    VM_TYPE=${vmType}
+    XPRA_PORT=${toString xpraPort}
+    TITLE_PREFIX=${titlePrefix}
+  '';
 }

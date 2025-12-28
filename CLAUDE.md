@@ -104,7 +104,7 @@ templates/local/                 # committed - examples for new users
 
 ### High Priority - Core Functionality
 1. **Test lockdown mode** - Verify host isolation while VMs retain internet access
-2. **VM workspace workflow** - Set up 1 VM per i3 workspace in fullscreen (virt-viewer integration)
+2. ~~**VM workspace workflow**~~ - ✅ Xpra implemented for seamless windows
 3. Set up shared folders between host and each VM (virtiofs or 9p)
 4. **Per-VM-type Firefox extensions** - Different extension sets per VM type:
    - **Core (all VMs)**: Vimium/Tridactyl (vim bindings)
@@ -186,7 +186,12 @@ modules/
 │   └── i3.nix                  # i3 window manager
 ├── pentesting/
 │   └── pentesting.nix          # Pentest tools and setup (VM user: "user")
-├── core.nix                    # Core essentials for all systems (dynamic username)
+├── vm/
+│   ├── qemu-guest.nix          # QEMU/SPICE guest configuration
+│   ├── xpra.nix                # Xpra server for seamless window forwarding
+│   ├── hydrix-clone.nix        # Clone Hydrix repo on first boot
+│   └── networking.nix          # VM networking (DHCP)
+├── core.nix                    # Core essentials for all systems (includes xpra)
 ├── router-vm-unified.nix       # Router VM configuration
 └── lockdown/
     └── router-vm-config.nix    # Lockdown router variant
@@ -372,6 +377,147 @@ Each VM should have access to a shared folder with the host:
 - Mount at `/shared` or similar in VM
 - Host path: `/home/<user>/shared/<vm-type>/` or similar
 - Allows easy file transfer without network
+
+## VM Window Forwarding - Xpra (IMPLEMENTED)
+
+Xpra enables seamless window forwarding from VMs to the host, allowing individual VM applications to appear as native windows on the host desktop.
+
+### Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                           HOST (zen)                                │
+├─────────────────────────────────────────────────────────────────────┤
+│  Host has IPs on all bridges for direct VM communication:          │
+│    br-pentest: 192.168.101.1    br-browse: 192.168.103.1           │
+│    br-office:  192.168.102.1    br-dev:    192.168.104.1           │
+│    br-shared:  192.168.105.1                                        │
+│                                                                     │
+│  Commands: xpra-browsing, xpra-pentest, xpra-dev, xpra-comms       │
+│  Help: xpra-help                                                    │
+└─────────────────────────────────────────────────────────────────────┘
+                              │
+        ┌─────────────────────┼─────────────────────┐
+        ▼                     ▼                     ▼
+┌───────────────┐   ┌───────────────┐   ┌───────────────┐
+│  Browsing VM  │   │  Pentest VM   │   │   Dev VM      │
+│  Port: 14501  │   │  Port: 14500  │   │  Port: 14504  │
+│  Prefix:[BRW] │   │  Prefix:[PTX] │   │  Prefix:[DEV] │
+│               │   │               │   │               │
+│ xpra-start    │   │ xpra-start    │   │ xpra-start    │
+│ (auto on X)   │   │ (auto on X)   │   │ (auto on X)   │
+└───────────────┘   └───────────────┘   └───────────────┘
+```
+
+### Key Files
+
+| File | Purpose |
+|------|---------|
+| `modules/vm/xpra.nix` | VM: Xpra server, firewall, helper scripts, dconf |
+| `modules/desktop/xpra-host.nix` | Host: Bridge IPs, attach scripts, vm-run |
+| `configs/xorg/.xinitrc` | Auto-starts xpra-start on VM login |
+| `configs/i3/config.template` | Keybindings for VM attachment |
+
+### Xpra Port Assignments
+
+| VM Type  | Port  | Bridge      | Title Prefix |
+|----------|-------|-------------|--------------|
+| pentest  | 14500 | br-pentest  | [PTX]        |
+| browsing | 14501 | br-browse   | [BRW]        |
+| office   | 14502 | br-office   | [OFC]        |
+| comms    | 14503 | br-office   | [COM]        |
+| dev      | 14504 | br-dev      | [DEV]        |
+
+### Host Commands
+
+```bash
+# Auto-discovery attach (finds VM automatically)
+xpra-browsing          # Attach to browsing VM
+xpra-pentest           # Attach to pentest VM
+xpra-dev               # Attach to dev VM
+xpra-comms             # Attach to comms VM
+xpra-attach <type>     # Generic: browsing|pentest|dev|comms|ip:port
+
+# Launch apps in VMs via SSH
+vm-run browsing firefox
+vm-run browsing obsidian
+vm-run pentest burpsuite
+
+# Discovery
+xpra-list-vms          # Scan for running VMs with Xpra
+
+# Help
+xpra-help              # Full command reference
+```
+
+### VM Commands
+
+```bash
+# Xpra server management (auto-starts on X login)
+xpra-start             # Start Xpra server on :100
+xpra-stop              # Stop Xpra server
+xpra-restart           # Restart Xpra server
+xpra-info              # Show status and connection info
+
+# Run apps through Xpra (visible on host)
+xpra-run firefox
+xpra-run alacritty
+xpra-run obsidian
+
+# Help
+xpra-help              # Full command reference
+```
+
+### i3 Keybindings (Host)
+
+| Binding | Action |
+|---------|--------|
+| `Mod+F9` | Attach to browsing VM |
+| `Mod+F10` | Attach to pentest VM |
+| `Mod+F11` | Attach to dev VM |
+| `Mod+Shift+F9` | Attach to comms VM |
+| `Mod+Shift+o` | Launch Obsidian in browsing VM |
+| `Mod+Shift+a` | Launch Claude (firefox) in browsing VM |
+
+### Workflow
+
+1. **Start VM** via virt-manager or `build-vm.sh`
+2. **VM auto-starts Xpra** when X session begins (via xinitrc)
+3. **From host**, attach: `xpra-browsing` (or use `Mod+F9`)
+4. **In VM**, run apps: `xpra-run firefox`
+5. **Apps appear** as windows on host desktop
+6. **Detach** with `Ctrl+C` or close tray icon
+
+### Packages Installed
+
+**VM** (`modules/vm/xpra.nix`):
+- xpra, python3Packages.{numpy,pillow,pygobject3}
+- dconf, glib, libnotify (fixes GTK warnings)
+- `programs.dconf.enable = true`
+
+**Host** (`modules/desktop/xpra-host.nix`):
+- xpra, python3Packages.{numpy,pillow,pygobject3}
+- libnotify, glib
+- `programs.dconf.enable = true`
+
+### Fallback: Fullscreen VMs per Workspace
+
+If Xpra doesn't meet needs, use virt-manager with fullscreen per workspace:
+
+1. **virt-manager** (current): Double-click VM, press `Super+f` for fullscreen
+2. **virt-viewer**: `virt-viewer --connect qemu:///system <vm-name>` (no menu bar)
+3. **remote-viewer**: `remote-viewer spice://127.0.0.1:<port>` (direct SPICE)
+
+### Status
+
+- [x] Xpra server module with auto-start (`modules/vm/xpra.nix`)
+- [x] Host module with bridge IPs and attach scripts (`modules/desktop/xpra-host.nix`)
+- [x] Auto-start xpra on VM X login (xinitrc)
+- [x] i3 keybindings for VM attachment
+- [x] `xpra-help` command on both host and VM
+- [x] dconf/GTK deps to fix warnings
+- [ ] Test title prefix for origin indication
+- [ ] i3 window rules for VM-specific border colors (optional)
 
 ## Home-Manager Troubleshooting
 
