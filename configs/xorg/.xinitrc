@@ -43,43 +43,11 @@ if [[ $hostname =~ [vV][mM] ]]; then
     fi
     export MOD_KEY="Mod1"
 
-    # Determine Xpra port based on VM type
-    VM_TYPE=$(echo "$hostname" | grep -oE "(pentest|comms|browsing|dev|office)" | head -n1)
-    case "$VM_TYPE" in
-        pentest)  XPRA_PORT=14500 ;;
-        browsing) XPRA_PORT=14501 ;;
-        office)   XPRA_PORT=14502 ;;
-        comms)    XPRA_PORT=14503 ;;
-        dev)      XPRA_PORT=14504 ;;
-        *)        XPRA_PORT=14500 ;;
-    esac
-
-    # Start Xpra server and auto-launch apps
-    # Run in background subshell to not block i3 startup
-    (
-        sleep 2
-        # Start xpra in daemon mode
-        xpra start :100 \
-            --bind-tcp=0.0.0.0:$XPRA_PORT \
-            --daemon=yes \
-            --no-mdns \
-            --no-printing \
-            --no-webcam \
-            --exit-with-children=no \
-            --html=off \
-            --compress=0 \
-            --speed=100 \
-            --quality=100 \
-            --opengl=yes
-
-        # Wait for xpra to be ready, then launch default apps
-        sleep 5
-        DISPLAY=:100 alacritty &
-        if [ "$VM_TYPE" = "browsing" ]; then
-            sleep 2
-            DISPLAY=:100 firefox &
-        fi
-    ) &
+    # Start auto-resize monitor for fullscreen mode
+    # This watches for SPICE resolution changes and applies them
+    if [ -x "$HOME/Hydrix/scripts/vm-auto-resize.sh" ]; then
+        "$HOME/Hydrix/scripts/vm-auto-resize.sh" &
+    fi
 else
     export MOD_KEY="Mod4"
     # Resolution will be set by load-display-config.sh based on machine overrides
