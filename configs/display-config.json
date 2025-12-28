@@ -67,6 +67,29 @@
       "firefox_header_font_size": 10,
       "firefox_ui_scale": "0.5"
     },
+    "2560x1600": {
+      "polybar_font_size": 20,
+      "polybar_height": 30,
+      "polybar_line_size": 2,
+      "alacritty_font_size": 15,
+      "rofi_font_size": 12,
+      "i3_font_size": 9,
+      "i3_border_thickness": 2,
+      "gaps_inner": 5,
+      "dunst_font_size": 13,
+      "dunst_width": 250,
+      "dunst_height": 250,
+      "dunst_offset_x": 24,
+      "dunst_offset_y": 50,
+      "dunst_padding": 10,
+      "dunst_frame_width": 2,
+      "dunst_icon_size": 40,
+      "obsidian_font_size": 13,
+      "obsidian_header_font_size": 26,
+      "firefox_font_size": 10,
+      "firefox_header_font_size": 10,
+      "firefox_ui_scale": "0.5"
+    },
     "2880x1800": {
       "polybar_font_size": 12,
       "polybar_height": 40,
@@ -136,6 +159,11 @@
     }
   },
   "machine_overrides": {
+    "zen": {
+      "_comment": "Zenbook - force 2560x1600 on internal to match 27\" external at 2560x1440",
+      "force_resolution": "2560x1600",
+      "dpi": 96
+    },
     "_example": {
       "_comment": "Example override - copy and rename to your hostname",
       "force_resolution": "2880x1800",

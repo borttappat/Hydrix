@@ -85,42 +85,49 @@ init_exports() {
 
 init_exports
 
-# Apply machine overrides ONLY if no external monitor
-if [ "$EXTERNAL_MONITOR" -eq 0 ]; then
-    MACHINE_OVERRIDE=$(jq -r ".machine_overrides[\"$HOSTNAME\"] // null" "$CONFIG_FILE")
+# Check for machine overrides
+MACHINE_OVERRIDE=$(jq -r ".machine_overrides[\"$HOSTNAME\"] // null" "$CONFIG_FILE")
 
-    if [ "$MACHINE_OVERRIDE" != "null" ]; then
-        echo "Applying machine overrides for: $HOSTNAME"
+if [ "$MACHINE_OVERRIDE" != "null" ]; then
+    # Always apply internal display resolution override (even with external connected)
+    FORCED_RES=$(echo "$MACHINE_OVERRIDE" | jq -r '.force_resolution // "null"')
+    FORCED_DPI=$(echo "$MACHINE_OVERRIDE" | jq -r '.dpi // "null"')
+    FORCED_GDK_SCALE=$(echo "$MACHINE_OVERRIDE" | jq -r '.gdk_scale // "null"')
 
-        # Apply forced resolution if set
-        FORCED_RES=$(echo "$MACHINE_OVERRIDE" | jq -r '.force_resolution // "null"')
-        FORCED_DPI=$(echo "$MACHINE_OVERRIDE" | jq -r '.dpi // "null"')
-        FORCED_GDK_SCALE=$(echo "$MACHINE_OVERRIDE" | jq -r '.gdk_scale // "null"')
-
-        if [ "$FORCED_RES" != "null" ]; then
-            CURRENT_RESOLUTION="$FORCED_RES"
-            INTERNAL_DISPLAY=$(xrandr | grep "eDP" | cut -d' ' -f1 | head -n1)
-            if [ -n "$INTERNAL_DISPLAY" ]; then
-                if [ "$FORCED_DPI" != "null" ]; then
-                    xrandr --output "$INTERNAL_DISPLAY" --mode "$FORCED_RES" --dpi "$FORCED_DPI" 2>/dev/null || echo "Warning: Could not set resolution to $FORCED_RES"
-                else
-                    xrandr --output "$INTERNAL_DISPLAY" --mode "$FORCED_RES" 2>/dev/null || echo "Warning: Could not set resolution to $FORCED_RES"
-                fi
+    if [ "$FORCED_RES" != "null" ]; then
+        INTERNAL_DISPLAY=$(xrandr | grep "eDP" | grep " connected" | cut -d' ' -f1 | head -n1)
+        if [ -n "$INTERNAL_DISPLAY" ]; then
+            echo "Applying forced resolution $FORCED_RES to internal display ($INTERNAL_DISPLAY)"
+            if [ "$FORCED_DPI" != "null" ]; then
+                xrandr --output "$INTERNAL_DISPLAY" --mode "$FORCED_RES" --dpi "$FORCED_DPI" 2>/dev/null || echo "Warning: Could not set resolution to $FORCED_RES"
+            else
+                xrandr --output "$INTERNAL_DISPLAY" --mode "$FORCED_RES" 2>/dev/null || echo "Warning: Could not set resolution to $FORCED_RES"
+            fi
+            # Check if internal is primary - if so, use forced resolution for font lookups
+            if xrandr | grep "eDP" | grep -q "primary"; then
+                echo "Internal display is primary, using $FORCED_RES for font settings"
+                CURRENT_RESOLUTION="$FORCED_RES"
+            elif [ "$EXTERNAL_MONITOR" -eq 0 ]; then
+                CURRENT_RESOLUTION="$FORCED_RES"
             fi
         fi
+    fi
 
-        # Apply DPI scaling for HiDPI displays
-        if [ "$FORCED_DPI" != "null" ]; then
-            echo "Xft.dpi: $FORCED_DPI" | xrdb -merge
-        fi
+    # Apply DPI scaling for HiDPI displays
+    if [ "$FORCED_DPI" != "null" ]; then
+        echo "Xft.dpi: $FORCED_DPI" | xrdb -merge
+    fi
 
-        # Apply GTK/Qt scaling
-        if [ "$FORCED_GDK_SCALE" != "null" ]; then
-            export GDK_SCALE="$FORCED_GDK_SCALE"
-            export QT_AUTO_SCREEN_SCALE_FACTOR=1
-        fi
+    # Apply GTK/Qt scaling
+    if [ "$FORCED_GDK_SCALE" != "null" ]; then
+        export GDK_SCALE="$FORCED_GDK_SCALE"
+        export QT_AUTO_SCREEN_SCALE_FACTOR=1
+    fi
 
-        # Load machine-specific display settings
+    # Load machine-specific display settings only if no external monitor
+    # (external monitor means use external's resolution defaults for font sizes)
+    if [ "$EXTERNAL_MONITOR" -eq 0 ]; then
+        echo "Applying machine overrides for: $HOSTNAME"
         export POLYBAR_FONT_SIZE=$(echo "$MACHINE_OVERRIDE" | jq -r ".polybar_font_size // null")
         export POLYBAR_HEIGHT=$(echo "$MACHINE_OVERRIDE" | jq -r ".polybar_height // null")
         export POLYBAR_LINE_SIZE=$(echo "$MACHINE_OVERRIDE" | jq -r ".polybar_line_size // null")

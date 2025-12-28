@@ -43,11 +43,10 @@ if [[ $hostname =~ [vV][mM] ]]; then
     fi
     export MOD_KEY="Mod1"
 
-    # Auto-start Xpra server for seamless window forwarding to host
-    if command -v xpra-start &> /dev/null; then
-        echo "Starting Xpra server for VM window forwarding..."
-        xpra-start &
-    fi
+    # Import environment and start graphical-session.target for systemd user services
+    # This triggers xpra-server and xpra-apps services automatically
+    systemctl --user import-environment DISPLAY XAUTHORITY
+    systemctl --user start graphical-session.target &
 else
     export MOD_KEY="Mod4"
     # Resolution will be set by load-display-config.sh based on machine overrides

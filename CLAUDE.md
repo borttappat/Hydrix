@@ -124,6 +124,10 @@ templates/local/                 # committed - examples for new users
 
 ## Recently Completed
 
+- ✅ **Xpra seamless window forwarding** - VMs export individual windows to host desktop
+  - Auto-start on VM login, auto-discovery from host
+  - `xpra-help` command for reference, i3 keybindings
+  - Host IPs on all bridges for direct VM communication
 - ✅ **Bridge isolation implemented** - Isolated bridges (pentest, office, browse, dev) cannot communicate directly
 - ✅ **br-shared bridge added** - Allows crosstalk between VMs that need to communicate
 - ✅ **nftables firewall rules** - Enforces isolation in both standard and lockdown modes

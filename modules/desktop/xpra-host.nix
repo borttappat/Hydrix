@@ -336,6 +336,77 @@ DETACHING:
 ================================================================================
 EOF
     '')
+
+    # Script to auto-attach to all available VMs
+    (writeShellScriptBin "xpra-auto-attach" ''
+      # Auto-attach to VMs as they become available
+      # Runs in background, attaching to each VM type once
+
+      ATTACHED=""
+
+      attach_vm() {
+        VM_TYPE="$1"
+        PORT="$2"
+        SUBNETS="$3"
+        PREFIX="$4"
+
+        # Skip if already attached
+        if echo "$ATTACHED" | grep -q "$VM_TYPE"; then
+          return
+        fi
+
+        for SUBNET in $SUBNETS; do
+          for i in $(seq 2 254); do
+            IP="$SUBNET.$i"
+            if timeout 0.3 bash -c "echo >/dev/tcp/$IP/$PORT" 2>/dev/null; then
+              echo "Found $VM_TYPE VM at $IP:$PORT - attaching..."
+              xpra attach "tcp://$IP:$PORT" \
+                --title="@title@ $PREFIX" \
+                --opengl=yes \
+                --notifications=no &
+              ATTACHED="$ATTACHED $VM_TYPE"
+              return 0
+            fi
+          done
+        done
+        return 1
+      }
+
+      echo "Xpra auto-attach started. Scanning for VMs..."
+
+      # Initial scan
+      attach_vm browsing 14501 "192.168.105 192.168.103" "[BRW]"
+      attach_vm pentest 14500 "192.168.105 192.168.101" "[PTX]"
+      attach_vm dev 14504 "192.168.105 192.168.104" "[DEV]"
+      attach_vm comms 14503 "192.168.105 192.168.102" "[COM]"
+
+      echo "Initial scan complete. Attached to:$ATTACHED"
+      echo "Press Ctrl+C to stop auto-attach."
+
+      # Keep scanning for new VMs every 30 seconds
+      while true; do
+        sleep 30
+        attach_vm browsing 14501 "192.168.105 192.168.103" "[BRW]"
+        attach_vm pentest 14500 "192.168.105 192.168.101" "[PTX]"
+        attach_vm dev 14504 "192.168.105 192.168.104" "[DEV]"
+        attach_vm comms 14503 "192.168.105 192.168.102" "[COM]"
+      done
+    '')
   ];
+
+  # Systemd user service for auto-attaching to VMs
+  # Disabled by default - enable with: systemctl --user enable --now xpra-auto-attach
+  systemd.user.services.xpra-auto-attach = {
+    description = "Auto-attach to Xpra VMs";
+    wantedBy = []; # Not auto-started - user enables manually if desired
+    after = [ "graphical-session.target" ];
+    serviceConfig = {
+      Type = "simple";
+      ExecStart = "${pkgs.bash}/bin/bash -c 'xpra-auto-attach'";
+      Restart = "on-failure";
+      RestartSec = 10;
+      Environment = "PATH=/run/current-system/sw/bin";
+    };
+  };
 }
 

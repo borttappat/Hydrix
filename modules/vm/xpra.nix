@@ -24,18 +24,50 @@ let
     "dev" = "[DEV]";
   }.${vmType} or "[VM]";
 
-  # Xpra start script with optimizations
-  xpraStartScript = pkgs.writeShellScript "xpra-start" ''
-    # Wait a moment for X to fully initialize
-    sleep 2
+  # Apps to auto-start on Xpra display per VM type
+  autoStartApps = {
+    "browsing" = [ "firefox" "alacritty" ];
+    "pentest" = [ "alacritty" ];
+    "office" = [ "alacritty" ];
+    "comms" = [ "alacritty" ];
+    "dev" = [ "alacritty" ];
+  }.${vmType} or [ "alacritty" ];
 
+  # Xpra start script (daemon mode for service)
+  xpraStartScript = pkgs.writeShellScript "xpra-start-daemon" ''
     # Check if xpra is already running on :100
     if ${pkgs.xpra}/bin/xpra list 2>/dev/null | grep -q ":100"; then
       echo "Xpra already running on :100"
       exit 0
     fi
 
-    # Start xpra server with optimizations
+    # Start xpra server in daemon mode
+    ${pkgs.xpra}/bin/xpra start :100 \
+      --bind-tcp=0.0.0.0:${toString xpraPort} \
+      --daemon=yes \
+      --no-mdns \
+      --no-printing \
+      --no-webcam \
+      --exit-with-children=no \
+      --html=off \
+      --compress=0 \
+      --speed=100 \
+      --quality=100 \
+      --min-quality=80 \
+      --opengl=yes
+
+    echo "Xpra server started on :100, port ${toString xpraPort}"
+  '';
+
+  # Xpra start script for manual use (foreground)
+  xpraStartForeground = pkgs.writeShellScript "xpra-start-fg" ''
+    # Check if xpra is already running on :100
+    if ${pkgs.xpra}/bin/xpra list 2>/dev/null | grep -q ":100"; then
+      echo "Xpra already running on :100"
+      exit 0
+    fi
+
+    # Start xpra server in foreground
     ${pkgs.xpra}/bin/xpra start :100 \
       --bind-tcp=0.0.0.0:${toString xpraPort} \
       --no-daemon \
@@ -44,7 +76,6 @@ let
       --no-webcam \
       --exit-with-children=no \
       --html=off \
-      --encoding=rgb \
       --compress=0 \
       --speed=100 \
       --quality=100 \
@@ -55,6 +86,26 @@ let
   # Xpra stop script
   xpraStopScript = pkgs.writeShellScript "xpra-stop" ''
     ${pkgs.xpra}/bin/xpra stop :100 2>/dev/null || true
+  '';
+
+  # Script to launch auto-start apps
+  launchAppsScript = pkgs.writeShellScript "xpra-launch-apps" ''
+    # Wait for Xpra to be fully ready
+    for i in $(seq 1 30); do
+      if ${pkgs.xpra}/bin/xpra list 2>/dev/null | grep -q ":100"; then
+        break
+      fi
+      sleep 1
+    done
+
+    # Launch configured apps
+    ${lib.concatMapStringsSep "\n" (app: ''
+      echo "Launching ${app} on Xpra display..."
+      DISPLAY=:100 ${app} &
+      sleep 2
+    '') autoStartApps}
+
+    echo "Auto-start apps launched"
   '';
 in
 {
@@ -76,9 +127,9 @@ in
     glib
     libnotify
 
-    # Script to start xpra server manually
+    # Script to start xpra server manually (foreground)
     (writeShellScriptBin "xpra-start" ''
-      ${xpraStartScript}
+      ${xpraStartForeground}
     '')
 
     # Script to stop xpra server
@@ -179,4 +230,31 @@ EOF
     XPRA_PORT=${toString xpraPort}
     TITLE_PREFIX=${titlePrefix}
   '';
+
+  # Systemd user service to auto-start Xpra server
+  systemd.user.services.xpra-server = {
+    description = "Xpra seamless window server";
+    wantedBy = [ "graphical-session.target" ];
+    after = [ "graphical-session.target" ];
+    serviceConfig = {
+      Type = "forking";
+      ExecStart = "${xpraStartScript}";
+      ExecStop = "${xpraStopScript}";
+      Restart = "on-failure";
+      RestartSec = 5;
+    };
+  };
+
+  # Systemd user service to auto-launch apps on Xpra
+  systemd.user.services.xpra-apps = {
+    description = "Auto-launch apps on Xpra display";
+    wantedBy = [ "graphical-session.target" ];
+    after = [ "xpra-server.service" ];
+    requires = [ "xpra-server.service" ];
+    serviceConfig = {
+      Type = "oneshot";
+      ExecStart = "${launchAppsScript}";
+      RemainAfterExit = true;
+    };
+  };
 }
