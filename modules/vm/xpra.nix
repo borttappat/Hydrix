@@ -231,11 +231,9 @@ EOF
     TITLE_PREFIX=${titlePrefix}
   '';
 
-  # Systemd user service to auto-start Xpra server
+  # Systemd user service for Xpra server (started by xinitrc)
   systemd.user.services.xpra-server = {
     description = "Xpra seamless window server";
-    wantedBy = [ "graphical-session.target" ];
-    after = [ "graphical-session.target" ];
     serviceConfig = {
       Type = "forking";
       ExecStart = "${xpraStartScript}";
@@ -245,12 +243,10 @@ EOF
     };
   };
 
-  # Systemd user service to auto-launch apps on Xpra
+  # Systemd user service to auto-launch apps on Xpra (started by xinitrc)
   systemd.user.services.xpra-apps = {
     description = "Auto-launch apps on Xpra display";
-    wantedBy = [ "graphical-session.target" ];
     after = [ "xpra-server.service" ];
-    requires = [ "xpra-server.service" ];
     serviceConfig = {
       Type = "oneshot";
       ExecStart = "${launchAppsScript}";

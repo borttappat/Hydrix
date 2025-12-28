@@ -43,10 +43,11 @@ if [[ $hostname =~ [vV][mM] ]]; then
     fi
     export MOD_KEY="Mod1"
 
-    # Import environment and start graphical-session.target for systemd user services
-    # This triggers xpra-server and xpra-apps services automatically
+    # Start Xpra server and apps via systemd user services
     systemctl --user import-environment DISPLAY XAUTHORITY
-    systemctl --user start graphical-session.target &
+    systemctl --user start xpra-server.service &
+    # Give xpra a moment to start, then launch apps
+    (sleep 5 && systemctl --user start xpra-apps.service) &
 else
     export MOD_KEY="Mod4"
     # Resolution will be set by load-display-config.sh based on machine overrides

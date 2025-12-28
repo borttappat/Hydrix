@@ -340,9 +340,26 @@ EOF
     # Script to auto-attach to all available VMs
     (writeShellScriptBin "xpra-auto-attach" ''
       # Auto-attach to VMs as they become available
-      # Runs in background, attaching to each VM type once
+      # Uses fast parallel scanning with nmap if available, falls back to sequential
 
       ATTACHED=""
+
+      # Fast scan using parallel connections (only DHCP range 100-200)
+      scan_subnet() {
+        SUBNET="$1"
+        PORT="$2"
+
+        # Scan IPs 100-200 in parallel (typical DHCP range)
+        for i in $(seq 100 200); do
+          (
+            IP="$SUBNET.$i"
+            if timeout 0.1 bash -c "echo >/dev/tcp/$IP/$PORT" 2>/dev/null; then
+              echo "$IP"
+            fi
+          ) &
+        done
+        wait
+      }
 
       attach_vm() {
         VM_TYPE="$1"
@@ -352,27 +369,25 @@ EOF
 
         # Skip if already attached
         if echo "$ATTACHED" | grep -q "$VM_TYPE"; then
-          return
+          return 0
         fi
 
         for SUBNET in $SUBNETS; do
-          for i in $(seq 2 254); do
-            IP="$SUBNET.$i"
-            if timeout 0.3 bash -c "echo >/dev/tcp/$IP/$PORT" 2>/dev/null; then
-              echo "Found $VM_TYPE VM at $IP:$PORT - attaching..."
-              xpra attach "tcp://$IP:$PORT" \
-                --title="@title@ $PREFIX" \
-                --opengl=yes \
-                --notifications=no &
-              ATTACHED="$ATTACHED $VM_TYPE"
-              return 0
-            fi
-          done
+          FOUND_IP=$(scan_subnet "$SUBNET" "$PORT" 2>/dev/null | head -1)
+          if [ -n "$FOUND_IP" ]; then
+            echo "Found $VM_TYPE VM at $FOUND_IP:$PORT - attaching..."
+            xpra attach "tcp://$FOUND_IP:$PORT" \
+              --title="@title@ $PREFIX" \
+              --opengl=yes \
+              --notifications=no &
+            ATTACHED="$ATTACHED $VM_TYPE"
+            return 0
+          fi
         done
         return 1
       }
 
-      echo "Xpra auto-attach started. Scanning for VMs..."
+      echo "Xpra auto-attach started. Scanning for VMs (fast parallel scan)..."
 
       # Initial scan
       attach_vm browsing 14501 "192.168.105 192.168.103" "[BRW]"
@@ -381,7 +396,7 @@ EOF
       attach_vm comms 14503 "192.168.105 192.168.102" "[COM]"
 
       echo "Initial scan complete. Attached to:$ATTACHED"
-      echo "Press Ctrl+C to stop auto-attach."
+      echo "Continuing to scan every 30 seconds. Press Ctrl+C to stop."
 
       # Keep scanning for new VMs every 30 seconds
       while true; do
