@@ -25,6 +25,13 @@ while true; do
         xrandr --output "$OUTPUT" --mode "$PREFERRED" 2>/dev/null || \
         xrandr --output "$OUTPUT" --auto 2>/dev/null || true
         LAST_RES="$PREFERRED"
+
+        # Reload polybar to adjust to new resolution
+        sleep 0.5
+        pkill polybar 2>/dev/null || true
+        sleep 0.2
+        polybar main 2>/dev/null &
+        disown
     fi
 
     sleep 0.5

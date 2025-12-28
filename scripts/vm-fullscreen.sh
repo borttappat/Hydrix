@@ -32,39 +32,18 @@ if [ -n "$WORKSPACE" ]; then
     i3-msg "workspace $WORKSPACE" >/dev/null
 fi
 
-# Open virt-manager console
-virt-manager --connect qemu:///system --show-domain-console "$VM_NAME" &
-VIRT_PID=$!
+# Use virt-viewer with fullscreen flag
+# --full-screen starts in fullscreen mode
+# --auto-resize adjusts guest resolution to match window
+# --hotkeys allows customizing release keys
+virt-viewer --connect qemu:///system \
+    --full-screen \
+    --auto-resize=always \
+    --hotkeys=toggle-fullscreen=shift+f11,release-cursor=Super_L \
+    "$VM_NAME" &
 
-# Wait for window to appear
-echo "Waiting for window..."
-sleep 2
-
-# Find the window
-WIN_ID=""
-for i in $(seq 1 10); do
-    WIN_ID=$(xdotool search --name "$VM_NAME" 2>/dev/null | head -1 || true)
-    if [ -n "$WIN_ID" ]; then
-        break
-    fi
-    sleep 0.5
-done
-
-if [ -z "$WIN_ID" ]; then
-    echo "Error: Could not find window for $VM_NAME"
-    exit 1
-fi
-
-# Activate and fullscreen
-xdotool windowactivate --sync "$WIN_ID"
-sleep 0.3
-xdotool key alt+v
-sleep 0.2
-xdotool key f
-
-echo "VM $VM_NAME is now fullscreen"
-
-# If workspace was specified, confirm we're there
-if [ -n "$WORKSPACE" ]; then
-    echo "On workspace $WORKSPACE"
-fi
+echo "VM $VM_NAME launched in fullscreen on workspace ${WORKSPACE:-current}"
+echo ""
+echo "Controls:"
+echo "  Super (hold) + 1/2/3...  - Release and switch workspace"
+echo "  Shift+F11                - Toggle fullscreen"
