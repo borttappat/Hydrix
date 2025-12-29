@@ -23,8 +23,8 @@ monitor = ${env:MONITOR:}
 top = true
 width = 100%
 height = ${POLYBAR_HEIGHT}
-offset-x = 0.42%
-offset-y = 7
+offset-x = 0
+offset-y = 0
 fixed-center = true
 radius = 0.0
 
@@ -286,6 +286,10 @@ margin-bottom = 5
 inherit = bar/main
 bottom = true
 offset-y = 7
+
+; Bottom bar is a normal bar (not override-redirect like top bar)
+override-redirect = false
+wm-restack =
 
 ; Bottom bar uses same modules as main
 modules-left = xworkspaces
