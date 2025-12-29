@@ -104,9 +104,19 @@ for monitor in $MONITORS; do
         -e "s/\${POLYBAR_LINE_SIZE}/$MONITOR_POLYBAR_LINE_SIZE/g" \
         "$POLYBAR_TEMPLATE" > "$MONITOR_CONFIG"
 
-    # Launch polybar on this monitor with its config
-    echo "$(date): Launching polybar on $monitor with config $MONITOR_CONFIG" >> "$LOGFILE"
-    MONITOR=$monitor polybar -q --config="$MONITOR_CONFIG" main &
+    # Determine which bars to launch based on host vs VM
+    hostname_icon=$(hostnamectl | grep "Icon name:" | cut -d ":" -f2 | xargs)
+    if [[ $hostname_icon =~ [vV][mM] ]]; then
+        # VM: Launch normal top + bottom bars
+        echo "$(date): VM mode - launching top and bottom bars on $monitor" >> "$LOGFILE"
+        MONITOR=$monitor polybar -q --config="$MONITOR_CONFIG" top &
+        MONITOR=$monitor polybar -q --config="$MONITOR_CONFIG" bottom &
+    else
+        # Host: Launch normal top + floating top (override) - no bottom bar
+        echo "$(date): Host mode - launching top and main (floating) bars on $monitor" >> "$LOGFILE"
+        MONITOR=$monitor polybar -q --config="$MONITOR_CONFIG" top &
+        MONITOR=$monitor polybar -q --config="$MONITOR_CONFIG" main &
+    fi
 done
 
 echo "$(date): Polybar restart complete" >> "$LOGFILE"

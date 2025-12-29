@@ -139,13 +139,14 @@ for monitor in $MONITORS; do
         "$POLYBAR_TEMPLATE" > "$MONITOR_CONFIG"
 
     if [ "$IS_VM" -eq 1 ]; then
-        # VM: Launch both top and bottom bars
+        # VM: Launch normal top bar + bottom bar
         echo "$(date): VM mode - launching top and bottom bars on $monitor" >> "$AUTOSTART_LOG"
-        MONITOR=$monitor polybar -q --config="$MONITOR_CONFIG" main >> "$AUTOSTART_LOG" 2>&1 &
+        MONITOR=$monitor polybar -q --config="$MONITOR_CONFIG" top >> "$AUTOSTART_LOG" 2>&1 &
         MONITOR=$monitor polybar -q --config="$MONITOR_CONFIG" bottom >> "$AUTOSTART_LOG" 2>&1 &
     else
-        # Host: Launch only top bar (sticky, overrides VM windows)
-        echo "$(date): Host mode - launching top bar on $monitor" >> "$AUTOSTART_LOG"
+        # Host: Launch normal top + floating top (override) - no bottom bar
+        echo "$(date): Host mode - launching top and main (floating) bars on $monitor" >> "$AUTOSTART_LOG"
+        MONITOR=$monitor polybar -q --config="$MONITOR_CONFIG" top >> "$AUTOSTART_LOG" 2>&1 &
         MONITOR=$monitor polybar -q --config="$MONITOR_CONFIG" main >> "$AUTOSTART_LOG" 2>&1 &
     fi
 done
