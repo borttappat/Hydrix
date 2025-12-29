@@ -596,6 +596,143 @@ mkpasswd -m sha-512
 
 When you `su user` on the host, it fails because that user only exists in VMs. This is correct behavior!
 
+## VM Fullscreen & Auto-Resize (✅ IMPLEMENTED)
+
+### The Problem
+VMs need to run in fullscreen mode with:
+1. Automatic resolution adjustment when window/workspace changes
+2. Super_L key as the keyboard release key
+3. No menubar/chrome in fullscreen mode (virt-manager's internal fullscreen)
+
+### Solution
+
+Use **virt-manager** with the **vm-fullscreen-hack.sh** script which triggers virt-manager's
+internal fullscreen mode (hides menubar) via a carefully timed xdotool sequence.
+
+**Why this is tricky**: virt-manager doesn't expose fullscreen via CLI, dbus, or keyboard
+accelerator. The only way to trigger it is through the View > Fullscreen menu. Simple
+`xdotool key alt+v` fails because the SPICE console widget captures keyboard input.
+
+### What Works
+- **vm-fullscreen-hack.sh**: Triggers internal fullscreen reliably
+  - Clicks menubar to take focus from SPICE console
+  - Sends Ctrl+Alt to release any VM keyboard grab
+  - Holds Alt for 1 second, presses V (opens View menu)
+  - Presses F to activate Fullscreen
+  - Centers cursor on screen
+- **virt-manager + vm-auto-resize.sh**: Resolution changes work correctly
+  - The polling script (`scripts/vm-auto-resize.sh`) monitors xrandr for "preferred" resolution changes
+  - When virt-manager resizes the window, SPICE updates xrandr preferred modes
+  - The script detects this and applies `xrandr --output Virtual-1 --auto`
+- **Super_L release key**: Works in virt-manager via dconf setting
+  - Set with: `dconf write /org/virt-manager/virt-manager/console/grab-keys "'65515'"`
+  - Key code 65515 = Super_L
+
+### What Doesn't Work
+- **virt-viewer auto-resize**: Even with `--auto-resize=always`, virt-viewer doesn't trigger
+  xrandr mode updates like virt-manager does. The polling script sees no changes.
+- **virt-viewer kiosk mode**: Broken/unreliable, not recommended
+- **LD_PRELOAD menubar hiding**: Attempted GTK hook to hide menubar via `gtk_builder_new_from_resource`
+  interception. Approach is valid but Nix integration was problematic.
+- **Simple xdotool alt+v, f**: Fails because SPICE console captures keyboard before GTK menu
+- **X11 _NET_WM_STATE_FULLSCREEN**: Only triggers i3 fullscreen, doesn't hide virt-manager menubar
+- **virt-manager dbus interface**: Only exposes `cli_command` action, no fullscreen control
+
+### Current Approach
+1. Use **virt-manager** (not virt-viewer) for VM display
+2. **vm-fullscreen-hack.sh** triggers internal fullscreen (hides menubar)
+3. **vm-auto-resize.sh** runs in VM xinitrc for resolution tracking
+4. **Udev rule** (`modules/vm/auto-resize.nix`) as backup/alternative to polling
+
+### Files Involved
+| File | Purpose |
+|------|---------|
+| `scripts/vm-fullscreen.sh` | Launches VM viewer on specific workspace, calls hack script |
+| `scripts/vm-fullscreen-hack.sh` | Triggers virt-manager internal fullscreen via xdotool |
+| `scripts/vm-auto-resize.sh` | Polls xrandr, applies resolution changes, restarts polybar |
+| `modules/vm/auto-resize.nix` | Udev-based resize (backup to polling) |
+| `configs/xorg/.xinitrc` | Starts vm-auto-resize.sh on VM X session |
+
+### Usage
+
+```bash
+# Open VM in fullscreen on current workspace
+./scripts/vm-fullscreen.sh browsing-test
+
+# Open VM in fullscreen on workspace 3
+./scripts/vm-fullscreen.sh browsing-test 3
+
+# Just trigger fullscreen on already-open VM window
+./scripts/vm-fullscreen-hack.sh browsing-test
+```
+
+### The Fullscreen Hack Sequence
+
+`vm-fullscreen-hack.sh` performs this sequence:
+1. **Activate window** - `xdotool windowactivate --sync`
+2. **Click menubar border** - Takes focus away from SPICE console widget
+3. **Ctrl+Alt release** - Releases any VM keyboard grab
+4. **Hold Alt 1 second** - Required for GTK menu activation
+5. **Press V while holding Alt** - Opens View menu
+6. **Release Alt, press F** - Activates Fullscreen menu item
+7. **Center cursor** - Moves mouse to screen center
+
+### dconf Settings (virt-manager)
+
+dconf settings persist in `~/.config/dconf/user` and survive reboots.
+
+**Auto-configured**: The Super_L grab key is automatically set in `configs/xorg/.xinitrc`
+on every X session start for hosts. No manual configuration needed.
+
+```bash
+# Set release key to Super_L (key code 65515) - AUTO-SET IN XINITRC
+dconf write /org/virt-manager/virt-manager/console/grab-keys "'65515'"
+
+# View current console settings
+dconf dump /org/virt-manager/virt-manager/console/
+# Expected output:
+# [/]
+# autoconnect=true
+# grab-keys='65515'
+# resize-guest=1
+
+# View ALL virt-manager settings
+dconf dump /org/virt-manager/
+
+# Reset to default (Ctrl+Alt = 65507,65513)
+dconf write /org/virt-manager/virt-manager/console/grab-keys "'65507,65513'"
+```
+
+**Key codes reference:**
+- `65515` = Super_L (Left Super/Windows key)
+- `65516` = Super_R (Right Super key)
+- `65507` = Control_L
+- `65513` = Alt_L
+- `65505` = Shift_L
+
+### Approaches Tried
+
+| Approach | Result | Notes |
+|----------|--------|-------|
+| virt-viewer `--auto-resize=always` | **Failed** | Doesn't trigger xrandr mode updates like virt-manager |
+| virt-viewer `--kiosk` mode | **Failed** | Broken/unreliable, causes issues |
+| virt-viewer `--hotkeys=release-cursor=Super_L` | Works | But useless without auto-resize |
+| LD_PRELOAD menubar hiding | **Failed** | GTK hook approach valid but Nix integration problematic |
+| Simple xdotool alt+v, f | **Failed** | SPICE console captures keyboard before GTK menu |
+| X11 _NET_WM_STATE_FULLSCREEN | **Failed** | Only triggers WM fullscreen, menubar stays visible |
+| virt-manager dbus interface | **Failed** | No fullscreen action exposed |
+| virt-manager + vm-auto-resize.sh | **Works** | Polling script catches SPICE resolution changes |
+| virt-manager dconf grab-keys | **Works** | Super_L release key persists in dconf |
+| vm-fullscreen-hack.sh | **Works** | Click menubar + Ctrl+Alt + hold Alt + V + F sequence |
+| udev rule for resize | **Works** | Backup approach in modules/vm/auto-resize.nix |
+
+### TODO
+- [x] Find reliable fullscreen trigger method
+- [x] Implement vm-fullscreen-hack.sh
+- [x] Update vm-fullscreen.sh to use hack script
+- [ ] Consider adding vm-fullscreen.sh to PATH via Nix module
+- [ ] Add i3 keybindings for quick VM workspace switching
+
 ## Known Issues
 
 *No critical issues currently tracked.*

@@ -43,15 +43,20 @@ if [[ $hostname =~ [vV][mM] ]]; then
     fi
     export MOD_KEY="Mod1"
 
-    # Auto-resize is now handled by udev rule in modules/vm/auto-resize.nix
-    # The udev rule triggers on DRM changes and applies xrandr automatically
-    # Keeping polling script commented out as fallback:
-    # if [ -x "$HOME/Hydrix/scripts/vm-auto-resize.sh" ]; then
-    #     "$HOME/Hydrix/scripts/vm-auto-resize.sh" &
-    # fi
+    # Auto-resize monitor for SPICE resolution changes
+    # Polls xrandr for preferred resolution changes and applies them
+    # Works with virt-manager (virt-viewer doesn't trigger xrandr updates properly)
+    # Udev rule in modules/vm/auto-resize.nix is also in place as backup
+    if [ -x "$HOME/Hydrix/scripts/vm-auto-resize.sh" ]; then
+        "$HOME/Hydrix/scripts/vm-auto-resize.sh" &
+    fi
 else
     export MOD_KEY="Mod4"
     # Resolution will be set by load-display-config.sh based on machine overrides
+
+    # Set virt-manager grab key to Super_L (persists in dconf but ensure it's set)
+    # Key code 65515 = Super_L - allows releasing VM keyboard grab with Super key
+    dconf write /org/virt-manager/virt-manager/console/grab-keys "'65515'" 2>/dev/null || true
 fi
 
 # Restore pywal colors (now guaranteed to exist)
