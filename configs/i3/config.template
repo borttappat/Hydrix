@@ -104,17 +104,6 @@ bindsym $mod+o exec obsidian
 # Start Virt-Manager
 bindsym $mod+m exec virt-manager
 
-# ===== VM Xpra Integration =====
-# Attach to VM xpra sessions (seamless windows)
-bindsym $mod+F9 exec xpra-browsing
-bindsym $mod+F10 exec xpra-pentest
-bindsym $mod+F11 exec xpra-dev
-bindsym $mod+Shift+F9 exec xpra-comms
-
-# Launch apps in VMs (requires xpra attach first)
-bindsym $mod+Shift+o exec vm-run browsing obsidian
-bindsym $mod+Shift+a exec vm-run browsing firefox https://claude.ai
-
 # Start rofi
 bindsym $mod+d exec --no-startup-id ~/Hydrix/scripts/rofi.sh -show drun
 bindsym $mod+Shift+d exec --no-startup-id rofi -show run

@@ -17,6 +17,7 @@
 
     # VM-specific modules
     ../modules/vm/qemu-guest.nix
+    ../modules/vm/auto-resize.nix      # Udev-based auto display resize for SPICE
     ../modules/vm/hardware-setup.nix   # Auto-generates hardware-configuration.nix on first boot
     ../modules/vm/hydrix-clone.nix     # Clones Hydrix on first boot
     ../modules/vm/shaping.nix          # First-boot shaping service
@@ -31,9 +32,6 @@
 
     # Theming (colors will be applied based on hostname-derived VM type)
     ../modules/theming/static-colors.nix
-
-    # Xpra server for seamless window forwarding to host
-    ../modules/vm/xpra.nix
   ];
 
   # Set VM type based on hostname for color generation

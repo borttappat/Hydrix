@@ -43,11 +43,12 @@ if [[ $hostname =~ [vV][mM] ]]; then
     fi
     export MOD_KEY="Mod1"
 
-    # Start auto-resize monitor for fullscreen mode
-    # This watches for SPICE resolution changes and applies them
-    if [ -x "$HOME/Hydrix/scripts/vm-auto-resize.sh" ]; then
-        "$HOME/Hydrix/scripts/vm-auto-resize.sh" &
-    fi
+    # Auto-resize is now handled by udev rule in modules/vm/auto-resize.nix
+    # The udev rule triggers on DRM changes and applies xrandr automatically
+    # Keeping polling script commented out as fallback:
+    # if [ -x "$HOME/Hydrix/scripts/vm-auto-resize.sh" ]; then
+    #     "$HOME/Hydrix/scripts/vm-auto-resize.sh" &
+    # fi
 else
     export MOD_KEY="Mod4"
     # Resolution will be set by load-display-config.sh based on machine overrides

@@ -23,9 +23,6 @@
     ../../modules/base/hardware/intel.nix
     ../../modules/base/hardware/asus.nix
     # Note: static-colors.nix and xinitrc.nix are imported in flake.nix (same as VMs)
-
-    # Xpra host configuration for seamless VM window forwarding
-    ../../modules/desktop/xpra-host.nix
   ];
 
   # Host theming - use "host" type or set a custom colorscheme

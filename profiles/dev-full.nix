@@ -23,9 +23,6 @@
 
     # Firefox browser
     ../modules/desktop/firefox.nix
-
-    # Xpra server for seamless window forwarding to host
-    ../modules/vm/xpra.nix
   ];
 
   # ===== Inline hardware configuration for QEMU VMs =====
