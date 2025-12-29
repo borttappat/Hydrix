@@ -9,6 +9,15 @@ set -g fish_greeting
 
 # === INTERACTIVE BLOCK ===
 if status is-interactive
+    # Auto-start X on VMs only (tty1, X not running)
+    # VMs have hostnames ending in "-vm" (e.g., browsing-vm, pentest-vm)
+    set -l current_hostname (hostname 2>/dev/null)
+    if string match -q '*-vm' "$current_hostname"
+        if test (tty) = "/dev/tty1" -a -z "$DISPLAY"
+            exec startx
+        end
+    end
+
     # Apply pywal colors (sequences now managed by home-manager/Nix)
     # The sequences file is generated with proper escape codes
     if test -f ~/.cache/wal/sequences

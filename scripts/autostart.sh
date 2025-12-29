@@ -151,36 +151,19 @@ for monitor in $MONITORS; do
     fi
 done
 
-# Auto-start VMs on designated workspaces and build final notification (host only)
+# Send setup notification and auto-start VMs (host only)
 if [[ ! $hostname =~ [vV][mM] ]]; then
     EXTERNAL_MONITOR=$(xrandr --query | grep " connected" | grep -E "(DP-|HDMI-)" | cut -d' ' -f1 | head -n1)
-    MONITOR_INFO=""
     if [ -n "$EXTERNAL_MONITOR" ]; then
-        MONITOR_INFO="External: $EXTERNAL_MONITOR (WS 2-5)\n"
+        notify-send "Hydrix Setup Complete" "External: $EXTERNAL_MONITOR (WS 2-5)" -t 4000
     else
-        MONITOR_INFO="No external monitor\n"
+        notify-send "Hydrix Setup Complete" "No external monitor" -t 4000
     fi
 
+    # Run VM autostart in background (doesn't block notification)
     if [ -x "$HOME/Hydrix/scripts/vm-autostart.sh" ]; then
         echo "$(date): Starting VM autostart..." >> "$AUTOSTART_LOG"
-        # Run VM autostart and capture output for notification
-        (
-            sleep 5
-            VM_OUTPUT=$("$HOME/Hydrix/scripts/vm-autostart.sh" 2>&1)
-            echo "$VM_OUTPUT" >> "$AUTOSTART_LOG"
-
-            # Parse VM output for notification
-            PLACED=$(echo "$VM_OUTPUT" | grep "VMs placed" | grep -oE "[0-9]+" | head -n1)
-            CONFLICTS=$(echo "$VM_OUTPUT" | grep -A 20 "Conflict:" | grep -E "^\s+\w+" || true)
-
-            if [ -n "$CONFLICTS" ]; then
-                notify-send -u normal "Hydrix Setup Complete" "${MONITOR_INFO}VMs placed: ${PLACED:-0}\nDuplicate VMs detected:\n$CONFLICTS" -t 8000
-            else
-                notify-send "Hydrix Setup Complete" "${MONITOR_INFO}VMs placed: ${PLACED:-0}" -t 4000
-            fi
-        ) &
-    else
-        notify-send "Hydrix Setup Complete" "${MONITOR_INFO}No VM autostart script found" -t 4000
+        (sleep 5 && "$HOME/Hydrix/scripts/vm-autostart.sh" >> "$AUTOSTART_LOG" 2>&1) &
     fi
 else
     # VM notification

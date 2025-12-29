@@ -280,6 +280,16 @@ margin-top = 5
 margin-bottom = 5
 
 ; =================================
+; Normal top bar (for VMs - no override)
+; =================================
+[bar/top]
+inherit = bar/main
+
+; Normal top bar doesn't override other windows
+override-redirect = false
+wm-restack =
+
+; =================================
 ; Bottom bar (clone of main bar)
 ; =================================
 [bar/bottom]
