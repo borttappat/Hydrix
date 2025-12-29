@@ -95,9 +95,10 @@ for vm_type in "${!TYPE_COUNT[@]}"; do
         echo "  Placing $vm_name on workspace $workspace"
 
         if [ -x "$FULLSCREEN_SCRIPT" ]; then
-            "$FULLSCREEN_SCRIPT" "$vm_name" "$workspace" &
+            # Run synchronously - vm-fullscreen.sh now blocks until complete
+            "$FULLSCREEN_SCRIPT" "$vm_name" "$workspace"
             PLACED=$((PLACED + 1))
-            sleep 2  # Give time for window to open
+            sleep 3  # Wait for virt-manager to fully stabilize before next VM
         else
             echo "  Error: $FULLSCREEN_SCRIPT not found or not executable"
         fi

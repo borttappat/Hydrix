@@ -5,7 +5,8 @@
 # This script works around virt-manager not exposing fullscreen via CLI/dbus
 # by simulating the exact keyboard sequence needed to trigger View > Fullscreen
 
-set -euo pipefail
+# Don't use set -e so we can handle failures gracefully
+set -uo pipefail
 
 VM_NAME="${1:-}"
 
@@ -27,12 +28,15 @@ if [ -z "$WINDOW_ID" ]; then
     exit 1
 fi
 
-# Get window geometry
-eval $(xdotool getwindowgeometry --shell "$WINDOW_ID")
+# Get window geometry (with timeout)
+if ! eval $(timeout 3 xdotool getwindowgeometry --shell "$WINDOW_ID" 2>/dev/null); then
+    echo "Error: Could not get window geometry"
+    exit 1
+fi
 
-# Step 1: Activate window
-xdotool windowactivate --sync "$WINDOW_ID"
-sleep 0.2
+# Step 1: Activate window (with timeout to prevent hang)
+timeout 3 xdotool windowactivate --sync "$WINDOW_ID" 2>/dev/null || echo "Window activate timed out, continuing..."
+sleep 0.3
 
 # Step 2: Click on window border/menubar area to ensure GTK has focus (not VM console)
 BORDER_X=$((X + WIDTH/2))

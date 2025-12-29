@@ -139,13 +139,13 @@ for monitor in $MONITORS; do
         "$POLYBAR_TEMPLATE" > "$MONITOR_CONFIG"
 
     if [ "$IS_VM" -eq 1 ]; then
-        # VM: Launch normal top bar + bottom bar
-        echo "$(date): VM mode - launching top and bottom bars on $monitor" >> "$AUTOSTART_LOG"
-        MONITOR=$monitor polybar -q --config="$MONITOR_CONFIG" top >> "$AUTOSTART_LOG" 2>&1 &
-        MONITOR=$monitor polybar -q --config="$MONITOR_CONFIG" bottom >> "$AUTOSTART_LOG" 2>&1 &
+        # VM: Launch padding top bar + visible bottom bar (numbered workspaces)
+        echo "$(date): VM mode - launching vm-top (padding) and vm-bottom bars on $monitor" >> "$AUTOSTART_LOG"
+        MONITOR=$monitor polybar -q --config="$MONITOR_CONFIG" vm-top >> "$AUTOSTART_LOG" 2>&1 &
+        MONITOR=$monitor polybar -q --config="$MONITOR_CONFIG" vm-bottom >> "$AUTOSTART_LOG" 2>&1 &
     else
-        # Host: Launch normal top + floating top (override) - no bottom bar
-        echo "$(date): Host mode - launching top and main (floating) bars on $monitor" >> "$AUTOSTART_LOG"
+        # Host: Launch background top bar + floating override bar (named workspaces)
+        echo "$(date): Host mode - launching top (background) and main (floating) bars on $monitor" >> "$AUTOSTART_LOG"
         MONITOR=$monitor polybar -q --config="$MONITOR_CONFIG" top >> "$AUTOSTART_LOG" 2>&1 &
         MONITOR=$monitor polybar -q --config="$MONITOR_CONFIG" main >> "$AUTOSTART_LOG" 2>&1 &
     fi
@@ -167,7 +167,7 @@ if [[ ! $hostname =~ [vV][mM] ]]; then
     fi
 else
     # VM notification
-    notify-send "VM Display Ready" "Top + bottom bars active" -t 2000
+    notify-send "VM Display Ready" "Bottom bar active" -t 2000
 fi
 
 echo "$(date): Autostart completed... Resolution: $DISPLAY_RESOLUTION, Polybar font: $POLYBAR_FONT_SIZE" >> "$AUTOSTART_LOG"

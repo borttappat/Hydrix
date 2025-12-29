@@ -2,32 +2,32 @@
   "_comment": "VM type to workspace mapping for auto-placement",
   "workspaces": {
     "1": {
-      "name": "1: host",
+      "name": "1 - HOST",
       "type": null,
       "description": "Host workspace - terminals, tools"
     },
     "2": {
-      "name": "2: pentest",
+      "name": "2 - HÄXING",
       "type": "pentest",
       "description": "Pentesting VM"
     },
     "3": {
-      "name": "3: browsing",
+      "name": "3 - BROWSING",
       "type": "browsing",
       "description": "Browsing/leisure VM"
     },
     "4": {
-      "name": "4: comms",
+      "name": "4 - COMMS",
       "type": "comms",
       "description": "Communications VM"
     },
     "5": {
-      "name": "5: dev",
+      "name": "5 - DEV",
       "type": "dev",
       "description": "Development VM"
     },
     "6": {
-      "name": "6: office",
+      "name": "6",
       "type": "office",
       "description": "Office/productivity VM"
     },

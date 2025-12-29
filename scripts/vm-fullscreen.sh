@@ -34,31 +34,43 @@ fi
 echo "Opening $VM_NAME..."
 
 # Move to target workspace first (if specified)
+# Use "workspace number" to match workspaces like "2 - HÄXING" by their number prefix
 if [ -n "$WORKSPACE" ]; then
-    i3-msg "workspace $WORKSPACE" >/dev/null
+    i3-msg "workspace number $WORKSPACE" >/dev/null
 fi
 
-# Ensure Super_L is set as release key (persists in dconf)
+# Ensure Super_L is set as release key BEFORE launching virt-manager
+# Key code 65515 = Super_L. Must be set before virt-manager reads it.
+# Kill existing virt-manager console windows for this VM to ensure fresh dconf read
 dconf write /org/virt-manager/virt-manager/console/grab-keys "'65515'" 2>/dev/null || true
 
 # Launch virt-manager with direct console view
 virt-manager --connect qemu:///system --show-domain-console "$VM_NAME" &
+VIRT_PID=$!
 
-# Wait for window to appear, then trigger fullscreen via hack script
-(
-    # Wait for virt-manager window to appear
-    for i in {1..20}; do
-        if xdotool search --name "$VM_NAME on QEMU" >/dev/null 2>&1; then
-            break
-        fi
-        sleep 0.2
-    done
+# Wait for window to appear (blocking, not background)
+echo "Waiting for VM window to appear..."
+WINDOW_FOUND=0
+for i in {1..30}; do
+    if xdotool search --name "$VM_NAME on QEMU" >/dev/null 2>&1; then
+        WINDOW_FOUND=1
+        break
+    fi
+    sleep 0.3
+done
 
-    sleep 0.5  # Extra time for window to stabilize
+if [ "$WINDOW_FOUND" -eq 0 ]; then
+    echo "Warning: VM window did not appear within timeout"
+    echo "Skipping fullscreen hack to avoid freeze"
+else
+    sleep 1  # Extra time for window to stabilize
 
-    # Trigger internal fullscreen (hides menubar)
-    "$SCRIPT_DIR/vm-fullscreen-hack.sh" "$VM_NAME"
-) &
+    # Trigger internal fullscreen (hides menubar) - with timeout to prevent hang
+    echo "Triggering fullscreen..."
+    timeout 10 "$SCRIPT_DIR/vm-fullscreen-hack.sh" "$VM_NAME" || echo "Fullscreen hack timed out or failed"
+
+    sleep 1  # Allow fullscreen to complete
+fi
 
 echo "VM $VM_NAME launched on workspace ${WORKSPACE:-current}"
 echo ""

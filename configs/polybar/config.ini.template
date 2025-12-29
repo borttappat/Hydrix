@@ -280,28 +280,69 @@ margin-top = 5
 margin-bottom = 5
 
 ; =================================
-; Normal top bar (for VMs - no override)
+; HOST BARS
 ; =================================
+
+; Host background bar (normal, non-override - sits behind floating bar)
 [bar/top]
 inherit = bar/main
-
-; Normal top bar doesn't override other windows
 override-redirect = false
-wm-restack =
+wm-restack = i3
+
+; Host floating override bar (floats above everything including fullscreen VMs)
+; bar/main already has override-redirect = true
 
 ; =================================
-; Bottom bar (clone of main bar)
+; VM BARS - Use numbered workspaces, no host-specific modules
 ; =================================
-[bar/bottom]
+
+; VM workspaces module - shows index numbers instead of names
+[module/xworkspaces-vm]
+type = internal/xworkspaces
+label-active = %index%
+label-active-color = ${colors.color2}
+label-active-underline= ${colors.color2}
+label-active-padding = 1
+label-occupied = %index%
+label-occupied-padding = 1
+label-urgent = %index%
+label-urgent-color = ${colors.color2}
+label-urgent-padding = 1
+label-empty = %index%
+label-empty-foreground = ${colors.color6}
+label-empty-padding = 1
+
+; VM hostname module
+[module/vm-hostname]
+type = custom/script
+exec = hostname | sed 's/-vm$//' | tr '[:lower:]' '[:upper:]'
+interval = 600
+label = %output%
+label-underline = ${colors.color2}
+format-prefix = "VM "
+format-prefix-foreground = ${colors.color3}
+format-prefix-underline = ${colors.color2}
+
+; VM top bar - padding only (non-floating, minimal/no content)
+[bar/vm-top]
+inherit = bar/main
+override-redirect = false
+wm-restack = i3
+
+; Padding bar - empty, just reserves space
+modules-left =
+modules-center =
+modules-right =
+
+; VM bottom bar - visible with content
+[bar/vm-bottom]
 inherit = bar/main
 bottom = true
-offset-y = 7
-
-; Bottom bar is a normal bar (not override-redirect like top bar)
+offset-y = 0
 override-redirect = false
-wm-restack =
+wm-restack = i3
 
-; Bottom bar uses same modules as main
-modules-left = xworkspaces
+; VM-specific modules: numbered workspaces, no battery/wifi
+modules-left = xworkspaces-vm
 modules-center =
-modules-right = battery essid nwup nwdown ip btc eth volume memory cpu date
+modules-right = vm-hostname ip volume memory cpu date

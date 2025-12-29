@@ -102,6 +102,41 @@ templates/local/                 # committed - examples for new users
 
 ## Current TODO List
 
+### VM Workspace & Polybar Setup (✅ IMPLEMENTED)
+
+**Goal**: Fullscreen VMs on dedicated workspaces with separated polybar configs.
+
+#### Workspace Layout (Host)
+| WS# | Name     | Purpose | Output |
+|-----|----------|---------|--------|
+| 1   | HOST     | Host terminal/tools | Internal |
+| 2   | HÄXING   | Pentesting VM | External (preferred) |
+| 3   | BROWSING | Browsing VM | External (preferred) |
+| 4   | COMMS    | Communications VM | External (preferred) |
+| 5   | DEV      | Development VM | External (preferred) |
+
+#### Completed Tasks
+- [x] Renamed workspaces in i3 config and vm-workspaces.json
+- [x] Created VM-specific polybar bars (`vm-top`, `vm-bottom`) with numbered workspaces
+- [x] Updated autostart.sh to use correct polybar bars per system type
+- [x] Workspace-to-output assignments route VM workspaces to external display
+- [ ] Test complete setup with pentest + browsing VMs
+- [ ] (Future) Per-VM-type polybar modules
+
+#### Polybar Separation
+- **Host bars**: `top` (background) + `main` (floating override) - named workspaces via `xworkspaces`
+- **VM bars**: `vm-top` (padding only) + `vm-bottom` (visible) - numbered workspaces via `xworkspaces-vm`
+
+#### Key Files
+| File | Purpose |
+|------|---------|
+| `configs/i3/config.template` | i3 workspace definitions with output assignments |
+| `configs/vm-workspaces.json` | VM type to workspace mapping |
+| `configs/polybar/config.ini.template` | All polybar bars (host + VM) in one file |
+| `scripts/autostart.sh` | Launches appropriate polybar bars per system type |
+| `scripts/vm-autostart.sh` | Auto-places VMs on designated workspaces |
+| `scripts/load-display-config.sh` | Exports INTERNAL_OUTPUT and EXTERNAL_OUTPUT |
+
 ### High Priority - Core Functionality
 1. **Test lockdown mode** - Verify host isolation while VMs retain internet access
 2. ~~**VM workspace workflow**~~ - ✅ Xpra implemented for seamless windows
