@@ -57,6 +57,13 @@ else
     # Set virt-manager grab key to Super_L (persists in dconf but ensure it's set)
     # Key code 65515 = Super_L - allows releasing VM keyboard grab with Super key
     dconf write /org/virt-manager/virt-manager/console/grab-keys "'65515'" 2>/dev/null || true
+
+    # xcape: Make Super_L release VM keyboard grab when tapped alone
+    # Super_L tapped alone -> sends Ctrl+Alt (SPICE's hardcoded release key)
+    # Super_L + other key -> works normally for i3 bindings
+    # Kill any existing xcape first to avoid duplicates
+    pkill -x xcape 2>/dev/null || true
+    xcape -e 'Super_L=Control_L|Alt_L' &
 fi
 
 # Restore pywal colors (now guaranteed to exist)

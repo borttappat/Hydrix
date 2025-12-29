@@ -664,8 +664,11 @@ accelerator. The only way to trigger it is through the View > Fullscreen menu. S
   - Key code 65515 = Super_L
 
 ### What Doesn't Work
-- **virt-viewer auto-resize**: Even with `--auto-resize=always`, virt-viewer doesn't trigger
-  xrandr mode updates like virt-manager does. The polling script sees no changes.
+- **virt-viewer** - **NEVER USE**: virt-viewer does NOT trigger xrandr mode updates when the
+  window/resolution changes. This breaks vm-auto-resize.sh which relies on polling xrandr for
+  "preferred" resolution changes. Even `--auto-resize=always` doesn't help. While virt-viewer's
+  `--hotkeys=release-cursor=Super_L` works reliably, the lack of xrandr updates is a dealbreaker.
+  **Always use virt-manager instead.**
 - **virt-viewer kiosk mode**: Broken/unreliable, not recommended
 - **LD_PRELOAD menubar hiding**: Attempted GTK hook to hide menubar via `gtk_builder_new_from_resource`
   interception. Approach is valid but Nix integration was problematic.
@@ -765,12 +768,16 @@ dconf write /org/virt-manager/virt-manager/console/grab-keys "'65507,65513'"
 - [x] Find reliable fullscreen trigger method
 - [x] Implement vm-fullscreen-hack.sh
 - [x] Update vm-fullscreen.sh to use hack script
+- [x] **Super_L release key fixed via xcape** - virt-manager's `grab-keys` setting alone was
+  unreliable for modifier-only keys. Solution: xcape runs on host and maps Super_L (tapped alone)
+  to Ctrl+Alt, which is SPICE's hardcoded release key. Super+<key> combos still work for i3.
+  Config: `xcape -e 'Super_L=Control_L|Alt_L'` in xinitrc (host only).
 - [ ] Consider adding vm-fullscreen.sh to PATH via Nix module
 - [ ] Add i3 keybindings for quick VM workspace switching
 
 ## Known Issues
 
-*No critical issues currently tracked.*
+None currently.
 
 ## Notes for Contributors
 

@@ -18,6 +18,9 @@ declare -A TYPE_TO_WORKSPACE=(
     ["office"]="6"
 )
 
+# Ensure Super_L grab key is set (virt-manager reads this on console open)
+dconf write /org/virt-manager/virt-manager/console/grab-keys "'65515'" 2>/dev/null || true
+
 # Check dependencies
 if ! command -v jq &>/dev/null; then
     echo "Error: jq is required but not installed"

@@ -61,10 +61,23 @@ sleep 0.3
 
 # Step 5: Press F to activate Fullscreen
 xdotool key f
-sleep 0.3
+sleep 0.5
 
-# Step 6: Move cursor to center of screen
+# Step 6: Release keyboard grab after fullscreen activates
+# The SPICE console grabs keyboard after fullscreen - release it
+xdotool keydown ctrl+alt
+sleep 0.1
+xdotool keyup ctrl+alt
+sleep 0.2
+
+# Step 7: Click on host polybar area (top of screen) to ensure host has focus
+# This ensures Super_L works as release key
 SCREEN_WIDTH=$(xdotool getdisplaygeometry | cut -d' ' -f1)
+xdotool mousemove $((SCREEN_WIDTH / 2)) 10
+xdotool click 1
+sleep 0.2
+
+# Step 8: Move cursor to center of screen (ready for user)
 SCREEN_HEIGHT=$(xdotool getdisplaygeometry | cut -d' ' -f2)
 CENTER_X=$((SCREEN_WIDTH / 2))
 CENTER_Y=$((SCREEN_HEIGHT / 2))

@@ -323,18 +323,18 @@ format-prefix = "VM "
 format-prefix-foreground = ${colors.color3}
 format-prefix-underline = ${colors.color2}
 
-; VM top bar - padding only (non-floating, minimal/no content)
+; VM top bar - same modules as bottom for consistent look
 [bar/vm-top]
 inherit = bar/main
 override-redirect = false
 wm-restack = i3
 
-; Padding bar - empty, just reserves space
-modules-left =
+; VM modules: numbered workspaces, no battery/wifi (host-specific)
+modules-left = xworkspaces-vm
 modules-center =
-modules-right =
+modules-right = vm-hostname ip volume memory cpu date
 
-; VM bottom bar - visible with content
+; VM bottom bar - same as top
 [bar/vm-bottom]
 inherit = bar/main
 bottom = true
@@ -342,7 +342,7 @@ offset-y = 0
 override-redirect = false
 wm-restack = i3
 
-; VM-specific modules: numbered workspaces, no battery/wifi
+; VM modules: numbered workspaces, no battery/wifi (host-specific)
 modules-left = xworkspaces-vm
 modules-center =
 modules-right = vm-hostname ip volume memory cpu date

@@ -224,6 +224,7 @@ environment.systemPackages = with pkgs; [
     #khoj
     #aichat          #CLI gpt-chatbot 
     unclutter       #hides mouse cursor when not in use
+    xcape           #make modifier keys do something when tapped alone
     unzip           #zip-archiving tool 
     tealdeer        #alternative to man
     #udevil          #udisks replacement
