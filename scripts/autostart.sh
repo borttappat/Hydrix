@@ -28,8 +28,7 @@ fi
 mkdir -p ~/.config/dunst
 ln -sf ~/.cache/wal/dunstrc ~/.config/dunst/dunstrc
 
-# Notify user that display configuration is starting
-notify-send "Display Setup" "Configuring monitors..." -t 2000
+# Note: We send a single consolidated notification at the end instead of multiple notifications
 
 hostname=$(hostnamectl | grep "Icon name:" | cut -d ":" -f2 | xargs)
 
@@ -77,6 +76,12 @@ while pgrep -u $UID -x polybar >/dev/null; do sleep 1; done
 # Get all connected monitors
 MONITORS=$(xrandr --query | grep " connected" | cut -d' ' -f1)
 echo "$(date): Detected monitors: $MONITORS" >> "$AUTOSTART_LOG"
+
+# Determine which bars to launch based on host vs VM
+IS_VM=0
+if [[ $hostname =~ [vV][mM] ]]; then
+    IS_VM=1
+fi
 
 # Launch polybar on each monitor with appropriate config
 for monitor in $MONITORS; do
@@ -133,20 +138,52 @@ for monitor in $MONITORS; do
         -e "s/\${POLYBAR_LINE_SIZE}/$MONITOR_POLYBAR_LINE_SIZE/g" \
         "$POLYBAR_TEMPLATE" > "$MONITOR_CONFIG"
 
-    # Launch polybar on this monitor with its config
-    echo "$(date): Launching polybar on $monitor with config $MONITOR_CONFIG" >> "$AUTOSTART_LOG"
-    MONITOR=$monitor polybar -q --config="$MONITOR_CONFIG" main >> "$AUTOSTART_LOG" 2>&1 &
+    if [ "$IS_VM" -eq 1 ]; then
+        # VM: Launch both top and bottom bars
+        echo "$(date): VM mode - launching top and bottom bars on $monitor" >> "$AUTOSTART_LOG"
+        MONITOR=$monitor polybar -q --config="$MONITOR_CONFIG" main >> "$AUTOSTART_LOG" 2>&1 &
+        MONITOR=$monitor polybar -q --config="$MONITOR_CONFIG" bottom >> "$AUTOSTART_LOG" 2>&1 &
+    else
+        # Host: Launch only top bar (sticky, overrides VM windows)
+        echo "$(date): Host mode - launching top bar on $monitor" >> "$AUTOSTART_LOG"
+        MONITOR=$monitor polybar -q --config="$MONITOR_CONFIG" main >> "$AUTOSTART_LOG" 2>&1 &
+    fi
 done
 
-notify-send "Display Setup" "Configuration complete!" -t 2000
-
-# Auto-start VMs on designated workspaces (host only)
+# Auto-start VMs on designated workspaces and build final notification (host only)
 if [[ ! $hostname =~ [vV][mM] ]]; then
+    EXTERNAL_MONITOR=$(xrandr --query | grep " connected" | grep -E "(DP-|HDMI-)" | cut -d' ' -f1 | head -n1)
+    MONITOR_INFO=""
+    if [ -n "$EXTERNAL_MONITOR" ]; then
+        MONITOR_INFO="External: $EXTERNAL_MONITOR (WS 2-5)\n"
+    else
+        MONITOR_INFO="No external monitor\n"
+    fi
+
     if [ -x "$HOME/Hydrix/scripts/vm-autostart.sh" ]; then
         echo "$(date): Starting VM autostart..." >> "$AUTOSTART_LOG"
-        # Delay to let i3 and displays settle
-        (sleep 5 && "$HOME/Hydrix/scripts/vm-autostart.sh" >> "$AUTOSTART_LOG" 2>&1) &
+        # Run VM autostart and capture output for notification
+        (
+            sleep 5
+            VM_OUTPUT=$("$HOME/Hydrix/scripts/vm-autostart.sh" 2>&1)
+            echo "$VM_OUTPUT" >> "$AUTOSTART_LOG"
+
+            # Parse VM output for notification
+            PLACED=$(echo "$VM_OUTPUT" | grep "VMs placed" | grep -oE "[0-9]+" | head -n1)
+            CONFLICTS=$(echo "$VM_OUTPUT" | grep -A 20 "Conflict:" | grep -E "^\s+\w+" || true)
+
+            if [ -n "$CONFLICTS" ]; then
+                notify-send -u normal "Hydrix Setup Complete" "${MONITOR_INFO}VMs placed: ${PLACED:-0}\nDuplicate VMs detected:\n$CONFLICTS" -t 8000
+            else
+                notify-send "Hydrix Setup Complete" "${MONITOR_INFO}VMs placed: ${PLACED:-0}" -t 4000
+            fi
+        ) &
+    else
+        notify-send "Hydrix Setup Complete" "${MONITOR_INFO}No VM autostart script found" -t 4000
     fi
+else
+    # VM notification
+    notify-send "VM Display Ready" "Top + bottom bars active" -t 2000
 fi
 
 echo "$(date): Autostart completed... Resolution: $DISPLAY_RESOLUTION, Polybar font: $POLYBAR_FONT_SIZE" >> "$AUTOSTART_LOG"

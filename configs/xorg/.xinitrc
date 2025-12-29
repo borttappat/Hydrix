@@ -65,6 +65,19 @@ else
     source ~/.config/scripts/load-display-config.sh
 fi
 
+# Detect monitors for workspace output assignments
+INTERNAL_OUTPUT=$(xrandr --query | grep "eDP" | grep " connected" | cut -d' ' -f1)
+EXTERNAL_OUTPUT=$(xrandr --query | grep " connected" | grep -E "(DP-|HDMI-)" | cut -d' ' -f1 | head -n1)
+
+# If no external monitor, use internal for all workspaces
+if [ -z "$EXTERNAL_OUTPUT" ]; then
+    EXTERNAL_OUTPUT="$INTERNAL_OUTPUT"
+fi
+# If no internal (desktop?), use external for all
+if [ -z "$INTERNAL_OUTPUT" ]; then
+    INTERNAL_OUTPUT="$EXTERNAL_OUTPUT"
+fi
+
 # Process templates from Hydrix repo (or ~/.config as fallback)
 # Output always goes to ~/.config/ for app compatibility
 sed -e "s/\${MOD_KEY}/$MOD_KEY/g" \
@@ -72,6 +85,8 @@ sed -e "s/\${MOD_KEY}/$MOD_KEY/g" \
     -e "s/\${I3_FONT_SIZE}/$I3_FONT_SIZE/g" \
     -e "s/\${I3_BORDER_THICKNESS}/$I3_BORDER_THICKNESS/g" \
     -e "s/\${GAPS_INNER}/$GAPS_INNER/g" \
+    -e "s/\${INTERNAL_OUTPUT}/$INTERNAL_OUTPUT/g" \
+    -e "s/\${EXTERNAL_OUTPUT}/$EXTERNAL_OUTPUT/g" \
     "$TEMPLATE_BASE/i3/config.template" > ~/.config/i3/config
 sed -e "s/\${POLYBAR_FONT_SIZE}/$POLYBAR_FONT_SIZE/g" \
     -e "s/\${POLYBAR_FONT}/$POLYBAR_FONT/g" \

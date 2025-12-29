@@ -178,6 +178,20 @@ set $ws8 "8"
 set $ws9 "9"
 set $ws10 "10"
 
+# Workspace-to-output assignments (set dynamically by autostart.sh)
+# When external monitor present: WS 2-5 (VMs) go to external, WS 1 (host) stays internal
+# These are placeholders - autostart.sh will set actual output names
+workspace $ws1 output ${INTERNAL_OUTPUT} ${EXTERNAL_OUTPUT}
+workspace $ws2 output ${EXTERNAL_OUTPUT} ${INTERNAL_OUTPUT}
+workspace $ws3 output ${EXTERNAL_OUTPUT} ${INTERNAL_OUTPUT}
+workspace $ws4 output ${EXTERNAL_OUTPUT} ${INTERNAL_OUTPUT}
+workspace $ws5 output ${EXTERNAL_OUTPUT} ${INTERNAL_OUTPUT}
+workspace $ws6 output ${INTERNAL_OUTPUT} ${EXTERNAL_OUTPUT}
+workspace $ws7 output ${INTERNAL_OUTPUT} ${EXTERNAL_OUTPUT}
+workspace $ws8 output ${INTERNAL_OUTPUT} ${EXTERNAL_OUTPUT}
+workspace $ws9 output ${INTERNAL_OUTPUT} ${EXTERNAL_OUTPUT}
+workspace $ws10 output ${INTERNAL_OUTPUT} ${EXTERNAL_OUTPUT}
+
 # Switch to workspace
 bindsym $mod+1 workspace number $ws1
 bindsym $mod+2 workspace number $ws2

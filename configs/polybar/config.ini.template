@@ -28,6 +28,12 @@ offset-y = 7
 fixed-center = true
 radius = 0.0
 
+; Stacking behavior for i3 - ensures proper layer ordering
+wm-restack = i3
+; Override-redirect makes bar float above everything including fullscreen windows
+; This is enabled so host bar overlays fullscreen VM windows
+override-redirect = true
+
 enable-ipc = true
 
 background = ${colors.color1}
@@ -272,3 +278,16 @@ format-prefix-foreground = ${colors.color3}
 [global/wm]
 margin-top = 5
 margin-bottom = 5
+
+; =================================
+; Bottom bar (clone of main bar)
+; =================================
+[bar/bottom]
+inherit = bar/main
+bottom = true
+offset-y = 7
+
+; Bottom bar uses same modules as main
+modules-left = xworkspaces
+modules-center =
+modules-right = battery essid nwup nwdown ip btc eth volume memory cpu date
