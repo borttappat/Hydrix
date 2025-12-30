@@ -216,8 +216,8 @@ fi
 INTERNAL_OUTPUT=$(xrandr --query | grep "eDP" | grep " connected" | cut -d' ' -f1 | head -n1)
 export INTERNAL_OUTPUT="${INTERNAL_OUTPUT:-eDP-1}"
 
-# External display (DP or HDMI, prefer DP)
-EXTERNAL_OUTPUT=$(xrandr --query | grep " connected" | grep -E "(DP-|HDMI-)" | cut -d' ' -f1 | head -n1)
+# External display (DP or HDMI, prefer DP) - exclude eDP (internal)
+EXTERNAL_OUTPUT=$(xrandr --query | grep " connected" | grep -v "eDP" | grep -E "(DP-|HDMI-)" | cut -d' ' -f1 | head -n1)
 export EXTERNAL_OUTPUT="${EXTERNAL_OUTPUT:-$INTERNAL_OUTPUT}"
 
 echo "Loaded config for $HOSTNAME @ $DISPLAY_RESOLUTION: polybar=$POLYBAR_FONT_SIZE alacritty=$ALACRITTY_FONT_SIZE (scale=$ALACRITTY_SCALE_FACTOR) i3=$I3_FONT_SIZE gaps=$GAPS_INNER font=$POLYBAR_FONT external=$EXTERNAL_MONITOR"

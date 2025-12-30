@@ -389,7 +389,7 @@ deploy_vm() {
         --os-variant=nixos-unstable \
         --boot=hd \
         --graphics spice,listen=127.0.0.1 \
-        --video qxl,vram=65536 \
+        --video qxl,ram=65536,vram=65536,vgamem=65536 \
         --channel spicevmc,target_type=virtio,name=com.redhat.spice.0 \
         --network bridge="$VM_BRIDGE",model=virtio \
         --memballoon virtio \

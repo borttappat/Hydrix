@@ -34,17 +34,9 @@ fi
 echo "Opening $VM_NAME..."
 
 # Move to target workspace first (if specified)
-# Map workspace numbers to full names for consistent naming
-declare -A WS_NAMES=(
-    ["1"]="1 - HOST"
-    ["2"]="2 - HÄXING"
-    ["3"]="3 - BROWSING"
-    ["4"]="4 - COMMS"
-    ["5"]="5 - DEV"
-)
 if [ -n "$WORKSPACE" ]; then
-    WS_FULL="${WS_NAMES[$WORKSPACE]:-$WORKSPACE}"
-    i3-msg "workspace \"$WS_FULL\"" >/dev/null
+    echo "Switching to workspace $WORKSPACE"
+    i3-msg "workspace $WORKSPACE" >/dev/null
 fi
 
 # Ensure Super_L is set as release key BEFORE launching virt-manager

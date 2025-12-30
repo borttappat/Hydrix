@@ -42,6 +42,12 @@ if [ -f "$CONFIG_FILE" ]; then
     done < <(jq -r '.workspaces | to_entries[] | select(.value.type != null) | "\(.key)=\(.value.type)"' "$CONFIG_FILE")
 fi
 
+# Jump to workspace 2 first to establish external monitor focus
+# This ensures subsequent VM-to-workspace placements go to external display
+echo "Switching to workspace 2 (external monitor)..."
+i3-msg "workspace 2" >/dev/null 2>&1 || true
+sleep 0.5
+
 # Get list of running VMs (excluding router-vm)
 echo "Detecting running VMs..."
 RUNNING_VMS=$(sudo virsh list --name 2>/dev/null | grep -v "^$" | grep -v "router-vm" || true)

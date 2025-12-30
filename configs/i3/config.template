@@ -154,33 +154,17 @@ bindsym $mod+f fullscreen toggle
 bindsym $mod+Shift+space floating toggle
 bindsym $mod+space focus mode_toggle
 
-# Workspaces
-# Workspace names (numbers required for keybinds, names show in polybar)
-# Host uses named workspaces, VMs use simple numbers
-set $ws1 "1 - HOST"
-set $ws2 "2 - HÄXING"
-set $ws3 "3 - BROWSING"
-set $ws4 "4 - COMMS"
-set $ws5 "5 - DEV"
+# Workspaces - simple numbers
+set $ws1 "1"
+set $ws2 "2"
+set $ws3 "3"
+set $ws4 "4"
+set $ws5 "5"
 set $ws6 "6"
 set $ws7 "7"
 set $ws8 "8"
 set $ws9 "9"
 set $ws10 "10"
-
-# Workspace-to-output assignments (set dynamically by autostart.sh)
-# When external monitor present: WS 2-5 (VMs) go to external, WS 1 (host) stays internal
-# These are placeholders - autostart.sh will set actual output names
-workspace $ws1 output ${INTERNAL_OUTPUT} ${EXTERNAL_OUTPUT}
-workspace $ws2 output ${EXTERNAL_OUTPUT} ${INTERNAL_OUTPUT}
-workspace $ws3 output ${EXTERNAL_OUTPUT} ${INTERNAL_OUTPUT}
-workspace $ws4 output ${EXTERNAL_OUTPUT} ${INTERNAL_OUTPUT}
-workspace $ws5 output ${EXTERNAL_OUTPUT} ${INTERNAL_OUTPUT}
-workspace $ws6 output ${INTERNAL_OUTPUT} ${EXTERNAL_OUTPUT}
-workspace $ws7 output ${INTERNAL_OUTPUT} ${EXTERNAL_OUTPUT}
-workspace $ws8 output ${INTERNAL_OUTPUT} ${EXTERNAL_OUTPUT}
-workspace $ws9 output ${INTERNAL_OUTPUT} ${EXTERNAL_OUTPUT}
-workspace $ws10 output ${INTERNAL_OUTPUT} ${EXTERNAL_OUTPUT}
 
 # Switch to workspace
 bindsym $mod+1 workspace $ws1

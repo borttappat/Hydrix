@@ -90,7 +90,7 @@ INTERNAL_OUTPUT=""
 EXTERNAL_OUTPUT=""
 for i in 1 2 3 4 5 6; do
     INTERNAL_OUTPUT=$(xrandr --query | grep "eDP" | grep " connected" | cut -d' ' -f1)
-    EXTERNAL_OUTPUT=$(xrandr --query | grep " connected" | grep -E "(DP-|HDMI-)" | cut -d' ' -f1 | head -n1)
+    EXTERNAL_OUTPUT=$(xrandr --query | grep " connected" | grep -v "eDP" | grep -E "(DP-|HDMI-)" | cut -d' ' -f1 | head -n1)
     if [ -n "$EXTERNAL_OUTPUT" ]; then
         break
     fi

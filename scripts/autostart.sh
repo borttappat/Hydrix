@@ -32,14 +32,6 @@ ln -sf ~/.cache/wal/dunstrc ~/.config/dunst/dunstrc
 
 hostname=$(hostnamectl | grep "Icon name:" | cut -d ":" -f2 | xargs)
 
-# Pre-create named workspaces (host only) to ensure consistent naming
-# Without this, workspaces created implicitly (e.g., by window placement) get just numbers
-if [[ ! $hostname =~ [vV][mM] ]]; then
-    echo "$(date): Pre-creating named workspaces" >> "$AUTOSTART_LOG"
-    # Create workspaces with full names, then return to ws1
-    i3-msg 'workspace "1 - HOST"; workspace "2 - HÄXING"; workspace "3 - BROWSING"; workspace "4 - COMMS"; workspace "5 - DEV"; workspace "1 - HOST"' >> "$AUTOSTART_LOG" 2>&1
-fi
-
 if [[ ! $hostname =~ [vV][mM] ]]; then
 killall -q picom
 while pgrep -u $UID -x picom >/dev/null; do sleep 1; done

@@ -345,4 +345,4 @@ wm-restack = i3
 ; VM modules: numbered workspaces, no battery/wifi (host-specific)
 modules-left = xworkspaces-vm
 modules-center =
-modules-right = vm-hostname ip volume memory cpu date
+modules-right = vm-hostname ip volume memory cpu ip filesystem uptime 
