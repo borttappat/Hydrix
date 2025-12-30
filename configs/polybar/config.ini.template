@@ -60,7 +60,7 @@ separator-foreground= ${colors.color2}
 
 modules-left =  xworkspaces
 modules-center =   
-modules-right = battery essid nwup nwdown ip btc eth volume memory cpu date 
+modules-right = battery essid nwup nwdown ip btc eth volume memory cpu filesystem uptime date 
 ;filesystem uptime pomodoro btc eth sol
 
 cursor-click = pointer
@@ -137,7 +137,7 @@ exec = ifconfig | grep -A 1 tun0 | grep inet | awk '{print $2}'
 interval = 1
 format = <label>
 format-underline = ${colors.color2}
-format-prefix = "HTB " 
+format-prefix = "IP " 
 format-prefix-foreground = ${colors.color3}
 format--prefix-underline = ${colors.color2}
 
@@ -332,7 +332,7 @@ wm-restack = i3
 ; VM modules: numbered workspaces, no battery/wifi (host-specific)
 modules-left = xworkspaces-vm
 modules-center =
-modules-right = vm-hostname ip volume memory cpu date
+modules-right = vm-hostname ip volume memory cpu ip filesystem uptime 
 
 ; VM bottom bar - same as top
 [bar/vm-bottom]
