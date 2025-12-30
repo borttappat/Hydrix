@@ -37,9 +37,15 @@ fi
 if [[ $hostname =~ [vV][mM] ]]; then
     # VM-specific setup
     spice-vdagent -x &
+
+    # Wait for SPICE to initialize and set resolution
+    # Without this delay, polybar launches before resolution is set
+    sleep 2
+
     VM_DISPLAY=$(xrandr | grep -E "(Virtual-1|qxl-0)" | grep " connected" | cut -d' ' -f1 | head -n1)
     if [ -n "$VM_DISPLAY" ]; then
-        xrandr --output "$VM_DISPLAY" --mode 1920x1200 2>/dev/null || true
+        # Apply current preferred resolution (set by SPICE)
+        xrandr --output "$VM_DISPLAY" --auto 2>/dev/null || true
     fi
     export MOD_KEY="Mod1"
 
