@@ -38,8 +38,8 @@ in
     ./shell/fish.nix
     ./shell/packages.nix
 
-    # Theming system
-    ./theming/colors.nix
+    # Note: TTY colors are set in static-colors.nix (imported in flake.nix)
+    # based on the configured colorscheme
   ];
 
   # Essential packages that every VM needs

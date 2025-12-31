@@ -70,6 +70,40 @@ in
       then config.hydrix.vmType
       else "host";
 
+    # Parse colorscheme JSON for TTY colors
+    schemeData = if hasCustomScheme
+      then builtins.fromJSON (builtins.readFile schemeFile)
+      else null;
+
+    # Extract 16 colors from scheme, strip # prefix for console.colors
+    # Falls back to a neutral gray palette if no scheme
+    stripHash = color: builtins.substring 1 6 color;
+
+    ttyColors = if schemeData != null then [
+      (stripHash schemeData.colors.color0)
+      (stripHash schemeData.colors.color1)
+      (stripHash schemeData.colors.color2)
+      (stripHash schemeData.colors.color3)
+      (stripHash schemeData.colors.color4)
+      (stripHash schemeData.colors.color5)
+      (stripHash schemeData.colors.color6)
+      (stripHash schemeData.colors.color7)
+      (stripHash schemeData.colors.color8)
+      (stripHash schemeData.colors.color9)
+      (stripHash schemeData.colors.color10)
+      (stripHash schemeData.colors.color11)
+      (stripHash schemeData.colors.color12)
+      (stripHash schemeData.colors.color13)
+      (stripHash schemeData.colors.color14)
+      (stripHash schemeData.colors.color15)
+    ] else [
+      # Default neutral palette (fallback for vmType-based colors)
+      "0d0d0d" "585858" "676767" "787878"
+      "878787" "989898" "A7A7A7" "d2d2d2"
+      "939393" "585858" "676767" "787878"
+      "878787" "989898" "A7A7A7" "d2d2d2"
+    ];
+
     # Restore script - reads default from /etc and re-applies
     restoreSchemeScript = pkgs.writeShellScriptBin "restore-colorscheme" ''
       set -euo pipefail
@@ -243,6 +277,9 @@ XEOF
   in {
     # Store the default colorscheme name for restore-colorscheme script
     environment.etc."hydrix-colorscheme".text = defaultSchemeName;
+
+    # Apply colorscheme to TTY/console (Linux virtual terminals)
+    console.colors = ttyColors;
 
     environment.systemPackages = [
       applySchemeScript
