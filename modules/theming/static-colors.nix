@@ -269,7 +269,18 @@ XEOF
         Type = "oneshot";
         RemainAfterExit = true;
         User = username;
+        Group = "users";
+        # Ensure proper home directory access
+        StateDirectory = "";
+        CacheDirectory = "";
       };
+
+      # Ensure the cache directory exists with correct permissions before running
+      # preStart runs as root, then script runs as User
+      preStart = ''
+        ${pkgs.coreutils}/bin/mkdir -p /home/${username}/.cache/wal
+        ${pkgs.coreutils}/bin/chown -R ${username}:users /home/${username}/.cache/wal
+      '';
 
       script = if hasCustomScheme then ''
         echo "Applying configured colorscheme: ${config.hydrix.colorscheme}"
