@@ -44,6 +44,14 @@ Network Isolation Rules:
 - **Lockdown**: Same as router but host firewall blocks all outbound (VMs still have internet)
 - **Fallback**: Emergency mode - re-enables WiFi on host, disables VFIO, normal networking
 
+### Router VM Credentials
+The router VM uses hardcoded credentials (cannot use local/ config since it's built separately):
+- **Username**: `user`
+- **Password**: `router`
+- **Access**: Only via br-mgmt (192.168.100.253) - not exposed externally
+- **SSH**: Enabled, password auth allowed (internal use only)
+- **Sudo**: Passwordless for wheel group
+
 ## Key Scripts
 
 | Script | Purpose |

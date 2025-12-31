@@ -546,11 +546,13 @@ in {
     };
 
     services.qemuGuest.enable = true;
-    services.getty.autologinUser = "traum";
+    services.getty.autologinUser = "user";
 
-    users.users.traum = {
+    # Router VM uses "user" for consistency with other VMs
+    # Password is simple since VM is only accessible via management bridge
+    users.users.user = {
       isNormalUser = true;
-      password = "ifEHbuuhSez9";
+      password = "router";  # Simple password - router VM is internal only
       extraGroups = [ "wheel" "networkmanager" ];
     };
 
