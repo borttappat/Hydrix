@@ -1,24 +1,45 @@
 #!/usr/bin/env bash
 # Open a VM in fullscreen mode on a specific workspace using virt-manager
-# Usage: vm-fullscreen.sh <vm-name> [workspace]
+# Usage: vm-fullscreen.sh <vm-name> [workspace] [--no-fullscreen]
 #
 # Uses virt-manager (not virt-viewer) because:
 # - virt-manager properly triggers SPICE resolution updates for vm-auto-resize.sh
 # - Super_L release key works via dconf setting
 # - vm-fullscreen-hack.sh triggers internal fullscreen (hides menubar)
 #
+# Options:
+#   --no-fullscreen  Skip the fullscreen hack (just place window, don't fullscreen)
+#
 # Examples:
 #   vm-fullscreen.sh browsing-test 3
 #   vm-fullscreen.sh pentest-test 2
+#   vm-fullscreen.sh browsing-test 3 --no-fullscreen
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-VM_NAME="${1:-}"
-WORKSPACE="${2:-}"
+VM_NAME=""
+WORKSPACE=""
+NO_FULLSCREEN=0
+
+# Parse arguments
+for arg in "$@"; do
+    case "$arg" in
+        --no-fullscreen)
+            NO_FULLSCREEN=1
+            ;;
+        *)
+            if [ -z "$VM_NAME" ]; then
+                VM_NAME="$arg"
+            elif [ -z "$WORKSPACE" ]; then
+                WORKSPACE="$arg"
+            fi
+            ;;
+    esac
+done
 
 if [ -z "$VM_NAME" ]; then
-    echo "Usage: vm-fullscreen.sh <vm-name> [workspace]"
+    echo "Usage: vm-fullscreen.sh <vm-name> [workspace] [--no-fullscreen]"
     echo ""
     echo "Available VMs:"
     sudo virsh list --name | grep -v "^$" | sed 's/^/  /'
@@ -62,6 +83,8 @@ done
 if [ "$WINDOW_FOUND" -eq 0 ]; then
     echo "Warning: VM window did not appear within timeout"
     echo "Skipping fullscreen hack to avoid freeze"
+elif [ "$NO_FULLSCREEN" -eq 1 ]; then
+    echo "Skipping fullscreen hack (--no-fullscreen specified)"
 else
     sleep 1  # Extra time for window to stabilize
 
@@ -73,7 +96,9 @@ else
 fi
 
 echo "VM $VM_NAME launched on workspace ${WORKSPACE:-current}"
-echo ""
-echo "Controls:"
-echo "  Super_L (tap)           - Release keyboard grab"
-echo "  Super + 1/2/3...        - Switch workspace (after release)"
+if [ "$NO_FULLSCREEN" -eq 0 ]; then
+    echo ""
+    echo "Controls:"
+    echo "  Super_L (tap)           - Release keyboard grab"
+    echo "  Super + 1/2/3...        - Switch workspace (after release)"
+fi

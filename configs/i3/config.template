@@ -237,6 +237,13 @@ for_window [class="Polybar"] floating enable
 for_window [class="Polybar"] sticky enable
 no_focus [class="Polybar"]
 
+# Splash cover settings (hides X session setup)
+for_window [class="splash-cover"] fullscreen enable
+for_window [class="splash-cover"] border pixel 0
+for_window [class="splash-cover"] floating enable
+for_window [class="splash-cover"] sticky enable
+no_focus [class="splash-cover"]
+
 # Other settings
 focus_follows_mouse no
 tiling_drag modifier

@@ -53,8 +53,10 @@ if [[ $hostname =~ [vV][mM] ]]; then
     # Polls xrandr for preferred resolution changes and applies them
     # Works with virt-manager (virt-viewer doesn't trigger xrandr updates properly)
     # Udev rule in modules/vm/auto-resize.nix is also in place as backup
+    # Logs to /tmp/vm-auto-resize.log for debugging
     if [ -x "$HOME/Hydrix/scripts/vm-auto-resize.sh" ]; then
         "$HOME/Hydrix/scripts/vm-auto-resize.sh" &
+        disown
     fi
 else
     export MOD_KEY="Mod4"
@@ -184,5 +186,8 @@ sed -e "s/\${FIREFOX_FONT}/$FIREFOX_FONT/g" \
 # Generate profiles.ini with dynamic username
 sed -e "s/\${FIREFOX_PROFILE_NAME}/$FIREFOX_PROFILE_NAME/g" \
     "$TEMPLATE_BASE/firefox/profiles.ini.template" > ~/.mozilla/firefox/profiles.ini
+
+# Splash cover is now handled by vm-autostart.sh (spawns splash per workspace)
+# This ensures splash appears on the correct workspace before each VM is placed
 
 exec i3

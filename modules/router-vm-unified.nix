@@ -443,6 +443,10 @@ in {
             ip saddr 192.168.105.0/24 accept
             ip daddr 192.168.105.0/24 accept
 
+            # Block host (br-mgmt 100) from reaching isolated bridges
+            # Host can only reach br-shared (105) and router, not isolated VMs
+            ip saddr 192.168.100.0/24 ip daddr { 192.168.101.0/24, 192.168.102.0/24, 192.168.103.0/24, 192.168.104.0/24 } drop
+
             # Block direct traffic between isolated bridges (pentest, office, browse, dev)
             # pentest (101) cannot reach office (102), browse (103), dev (104)
             ip saddr 192.168.101.0/24 ip daddr { 192.168.102.0/24, 192.168.103.0/24, 192.168.104.0/24 } drop

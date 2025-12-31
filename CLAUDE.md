@@ -15,25 +15,28 @@ Hydrix is a NixOS-based VM isolation system designed for security-conscious work
 
 ### Network Layout
 ```
-Host Machine
-├── br-mgmt     (192.168.100.x) - Management, host-router communication
-├── br-pentest  (192.168.101.x) - Pentesting VMs [ISOLATED]
-├── br-office   (192.168.102.x) - Office/comms VMs [ISOLATED]
-├── br-browse   (192.168.103.x) - Browsing VMs [ISOLATED]
-├── br-dev      (192.168.104.x) - Development VMs [ISOLATED]
-└── br-shared   (192.168.105.x) - Shared bridge [CROSSTALK ALLOWED]
+Host Machine (zen)
+├── br-mgmt     (192.168.100.1) - Management, host-router communication
+├── br-pentest  (NO HOST IP)    - Pentesting VMs [ISOLATED from host]
+├── br-office   (NO HOST IP)    - Office/comms VMs [ISOLATED from host]
+├── br-browse   (NO HOST IP)    - Browsing VMs [ISOLATED from host]
+├── br-dev      (NO HOST IP)    - Development VMs [ISOLATED from host]
+└── br-shared   (192.168.105.1) - Shared bridge [HOST CAN REACH]
 
 Router VM (WiFi passthrough)
 ├── Handles all internet connectivity
-├── DHCP for each bridge
+├── DHCP for each bridge (x.x.x.10-200)
 ├── NAT to internet
 ├── VPN policy routing (lockdown mode)
 └── Bridge isolation enforcement (nftables)
 
-Bridge Isolation:
-  - Isolated bridges (pentest, office, browse, dev) cannot communicate directly
-  - br-shared allows VMs to talk to each other across bridge boundaries
-  - All VMs can still access internet through router VM
+Network Isolation Rules:
+  - Host can ONLY reach: router (br-mgmt) and VMs on br-shared
+  - Host CANNOT reach: VMs on isolated bridges (enforced by router nftables)
+  - Same-bridge VMs: Can communicate directly (Layer 2)
+  - Cross-bridge VMs: Cannot communicate unless on br-shared
+  - br-shared VMs: Can reach any VM on any bridge + host
+  - All VMs: Can access internet through router VM
 ```
 
 ### Boot Modes (Specialisations)
@@ -141,7 +144,8 @@ templates/local/                 # committed - examples for new users
 1. **Test lockdown mode** - Verify host isolation while VMs retain internet access
 2. ~~**VM workspace workflow**~~ - ✅ Xpra implemented for seamless windows
 3. Set up shared folders between host and each VM (virtiofs or 9p)
-4. **Per-VM-type Firefox extensions** - Different extension sets per VM type:
+4. ~~**Splash screen cover**~~ - ❌ BLOCKED - Cannot hide xdotool automation (see Splash Screen section below)
+5. **Per-VM-type Firefox extensions** - Different extension sets per VM type:
    - **Core (all VMs)**: Vimium/Tridactyl (vim bindings)
    - **Browsing VM**: uBlock Origin, Privacy Badger, privacy-focused extensions
    - **Pentest VM**: Wappalyzer, cookie editors, HackTools, FoxyProxy, scanner extensions
@@ -159,10 +163,11 @@ templates/local/                 # committed - examples for new users
 
 ## Recently Completed
 
-- ✅ **Xpra seamless window forwarding** - VMs export individual windows to host desktop
-  - Auto-start on VM login, auto-discovery from host
-  - `xpra-help` command for reference, i3 keybindings
-  - Host IPs on all bridges for direct VM communication
+- ✅ **Host network isolation** - Host can only reach VMs on br-shared, not isolated bridges
+  - Host IPs: br-mgmt (192.168.100.1) + br-shared (192.168.105.1) only
+  - Router nftables blocks host from reaching isolated bridge VMs
+- ✅ **Xpra deprecated** - Switched to workspace-bound virt-manager fullscreen sessions
+  - Xpra modules kept but not imported (dormant)
 - ✅ **Bridge isolation implemented** - Isolated bridges (pentest, office, browse, dev) cannot communicate directly
 - ✅ **br-shared bridge added** - Allows crosstalk between VMs that need to communicate
 - ✅ **nftables firewall rules** - Enforces isolation in both standard and lockdown modes
@@ -211,7 +216,8 @@ modules/
 │       └── asus.nix            # ASUS-specific (asusd)
 ├── desktop/
 │   ├── firefox.nix             # Firefox with extensions (dynamic username)
-│   └── xinitrc.nix             # X session and config deployment (dynamic username)
+│   ├── xinitrc.nix             # X session and config deployment (dynamic username)
+│   └── xpra-host.nix           # Xpra host client (DORMANT - not imported)
 ├── shell/
 │   ├── fish.nix                # Fish shell configuration
 │   ├── fish-home.nix           # Fish home-manager config (dynamic username)
@@ -227,10 +233,10 @@ modules/
 │   └── pentesting.nix          # Pentest tools and setup (VM user: "user")
 ├── vm/
 │   ├── qemu-guest.nix          # QEMU/SPICE guest configuration
-│   ├── xpra.nix                # Xpra server for seamless window forwarding
+│   ├── xpra.nix                # Xpra server (DORMANT - not imported)
 │   ├── hydrix-clone.nix        # Clone Hydrix repo on first boot
 │   └── networking.nix          # VM networking (DHCP)
-├── core.nix                    # Core essentials for all systems (includes xpra)
+├── core.nix                    # Core essentials for all systems
 ├── router-vm-unified.nix       # Router VM configuration
 └── lockdown/
     └── router-vm-config.nix    # Lockdown router variant
@@ -417,146 +423,21 @@ Each VM should have access to a shared folder with the host:
 - Host path: `/home/<user>/shared/<vm-type>/` or similar
 - Allows easy file transfer without network
 
-## VM Window Forwarding - Xpra (IMPLEMENTED)
+## VM Window Forwarding - Xpra (DEPRECATED - NOT IN USE)
 
-Xpra enables seamless window forwarding from VMs to the host, allowing individual VM applications to appear as native windows on the host desktop.
+**Status: DEPRECATED** - Xpra modules exist but are NOT imported. Using workspace-bound virt-manager fullscreen sessions instead.
 
-### Architecture
+Files kept for future reference:
+- `modules/vm/xpra.nix` - VM Xpra server config (not imported)
+- `modules/desktop/xpra-host.nix` - Host Xpra client config (not imported)
 
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│                           HOST (zen)                                │
-├─────────────────────────────────────────────────────────────────────┤
-│  Host has IPs on all bridges for direct VM communication:          │
-│    br-pentest: 192.168.101.1    br-browse: 192.168.103.1           │
-│    br-office:  192.168.102.1    br-dev:    192.168.104.1           │
-│    br-shared:  192.168.105.1                                        │
-│                                                                     │
-│  Commands: xpra-browsing, xpra-pentest, xpra-dev, xpra-comms       │
-│  Help: xpra-help                                                    │
-└─────────────────────────────────────────────────────────────────────┘
-                              │
-        ┌─────────────────────┼─────────────────────┐
-        ▼                     ▼                     ▼
-┌───────────────┐   ┌───────────────┐   ┌───────────────┐
-│  Browsing VM  │   │  Pentest VM   │   │   Dev VM      │
-│  Port: 14501  │   │  Port: 14500  │   │  Port: 14504  │
-│  Prefix:[BRW] │   │  Prefix:[PTX] │   │  Prefix:[DEV] │
-│               │   │               │   │               │
-│ xpra-start    │   │ xpra-start    │   │ xpra-start    │
-│ (auto on X)   │   │ (auto on X)   │   │ (auto on X)   │
-└───────────────┘   └───────────────┘   └───────────────┘
-```
+### Current Approach: Fullscreen VMs per Workspace
 
-### Key Files
+VMs run in fullscreen mode on dedicated workspaces via virt-manager:
 
-| File | Purpose |
-|------|---------|
-| `modules/vm/xpra.nix` | VM: Xpra server, firewall, helper scripts, dconf |
-| `modules/desktop/xpra-host.nix` | Host: Bridge IPs, attach scripts, vm-run |
-| `configs/xorg/.xinitrc` | Auto-starts xpra-start on VM login |
-| `configs/i3/config.template` | Keybindings for VM attachment |
-
-### Xpra Port Assignments
-
-| VM Type  | Port  | Bridge      | Title Prefix |
-|----------|-------|-------------|--------------|
-| pentest  | 14500 | br-pentest  | [PTX]        |
-| browsing | 14501 | br-browse   | [BRW]        |
-| office   | 14502 | br-office   | [OFC]        |
-| comms    | 14503 | br-office   | [COM]        |
-| dev      | 14504 | br-dev      | [DEV]        |
-
-### Host Commands
-
-```bash
-# Auto-discovery attach (finds VM automatically)
-xpra-browsing          # Attach to browsing VM
-xpra-pentest           # Attach to pentest VM
-xpra-dev               # Attach to dev VM
-xpra-comms             # Attach to comms VM
-xpra-attach <type>     # Generic: browsing|pentest|dev|comms|ip:port
-
-# Launch apps in VMs via SSH
-vm-run browsing firefox
-vm-run browsing obsidian
-vm-run pentest burpsuite
-
-# Discovery
-xpra-list-vms          # Scan for running VMs with Xpra
-
-# Help
-xpra-help              # Full command reference
-```
-
-### VM Commands
-
-```bash
-# Xpra server management (auto-starts on X login)
-xpra-start             # Start Xpra server on :100
-xpra-stop              # Stop Xpra server
-xpra-restart           # Restart Xpra server
-xpra-info              # Show status and connection info
-
-# Run apps through Xpra (visible on host)
-xpra-run firefox
-xpra-run alacritty
-xpra-run obsidian
-
-# Help
-xpra-help              # Full command reference
-```
-
-### i3 Keybindings (Host)
-
-| Binding | Action |
-|---------|--------|
-| `Mod+F9` | Attach to browsing VM |
-| `Mod+F10` | Attach to pentest VM |
-| `Mod+F11` | Attach to dev VM |
-| `Mod+Shift+F9` | Attach to comms VM |
-| `Mod+Shift+o` | Launch Obsidian in browsing VM |
-| `Mod+Shift+a` | Launch Claude (firefox) in browsing VM |
-
-### Workflow
-
-1. **Start VM** via virt-manager or `build-vm.sh`
-2. **VM auto-starts Xpra** when X session begins (via xinitrc)
-3. **From host**, attach: `xpra-browsing` (or use `Mod+F9`)
-4. **In VM**, run apps: `xpra-run firefox`
-5. **Apps appear** as windows on host desktop
-6. **Detach** with `Ctrl+C` or close tray icon
-
-### Packages Installed
-
-**VM** (`modules/vm/xpra.nix`):
-- xpra, python3Packages.{numpy,pillow,pygobject3}
-- dconf, glib, libnotify (fixes GTK warnings)
-- `programs.dconf.enable = true`
-
-**Host** (`modules/desktop/xpra-host.nix`):
-- xpra, python3Packages.{numpy,pillow,pygobject3}
-- libnotify, glib
-- `programs.dconf.enable = true`
-
-### Fallback: Fullscreen VMs per Workspace
-
-If Xpra doesn't meet needs, use virt-manager with fullscreen per workspace:
-
-1. **virt-manager** (current): Double-click VM, press `Super+f` for fullscreen
-2. **virt-viewer**: `virt-viewer --connect qemu:///system <vm-name>` (no menu bar)
-3. **remote-viewer**: `remote-viewer spice://127.0.0.1:<port>` (direct SPICE)
-
-### Status
-
-- [x] Xpra server module with auto-start (`modules/vm/xpra.nix`)
-- [x] Host module with bridge IPs and attach scripts (`modules/desktop/xpra-host.nix`)
-- [x] Auto-start xpra on VM X login (xinitrc)
-- [x] i3 keybindings for VM attachment
-- [x] `xpra-help` command on both host and VM
-- [x] dconf/GTK deps to fix warnings
-- [ ] Test title prefix for origin indication
-- [ ] i3 window rules for VM-specific border colors (optional)
+1. **virt-manager**: Double-click VM, use `vm-fullscreen-hack.sh` for internal fullscreen
+2. **Super_L release**: xcape maps Super_L tap → Ctrl+Alt (SPICE release key)
+3. **Auto-resize**: `vm-auto-resize.sh` polls xrandr for resolution changes
 
 ## Home-Manager Troubleshooting
 
@@ -774,6 +655,66 @@ dconf write /org/virt-manager/virt-manager/console/grab-keys "'65507,65513'"
   Config: `xcape -e 'Super_L=Control_L|Alt_L'` in xinitrc (host only).
 - [ ] Consider adding vm-fullscreen.sh to PATH via Nix module
 - [ ] Add i3 keybindings for quick VM workspace switching
+
+## Splash Screen Cover (❌ NOT WORKING - DISABLED)
+
+### The Problem
+When starting an X session on the host, there are visible xdotool macros, window movements,
+VM positioning, and other automation that looks messy. We wanted a splash screen to hide this.
+
+### Why It Doesn't Work
+
+The fundamental blocker is that `vm-fullscreen-hack.sh` requires:
+1. `xdotool windowactivate` - brings virt-manager window to foreground (breaks splash coverage)
+2. Clicking on virt-manager's menubar - requires the window to be **visible**
+3. Sending keystrokes to GTK menus (Alt+V, F for View > Fullscreen)
+
+**You cannot click on a hidden window's menubar.** When `windowactivate` runs, it brings
+virt-manager in front of any splash screen, exposing the automation to the user.
+
+### Why Not Use virt-viewer Instead?
+
+**virt-viewer is NOT a valid alternative** because:
+- It does **NOT** trigger xrandr mode updates when window/resolution changes
+- This breaks `vm-auto-resize.sh` which polls xrandr for "preferred" resolution changes
+- Even `--auto-resize=always` doesn't help
+- The host-side resolution polling is essential for the VM display workflow
+
+virt-manager DOES trigger xrandr updates properly, which is why we must use it despite
+lacking a CLI fullscreen option.
+
+### Why Not Start virt-manager in Fullscreen Mode?
+
+virt-manager has **no CLI option** to start in fullscreen mode:
+- No `--fullscreen` flag
+- No dconf setting for default fullscreen
+- No D-Bus method to trigger fullscreen
+- The only way is through the GUI: View > Fullscreen menu
+
+This is why `vm-fullscreen-hack.sh` exists - it simulates clicking the menu.
+
+### Current Status
+
+**DISABLED** - The splash code is commented out in `vm-autostart.sh`. The scripts remain
+for future reference if a solution is found.
+
+### Approaches Tried
+
+| Approach | Result | Notes |
+|----------|--------|-------|
+| Sticky splash + xinput disable | **Failed** | windowactivate breaks splash coverage |
+| Splash per workspace | **Failed** | Same issue - windowactivate brings VM to front |
+| Re-raise splash after VM placement | **Failed** | User sees flash of virt-manager UI |
+| virt-viewer with --full-screen | **Failed** | Doesn't trigger xrandr updates, breaks resize |
+| virt-viewer kiosk mode | **Failed** | Broken/unreliable |
+| Send keys by window ID without activate | **Failed** | Menu clicks require visible window |
+
+### Possible Future Solutions
+
+1. **Patch virt-manager** to add `--fullscreen` CLI option
+2. **Find dconf setting** for per-VM fullscreen state
+3. **Alternative display mechanism** that supports both CLI fullscreen AND xrandr updates
+4. **LD_PRELOAD hack** to intercept GTK and force fullscreen (attempted, Nix integration problematic)
 
 ## Known Issues
 

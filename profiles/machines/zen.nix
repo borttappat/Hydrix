@@ -73,9 +73,14 @@
   # Shared bridge (allows crosstalk between any VMs connected to it)
   networking.bridges.br-shared.interfaces = [];
 
-  # Host gets IP on management bridge only (for router VM communication)
+  # Host gets IP on management bridge (for router VM communication)
+  # and br-shared (for direct access to VMs on shared bridge)
   networking.interfaces.br-mgmt.ipv4.addresses = [{
     address = "192.168.100.1";
+    prefixLength = 24;
+  }];
+  networking.interfaces.br-shared.ipv4.addresses = [{
+    address = "192.168.105.1";
     prefixLength = 24;
   }];
 

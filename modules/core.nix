@@ -63,6 +63,9 @@ in
 
     # Version control
     git
+
+    # X11 utilities (for splash screen click-through)
+    python3Packages.xlib
   ];
 
   # X11 essentials for desktop environment

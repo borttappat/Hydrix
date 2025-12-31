@@ -6,11 +6,27 @@
 # is resized, but doesn't auto-apply them. This script monitors for changes
 # and applies the preferred resolution automatically.
 
+LOGFILE="/tmp/vm-auto-resize.log"
+exec >> "$LOGFILE" 2>&1
+
 LAST_RES=""
 OUTPUT="Virtual-1"
 
-echo "VM auto-resize monitor started"
-echo "Monitoring $OUTPUT for resolution changes..."
+# Detect if we're in a VM (hostname contains "vm" case-insensitive)
+hostname=$(hostnamectl hostname 2>/dev/null || hostname)
+if [[ $hostname =~ [vV][mM] ]]; then
+    IS_VM=1
+    BAR_TOP="vm-top"
+    BAR_BOTTOM="vm-bottom"
+else
+    IS_VM=0
+    BAR_TOP="top"
+    BAR_BOTTOM="main"
+fi
+
+echo "$(date '+%H:%M:%S') VM auto-resize monitor started (IS_VM=$IS_VM)"
+echo "$(date '+%H:%M:%S') Monitoring $OUTPUT for resolution changes..."
+echo "$(date '+%H:%M:%S') Using polybar bars: $BAR_TOP, $BAR_BOTTOM"
 
 while true; do
     # Get current preferred resolution (marked with +)
@@ -26,13 +42,14 @@ while true; do
         xrandr --output "$OUTPUT" --auto 2>/dev/null || true
         LAST_RES="$PREFERRED"
 
-        # Reload polybar to adjust to new resolution (VMs use top + bottom bars)
+        # Reload polybar to adjust to new resolution
         sleep 0.5
         pkill polybar 2>/dev/null || true
         sleep 0.2
-        polybar top 2>/dev/null &
-        polybar bottom 2>/dev/null &
+        polybar "$BAR_TOP" 2>/dev/null &
+        polybar "$BAR_BOTTOM" 2>/dev/null &
         disown
+        echo "$(date '+%H:%M:%S') Restarted polybar ($BAR_TOP + $BAR_BOTTOM)"
     fi
 
     sleep 0.5
