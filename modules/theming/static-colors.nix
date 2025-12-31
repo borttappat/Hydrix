@@ -280,7 +280,11 @@ XEOF
 
       # Ensure the cache directory exists with correct permissions before running
       # preStart runs as root, then script runs as User
+      # Remove any existing symlink (from old dotfiles setups) before creating directory
       preStart = ''
+        if [ -L /home/${username}/.cache/wal ]; then
+          ${pkgs.coreutils}/bin/rm /home/${username}/.cache/wal
+        fi
         ${pkgs.coreutils}/bin/mkdir -p /home/${username}/.cache/wal
         ${pkgs.coreutils}/bin/chown -R ${username}:users /home/${username}/.cache/wal
       '';
