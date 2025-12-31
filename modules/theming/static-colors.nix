@@ -165,6 +165,9 @@ in
 
       mkdir -p ~/.cache/wal
 
+      # Remove existing file if read-only (Nix store files are read-only)
+      rm -f ~/.cache/wal/colors.json 2>/dev/null || true
+
       # Copy the JSON directly
       cp "$SCHEME_JSON" ~/.cache/wal/colors.json
 
