@@ -375,17 +375,15 @@ df -T /var/lib/libvirt/images
 ### Completed
 - [x] Merge to master
 - [x] Benchmark and document results
+- [x] Update all VM profiles (pentest, browsing, comms, dev) to import shared-store.nix
+- [x] Automate VM pre-building in setup.sh (runs after initial host build)
+- [x] Automate VM pre-building in nixbuild.sh (runs after every host rebuild)
 
 ### Remaining
-1. **Update other VM profiles** (browsing-full.nix, comms-full.nix, dev-full.nix) to import shared-store.nix
-2. **Pre-build VM configs on host** for optimal cache:
-   ```bash
-   nix build .#nixosConfigurations.vm-pentest.config.system.build.toplevel --no-link
-   ```
+None - VM deploy improvement is complete!
 
 ### Future Improvements
 - Consider btrfs for `/var/lib/libvirt/images` for instant reflink copies
-- Add a `--pre-cache` flag to build-vm.sh that runs the host-side build
 - Investigate if shared store could reduce base image size (mount store at boot instead of baking in)
 
 ---

@@ -13,6 +13,7 @@
     ../modules/base/networking.nix
     ../modules/vm/qemu-guest.nix
     ../modules/vm/hydrix-clone.nix  # Clone Hydrix repo on first boot
+    ../modules/vm/shared-store.nix  # virtiofs shared /nix/store from host
 
     # Core desktop environment (i3, fish, etc.)
     ../modules/core.nix
@@ -57,6 +58,9 @@
   # VM type and colorscheme
   hydrix.vmType = "comms";
   hydrix.colorscheme = "punk";
+
+  # Enable virtiofs shared /nix/store from host (for fast rebuilds)
+  hydrix.vm.sharedStore.enable = lib.mkDefault true;
 
   # Communication-specific packages
   environment.systemPackages = with pkgs; [
