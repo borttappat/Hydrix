@@ -41,6 +41,10 @@
           };
           swtpm.enable = true;
           runAsRoot = true;
+          # Enable virtiofs for sharing /nix/store with VMs
+          verbatimConfig = ''
+            virtiofsd_binary = "/run/current-system/sw/bin/virtiofsd"
+          '';
         };
         onBoot = "start";
         onShutdown = "shutdown";

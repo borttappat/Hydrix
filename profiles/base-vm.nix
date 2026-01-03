@@ -22,6 +22,7 @@
     ../modules/vm/hydrix-clone.nix     # Clones Hydrix on first boot
     ../modules/vm/shaping.nix          # First-boot shaping service
     ../modules/vm/networking.nix       # VM networking override (DHCP instead of NetworkManager)
+    ../modules/vm/shared-store.nix     # Optional virtiofs shared /nix/store from host
 
     # Core desktop environment (i3, fish, alacritty, etc.)
     ../modules/core.nix
@@ -33,6 +34,11 @@
     # Theming (colors will be applied based on hostname-derived VM type)
     ../modules/theming/static-colors.nix
   ];
+
+  # Enable virtiofs shared /nix/store by default
+  # This allows VMs to use packages from host without re-downloading
+  # Requires VM to be deployed with --shared-store (default in build-vm.sh)
+  hydrix.vm.sharedStore.enable = lib.mkDefault true;
 
   # Set VM type based on hostname for color generation
   # Hostname is set in flake.nix per VM type (e.g., "browsing-vm", "pentest-vm")

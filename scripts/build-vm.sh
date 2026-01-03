@@ -25,6 +25,7 @@ VM_DISK_SIZE="100G"
 VM_BRIDGE=""  # Will be auto-detected based on mode
 VM_MODE="auto"  # auto, standard, or lockdown
 FORCE_REBUILD=false
+SHARED_STORE=true  # Enable virtiofs shared /nix/store by default
 
 # Bridge mappings (unified naming - same bridges used in all modes)
 # Standard mode: 192.168.x.x subnets
@@ -81,6 +82,7 @@ Optional Arguments:
   --disk SIZE          Disk size (default: 100G)
   --bridge BRIDGE      Network bridge (overrides auto-detection)
   --mode MODE          Network mode: auto, standard, lockdown (default: auto)
+  --no-shared-store    Disable virtiofs shared /nix/store (enabled by default)
   -h, --help           Show this help
 
 VM Types and Resource Allocation:
@@ -224,6 +226,10 @@ parse_args() {
                 FORCE_REBUILD=true
                 shift
                 ;;
+            --no-shared-store)
+                SHARED_STORE=false
+                shift
+                ;;
             -h|--help)
                 print_usage
                 ;;
@@ -340,9 +346,11 @@ create_vm_disk() {
 
     sudo mkdir -p /var/lib/libvirt/images
 
-    log "Copying and resizing base image..."
-    sudo cp "$BASE_IMAGE_RESULT" "$target_image"
-    sudo qemu-img resize "$target_image" "$VM_DISK_SIZE"
+    log "Creating VM disk with backing file (instant, saves space)..."
+    # Use qcow2 backing file - creates thin overlay instead of full copy
+    # The base image stays read-only in nix store, VM writes go to overlay
+    sudo qemu-img create -f qcow2 -b "$BASE_IMAGE_RESULT" -F qcow2 "$target_image" "$VM_DISK_SIZE"
+    # Future: on btrfs/zfs, could use: sudo cp --reflink=auto "$BASE_IMAGE_RESULT" "$target_image"
 
     # Hostname is baked into the base image (e.g., "pentest-vm")
     # The base image already has the correct hostname set at build time
@@ -377,27 +385,41 @@ deploy_vm() {
     log "  Storage: $VM_DISK_SIZE disk"
     log "  Network: $VM_BRIDGE bridge"
     log "  Graphics: SPICE optimized"
+    log "  Shared Store: $SHARED_STORE"
 
-    # Deploy VM (hostname already set in image via virt-customize)
-    sudo virt-install \
-        --connect qemu:///system \
-        --name="$vm_hostname" \
-        --memory="$VM_MEMORY" \
-        --vcpus="$VM_VCPUS" \
-        --cpu host-passthrough \
-        --disk "$target_image,device=disk,bus=virtio,cache=writeback" \
-        --os-variant=nixos-unstable \
-        --boot=hd \
-        --graphics spice,listen=127.0.0.1 \
-        --video qxl,ram=65536,vram=65536,vgamem=65536 \
-        --channel spicevmc,target_type=virtio,name=com.redhat.spice.0 \
-        --network bridge="$VM_BRIDGE",model=virtio \
-        --memballoon virtio \
-        --rng /dev/urandom \
-        --features kvm_hidden=on \
-        --clock offset=utc,rtc_tickpolicy=catchup \
-        --noautoconsole \
+    # Build virt-install arguments
+    local virt_args=(
+        --connect qemu:///system
+        --name="$vm_hostname"
+        --memory="$VM_MEMORY"
+        --vcpus="$VM_VCPUS"
+        --cpu host-passthrough
+        --disk "$target_image,device=disk,bus=virtio,cache=writeback"
+        --os-variant=nixos-unstable
+        --boot=hd
+        --graphics spice,listen=127.0.0.1
+        --video qxl,ram=65536,vram=65536,vgamem=65536
+        --channel spicevmc,target_type=virtio,name=com.redhat.spice.0
+        --network bridge="$VM_BRIDGE",model=virtio
+        --memballoon virtio
+        --rng /dev/urandom
+        --features kvm_hidden=on
+        --clock offset=utc,rtc_tickpolicy=catchup
+        --noautoconsole
         --import
+    )
+
+    # Add virtiofs shared /nix/store if enabled
+    if [[ "$SHARED_STORE" == true ]]; then
+        log "Adding virtiofs shared /nix/store..."
+        virt_args+=(
+            --memorybacking source.type=memfd,access.mode=shared
+            --filesystem source=/nix/store,target=nix-store,driver.type=virtiofs,binary.path=/run/current-system/sw/bin/virtiofsd
+        )
+    fi
+
+    # Deploy VM
+    sudo virt-install "${virt_args[@]}"
 
     success "VM deployed successfully!"
 }
@@ -428,6 +450,18 @@ First Boot Process:
   8. Ready to use with all $VM_TYPE-specific packages and configs
 
 EOF
+
+    # Show shared store status
+    if [[ "$SHARED_STORE" == true ]]; then
+        echo "Shared /nix/store: ENABLED (virtiofs mount from host)"
+        echo "  Updates will use host's cached packages - near-instant rebuilds!"
+        echo "  To disable: redeploy with --no-shared-store"
+    else
+        echo "Shared /nix/store: DISABLED"
+        echo "  Updates will download packages from internet"
+        echo "  To enable: redeploy without --no-shared-store"
+    fi
+    echo ""
 
     # Show isolation status
     if [[ "$VM_BRIDGE" == "br-shared" ]]; then

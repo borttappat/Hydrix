@@ -8,6 +8,10 @@
     auto-optimise-store = true;
     download-buffer-size = 524288000;
 
+    # Parallel build settings for faster image builds
+    max-jobs = "auto";  # Parallel derivations = number of CPU cores
+    cores = 0;          # Each build job uses all available cores
+
     substituters = [
       "https://cache.nixos.org"
       "https://nix-community.cachix.org"
