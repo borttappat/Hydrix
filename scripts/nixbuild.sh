@@ -51,6 +51,32 @@ flake_config_exists() {
     nix flake show "$FLAKE_DIR" --json 2>/dev/null | grep -q "nixosConfigurations.*${config_name}"
 }
 
+# Pre-build VM configurations to populate virtiofs cache
+prebuild_vm_configs() {
+    echo ""
+    echo "======================================"
+    echo "Pre-building VM configurations"
+    echo "======================================"
+    echo "(Populates /nix/store for virtiofs shared cache)"
+    echo ""
+
+    local vm_configs=("vm-pentest" "vm-browsing" "vm-comms" "vm-dev")
+    local success_count=0
+
+    for vm_config in "${vm_configs[@]}"; do
+        echo -n "  $vm_config... "
+        if nix build "$FLAKE_DIR#nixosConfigurations.${vm_config}.config.system.build.toplevel" --no-link 2>/dev/null; then
+            echo "✓"
+            ((success_count++))
+        else
+            echo "✗ (may not exist)"
+        fi
+    done
+
+    echo ""
+    echo "VM cache updated: $success_count/${#vm_configs[@]} configurations"
+}
+
 # Interactive config selection
 select_config_interactively() {
     echo ""
@@ -254,6 +280,9 @@ if rebuild_system "$FLAKE_TARGET" "$CURRENT_SPEC"; then
     echo ""
     echo "✓ Configuration applied successfully!"
     [[ "$CURRENT_SPEC" == "none" ]] && echo "  (Running in base mode)"
+
+    # Pre-build VM configs to update virtiofs cache
+    prebuild_vm_configs
 else
     echo ""
     echo "✗ Configuration failed - see errors above"
