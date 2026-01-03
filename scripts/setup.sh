@@ -796,6 +796,46 @@ AUTOSTARTEOF
     success "Autostart script generated: $script_path"
 }
 
+# ========== PRE-BUILD VM CONFIGURATIONS ==========
+
+prebuild_vm_configs() {
+    log "Pre-building VM configurations (for virtiofs shared store)..."
+
+    cd "$PROJECT_DIR"
+
+    # VM configurations to pre-build
+    # These populate the host's /nix/store so VMs can use them via virtiofs
+    local vm_configs=(
+        "vm-pentest"
+        "vm-browsing"
+        "vm-comms"
+        "vm-dev"
+    )
+
+    local success_count=0
+    local total=${#vm_configs[@]}
+
+    for vm_config in "${vm_configs[@]}"; do
+        log "  Building $vm_config toplevel..."
+        if nix build ".#nixosConfigurations.${vm_config}.config.system.build.toplevel" --no-link 2>/dev/null; then
+            log "    [+] $vm_config cached"
+            ((success_count++))
+        else
+            warn "    [!] $vm_config failed (may not exist)"
+        fi
+    done
+
+    if [[ $success_count -eq $total ]]; then
+        success "All VM configurations pre-built ($success_count/$total)"
+    else
+        warn "Some VM configurations failed to build ($success_count/$total)"
+    fi
+
+    log ""
+    log "  VMs will now rebuild quickly using virtiofs shared /nix/store"
+    log "  Expected rebuild time: ~1-2 minutes (vs 15+ minutes without cache)"
+}
+
 # ========== BUILD SYSTEM ==========
 
 build_system() {
@@ -895,6 +935,9 @@ show_completion_summary() {
         echo "  [!] Not installed (run setup again or: nix build .#router-vm)"
     fi
     echo "  [i] Auto-starts on first boot into router mode"
+    echo ""
+    echo "VM Cache (virtiofs):"
+    echo "  [+] VM configurations pre-built in /nix/store"
     echo ""
     echo "========================================"
     echo "  ARCHITECTURE"
@@ -1058,6 +1101,7 @@ main() {
     generate_autostart_script
     git_stage_files "$machine_name"
     build_system "$machine_name"
+    prebuild_vm_configs
     show_completion_summary "$machine_name" "$cpu_platform" "$is_asus" "$username"
 }
 

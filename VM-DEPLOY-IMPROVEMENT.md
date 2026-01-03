@@ -2,9 +2,9 @@
 
 This document tracks improvements to VM deployment and update workflows in Hydrix.
 
-**Branch**: `vm-deploy-improvement`
+**Branch**: `vm-deploy-improvement` (merged to master)
 **Started**: 2026-01-01
-**Status**: Phase 2 Complete - virtiofs Working ✅
+**Status**: Complete - Merged to Master ✅
 
 ---
 
@@ -284,7 +284,32 @@ df -T /var/lib/libvirt/images
 
 ## Progress Log
 
-### 2026-01-03
+### 2026-01-03 (Benchmark Results)
+
+**Benchmark: Full VM Deployment + Rebuild**
+
+| Step | Time | Notes |
+|------|------|-------|
+| Pre-build VM toplevel on host | ~1s | Cached from previous build |
+| Build VM image | ~1s | Cached |
+| Deploy VM (qcow2 backing file) | ~2s | Instant overlay creation |
+| **Host total** | **~4s** | |
+| nixos-rebuild inside VM | **84s** | Most time spent cloning pentest tool repos |
+| **End-to-end total** | **~88s** | |
+
+**Comparison to old workflow:**
+- Old VM rebuild time: **15+ minutes** (re-downloading all packages)
+- New VM rebuild time: **84 seconds** (using virtiofs shared store)
+- **Improvement: ~10x faster**
+
+**What the rebuild downloaded:**
+- Only 32.4 MiB downloaded (vs 570+ MiB without shared store)
+- 185.2 MiB copied from host store via virtiofs
+- Most time spent cloning git repos (Havoc, SharpCollection, etc.)
+
+**Merged to master** - virtiofs shared store now available for all VMs.
+
+### 2026-01-03 (Earlier)
 
 - **Phase 2 Complete**: virtiofs shared /nix/store fully working
 - Fixed virtiofsd discovery: Added `binary.path=/run/current-system/sw/bin/virtiofsd` to virt-install
@@ -294,7 +319,6 @@ df -T /var/lib/libvirt/images
   - Instant VM disk creation (no copy, just overlay)
   - Saves disk space (only stores VM's changes)
 - Security analysis: virtiofs is safe for segmentation model (read-only, hypervisor-enforced)
-- **Next**: Pre-build VM configurations on host for optimal cache, update other VM profiles
 
 ### 2026-01-02
 
@@ -348,13 +372,16 @@ df -T /var/lib/libvirt/images
 
 ## Next Steps
 
-### Immediate
-1. **Pre-build VM configs on host** for optimal cache:
+### Completed
+- [x] Merge to master
+- [x] Benchmark and document results
+
+### Remaining
+1. **Update other VM profiles** (browsing-full.nix, comms-full.nix, dev-full.nix) to import shared-store.nix
+2. **Pre-build VM configs on host** for optimal cache:
    ```bash
    nix build .#nixosConfigurations.vm-pentest.config.system.build.toplevel --no-link
    ```
-2. **Update other VM profiles** (browsing-full.nix, comms-full.nix, dev-full.nix) to import shared-store.nix
-3. **Merge to master** when stable
 
 ### Future Improvements
 - Consider btrfs for `/var/lib/libvirt/images` for instant reflink copies
