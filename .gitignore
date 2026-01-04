@@ -5,6 +5,7 @@ router-vm-result
 base-image-result
 pentest-vm-image*
 browsing-vm-image*
+comms-vm-image*
 
 # Local configuration (secrets, user-specific settings)
 # See templates/local/ for examples
