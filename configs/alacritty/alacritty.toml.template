@@ -15,6 +15,8 @@ unfocused_hollow = false
 blink_timeout = 0
 blink_interval = 500
 style = { shape = "Underline", blinking = "Always" }
+# Cursor color is set dynamically via OSC 12 escape sequences from ~/.cache/wal/sequences
+# (sourced by fish on shell startup)
 
 [font]
 size = ${ALACRITTY_FONT_SIZE}
