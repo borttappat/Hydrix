@@ -225,11 +225,12 @@ set_from_resource $$al i3wm.color8 #ff0000
 set_from_resource $$c1 i3wm.color3 #f0f0f0
 set_From_resource $$c2 i3wm.color0 #f0f0f0
 
-# Window colors
-client.focused          $$fg     $$fg     $$fg     $$fg       
-client.focused_inactive $$c2     $$c2     $$c2     $$c2       
-client.unfocused        $$c2     $$c2     $$c2     $$c2       
-client.urgent           $$al     $$al     $$al     $$al       
+# Window colors (format: border background text indicator child_border)
+# Using ARGB format #AARRGGBB for transparency with picom
+client.focused          $$fg       $$fg       $$fg     $$fg       $$fg
+client.focused_inactive #00000000  #00000000  $$c2     #00000000  #00000000
+client.unfocused        #00000000  #00000000  $$c2     #00000000  #00000000
+client.urgent           $$al       $$al       $$al     $$al       $$al       
 
 # Polybar settings
 for_window [class="Polybar"] border pixel 0
