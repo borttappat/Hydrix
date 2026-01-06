@@ -66,10 +66,18 @@
       }];
     };
 
+    # Shared bridge (allows VM crosstalk)
+    interfaces.enp6s0 = {
+      ipv4.addresses = [{
+        address = "192.168.105.253";
+        prefixLength = 24;
+      }];
+    };
+
     nat = {
       enable = true;
       externalInterface = "";
-      internalInterfaces = [ "enp1s0" "enp2s0" "enp3s0" "enp4s0" "enp5s0" ];
+      internalInterfaces = [ "enp1s0" "enp2s0" "enp3s0" "enp4s0" "enp5s0" "enp6s0" ];
     };
 
     firewall = {
@@ -103,17 +111,20 @@
       ${pkgs.iptables}/bin/iptables -t nat -A POSTROUTING -s 192.168.102.0/24 -o "$WIFI_IFACE" -j MASQUERADE
       ${pkgs.iptables}/bin/iptables -t nat -A POSTROUTING -s 192.168.103.0/24 -o "$WIFI_IFACE" -j MASQUERADE
       ${pkgs.iptables}/bin/iptables -t nat -A POSTROUTING -s 192.168.104.0/24 -o "$WIFI_IFACE" -j MASQUERADE
+      ${pkgs.iptables}/bin/iptables -t nat -A POSTROUTING -s 192.168.105.0/24 -o "$WIFI_IFACE" -j MASQUERADE
 
       ${pkgs.iptables}/bin/iptables -A FORWARD -i enp1s0 -o "$WIFI_IFACE" -j ACCEPT
       ${pkgs.iptables}/bin/iptables -A FORWARD -i enp2s0 -o "$WIFI_IFACE" -j ACCEPT
       ${pkgs.iptables}/bin/iptables -A FORWARD -i enp3s0 -o "$WIFI_IFACE" -j ACCEPT
       ${pkgs.iptables}/bin/iptables -A FORWARD -i enp4s0 -o "$WIFI_IFACE" -j ACCEPT
       ${pkgs.iptables}/bin/iptables -A FORWARD -i enp5s0 -o "$WIFI_IFACE" -j ACCEPT
+      ${pkgs.iptables}/bin/iptables -A FORWARD -i enp6s0 -o "$WIFI_IFACE" -j ACCEPT
       ${pkgs.iptables}/bin/iptables -A FORWARD -i "$WIFI_IFACE" -o enp1s0 -m state --state RELATED,ESTABLISHED -j ACCEPT
       ${pkgs.iptables}/bin/iptables -A FORWARD -i "$WIFI_IFACE" -o enp2s0 -m state --state RELATED,ESTABLISHED -j ACCEPT
       ${pkgs.iptables}/bin/iptables -A FORWARD -i "$WIFI_IFACE" -o enp3s0 -m state --state RELATED,ESTABLISHED -j ACCEPT
       ${pkgs.iptables}/bin/iptables -A FORWARD -i "$WIFI_IFACE" -o enp4s0 -m state --state RELATED,ESTABLISHED -j ACCEPT
       ${pkgs.iptables}/bin/iptables -A FORWARD -i "$WIFI_IFACE" -o enp5s0 -m state --state RELATED,ESTABLISHED -j ACCEPT
+      ${pkgs.iptables}/bin/iptables -A FORWARD -i "$WIFI_IFACE" -o enp6s0 -m state --state RELATED,ESTABLISHED -j ACCEPT
     '';
   };
 
@@ -139,12 +150,13 @@
   services.dnsmasq = {
     enable = true;
     settings = {
-      interface = ["enp2s0" "enp3s0" "enp4s0" "enp5s0"];
+      interface = ["enp2s0" "enp3s0" "enp4s0" "enp5s0" "enp6s0"];
       dhcp-range = [
         "enp2s0,192.168.101.10,192.168.101.100,24h"
         "enp3s0,192.168.102.10,192.168.102.100,24h"
         "enp4s0,192.168.103.10,192.168.103.100,24h"
         "enp5s0,192.168.104.10,192.168.104.100,24h"
+        "enp6s0,192.168.105.10,192.168.105.100,24h"
       ];
       dhcp-option = [
         "enp2s0,option:router,192.168.101.253"
@@ -154,7 +166,9 @@
         "enp4s0,option:router,192.168.103.253"
         "enp4s0,option:dns-server,192.168.103.253"
         "enp5s0,option:router,192.168.104.253"
-        "entp5s0,option:dns-server,192.168.104.253"
+        "enp5s0,option:dns-server,192.168.104.253"
+        "enp6s0,option:router,192.168.105.253"
+        "enp6s0,option:dns-server,192.168.105.253"
       ];
       server = ["8.8.8.8" "1.1.1.1"];
       bind-interfaces = true;
@@ -168,12 +182,19 @@
     settings.PasswordAuthentication = __SSH_PASSWORD_AUTH__;
   };
 
+  # Auto-login for convenience (physical console only)
   services.getty.autologinUser = "__ROUTER_USER__";
 
   users.users.__ROUTER_USER__ = {
     isNormalUser = true;
-    password = "__ROUTER_PASSWORD__";
+    initialPassword = "__ROUTER_PASSWORD__";
     extraGroups = [ "wheel" "networkmanager" ];
     __SSH_KEYS__
+  };
+
+  # Security: Require password for sudo (router is public-facing)
+  security.sudo = {
+    enable = true;
+    wheelNeedsPassword = true;
   };
 }

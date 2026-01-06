@@ -27,6 +27,9 @@
   hydrix.vmType = "host";
   hydrix.colorscheme = "hydrix";  # Default colorscheme (see colorschemes/*.json)
 
+  # Set main user for virtualization permissions
+  virtualisation.mainUser = "{{USER}}";
+
   # Override hostname for this machine
   networking.hostName = lib.mkForce "{{MACHINE_NAME}}";
 
@@ -133,7 +136,7 @@
       # Check for router VM image
       if [ ! -f "''$VM_IMAGE" ]; then
         log "ERROR: Router VM image not found at ''$VM_IMAGE"
-        log "Run: nix build ~/Hydrix#router-vm && sudo cp result/nixos.qcow2 ''$VM_IMAGE"
+        log "Run: nix build ~/local-hydrix#router && sudo cp result/nixos.qcow2 ''$VM_IMAGE"
         exit 1
       fi
 
@@ -250,7 +253,7 @@
         ip -br addr
         echo ""
         echo "To return to router mode (requires reboot):"
-        echo "  sudo nixos-rebuild boot --flake ~/Hydrix#{{MACHINE_NAME}}"
+        echo "  sudo nixos-rebuild boot --flake ~/local-hydrix#{{MACHINE_NAME}}"
         echo "  sudo reboot"
       '')
     ];
@@ -380,9 +383,9 @@
       echo ""
 
       echo "Switching Modes (requires reboot for kernel changes):"
-      echo "  sudo nixos-rebuild boot --flake ~/Hydrix#{{MACHINE_NAME}}"
-      echo "  sudo nixos-rebuild boot --flake ~/Hydrix#{{MACHINE_NAME}} --specialisation fallback"
-      echo "  sudo nixos-rebuild boot --flake ~/Hydrix#{{MACHINE_NAME}} --specialisation lockdown"
+      echo "  sudo nixos-rebuild boot --flake ~/local-hydrix#{{MACHINE_NAME}}"
+      echo "  sudo nixos-rebuild boot --flake ~/local-hydrix#{{MACHINE_NAME}} --specialisation fallback"
+      echo "  sudo nixos-rebuild boot --flake ~/local-hydrix#{{MACHINE_NAME}} --specialisation lockdown"
     '')
 
     # Router mode status
