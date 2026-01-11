@@ -35,6 +35,11 @@ let
 
   routerUser = routerConfig.username or "user";
   routerHashedPassword = routerConfig.hashedPassword or null;
+
+  # WiFi credentials for automatic connection
+  wifiSSID = routerConfig.wifiSSID or "";
+  wifiPassword = routerConfig.wifiPassword or "";
+  hasWifiCredentials = wifiSSID != "" && wifiPassword != "";
 in {
   imports = [
     (modulesPath + "/profiles/qemu-guest.nix")
@@ -102,7 +107,36 @@ in {
       enableIPv6 = false;
       # Use NetworkManager for WiFi - it automatically handles WiFi connections
       # This is much simpler than wpa_supplicant which requires manual config files
-      networkmanager.enable = true;
+      networkmanager = {
+        enable = true;
+        # Pre-configure WiFi connection if credentials were provided during setup
+        ensureProfiles = lib.mkIf hasWifiCredentials {
+          profiles = {
+            "${wifiSSID}" = {
+              connection = {
+                id = wifiSSID;
+                type = "wifi";
+                autoconnect = "true";
+                autoconnect-priority = "100";
+              };
+              wifi = {
+                mode = "infrastructure";
+                ssid = wifiSSID;
+              };
+              wifi-security = {
+                key-mgmt = "wpa-psk";
+                psk = wifiPassword;
+              };
+              ipv4 = {
+                method = "auto";
+              };
+              ipv6 = {
+                method = "disabled";
+              };
+            };
+          };
+        };
+      };
       wireless.enable = false;  # Disable wpa_supplicant (NetworkManager handles WiFi)
 
       # WAN interface is detected dynamically at runtime by router-network-setup
