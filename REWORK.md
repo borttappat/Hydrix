@@ -229,15 +229,15 @@ The `build-vm.sh` script should handle this automatically.
 - [x] **3.6** Simplify flake.nix to single `host` entry (no per-machine entries)
 - [x] **3.7** Remove `update_flake()` from setup.sh (flake.nix never modified)
 
-### Phase 4: VM Build Integration
+### Phase 4: VM Build Integration ✅
 > Update build-vm.sh to use local/ and bake configs
 
-- [ ] **4.1** Update `build-vm.sh` to stage local files before build
-- [ ] **4.2** Add `--hostname` flag separate from `--name` (display name)
-- [ ] **4.3** Generate `local/vm-instance.nix` with hostname
-- [ ] **4.4** Generate per-VM credentials file in `local/vms/`
-- [ ] **4.5** Implement credential logging to `local/credentials/<vm-name>.json`
-- [ ] **4.6** Test VM build flow end-to-end
+- [x] **4.1** Update `build-vm.sh` to stage local files before build
+- [x] **4.2** Add `--hostname` flag separate from `--name` (display name)
+- [x] **4.3** Generate `local/vm-instance.nix` with hostname
+- [x] **4.4** Generate per-VM credentials file in `local/vms/`
+- [x] **4.5** Implement credential logging to `local/credentials/<vm-name>.json`
+- [x] **4.6** Test VM build flow end-to-end
 
 ### Phase 5: Display Configuration System
 > Implement per-font display configs
@@ -373,6 +373,17 @@ Track decisions that need to be made or questions that arise.
 
 ---
 
+## Future Investigations
+
+Items to explore after core rework is complete:
+
+| Topic | Description | Priority |
+|-------|-------------|----------|
+| BTRFS/ZFS + disko | Declarative disk setup with reflinks for instant image copies | Medium |
+| Minimal VM images | Investigate if smaller base images + virtiofs can speed up initial builds | Low |
+
+---
+
 ## File Changes Tracking
 
 ### New Files to Create
@@ -430,6 +441,33 @@ nix build .#router     # Build router VM image
 ---
 
 ## Progress Log
+
+### 2026-01-11 - Phase 4 Complete: VM Build Integration
+
+**Phase 4 is complete.** VMs now build with baked credentials from `local/` directory.
+
+**What works**:
+- `build-vm.sh --type pentest --name test1` prompts for password, generates secrets, builds VM
+- Secrets stored in `local/vms/<hostname>.nix`
+- Credentials reference saved to `local/credentials/<hostname>.json`
+- Reuse existing credentials for fast rebuilds (~6 seconds vs ~9 minutes)
+
+**Fixes made during Phase 4**:
+
+| File | Fix |
+|------|-----|
+| `modules/vm/bake-config.nix` | Added `chmod -R u+w $out` before mkdir (permission error) |
+| `modules/pentesting/burpsuite.nix` | Changed hardcoded `user` to `config.hydrix.username` |
+| `scripts/build-vm.sh` | Removed timestamps from generated nix files (enables caching) |
+| `scripts/build-vm.sh` | Added `check_existing_secrets()` for credential reuse flow |
+| `scripts/build-vm.sh` | Removed `FORCE_REBUILD=true` (let nix caching work) |
+
+**Build time optimization**:
+- First build with new credentials: ~9 minutes (creates disk image)
+- Rebuild with same credentials: ~6 seconds (nix cache hit)
+- Rebuilds inside VM via virtiofs: ~84 seconds (10x faster than without)
+
+---
 
 ### 2026-01-10 - Router VM Credentials from local/router.nix
 
