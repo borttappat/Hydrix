@@ -111,8 +111,8 @@
     script = ''
       set -euo pipefail
 
-      VM_NAME="router-vm"
-      VM_IMAGE="/var/lib/libvirt/images/router-vm.qcow2"
+      VM_NAME="router"
+      VM_IMAGE="/var/lib/libvirt/images/router.qcow2"
       PCI_ADDR="{{PRIMARY_PCI_SHORT}}"
 
       log() { echo "[router-vm-autostart] ''$*"; }
@@ -311,7 +311,7 @@
         echo "===================="
         echo ""
         echo "Host Internet: DISABLED (blocked by firewall)"
-        echo "Router VM: $(sudo virsh domstate router-vm 2>/dev/null || echo 'Not running')"
+        echo "Router VM: $(sudo virsh domstate router 2>/dev/null || echo 'Not running')"
         echo "NIC Passthrough: {{PRIMARY_PCI}} ({{PRIMARY_ID}})"
         echo ""
         echo "Network (same as router mode, host isolated):"
@@ -373,7 +373,7 @@
       echo "  WiFi:    $(ip link show {{PRIMARY_INTERFACE}} 2>/dev/null && echo 'Present (fallback mode?)' || echo 'Passed to VM')"
       echo ""
 
-      echo "Router VM: $(sudo virsh domstate router-vm 2>/dev/null || echo 'Not running')"
+      echo "Router VM: $(sudo virsh domstate router 2>/dev/null || echo 'Not running')"
       echo ""
 
       echo "Available Modes:"
@@ -393,7 +393,7 @@
       echo "ROUTER MODE Status"
       echo "=================="
       echo ""
-      echo "Router VM: $(sudo virsh domstate router-vm 2>/dev/null || echo 'Not running')"
+      echo "Router VM: $(sudo virsh domstate router 2>/dev/null || echo 'Not running')"
       echo "Management IP: 192.168.100.1 (host) / 192.168.100.253 (router)"
       echo ""
       echo "Bridges:"

@@ -110,8 +110,8 @@
     script = ''
       set -euo pipefail
 
-      VM_NAME="router-vm"
-      VM_IMAGE="/var/lib/libvirt/images/router-vm.qcow2"
+      VM_NAME="router"
+      VM_IMAGE="/var/lib/libvirt/images/router.qcow2"
       PCI_ADDR="00:14.3"
 
       log() { echo "[router-vm-autostart] ''$*"; }
@@ -135,7 +135,7 @@
       # Check for router VM image
       if [ ! -f "''$VM_IMAGE" ]; then
         log "ERROR: Router VM image not found at ''$VM_IMAGE"
-        log "Run: nix build ~/Hydrix#router-vm && sudo cp result/nixos.qcow2 ''$VM_IMAGE"
+        log "Run: nix build ~/Hydrix#router && sudo cp result/nixos.qcow2 ''$VM_IMAGE"
         exit 1
       fi
 
@@ -310,7 +310,7 @@
         echo "===================="
         echo ""
         echo "Host Internet: DISABLED (blocked by firewall)"
-        echo "Router VM: $(sudo virsh domstate router-vm 2>/dev/null || echo 'Not running')"
+        echo "Router VM: $(sudo virsh domstate router 2>/dev/null || echo 'Not running')"
         echo "NIC Passthrough: 0000:00:14.3 (8086:a840)"
         echo ""
         echo "Network (same as router mode, host isolated):"
@@ -372,7 +372,7 @@
       echo "  WiFi:    $(ip link show wlo1 2>/dev/null && echo 'Present (fallback mode?)' || echo 'Passed to VM')"
       echo ""
 
-      echo "Router VM: $(sudo virsh domstate router-vm 2>/dev/null || echo 'Not running')"
+      echo "Router VM: $(sudo virsh domstate router 2>/dev/null || echo 'Not running')"
       echo ""
 
       echo "Available Modes:"
@@ -392,7 +392,7 @@
       echo "ROUTER MODE Status"
       echo "=================="
       echo ""
-      echo "Router VM: $(sudo virsh domstate router-vm 2>/dev/null || echo 'Not running')"
+      echo "Router VM: $(sudo virsh domstate router 2>/dev/null || echo 'Not running')"
       echo "Management IP: 192.168.100.1 (host) / 192.168.100.253 (router)"
       echo ""
       echo "Bridges:"
