@@ -333,10 +333,9 @@ generate_router_config() {
 
     mkdir -p "$local_dir"
 
-    # Check if router.nix already exists
+    # Always prompt for password during setup (setup is typically run once)
     if [[ -f "$router_file" ]]; then
-        warn "local/router.nix already exists - skipping (delete to regenerate)"
-        return
+        warn "local/router.nix exists - will be overwritten with new credentials"
     fi
 
     log ""
@@ -556,13 +555,13 @@ generate_machine_profile() {
     if [[ "$cpu_platform" == "intel" ]]; then
         hw_imports="${hw_imports}
     # Intel hardware support (graphics, microcode, thermald)
-    ../modules/base/hardware/intel.nix"
+    ../../modules/base/hardware/intel.nix"
         log "  [+] Including Intel hardware module"
     fi
     if [[ "$is_asus" == "true" ]]; then
         hw_imports="${hw_imports}
     # ASUS hardware support (asusd, battery management)
-    ../modules/base/hardware/asus.nix"
+    ../../modules/base/hardware/asus.nix"
         log "  [+] Including ASUS hardware module"
     fi
 
