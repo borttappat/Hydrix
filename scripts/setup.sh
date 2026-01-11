@@ -601,7 +601,7 @@ build_router_vm() {
 
     cd "$PROJECT_DIR"
 
-    local libvirt_image="/var/lib/libvirt/images/router-vm.qcow2"
+    local libvirt_image="/var/lib/libvirt/images/router.qcow2"
 
     # Check if router VM already exists in libvirt storage (unless force rebuild)
     if [[ "$FORCE_REBUILD" != true ]] && [[ -f "$libvirt_image" ]]; then
@@ -615,36 +615,36 @@ build_router_vm() {
     # Force rebuild - remove existing image
     if [[ "$FORCE_REBUILD" == true ]]; then
         log "Force rebuild requested - removing cached images..."
-        rm -f "router-vm-result" 2>/dev/null || true
+        rm -f "router-result" 2>/dev/null || true
         sudo rm -f "$libvirt_image" 2>/dev/null || true
     fi
 
     # Check if we have a cached build (and not forcing)
-    if [[ "$FORCE_REBUILD" != true ]] && [[ -f "router-vm-result/nixos.qcow2" ]]; then
+    if [[ "$FORCE_REBUILD" != true ]] && [[ -f "router-result/nixos.qcow2" ]]; then
         local size
-        size=$(du -h router-vm-result/nixos.qcow2 | cut -f1)
+        size=$(du -h router-result/nixos.qcow2 | cut -f1)
         log "Using cached router VM build: $size"
     else
         log "Building router VM (this may take several minutes)..."
 
         # Use nix-shell to ensure virtiofsd is available for nixos-generators qcow format
-        if ! nix-shell -p virtiofsd --run "nix build .#router-vm --out-link router-vm-result"; then
+        if ! nix-shell -p virtiofsd --run "nix build .#router --out-link router-result"; then
             error "Router VM build failed"
         fi
 
-        if [[ ! -f "router-vm-result/nixos.qcow2" ]]; then
+        if [[ ! -f "router-result/nixos.qcow2" ]]; then
             error "Router VM build failed - no qcow2 found"
         fi
 
         local size
-        size=$(du -h router-vm-result/nixos.qcow2 | cut -f1)
+        size=$(du -h router-result/nixos.qcow2 | cut -f1)
         success "Router VM built: $size"
     fi
 
     # Copy to libvirt storage
     log "Installing router VM image to libvirt storage..."
     sudo mkdir -p /var/lib/libvirt/images
-    sudo cp "router-vm-result/nixos.qcow2" "$libvirt_image"
+    sudo cp "router-result/nixos.qcow2" "$libvirt_image"
     sudo chmod 644 "$libvirt_image"
 
     local final_size
@@ -659,7 +659,7 @@ generate_autostart_script() {
 
     mkdir -p "$GENERATED_DIR/scripts"
 
-    local script_path="$GENERATED_DIR/scripts/autostart-router-vm.sh"
+    local script_path="$GENERATED_DIR/scripts/autostart-router.sh"
 
     # Note: This script is kept for backwards compatibility but the actual
     # autostart logic is now embedded in the specialisation systemd services.
@@ -679,8 +679,8 @@ VIRSH="/run/current-system/sw/bin/virsh"
 detect_router_vm() {
     if $VIRSH --connect qemu:///system list --all 2>/dev/null | grep -q "lockdown-router"; then
         echo "lockdown-router"
-    elif $VIRSH --connect qemu:///system list --all 2>/dev/null | grep -q "router-vm"; then
-        echo "router-vm"
+    elif $VIRSH --connect qemu:///system list --all 2>/dev/null | grep -q "router"; then
+        echo "router"
     else
         echo ""
     fi
@@ -812,9 +812,9 @@ git_stage_files() {
     cd "$PROJECT_DIR"
 
     # Stage generated scripts (committed to git)
-    if [[ -f "generated/scripts/autostart-router-vm.sh" ]]; then
-        git add "generated/scripts/autostart-router-vm.sh" 2>/dev/null && \
-            log "  [+] generated/scripts/autostart-router-vm.sh" || true
+    if [[ -f "generated/scripts/autostart-router.sh" ]]; then
+        git add "generated/scripts/autostart-router.sh" 2>/dev/null && \
+            log "  [+] generated/scripts/autostart-router.sh" || true
     fi
 
     # Stage local files with -f (gitignored but needed for nix)
@@ -872,10 +872,10 @@ show_completion_summary() {
     echo "  [i] flake.nix has ONE generic 'host' entry - no per-machine entries"
     echo ""
     echo "Router VM:"
-    if [[ -f "/var/lib/libvirt/images/router-vm.qcow2" ]]; then
+    if [[ -f "/var/lib/libvirt/images/router.qcow2" ]]; then
         local size
-        size=$(sudo du -h "/var/lib/libvirt/images/router-vm.qcow2" | cut -f1)
-        echo "  [+] Installed: /var/lib/libvirt/images/router-vm.qcow2 ($size)"
+        size=$(sudo du -h "/var/lib/libvirt/images/router.qcow2" | cut -f1)
+        echo "  [+] Installed: /var/lib/libvirt/images/router.qcow2 ($size)"
     else
         echo "  [!] Not installed (run setup again or: nix build .#router)"
     fi
