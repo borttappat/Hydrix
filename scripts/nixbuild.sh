@@ -86,6 +86,12 @@ stage_local_files() {
     echo "  Staged $files_staged local files"
 }
 
+# Unstage local files after build (prevent accidental commits)
+unstage_local_files() {
+    cd "$FLAKE_DIR"
+    git reset HEAD -- local/ 2>/dev/null || true
+}
+
 # Rebuild the system
 rebuild_system() {
     local FLAKE_TARGET="$1"
@@ -203,6 +209,9 @@ fi
 echo ""
 
 if rebuild_system "$FLAKE_TARGET" "$CURRENT_SPEC"; then
+    # Unstage local files to prevent accidental commits
+    unstage_local_files
+
     echo ""
     echo "Configuration applied successfully!"
     [[ -z "$CURRENT_SPEC" ]] && echo "  (Running in base mode)"
@@ -210,6 +219,9 @@ if rebuild_system "$FLAKE_TARGET" "$CURRENT_SPEC"; then
     # Pre-build VM configs to update virtiofs cache
     prebuild_vm_configs
 else
+    # Unstage local files even on failure
+    unstage_local_files
+
     echo ""
     echo "Configuration failed - see errors above"
     exit 1

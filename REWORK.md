@@ -417,6 +417,58 @@ Items to explore after core rework is complete:
 - [x] `profiles/machines/zen.nix` (moved to `local/machines/host.nix`)
 - [x] Per-machine flake entries like `zen` (replaced by single `host` entry)
 
+#### Router Module Cleanup (Pending)
+
+**Analysis Date**: 2026-01-11
+
+There are 4 router-related files, but only `router-vm-unified.nix` is used:
+
+| File | Status | Reason |
+|------|--------|--------|
+| `modules/router-vm-unified.nix` | **KEEP** | Used by `flake.nix:214` for `nix build .#router` |
+| `modules/router-vm-config.nix` | **DELETE** | Legacy simple router - superseded by unified |
+| `modules/lockdown/router-vm-config.nix` | **DELETE** | Legacy lockdown router - merged into unified |
+| `templates/router-vm-config.nix.template` | **DELETE** | Unused - setup.sh creates `local/router.nix` directly |
+
+**Why `router-vm-unified.nix` replaces all others:**
+- Auto-detects mode at boot (standard 192.168.x.x vs lockdown 10.100.x.x)
+- Reads credentials from `local/router.nix` (no hardcoded passwords)
+- Uses nftables with proper network isolation rules
+- Supports 6 bridges including br-shared for VM crosstalk
+- Dynamic dnsmasq configuration based on detected mode
+
+**Why the legacy files are obsolete:**
+
+1. **`router-vm-config.nix`**: Hardcoded 192.168.x.x only, uses iptables, only 5 interfaces, hardcoded `user`/`router` credentials
+
+2. **`lockdown/router-vm-config.nix`**: Hardcoded 10.100.x.x only, imports separate `vpn-routing.nix`, different interface ordering, hardcoded credentials
+
+3. **`templates/router-vm-config.nix.template`**: Has placeholders (`__ROUTER_USER__` etc.) but **setup.sh doesn't use it** - it generates `local/router.nix` directly which `router-vm-unified.nix` imports
+
+**Verification**: `setup.sh:719` runs `nix build .#router` → `flake.nix:214` uses only `router-vm-unified.nix`
+
+- [ ] Delete `modules/router-vm-config.nix`
+- [ ] Delete `templates/router-vm-config.nix.template`
+
+#### Entire `modules/lockdown/` Directory (Pending)
+
+The entire `modules/lockdown/` directory appears to be orphaned:
+
+| File | Status | Reason |
+|------|--------|--------|
+| `router-vm-config.nix` | **DELETE** | Superseded by `router-vm-unified.nix` |
+| `vpn-routing.nix` | **DELETE** | Only imported by deleted router-vm-config.nix |
+| `host-lockdown.nix` | **DELETE** | Not imported anywhere (only in comments/docs) |
+| `bridges.nix` | **DELETE** | Only imported by host-lockdown.nix |
+
+**Why it's all orphaned:**
+- Host-side lockdown is now defined directly in `templates/machine-profile-full.nix.template:266` as a specialisation
+- Router lockdown mode is handled by `router-vm-unified.nix` with auto-detection
+- No actual imports of these files exist in the codebase
+
+- [ ] Delete entire `modules/lockdown/` directory
+- [ ] Update `HYDRIX-GUIDE.md` to remove references to deleted files
+
 ### Flake Cleanup - Simplified Naming
 
 **Remove** (obsolete base/minimal images):

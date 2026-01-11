@@ -1115,6 +1115,10 @@ main() {
     generate_machine_profile "$machine_name" "$cpu_platform" "$is_asus" "$username"
     # Note: No flake.nix update needed - uses generic #host entry
 
+    # Stage local/router.nix BEFORE building router VM (nix needs to see it)
+    log "Staging router config for nix visibility..."
+    git add -f local/router.nix 2>/dev/null || true
+
     if [[ "$SKIP_ROUTER" == true ]]; then
         log "Skipping router VM build (--skip-router)"
     else
