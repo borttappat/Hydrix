@@ -3,6 +3,8 @@ set -euo pipefail
 
 readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+readonly LOCAL_DIR="$PROJECT_DIR/local"
+readonly VMS_DIR="$LOCAL_DIR/vms"
 
 # Base image paths (set based on VM type)
 BASE_IMAGE_RESULT=""
@@ -26,6 +28,11 @@ VM_BRIDGE=""  # Will be auto-detected based on mode
 VM_MODE="auto"  # auto, standard, or lockdown
 FORCE_REBUILD=false
 SHARED_STORE=true  # Enable virtiofs shared /nix/store by default
+
+# User configuration (new parameters for baked + orphaned model)
+VM_USER=""         # Username inside VM (default: current user)
+VM_PASSWORD=""     # Will be prompted if not provided
+VM_HOSTNAME=""     # VM's internal hostname (default: <type>-<name>)
 
 # Bridge mappings (unified naming - same bridges used in all modes)
 # Standard mode: 192.168.x.x subnets
@@ -71,11 +78,16 @@ print_usage() {
 Usage: $0 --type TYPE --name NAME [OPTIONS]
 
 Hydrix VM Deployment System
-Builds universal base image and deploys type-specific VMs
+Builds VM images with baked-in configuration (orphaned model)
 
 Required Arguments:
   --type TYPE           VM type: pentest, comms, browsing, dev
   --name NAME           VM instance name (e.g., google, signal, leisure, rust)
+
+User Configuration:
+  --user USERNAME      Username inside VM (default: current user)
+  --hostname HOSTNAME  VM's internal hostname (default: <type>-<name>)
+  --password PASSWORD  User password (will prompt if not provided)
 
 Optional Arguments:
   --force-rebuild       Rebuild base image even if it exists
@@ -115,8 +127,11 @@ Host System:
   RAM: ${HOST_RAM_MB}MB (~$((HOST_RAM_MB / 1024))GB)
 
 Examples:
-  # Deploy pentest VM (auto-detects mode, uses isolated br-pentest)
+  # Deploy pentest VM with default settings
   $0 --type pentest --name google
+
+  # Deploy with custom username and password
+  $0 --type pentest --name htb --user alice
 
   # Deploy for lockdown mode explicitly
   $0 --type pentest --name google --mode lockdown
@@ -124,15 +139,22 @@ Examples:
   # Deploy a dev VM on the shared bridge (allows crosstalk with other VMs)
   $0 --type dev --name shared-rust --bridge br-shared
 
-  # Deploy with custom bridge
-  $0 --type dev --name rust --bridge br-dev
+  # Deploy with custom hostname (different from display name)
+  $0 --type pentest --name client-engagement --hostname target-audit
 
-Workflow:
-  1. Check if base image exists (builds if missing)
-  2. Auto-detect network mode (standard vs lockdown)
-  3. Calculate resources based on VM type
-  4. Create VM with hostname "<type>-<name>"
-  5. First boot: shaping service applies full profile
+Workflow (Baked + Orphaned Model):
+  1. Prompt for password (if not provided)
+  2. Generate secrets file (local/vms/<hostname>.nix)
+  3. Generate instance config (local/vm-instance.nix)
+  4. Build VM image with baked-in configuration
+  5. Deploy VM to libvirt
+  6. Clean up instance config (secrets are preserved)
+
+  The VM is self-contained after deployment:
+  - Config baked into /home/<user>/Hydrix
+  - No need to pull from git
+  - Rebuilds use local baked config
+  - virtiofs provides fast package access
 
 EOF
     exit 0
@@ -145,25 +167,25 @@ get_resource_allocation() {
     case "$type" in
         pentest)
             percent=75
-            BASE_IMAGE_FLAKE="${type}-vm-full"
+            BASE_IMAGE_FLAKE="${type}"
             BASE_IMAGE_RESULT="$PROJECT_DIR/${type}-vm-image/nixos.qcow2"
             log "Pentest VM - Full image, high performance (75%)"
             ;;
         dev)
             percent=75
-            BASE_IMAGE_FLAKE="${type}-vm-full"
+            BASE_IMAGE_FLAKE="${type}"
             BASE_IMAGE_RESULT="$PROJECT_DIR/${type}-vm-image/nixos.qcow2"
             log "Dev VM - Full image, high performance (75%)"
             ;;
         browsing)
             percent=50
-            BASE_IMAGE_FLAKE="${type}-vm-full"
+            BASE_IMAGE_FLAKE="${type}"
             BASE_IMAGE_RESULT="$PROJECT_DIR/${type}-vm-image/nixos.qcow2"
             log "Browsing VM - Full image (50%)"
             ;;
         comms)
             percent=25
-            BASE_IMAGE_FLAKE="${type}-vm-full"
+            BASE_IMAGE_FLAKE="${type}"
             BASE_IMAGE_RESULT="$PROJECT_DIR/${type}-vm-image/nixos.qcow2"
             log "Comms VM - Full image, light allocation (25%)"
             ;;
@@ -205,6 +227,21 @@ parse_args() {
             --name)
                 [[ -z "${2:-}" ]] && error "--name requires a value"
                 VM_NAME="$2"
+                shift 2
+                ;;
+            --user)
+                [[ -z "${2:-}" ]] && error "--user requires a value"
+                VM_USER="$2"
+                shift 2
+                ;;
+            --hostname)
+                [[ -z "${2:-}" ]] && error "--hostname requires a value"
+                VM_HOSTNAME="$2"
+                shift 2
+                ;;
+            --password)
+                [[ -z "${2:-}" ]] && error "--password requires a value"
+                VM_PASSWORD="$2"
                 shift 2
                 ;;
             --disk)
@@ -251,6 +288,20 @@ parse_args() {
             error "Invalid VM type: $VM_TYPE. Valid types: pentest, comms, browsing, dev"
             ;;
     esac
+
+    # Set defaults for user configuration
+    # Detect current user (prefer SUDO_USER if running with sudo, else USER)
+    # Use ${VAR:-} syntax to handle unset variables with set -u
+    if [[ -z "$VM_USER" ]]; then
+        if [[ -n "${SUDO_USER:-}" ]]; then
+            VM_USER="$SUDO_USER"
+        elif [[ -n "${USER:-}" && "${USER:-}" != "root" ]]; then
+            VM_USER="$USER"
+        else
+            VM_USER="user"
+        fi
+    fi
+    [[ -z "$VM_HOSTNAME" ]] && VM_HOSTNAME="${VM_TYPE}-${VM_NAME}"
 }
 
 check_dependencies() {
@@ -277,6 +328,182 @@ check_dependencies() {
     else
         log "WARNING: KVM not available, performance may be limited"
     fi
+}
+
+# ===== Credential and Config Generation Functions =====
+
+prompt_password() {
+    log "=== User Configuration ==="
+    log "Username: $VM_USER"
+    log "Hostname: $VM_HOSTNAME"
+
+    if [[ -z "$VM_PASSWORD" ]]; then
+        echo ""
+        echo "Enter password for VM user '$VM_USER':"
+        read -s -p "Password: " VM_PASSWORD
+        echo ""
+        read -s -p "Confirm password: " password_confirm
+        echo ""
+
+        if [[ "$VM_PASSWORD" != "$password_confirm" ]]; then
+            error "Passwords do not match"
+        fi
+
+        if [[ -z "$VM_PASSWORD" ]]; then
+            log "No password entered, using default password 'user'"
+            VM_PASSWORD="user"
+        fi
+    fi
+}
+
+generate_password_hash() {
+    log "Generating password hash..."
+    # Use mkpasswd to generate SHA-512 hash
+    if command -v mkpasswd &>/dev/null; then
+        VM_PASSWORD_HASH=$(echo "$VM_PASSWORD" | mkpasswd -m sha-512 -s)
+    else
+        # Fallback using openssl
+        local salt=$(openssl rand -base64 16 | tr -dc 'a-zA-Z0-9' | head -c 16)
+        VM_PASSWORD_HASH=$(openssl passwd -6 -salt "$salt" "$VM_PASSWORD")
+    fi
+
+    if [[ -z "$VM_PASSWORD_HASH" ]]; then
+        error "Failed to generate password hash"
+    fi
+}
+
+generate_secrets_file() {
+    log "=== Generating Secrets File ==="
+
+    # Ensure directories exist
+    mkdir -p "$VMS_DIR"
+
+    local secrets_file="$VMS_DIR/${VM_HOSTNAME}.nix"
+
+    cat > "$secrets_file" << EOF
+# VM Secrets - Generated by build-vm.sh
+# VM: ${VM_HOSTNAME}
+# Type: ${VM_TYPE}
+# Display Name: ${VM_NAME}
+# Generated: $(date -Iseconds)
+#
+# This file is LOCAL ONLY - not committed to git
+# Used at build time and for VM rebuilds
+
+{
+  # VM user account
+  username = "${VM_USER}";
+
+  # Password hash (SHA-512)
+  hashedPassword = "${VM_PASSWORD_HASH}";
+
+  # VM hostname (set in the VM's /etc/hostname)
+  hostname = "${VM_HOSTNAME}";
+
+  # VM type (pentest, browsing, comms, dev)
+  vmType = "${VM_TYPE}";
+
+  # Network bridge
+  bridge = "${VM_BRIDGE}";
+}
+EOF
+
+    log "Secrets file created: $secrets_file"
+}
+
+generate_instance_config() {
+    log "=== Generating Instance Config ==="
+
+    # Create the instance config that profiles import
+    local instance_file="$LOCAL_DIR/vm-instance.nix"
+
+    cat > "$instance_file" << EOF
+# VM Instance Configuration - Generated by build-vm.sh
+# This file is temporary and used during image build
+# Generated: $(date -Iseconds)
+#
+# After build, this file is baked into the VM image
+# and can be removed from the host
+
+{
+  # VM hostname (sets networking.hostName)
+  hostname = "${VM_HOSTNAME}";
+
+  # VM username (used by users-vm.nix)
+  username = "${VM_USER}";
+}
+EOF
+
+    log "Instance config created: $instance_file"
+}
+
+stage_local_files() {
+    log "=== Staging Local Files for Nix ==="
+
+    # Since local/ is gitignored, we need to stage files with -f for nix to see them
+    # This doesn't commit them, just makes them visible to nix flakes
+    cd "$PROJECT_DIR"
+
+    local files_to_stage=(
+        "local/vm-instance.nix"
+        "local/shared.nix"
+        "local/host.nix"
+        "local/vms/${VM_HOSTNAME}.nix"
+    )
+
+    for file in "${files_to_stage[@]}"; do
+        if [[ -f "$file" ]]; then
+            git add -f "$file" 2>/dev/null || true
+            log "Staged: $file"
+        fi
+    done
+
+    log "Local files staged for nix visibility"
+}
+
+unstage_local_files() {
+    log "=== Unstaging Local Files ==="
+
+    cd "$PROJECT_DIR"
+
+    # Unstage the temporary files (but keep secrets staged for potential rebuilds)
+    git reset HEAD local/vm-instance.nix 2>/dev/null || true
+
+    log "Temporary files unstaged"
+}
+
+cleanup_instance_config() {
+    local instance_file="$LOCAL_DIR/vm-instance.nix"
+
+    if [[ -f "$instance_file" ]]; then
+        log "Cleaning up instance config..."
+        rm -f "$instance_file"
+    fi
+}
+
+save_credentials_reference() {
+    log "=== Saving Credentials Reference ==="
+
+    # Create credentials directory
+    local creds_dir="$LOCAL_DIR/credentials"
+    mkdir -p "$creds_dir"
+
+    local creds_file="$creds_dir/${VM_HOSTNAME}.json"
+
+    cat > "$creds_file" << EOF
+{
+  "hostname": "${VM_HOSTNAME}",
+  "displayName": "${VM_NAME}",
+  "vmType": "${VM_TYPE}",
+  "username": "${VM_USER}",
+  "bridge": "${VM_BRIDGE}",
+  "created": "$(date -Iseconds)",
+  "secretsFile": "${VMS_DIR}/${VM_HOSTNAME}.nix",
+  "note": "Password is stored as hash in secrets file. Original password not saved."
+}
+EOF
+
+    log "Credentials reference saved: $creds_file"
 }
 
 check_base_image() {
@@ -328,14 +555,14 @@ build_base_image() {
 create_vm_disk() {
     log "=== Creating VM Disk ==="
 
-    local vm_hostname="${VM_TYPE}-${VM_NAME}"
-    local target_image="/var/lib/libvirt/images/$vm_hostname.qcow2"
+    # Use VM_HOSTNAME for the libvirt domain name (what the host sees)
+    local target_image="/var/lib/libvirt/images/${VM_HOSTNAME}.qcow2"
 
     # Remove existing VM if it exists
-    if sudo virsh --connect qemu:///system list --all | grep -q "\\b$vm_hostname\\b"; then
-        log "Removing existing VM: $vm_hostname"
-        sudo virsh --connect qemu:///system destroy "$vm_hostname" 2>/dev/null || true
-        sudo virsh --connect qemu:///system undefine "$vm_hostname" --nvram 2>/dev/null || true
+    if sudo virsh --connect qemu:///system list --all | grep -q "\\b${VM_HOSTNAME}\\b"; then
+        log "Removing existing VM: ${VM_HOSTNAME}"
+        sudo virsh --connect qemu:///system destroy "${VM_HOSTNAME}" 2>/dev/null || true
+        sudo virsh --connect qemu:///system undefine "${VM_HOSTNAME}" --nvram 2>/dev/null || true
     fi
 
     # Remove existing disk
@@ -350,11 +577,10 @@ create_vm_disk() {
     # Use qcow2 backing file - creates thin overlay instead of full copy
     # The base image stays read-only in nix store, VM writes go to overlay
     sudo qemu-img create -f qcow2 -b "$BASE_IMAGE_RESULT" -F qcow2 "$target_image" "$VM_DISK_SIZE"
-    # Future: on btrfs/zfs, could use: sudo cp --reflink=auto "$BASE_IMAGE_RESULT" "$target_image"
 
-    # Hostname is baked into the base image (e.g., "pentest-vm")
-    # The base image already has the correct hostname set at build time
-    log "Base image hostname: ${VM_TYPE}-vm (baked in at build time)"
+    # Hostname is baked into the image via vm-instance.nix
+    log "VM hostname (baked in): ${VM_HOSTNAME}"
+    log "VM username (baked in): ${VM_USER}"
 
     # Set permissions
     if id "libvirt-qemu" >/dev/null 2>&1; then
@@ -369,8 +595,7 @@ create_vm_disk() {
 deploy_vm() {
     log "=== Deploying VM ==="
 
-    local vm_hostname="${VM_TYPE}-${VM_NAME}"
-    local target_image="/var/lib/libvirt/images/$vm_hostname.qcow2"
+    local target_image="/var/lib/libvirt/images/${VM_HOSTNAME}.qcow2"
 
     # Check bridge
     if ! sudo virsh net-list --all | grep -q "\\b$VM_BRIDGE\\b" && ! ip link show "$VM_BRIDGE" >/dev/null 2>&1; then
@@ -379,7 +604,8 @@ deploy_vm() {
     fi
 
     log "VM Configuration:"
-    log "  Hostname: $vm_hostname"
+    log "  Hostname: $VM_HOSTNAME"
+    log "  Username: $VM_USER"
     log "  Type: $VM_TYPE"
     log "  Resources: ${VM_VCPUS}/${HOST_CORES} cores, ${VM_MEMORY}MB/${HOST_RAM_MB}MB RAM"
     log "  Storage: $VM_DISK_SIZE disk"
@@ -390,7 +616,7 @@ deploy_vm() {
     # Build virt-install arguments
     local virt_args=(
         --connect qemu:///system
-        --name="$vm_hostname"
+        --name="$VM_HOSTNAME"
         --memory="$VM_MEMORY"
         --vcpus="$VM_VCPUS"
         --cpu host-passthrough
@@ -425,29 +651,28 @@ deploy_vm() {
 }
 
 show_info() {
-    local vm_hostname="${VM_TYPE}-${VM_NAME}"
-
     cat << EOF
 
 === VM Ready! ===
 
 VM Details:
-  Hostname: $vm_hostname
+  Hostname: $VM_HOSTNAME
+  Username: $VM_USER
   Type: $VM_TYPE
   Mode: $VM_MODE
   Bridge: $VM_BRIDGE
   Resources: ${VM_VCPUS}/${HOST_CORES} cores, ${VM_MEMORY}MB/${HOST_RAM_MB}MB RAM
   Allocation: $((VM_VCPUS * 100 / HOST_CORES))% CPU, $((VM_MEMORY * 100 / HOST_RAM_MB))% RAM
 
-First Boot Process:
-  1. VM boots with base image (hostname: ${VM_TYPE}-vm)
-  2. Hydrix repo is copied to /home/traum/Hydrix
-  3. Hardware configuration is auto-generated
-  4. Shaping service detects hostname "${VM_TYPE}-vm"
-  5. Extracts type "$VM_TYPE" from hostname
-  6. Runs: nixbuild-vm (rebuilds with flake .#vm-$VM_TYPE)
-  7. System rebuilds with full $VM_TYPE profile
-  8. Ready to use with all $VM_TYPE-specific packages and configs
+Baked Configuration:
+  - Config location in VM: /home/${VM_USER}/Hydrix
+  - Secrets file on host: ${VMS_DIR}/${VM_HOSTNAME}.nix
+  - Credentials ref: ${LOCAL_DIR}/credentials/${VM_HOSTNAME}.json
+
+First Boot:
+  1. VM boots with all configuration baked in
+  2. User '$VM_USER' can login with the password you set
+  3. Run 'rebuild' to apply any local config changes
 
 EOF
 
@@ -495,18 +720,18 @@ EOF
 
     cat << EOF
 Connection:
-  virt-manager → $vm_hostname
-  virt-viewer qemu:///system $vm_hostname
+  virt-manager → $VM_HOSTNAME
+  virt-viewer qemu:///system $VM_HOSTNAME
 
 Credentials:
-  Username: traum
-  Password: (set in users.nix)
+  Username: $VM_USER
+  Password: (what you entered during setup)
 
 Management:
-  Start:   sudo virsh start $vm_hostname
-  Stop:    sudo virsh shutdown $vm_hostname
-  Console: sudo virsh console $vm_hostname
-  Delete:  sudo virsh undefine $vm_hostname --nvram
+  Start:   sudo virsh start $VM_HOSTNAME
+  Stop:    sudo virsh shutdown $VM_HOSTNAME
+  Console: sudo virsh console $VM_HOSTNAME
+  Delete:  sudo virsh undefine $VM_HOSTNAME --nvram
 
 EOF
 }
@@ -515,7 +740,7 @@ main() {
     parse_args "$@"
 
     log "=== Hydrix VM Deployment System ==="
-    log "Deploying: ${VM_TYPE}-${VM_NAME}"
+    log "Deploying: ${VM_TYPE}-${VM_NAME} (hostname: ${VM_HOSTNAME})"
 
     check_dependencies
 
@@ -541,10 +766,35 @@ main() {
   sudo nixos-rebuild switch --specialisation maximalism"
     fi
 
+    # === Credential and Config Generation (BEFORE build) ===
+    # These must be generated before building so they're baked into the image
+    prompt_password
+    generate_password_hash
+    generate_secrets_file
+    generate_instance_config
+
+    # Stage local files so nix can see them (they're gitignored)
+    stage_local_files
+
+    # === Build Image ===
+    # The image will now include the generated secrets and instance config
     get_resource_allocation "$VM_TYPE"
+
+    # Force rebuild since we have new secrets/config
+    # TODO: Could be smarter about detecting if secrets changed
+    FORCE_REBUILD=true
     check_base_image
+
+    # === Deploy ===
     create_vm_disk
     deploy_vm
+
+    # === Cleanup and Save ===
+    # Remove temporary instance config (secrets file is kept)
+    cleanup_instance_config
+    unstage_local_files
+    save_credentials_reference
+
     show_info
 
     success "Deployment complete!"

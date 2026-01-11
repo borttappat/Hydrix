@@ -5,50 +5,46 @@
 # \__,_/____/\___/_/  /____(_)_/ /_/_/_/|_|
 #
 # VM User Configuration
-# Simple, isolated user for VMs - does NOT use host secrets
+# Uses config.hydrix.username from hydrix-options.nix (the single source of truth)
+#
+# Secrets file format (local/vms/<hostname>.nix):
+#   {
+#     username = "alice";           # Optional, default: "user"
+#     hashedPassword = "$6$...";    # Optional, default: simple password
+#     hostname = "pentest-alice";   # Optional, overrides profile default
+#   }
 
 { config, pkgs, lib, ... }:
 
 let
-  # VMs ALWAYS use "user" for simplicity and portability
-  # The local/ directory is gitignored and won't exist in VM clones,
-  # so we hardcode the username to avoid unpredictable behavior
-  # Users can customize this directly in this file if needed
-  vmUser = "user";
+  # Get hostname (set by profile or override)
+  hostname = config.networking.hostName;
 
-  # Path to Hydrix repo in VM (always /home/user/Hydrix)
-  basePath = "/home/${vmUser}/Hydrix";
+  # Username comes from hydrix-options.nix which reads from local/vms/<hostname>.nix
+  vmUser = config.hydrix.username;
 
-  # Determine VM type from hostname (e.g., "pentest-vm" → "pentest")
-  vmType = let
-    hostname = config.networking.hostName;
-    parts = lib.splitString "-" hostname;
-  in if builtins.length parts > 0 then builtins.head parts else "generic";
-
-  # Path to VM-specific secrets
-  vmSecretsPath = "${basePath}/local/vms/${vmType}.nix";
-
-  # Load VM secrets if they exist, otherwise use defaults
-  vmSecrets = if builtins.pathExists vmSecretsPath
-    then import vmSecretsPath
-    else { hashedPassword = null; };
+  # We still need to read the secrets file for the password
+  # Path: ../../local/vms/<hostname>.nix relative to modules/base/users-vm.nix
+  secretsPath = ../../local/vms/${hostname}.nix;
+  vmSecrets = if builtins.pathExists secretsPath then import secretsPath else {};
+  vmHashedPassword = vmSecrets.hashedPassword or null;
 
 in {
-  # Define VM user - simple, predictable, isolated
+  # Define VM user with customizable username
   users.users.${vmUser} = {
     isNormalUser = true;
-    description = "VM User";
+    description = "VM User (${vmUser})";
     extraGroups = [ "wheel" "audio" "video" "networkmanager" ];
     createHome = true;
     shell = pkgs.fish;
+    home = "/home/${vmUser}";
 
-    # Use VM-specific password if available, otherwise allow passwordless login
-    # VMs are already isolated by network, so this is acceptable
-    hashedPassword = vmSecrets.hashedPassword;
+    # Use VM-specific password if available
+    hashedPassword = vmHashedPassword;
 
     # Fallback: if no hashed password, use simple password for convenience
-    # This is OK because VMs are network-isolated
-    password = if vmSecrets.hashedPassword == null then "user" else null;
+    # This is acceptable because VMs are network-isolated
+    password = if vmHashedPassword == null then "user" else null;
   };
 
   # Auto-login for VMs (convenience - VMs are already isolated)
@@ -71,4 +67,7 @@ in {
   systemd.tmpfiles.rules = [
     "d /home/${vmUser} 0755 ${vmUser} users -"
   ];
+
+  # Note: hydrix.vm.user option is defined in hydrix-options.nix
+  # All modules should use config.hydrix.username (or config.hydrix.vm.user for compatibility)
 }

@@ -165,12 +165,11 @@
     settings.PasswordAuthentication = true;
   };
 
-  services.getty.autologinUser = "traum";
+  services.getty.autologinUser = "user";
 
-  users.users.traum = {
+  users.users.user = {
     isNormalUser = true;
-    password = "ifEHbuuhSez9";
+    password = "router";  # Default password - change via setup.sh
     extraGroups = [ "wheel" "networkmanager" ];
-    # No SSH keys configured
   };
 }

@@ -164,12 +164,12 @@
   services.qemuGuest.enable = true;
 
   # Auto-login for console access
-  services.getty.autologinUser = "traum";
+  services.getty.autologinUser = "user";
 
   # User account
-  users.users.traum = {
+  users.users.user = {
     isNormalUser = true;
-    password = "ifEHbuuhSez9";  # Change this!
+    password = "router";  # Default password - change via setup.sh
     extraGroups = [ "wheel" "networkmanager" ];
   };
 
@@ -224,7 +224,7 @@
       echo "╔══════════════════════════════════════════════════════════╗"
       echo "║           LOCKDOWN ROUTER VM ACTIVE                      ║"
       echo "╠══════════════════════════════════════════════════════════╣"
-      echo "║  Management: 10.100.0.253  (SSH: ssh traum@10.100.0.253)║"
+      echo "║  Management: 10.100.0.253  (SSH: ssh user@10.100.0.253) ║"
       echo "║  Pentest:    10.100.1.253  (vpn-assign pentest <vpn>)   ║"
       echo "║  Office:     10.100.2.253  (vpn-assign office <vpn>)    ║"
       echo "║  Browse:     10.100.3.253  (vpn-assign browse <vpn>)    ║"

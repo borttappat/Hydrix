@@ -19,6 +19,149 @@ Reduce time spent on VM image builds and VM updates while preserving the network
 3. **Minimize Resource Usage** - Any infrastructure VMs must be lightweight (like router VM).
 4. **Prefer virtiofs Over Network** - Direct store sharing via virtio avoids network entirely.
 5. **Backwards Compatible** - Existing VMs continue to work, improvements are opt-in.
+6. **Baked + Orphaned Model** - VMs receive all config at build time and are self-contained after deployment.
+
+---
+
+## VM Build Workflow (Target Design)
+
+### Overview
+
+VMs are **baked** at build time with all configuration, secrets, and the Hydrix repo included in the image. After deployment, VMs are **orphaned** - they don't need to pull from the host repo or sync configs. The virtiofs shared `/nix/store` provides fast rebuilds within the VM using packages cached on the host.
+
+**Directory distinction:**
+- `Hydrix` - Upstream repo, cloned for initial setup
+- `hydrix-local` - Host's working directory where everything runs from
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                     BUILD TIME (Host)                       │
+├─────────────────────────────────────────────────────────────┤
+│  User runs: ./build-vm.sh --type pentest --bridge br-pentest│
+│                                                             │
+│  Prompted for / provided via flags:                         │
+│    • Username (default: user)                               │
+│    • Password (hashed, prompted securely)                   │
+│    • LUKS password (future feature)                         │
+│    • Hostname (VM's internal identity)                      │
+│    • VM name (libvirt domain name, what host sees)          │
+│                                                             │
+│  Script:                                                    │
+│    1. Writes secrets → local/vms/<vm-name>-secrets.nix      │
+│    2. Copies only relevant configs for VM type              │
+│    3. Fills placeholders in templates                       │
+│    4. Builds image (config + secrets baked in)              │
+│    5. Deploys to libvirt with virtiofs                      │
+│    6. Restores templates to placeholder state               │
+│    7. Keeps secrets file on host for reference              │
+└─────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│                    RUNTIME (VM)                             │
+├─────────────────────────────────────────────────────────────┤
+│  /home/<user>/Hydrix/  ← Baked in from host's hydrix-local  │
+│                                                             │
+│  VM is ORPHANED:                                            │
+│    • No git pull needed                                     │
+│    • No connection back to host repo                        │
+│    • rebuild script uses local baked-in config              │
+│    • virtiofs /nix/store = fast rebuilds (packages cached)  │
+│                                                             │
+│  If user modifies configs in VM:                            │
+│    • Changes stay local to that VM                          │
+│    • Can manually copy back to host for future builds       │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Build Script Parameters
+
+| Parameter | Flag | Prompt | Description |
+|-----------|------|--------|-------------|
+| VM type | `--type` | No | pentest, browsing, comms, dev |
+| Bridge | `--bridge` | No | br-pentest, br-browse, br-office, br-dev |
+| Username | `--user` | Optional | Username inside VM (default: user) |
+| Password | `--password` | Yes (secure) | User password, hashed before storing |
+| LUKS password | `--luks` | Yes (future) | Disk encryption password |
+| Hostname | `--hostname` | Optional | VM's internal hostname |
+| VM name | `--name` | Optional | Libvirt domain name (host sees this) |
+
+### Secrets File Structure
+
+```nix
+# local/vms/<vm-name>-secrets.nix
+{
+  vmUser = "alice";
+  vmHostname = "pentest-alice";
+  hashedPassword = "$6$rounds=...";  # mkpasswd output
+  # Future: LUKS key reference
+}
+```
+
+This file:
+- Is imported by the VM config at build time
+- Persists on host for reference/rebuilds
+- Is NOT committed to git (in .gitignore)
+
+### Template Placeholder System
+
+Templates in `templates/` contain placeholders that get filled at build time:
+
+```nix
+# templates/vm-config.nix.template
+{ config, pkgs, ... }:
+{
+  users.users.@VM_USER@ = {
+    isNormalUser = true;
+    hashedPassword = "@HASHED_PASSWORD@";
+  };
+  networking.hostName = "@VM_HOSTNAME@";
+}
+```
+
+Build script:
+1. Copies template to working location
+2. Substitutes `@PLACEHOLDER@` with values from secrets file
+3. Builds image
+4. Original template remains unchanged (placeholders intact)
+
+### Config Baking
+
+At build time, the following are baked into the VM image:
+
+| Item | Location in Image | Source |
+|------|-------------------|--------|
+| Hydrix repo | `/home/<user>/Hydrix/` | Host's `hydrix-local` directory |
+| VM-specific config | Parsed from templates | Secrets file + templates |
+| User credentials | `/etc/shadow` (via NixOS) | Secrets file |
+| Hostname | `/etc/hostname` | Secrets file |
+| Only relevant modules | Various | VM type determines which |
+
+### Post-Deployment (Orphaned Model)
+
+After deployment, the VM is self-contained:
+
+- **No git pull needed** - Config is already baked in
+- **No host sync** - VM operates independently
+- **Rebuild uses baked config** - `rebuild` script uses `/home/<user>/Hydrix/`
+- **virtiofs provides packages** - Host's `/nix/store` available for fast rebuilds
+- **Changes stay local** - User can modify configs inside VM
+
+To propagate changes back to host for future builds:
+```bash
+# Inside VM, copy modified config to shared location or manually
+# Then on host, update templates/configs as needed
+```
+
+### Future Enhancement: Host↔VM Config Sync
+
+**Goal**: Sync specific modules (e.g., `pentesting.nix`) between host and VMs.
+
+This would allow:
+- Host updates to pentesting tools propagate to VMs
+- VM-tested configs can be pulled back to host
+
+**Not implemented yet** - tracked as future work.
 
 ---
 

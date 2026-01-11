@@ -236,7 +236,7 @@ in {
           echo "║    br-browse  → 10.100.3.x (privacy VPN)                   ║"
           echo "║    br-dev     → 10.100.4.x (direct/configurable)           ║"
           echo "╠════════════════════════════════════════════════════════════╣"
-          echo "║  SSH to router: ssh traum@10.100.0.253                     ║"
+          echo "║  SSH to router: ssh <user>@10.100.0.253                    ║"
           echo "║  VPN status:    vpn-status (on router)                     ║"
           echo "╚════════════════════════════════════════════════════════════╝"
           echo ""

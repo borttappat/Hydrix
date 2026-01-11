@@ -79,10 +79,10 @@
   # Hardware
   hardware.enableAllFirmware = true;
 
-  # Locale and time
-  time.timeZone = "Europe/Stockholm";
-  i18n.defaultLocale = "en_US.UTF-8";
-  i18n.extraLocaleSettings = {
+  # Locale and time - use mkDefault so VMs can override from local/shared.nix
+  time.timeZone = lib.mkDefault "Europe/Stockholm";
+  i18n.defaultLocale = lib.mkDefault "en_US.UTF-8";
+  i18n.extraLocaleSettings = lib.mkDefault {
     LC_ADDRESS = "sv_SE.UTF-8";
     LC_IDENTIFICATION = "sv_SE.UTF-8";
     LC_MEASUREMENT = "sv_SE.UTF-8";
@@ -94,12 +94,12 @@
     LC_TIME = "sv_SE.UTF-8";
   };
 
-  console.keyMap = "sv-latin1";
+  console.keyMap = lib.mkDefault "sv-latin1";
 
-  # X11 keyboard layout
+  # X11 keyboard layout - use mkDefault so VMs can override
   services.xserver.xkb = {
-    layout = "se";
-    variant = "";
+    layout = lib.mkDefault "se";
+    variant = lib.mkDefault "";
   };
 
   # Qt and GTK support

@@ -1,66 +1,26 @@
 # Dev VM - Full profile
 # Software development and compilation system
+#
+# Hostname customization:
+#   - Default: "dev-vm"
+#   - Override: Create local/vm-instance.nix with: { hostname = "dev-myname"; }
+#   - The build-vm.sh script generates this automatically
+#
 { config, pkgs, lib, modulesPath, ... }:
 
 {
   imports = [
-    # QEMU guest profile from nixpkgs
-    (modulesPath + "/profiles/qemu-guest.nix")
+    # Hydrix options - MUST BE FIRST to define hydrix.* options before other modules use them
+    ../modules/base/hydrix-options.nix
 
-    # Base system
-    ../modules/base/nixos-base.nix
-    ../modules/base/users-vm.nix  # VM-isolated user (not host secrets)
-    ../modules/base/networking.nix
-    ../modules/vm/qemu-guest.nix
-    ../modules/vm/hydrix-clone.nix  # Clone Hydrix repo on first boot
-    ../modules/vm/shared-store.nix  # virtiofs shared /nix/store from host
-
-    # Core desktop environment (i3, fish, etc.)
-    ../modules/core.nix
-
-    # Theming system
-    ../modules/theming/static-colors.nix
-    ../modules/desktop/xinitrc.nix
-
-    # Firefox browser
-    ../modules/desktop/firefox.nix
+    # VM base module - handles all common VM config (hardware, locale, etc.)
+    ../modules/vm/vm-base.nix
   ];
 
-  # ===== Inline hardware configuration for QEMU VMs =====
-  boot.initrd.availableKernelModules = [
-    "virtio_balloon" "virtio_blk" "virtio_pci" "virtio_ring"
-    "virtio_net" "virtio_scsi" "virtio_console"
-    "ahci" "xhci_pci" "sd_mod" "sr_mod"
-  ];
-  boot.initrd.kernelModules = [ ];
-  boot.kernelModules = [ "kvm-intel" "kvm-amd" ];
-  boot.extraModulePackages = [ ];
-
-  boot.loader.grub = {
-    enable = true;
-    device = lib.mkDefault "/dev/vda";
-    efiSupport = false;
-    useOSProber = false;
-  };
-
-  fileSystems."/" = lib.mkDefault {
-    device = "/dev/disk/by-label/nixos";
-    fsType = "ext4";
-  };
-
-  swapDevices = [ ];
-  networking.useDHCP = lib.mkDefault true;
-  nixpkgs.hostPlatform = lib.mkDefault "x86_64-linux";
-
-  # Hostname
-  networking.hostName = lib.mkForce "dev-vm";
-
-  # VM type and colorscheme
+  # VM identity
   hydrix.vmType = "dev";
   hydrix.colorscheme = "perp";
-
-  # Enable virtiofs shared /nix/store from host (for fast rebuilds)
-  hydrix.vm.sharedStore.enable = lib.mkDefault true;
+  hydrix.vm.defaultHostname = "dev-vm";
 
   # Development packages
   environment.systemPackages = with pkgs; [
@@ -120,15 +80,6 @@
     # Terminal multiplexers
     tmux
     screen
-
-    # Rebuild script
-    (pkgs.writeShellScriptBin "rebuild" ''
-      #!/usr/bin/env bash
-      set -e
-      cd ~/Hydrix
-      echo "Rebuilding system..."
-      sudo nixos-rebuild switch --flake '.#vm-dev' --impure
-    '')
   ];
 
   # Enable Docker for containerized development
@@ -138,7 +89,7 @@
   };
 
   # Add VM user to docker group
-  users.users.user.extraGroups = [ "docker" ];
+  users.users.${config.hydrix.username}.extraGroups = [ "docker" ];
 
   # Enable PostgreSQL for database development
   services.postgresql = {

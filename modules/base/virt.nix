@@ -11,7 +11,7 @@
       };
       mainUser = lib.mkOption {
         type = lib.types.str;
-        default = "traum";
+        default = "user";
         description = "Main user for virtualization permissions";
       };
       enableLookingGlass = lib.mkOption {

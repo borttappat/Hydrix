@@ -1,28 +1,8 @@
 { config, lib, pkgs, ... }:
 
 let
-  # Check if we're building for a VM (vmType is set and not "host")
-  isVM = (config.hydrix.vmType or null) != null && config.hydrix.vmType != "host";
-
-  # Detect username dynamically (same pattern as base.nix)
-  hydrixPath = builtins.getEnv "HYDRIX_PATH";
-  sudoUser = builtins.getEnv "SUDO_USER";
-  currentUser = builtins.getEnv "USER";
-  effectiveUser = if sudoUser != "" then sudoUser
-                  else if currentUser != "" && currentUser != "root" then currentUser
-                  else "user";
-  basePath = if hydrixPath != "" then hydrixPath else "/home/${effectiveUser}/Hydrix";
-  hostConfigPath = "${basePath}/local/host.nix";
-
-  hostConfig = if builtins.pathExists hostConfigPath
-    then import hostConfigPath
-    else null;
-
-  # VMs always use "user", host uses detected username
-  username = if isVM then "user"
-    else if hostConfig != null && hostConfig ? username
-    then hostConfig.username
-    else "user";
+  # Username is computed by hydrix-options.nix (single source of truth)
+  username = config.hydrix.username;
 in
 {
   # Static color theming for VMs and hosts
@@ -40,20 +20,7 @@ in
 
   imports = [ ./base.nix ];
 
-  options.hydrix = {
-    vmType = lib.mkOption {
-      type = lib.types.nullOr (lib.types.enum [ "pentest" "comms" "browsing" "dev" "host" ]);
-      description = "VM/host type for fallback color scheme generation";
-      default = null;
-    };
-
-    colorscheme = lib.mkOption {
-      type = lib.types.nullOr lib.types.str;
-      description = "Name of saved colorscheme to use (from colorschemes/*.json). If set, overrides vmType colors.";
-      default = null;
-      example = "tokyo-night";
-    };
-  };
+  # Note: hydrix.vmType and hydrix.colorscheme options are defined in hydrix-options.nix
 
   config = let
     # Check if custom scheme exists

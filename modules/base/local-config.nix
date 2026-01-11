@@ -21,7 +21,7 @@ let
   currentUser = builtins.getEnv "USER";
   effectiveUser = if sudoUser != "" then sudoUser
                   else if currentUser != "" && currentUser != "root" then currentUser
-                  else "traum";
+                  else "user";
   basePath = if hydrixPath != "" then hydrixPath else "/home/${effectiveUser}/Hydrix";
   localPath = "${basePath}/local";
 

@@ -12,31 +12,38 @@ let
   hydrixPath = builtins.getEnv "HYDRIX_PATH";
   sudoUser = builtins.getEnv "SUDO_USER";
   currentUser = builtins.getEnv "USER";
-  # Prefer SUDO_USER (set by sudo), fall back to USER, then "traum"
+  # Prefer SUDO_USER (set by sudo), fall back to USER, then "user"
   effectiveUser = if sudoUser != "" then sudoUser
                   else if currentUser != "" && currentUser != "root" then currentUser
-                  else "traum";
+                  else "user";
+  # For single-repo Hydrix, use ~/Hydrix
   basePath = if hydrixPath != "" then hydrixPath else "/home/${effectiveUser}/Hydrix";
 
+  # Host config stored in local/ directory (gitignored)
+  # First try relative path, then absolute
+  localHostPath = ./../../local/host.nix;
   hostConfigPath = "${basePath}/local/host.nix";
 
   # Default config if local file doesn't exist
   defaultConfig = {
     username = "user";
-    hashedPassword = null;
     description = "Default User";
-    sshKeys = [];
+    sshPublicKeys = [];
     extraGroups = [];
   };
 
   # Use local config if available, otherwise defaults
-  hostConfig = if builtins.pathExists hostConfigPath
-    then import hostConfigPath
+  # First try relative path (flake-local), then absolute path (HYDRIX_PATH)
+  hostConfig = if builtins.pathExists localHostPath then import localHostPath
+    else if builtins.pathExists hostConfigPath then import hostConfigPath
     else defaultConfig;
 
   username = hostConfig.username or defaultConfig.username;
 
 in {
+  # Set mainUser for virt.nix (which adds virtualization groups)
+  virtualisation.mainUser = username;
+
   # Define user from local config
   users.users.${username} = {
     isNormalUser = true;
@@ -46,12 +53,11 @@ in {
     createHome = true;
     shell = pkgs.fish;
 
-    # Use hashed password from local config (secure)
-    # Falls back to no password if not set (login via SSH key only)
-    hashedPassword = hostConfig.hashedPassword or null;
+    # Note: No hashedPassword set - user's existing password from installation is preserved
+    # For VMs, password is set during VM build
 
     # SSH authorized keys from local config
-    openssh.authorizedKeys.keys = hostConfig.sshKeys or [];
+    openssh.authorizedKeys.keys = hostConfig.sshPublicKeys or [];
   };
 
   # Auto-login on TTY (uses dynamic username)
