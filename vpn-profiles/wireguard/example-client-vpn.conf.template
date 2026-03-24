@@ -1,0 +1,16 @@
+# Client-Provided VPN Configuration Template
+# For pentesting engagements where client provides VPN access
+#
+# Rename to client-vpn.conf and fill in credentials from client
+#
+[Interface]
+PrivateKey = YOUR_PRIVATE_KEY_HERE
+Address = 10.x.x.x/32
+# DNS = CLIENT_DNS_SERVER (optional)
+
+[Peer]
+PublicKey = CLIENT_VPN_SERVER_PUBLIC_KEY
+Endpoint = client-vpn.example.com:51820
+AllowedIPs = 0.0.0.0/0
+# Or restrict to client network: AllowedIPs = 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16
+PersistentKeepalive = 25

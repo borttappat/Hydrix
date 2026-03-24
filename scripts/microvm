@@ -1,0 +1,1914 @@
+#!/usr/bin/env bash
+# microvm - Simple microVM management with timing
+#
+# Usage:
+#   microvm build <name>      Build/rebuild microVM image
+#   microvm start <name>      Start microVM (waits until ready)
+#   microvm stop <name>       Stop microVM
+#   microvm restart <name>    Restart microVM
+#   microvm app <name> <cmd>  Launch app in microVM
+#   microvm status [name]     Show status of microVM(s)
+#   microvm list              List all declared microVMs
+#   microvm attach <name>     Attach to xpra session
+#   microvm logs <name>       View microVM logs
+#
+# Examples:
+#   microvm build microvm-browsing
+#   microvm start microvm-browsing
+#   microvm app microvm-browsing firefox
+#   microvm stop microvm-browsing
+#
+set -euo pipefail
+
+readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Auto-detect flake directory (supports both architectures)
+# Priority: HYDRIX_FLAKE_DIR env > ~/hydrix-config > ~/Hydrix > script location
+detect_flake_dir() {
+    local username="${SUDO_USER:-$USER}"
+    local home_dir="/home/$username"
+
+    # Environment variable override (highest priority)
+    if [[ -n "${HYDRIX_FLAKE_DIR:-}" ]] && [[ -f "${HYDRIX_FLAKE_DIR}/flake.nix" ]]; then
+        echo "$HYDRIX_FLAKE_DIR"
+        return
+    fi
+
+    # User mode: ~/hydrix-config (imports Hydrix from GitHub)
+    if [[ -f "$home_dir/hydrix-config/flake.nix" ]]; then
+        echo "$home_dir/hydrix-config"
+        return
+    fi
+
+    # Developer mode: ~/Hydrix (local clone)
+    if [[ -f "$home_dir/Hydrix/flake.nix" ]]; then
+        echo "$home_dir/Hydrix"
+        return
+    fi
+
+    # Fallback to script location (original behavior)
+    dirname "$SCRIPT_DIR"
+}
+
+readonly FLAKE_DIR="$(detect_flake_dir)"
+readonly XPRA_PORT=14500
+readonly SWITCH_PORT=14504
+readonly BUILDER_NAME="microvm-builder"
+readonly BUILDER_CID=210
+readonly BUILDER_BUILD_PORT=14510
+readonly BUILDER_STATUS_PORT=14511
+readonly GITSYNC_NAME="microvm-gitsync"
+readonly GITSYNC_CID=211
+readonly GITSYNC_GIT_PORT=14512
+readonly GITSYNC_STATUS_PORT=14513
+
+# Colors
+readonly RED=$'\e[31m'
+readonly GREEN=$'\e[32m'
+readonly YELLOW=$'\e[33m'
+readonly BLUE=$'\e[34m'
+readonly CYAN=$'\e[36m'
+readonly MAGENTA=$'\e[35m'
+readonly BOLD=$'\e[1m'
+readonly DIM=$'\e[2m'
+readonly NC=$'\e[0m'
+
+# Timing helpers (LC_ALL=C for consistent decimal handling)
+timer_start() { date +%s.%N; }
+timer_end() {
+    local start="$1"
+    local end
+    end=$(date +%s.%N)
+    LC_ALL=C printf "%.2f" "$(echo "$end - $start" | bc)"
+}
+
+log() { echo -e "${CYAN}::${NC} $*"; }
+log_success() { echo -e "${GREEN}::${NC} $*"; }
+log_warn() { echo -e "${YELLOW}::${NC} $*"; }
+log_error() { echo -e "${RED}::${NC} $*" >&2; }
+log_time() { echo -e "${MAGENTA}::${NC} ${DIM}$*${NC}"; }
+
+# Detect current specialisation (lockdown, administrative, fallback)
+detect_current_specialisation() {
+    # Method 1: Read from /run/current-system/configuration-name
+    if [[ -f /run/current-system/configuration-name ]]; then
+        local name
+        name=$(cat /run/current-system/configuration-name 2>/dev/null || true)
+        if [[ "$name" == "lockdown" || "$name" == "administrative" || "$name" == "fallback" ]]; then
+            echo "$name"
+            return
+        fi
+    fi
+
+    # Method 2: Check /etc/HYDRIX_MODE
+    if [[ -f /etc/HYDRIX_MODE ]]; then
+        local mode
+        mode=$(grep "^MODE=" /etc/HYDRIX_MODE 2>/dev/null | cut -d= -f2 || true)
+        if [[ "$mode" == "lockdown" || "$mode" == "administrative" || "$mode" == "fallback" ]]; then
+            echo "$mode"
+            return
+        fi
+    fi
+
+    # Method 3: Infer from running services
+    if systemctl is-active --quiet "microvm@microvm-router.service" 2>/dev/null; then
+        echo "administrative"
+        return
+    fi
+
+    # Default to lockdown (safest assumption)
+    echo "lockdown"
+}
+
+# Known VM CIDs (avoids nix eval when nix-daemon is stopped for builder)
+# New short names + legacy names for backwards compatibility
+declare -A KNOWN_CIDS=(
+    # Primary names
+    ["microvm-browsing"]=101
+    ["microvm-pentest"]=102
+    ["microvm-dev"]=103
+    ["microvm-comms"]=104
+    ["microvm-lurking"]=105
+    ["microvm-router"]=200
+    ["microvm-builder"]=210
+    ["microvm-gitsync"]=211
+    # Legacy names (backwards compatibility)
+    ["microbrowse"]=101
+    ["microhack"]=102
+    ["microdev"]=103
+    ["microcomms"]=104
+    ["microlurk"]=105
+    ["microrouter"]=200
+    ["microbuild"]=210
+    ["microvm-browsing-test"]=101
+    ["microvm-pentest-test"]=102
+    ["microvm-dev-test"]=103
+    ["microvm-comms-test"]=104
+    ["microvm-lurking-test"]=105
+)
+
+# Get vsock CID - uses cached values first, falls back to nix eval
+get_cid() {
+    local vm_name="$1"
+
+    # Fast path: use known CIDs (works even when nix-daemon is stopped)
+    if [[ -v "KNOWN_CIDS[$vm_name]" ]]; then
+        echo "${KNOWN_CIDS[$vm_name]}"
+        return
+    fi
+
+    # Fallback: try nix eval (requires nix-daemon)
+    local cid
+    cid=$(nix eval --json "$FLAKE_DIR#nixosConfigurations.${vm_name}.config.hydrix.microvm.vsockCid" 2>/dev/null || echo "")
+    if [[ -z "$cid" || "$cid" == "null" ]]; then
+        cid=$(nix eval --json "$FLAKE_DIR#nixosConfigurations.${vm_name}.config.microvm.vsock.cid" 2>/dev/null || echo "")
+    fi
+    echo "$cid"
+}
+
+# Check if VM is running
+is_running() {
+    local vm_name="$1"
+    systemctl is-active --quiet "microvm@${vm_name}.service" 2>/dev/null
+}
+
+# Check if VM is headless (no xpra - router, builder)
+is_headless() {
+    local vm_name="$1"
+    [[ "$vm_name" == "microvm-router" || "$vm_name" == "microvm-builder" || \
+       "$vm_name" == "microrouter" || "$vm_name" == "microbuild" ]]
+}
+
+# Check if VM is the builder
+is_builder() {
+    local vm_name="$1"
+    [[ "$vm_name" == "$BUILDER_NAME" || "$vm_name" == "microbuild" ]]
+}
+
+# Check if host nix-daemon is running
+host_daemon_running() {
+    systemctl is-active --quiet nix-daemon.service 2>/dev/null
+}
+
+# Wait for builder vsock to be ready
+wait_for_builder() {
+    local timeout="${1:-60}"
+    local elapsed=0
+
+    while ! echo "PING" | socat -T2 - "VSOCK-CONNECT:${BUILDER_CID}:${BUILDER_STATUS_PORT}" 2>/dev/null | grep -q "PONG"; do
+        sleep 1
+        elapsed=$((elapsed + 1))
+        if [[ $elapsed -ge $timeout ]]; then
+            return 1
+        fi
+    done
+    return 0
+}
+
+# Wait for xpra to be ready
+wait_for_xpra() {
+    local cid="$1"
+    local timeout="${2:-30}"
+    local elapsed=0
+
+    while ! xpra info "vsock://${cid}:${XPRA_PORT}" &>/dev/null; do
+        sleep 0.5
+        elapsed=$((elapsed + 1))
+        if [[ $elapsed -ge $((timeout * 2)) ]]; then
+            return 1
+        fi
+    done
+    return 0
+}
+
+# Build microVM
+cmd_build() {
+    local vm_name="$1"
+
+    # Builder VM: need host nix-daemon running to build the VM image
+    # (different from when builder is RUNNING, when we need it stopped)
+    if is_builder "$vm_name" && ! host_daemon_running; then
+        log "Starting host nix-daemon (needed to build VM image)..."
+        # Remount store read-only first if it's still rw
+        if mount | grep -q "/nix/store.*(rw"; then
+            sudo mount -o remount,ro /nix/store 2>/dev/null || true
+        fi
+        sudo systemctl start nix-daemon.socket
+    fi
+
+    log "Building ${BOLD}${vm_name}${NC}..."
+    local start
+    start=$(timer_start)
+
+    local out_link="/tmp/${vm_name}"
+    if ! nix build "${FLAKE_DIR}#nixosConfigurations.${vm_name}.config.microvm.declaredRunner" -o "$out_link" 2>&1; then
+        log_error "Build failed"
+        return 1
+    fi
+
+    local build_time
+    build_time=$(timer_end "$start")
+    log_time "Build completed in ${BOLD}${build_time}s${NC}"
+
+    # Update symlink - resolve to nix store path (systemd has PrivateTmp, can't see /tmp)
+    log "Updating symlink..."
+    local store_path
+    store_path=$(readlink -f "$out_link")
+
+    # Ensure directory structure exists with proper ownership
+    # (recreates what tmpfiles would do, needed after purge)
+    sudo mkdir -p "/var/lib/microvms/${vm_name}/config"
+    sudo chown microvm:kvm "/var/lib/microvms/${vm_name}"
+    sudo chown root:root "/var/lib/microvms/${vm_name}/config"
+    sudo chmod 755 "/var/lib/microvms/${vm_name}" "/var/lib/microvms/${vm_name}/config"
+    sudo ln -sfn "$store_path" "/var/lib/microvms/${vm_name}/current"
+
+    log_success "Build complete: $store_path"
+    echo ""
+    echo -e "  ${DIM}To start:${NC} microvm start ${vm_name}"
+    echo -e "  ${DIM}To restart:${NC} microvm restart ${vm_name}"
+}
+
+# Start microVM
+cmd_start() {
+    local vm_name="$1"
+
+    if is_running "$vm_name"; then
+        log_error "${vm_name} is already running"
+        return 1
+    fi
+
+    local cid
+    cid=$(get_cid "$vm_name")
+    if [[ -z "$cid" ]]; then
+        log_error "Cannot get vsock CID for ${vm_name}. Is it defined in the flake?"
+        return 1
+    fi
+
+    # Builder VM: stop host nix-daemon and remount store as read-write
+    if is_builder "$vm_name"; then
+        if host_daemon_running; then
+            log "Stopping host nix-daemon (required for builder)..."
+            sudo systemctl stop nix-daemon.service nix-daemon.socket
+        fi
+        # Remount /nix/store as read-write for builder to write to
+        log "Remounting /nix/store as read-write..."
+        sudo mount -o remount,rw /nix/store
+    fi
+
+    log "Starting ${BOLD}${vm_name}${NC} (CID: ${cid})..."
+    local start
+    start=$(timer_start)
+
+    sudo systemctl start "microvm@${vm_name}.service"
+
+    local boot_time
+    boot_time=$(timer_end "$start")
+    log_time "Service started in ${BOLD}${boot_time}s${NC}"
+
+    # Headless VMs (router, builder) - different ready check
+    if is_headless "$vm_name"; then
+        if is_builder "$vm_name"; then
+            log "Waiting for builder vsock..."
+            if ! wait_for_builder 60; then
+                log_error "Timeout waiting for builder"
+                log "Check logs with: microvm logs ${vm_name}"
+                return 1
+            fi
+            local total_time
+            total_time=$(timer_end "$start")
+            log_success "Builder ready! Total boot time: ${BOLD}${total_time}s${NC}"
+            echo ""
+            echo -e "  ${DIM}Build:${NC} microvm builder-exec <flake>"
+            echo -e "  ${DIM}Status:${NC} microvm builder-status"
+            echo -e "  ${DIM}Shell:${NC} microvm console ${vm_name}"
+        else
+            # Router - just report started
+            local total_time
+            total_time=$(timer_end "$start")
+            log_success "Started in ${BOLD}${total_time}s${NC}"
+            echo ""
+            echo -e "  ${DIM}Console:${NC} microvm console ${vm_name}"
+        fi
+        return 0
+    fi
+
+    # Graphical VMs - wait for xpra
+    log "Waiting for xpra server..."
+    local xpra_start
+    xpra_start=$(timer_start)
+
+    if ! wait_for_xpra "$cid" 30; then
+        log_error "Timeout waiting for xpra"
+        log "Check logs with: microvm logs ${vm_name}"
+        log "Try manually: xpra info vsock://${cid}:${XPRA_PORT}"
+        return 1
+    fi
+
+    local xpra_time
+    xpra_time=$(timer_end "$xpra_start")
+    log_time "Xpra ready in ${BOLD}${xpra_time}s${NC}"
+
+    local total_time
+    total_time=$(timer_end "$start")
+    log_success "Ready! Total boot time: ${BOLD}${total_time}s${NC}"
+
+    # Pre-attach xpra session in background for instant first app launch
+    log "Pre-attaching xpra session..."
+    vm-app "$vm_name" --attach >/dev/null 2>&1 &
+    disown
+    log_success "Pre-attached"
+
+    # Push current host colors to the new VM via vsock
+    if command -v push-colors-to-vms >/dev/null 2>&1; then
+        push-colors-to-vms >/dev/null 2>&1 &
+        disown
+    fi
+
+    # Desktop notification
+    notify-send "MicroVM Ready" "${vm_name} is ready for interaction" 2>/dev/null || true
+
+    echo ""
+    echo -e "  ${DIM}Launch app:${NC} microvm app ${vm_name} firefox"
+}
+
+# Wait for service to fully stop
+wait_for_stop() {
+    local vm_name="$1"
+    local timeout="${2:-10}"
+    local elapsed=0
+
+    while systemctl is-active --quiet "microvm@${vm_name}.service" 2>/dev/null; do
+        sleep 0.5
+        elapsed=$((elapsed + 1))
+        if [[ $elapsed -ge $((timeout * 2)) ]]; then
+            return 1
+        fi
+    done
+    return 0
+}
+
+# Stop microVM
+cmd_stop() {
+    local vm_name="$1"
+
+    if ! is_running "$vm_name"; then
+        # Builder special case: restore store and restart nix-daemon if needed
+        if is_builder "$vm_name" && ! host_daemon_running; then
+            log "Builder not running, but restoring host state..."
+            # Check if store is still rw and remount ro
+            if mount | grep -q "/nix/store.*(rw"; then
+                log "Remounting /nix/store as read-only..."
+                sleep 1
+                sudo mount -o remount,ro /nix/store 2>/dev/null || log "${YELLOW}Warning: Could not remount (busy)${NC}"
+            fi
+            log "Restarting host nix-daemon..."
+            sudo systemctl start nix-daemon.socket
+            log_success "Host state restored"
+        else
+            log_error "${vm_name} is not running"
+        fi
+        return 1
+    fi
+
+    log "Stopping ${BOLD}${vm_name}${NC}..."
+    local start
+    start=$(timer_start)
+
+    sudo systemctl stop "microvm@${vm_name}.service"
+
+    # Wait for service to fully stop
+    if ! wait_for_stop "$vm_name" 10; then
+        log_error "Timeout waiting for service to stop cleanly"
+        log "Attempting force kill..."
+        sudo systemctl kill --signal=SIGKILL "microvm@${vm_name}.service" 2>/dev/null || true
+        sleep 1
+    fi
+
+    local stop_time
+    stop_time=$(timer_end "$start")
+    log_success "Stopped in ${BOLD}${stop_time}s${NC}"
+
+    # Builder VM: remount store read-only and restart host nix-daemon
+    if is_builder "$vm_name"; then
+        log "Remounting /nix/store as read-only..."
+        # Wait a moment for virtiofsd to release the mount
+        sleep 1
+        if ! sudo mount -o remount,ro /nix/store 2>/dev/null; then
+            log "${YELLOW}Warning: Could not remount /nix/store as read-only (busy)${NC}"
+            log "${DIM}This is usually fine - nix-daemon will handle it${NC}"
+        fi
+        log "Restarting host nix-daemon..."
+        sudo systemctl start nix-daemon.socket
+        log_success "Host nix-daemon restarted"
+    fi
+}
+
+# Restart microVM
+cmd_restart() {
+    local vm_name="$1"
+
+    log "Restarting ${BOLD}${vm_name}${NC}..."
+    local start
+    start=$(timer_start)
+
+    local cid
+    cid=$(get_cid "$vm_name")
+    if [[ -z "$cid" ]]; then
+        log_error "Cannot get vsock CID for ${vm_name}. Is it defined in the flake?"
+        return 1
+    fi
+
+    if is_running "$vm_name"; then
+        log "Stopping service..."
+        sudo systemctl stop "microvm@${vm_name}.service"
+
+        # Wait for service to fully stop before starting again
+        if ! wait_for_stop "$vm_name" 10; then
+            log_error "Timeout waiting for service to stop"
+            log "Attempting force kill..."
+            sudo systemctl kill --signal=SIGKILL "microvm@${vm_name}.service" 2>/dev/null || true
+            sleep 1
+        fi
+
+    fi
+
+    log "Starting service..."
+    sudo systemctl start "microvm@${vm_name}.service"
+
+    # Headless VMs (router, builder) - no xpra
+    if is_headless "$vm_name"; then
+        local total_time
+        total_time=$(timer_end "$start")
+        log_success "Restarted in ${BOLD}${total_time}s${NC}"
+        echo ""
+        echo -e "  ${DIM}Console:${NC} microvm console ${vm_name}"
+        return 0
+    fi
+
+    # Graphical VMs - wait for xpra
+    log "Waiting for xpra server..."
+    if ! wait_for_xpra "$cid" 30; then
+        log_error "Timeout waiting for xpra"
+        log "Check logs with: microvm logs ${vm_name}"
+        log "Try manually: xpra info vsock://${cid}:${XPRA_PORT}"
+        return 1
+    fi
+
+    local total_time
+    total_time=$(timer_end "$start")
+    log_success "Restarted in ${BOLD}${total_time}s${NC}"
+
+    # Pre-attach xpra session in background
+    log "Pre-attaching xpra session..."
+    vm-app "$vm_name" --attach >/dev/null 2>&1 &
+    disown
+    log_success "Pre-attached"
+
+    # Desktop notification
+    notify-send "MicroVM Ready" "${vm_name} is ready for interaction" 2>/dev/null || true
+}
+
+# Launch app
+cmd_app() {
+    local vm_name="$1"
+    shift
+    local app_cmd="$*"
+
+    if ! is_running "$vm_name"; then
+        log_error "${vm_name} is not running. Start it first: microvm start ${vm_name}"
+        return 1
+    fi
+
+    log "Launching ${BOLD}${app_cmd}${NC} on ${vm_name}..."
+    local start
+    start=$(timer_start)
+
+    # Use vm-app which handles everything
+    vm-app "$vm_name" "$app_cmd"
+
+    local launch_time
+    launch_time=$(timer_end "$start")
+    log_time "App launched in ${BOLD}${launch_time}s${NC}"
+}
+
+# Attach to xpra session
+cmd_attach() {
+    local vm_name="$1"
+
+    if ! is_running "$vm_name"; then
+        log_error "${vm_name} is not running"
+        return 1
+    fi
+
+    log "Attaching to ${BOLD}${vm_name}${NC}..."
+    vm-app "$vm_name" --attach >/dev/null 2>&1 &
+    disown
+    log_success "Attached. Windows should appear on your desktop."
+}
+
+# Show status
+cmd_status() {
+    local vm_name="${1:-}"
+
+    if [[ -n "$vm_name" ]]; then
+        systemctl status "microvm@${vm_name}.service" --no-pager
+
+        # If running, also show switch status
+        if is_running "$vm_name" && ! is_headless "$vm_name"; then
+            local cid
+            cid=$(get_cid "$vm_name" 2>/dev/null || echo "")
+            if [[ -n "$cid" ]]; then
+                local switch_status
+                switch_status=$({ echo "STATUS"; sleep 0.5; } | socat -t5 -T10 - "VSOCK-CONNECT:${cid}:${SWITCH_PORT}" 2>/dev/null || true)
+                if [[ -n "$switch_status" ]]; then
+                    echo ""
+                    echo -e "${BOLD}Live Switch Status${NC}"
+                    while IFS= read -r line; do
+                        case "$line" in
+                            CURRENT\ *) echo -e "  Current: ${CYAN}${line#CURRENT }${NC}" ;;
+                            BOOTED\ *)  echo -e "  Booted:  ${DIM}${line#BOOTED }${NC}" ;;
+                            PROFILE\ *) echo -e "  Profile: ${DIM}${line#PROFILE }${NC}" ;;
+                        esac
+                    done <<< "$switch_status"
+
+                    # Show host-side built path
+                    local host_path
+                    host_path=$(get_current_system_path "$vm_name" 2>/dev/null || echo "")
+                    if [[ -n "$host_path" ]]; then
+                        echo -e "  Built:   ${GREEN}${host_path}${NC}"
+                    fi
+                fi
+            fi
+        fi
+    else
+        echo -e "${BOLD}MicroVM Status${NC}"
+        echo ""
+
+        local declared
+        declared=$(nix eval "$FLAKE_DIR#nixosConfigurations" --apply 'builtins.attrNames' --json 2>/dev/null | jq -r '.[]' | grep '^microvm-' || true)
+
+        if [[ -z "$declared" ]]; then
+            echo "No microVMs declared in flake"
+            return
+        fi
+
+        printf "  ${DIM}%-30s %-10s %-6s${NC}\n" "NAME" "STATUS" "CID"
+        echo "  ────────────────────────────────────────────────"
+
+        while IFS= read -r vm; do
+            local status cid
+            if is_running "$vm"; then
+                status="${GREEN}running${NC}"
+            else
+                status="${DIM}stopped${NC}"
+            fi
+            cid=$(get_cid "$vm" 2>/dev/null || echo "?")
+            printf "  %-30s %-18s %-6s\n" "$vm" "$status" "$cid"
+        done <<< "$declared"
+    fi
+}
+
+# List declared microVMs
+cmd_list() {
+    nix eval "$FLAKE_DIR#nixosConfigurations" --apply 'builtins.attrNames' --json 2>/dev/null | \
+        jq -r '.[]' | grep '^microvm-' || echo "No microVMs declared"
+}
+
+# View logs
+cmd_logs() {
+    local vm_name="$1"
+    sudo journalctl -u "microvm@${vm_name}.service" -f --no-pager
+}
+
+# Attach to console (for headless VMs like router, builder)
+cmd_console() {
+    local vm_name="$1"
+
+    if ! is_running "$vm_name"; then
+        log_error "${vm_name} is not running"
+        return 1
+    fi
+
+    local console_sock="/var/lib/microvms/${vm_name}/console.sock"
+    if [[ ! -S "$console_sock" ]]; then
+        log_error "Console socket not found: $console_sock"
+        return 1
+    fi
+
+    log "Attaching to ${BOLD}${vm_name}${NC} console (Ctrl+] to detach)..."
+    sudo socat -,rawer "UNIX-CONNECT:${console_sock}"
+}
+
+# Builder: execute build command
+cmd_builder_exec() {
+    local flake="$1"
+
+    if ! is_running "$BUILDER_NAME"; then
+        log_error "Builder VM is not running. Start with: microvm start $BUILDER_NAME"
+        return 1
+    fi
+
+    log "Building: ${BOLD}${flake}${NC}"
+    echo "BUILD $flake" | socat -T600 - "VSOCK-CONNECT:${BUILDER_CID}:${BUILDER_BUILD_PORT}" | while read -r line; do
+        case "$line" in
+            OK*)
+                log "$line"
+                ;;
+            DONE*)
+                log_success "$line"
+                ;;
+            ERROR*)
+                log_error "$line"
+                ;;
+            *)
+                echo "  $line"
+                ;;
+        esac
+    done
+}
+
+# Builder: check status
+cmd_builder_status() {
+    echo -e "${BOLD}Builder Status${NC}"
+    echo ""
+
+    if is_running "$BUILDER_NAME"; then
+        echo -e "VM Status: ${GREEN}running${NC}"
+
+        # Query builder status
+        local status
+        status=$(echo "STATUS" | socat -T5 - "VSOCK-CONNECT:${BUILDER_CID}:${BUILDER_STATUS_PORT}" 2>/dev/null || echo "unreachable")
+        echo "Builder: $status"
+    else
+        echo -e "VM Status: ${DIM}stopped${NC}"
+    fi
+
+    echo ""
+    if host_daemon_running; then
+        echo -e "Host nix-daemon: ${GREEN}running${NC}"
+    else
+        echo -e "Host nix-daemon: ${YELLOW}stopped${NC} (normal when builder is active)"
+    fi
+
+    # Check for lockdown mode
+    if [[ -f /etc/LOCKDOWN_MODE ]]; then
+        echo ""
+        echo -e "Mode: ${YELLOW}LOCKDOWN${NC} - host has no internet"
+        echo "  Builder can fetch packages via router VM"
+    fi
+}
+
+# Sync staged changes from VM to host - DEPRECATED
+# This functionality has been replaced by vm-sync which uses vsock queries
+cmd_sync() {
+    echo -e "${YELLOW}microvm sync is deprecated${NC}"
+    echo ""
+    echo "Package sync now uses vsock queries instead of shared directories."
+    echo ""
+    echo -e "${BOLD}New commands:${NC}"
+    echo "  vm-sync list              List staged packages from running VMs"
+    echo "  vm-sync pull <pkg>        Pull package to host profiles"
+    echo "  vm-sync status            Show packages per profile"
+    echo ""
+    echo -e "${BOLD}Or use the TUI:${NC}"
+    echo "  ./scripts/hydrix-tui.sh   Press 'd' for devshells menu"
+    echo ""
+    echo -e "${BOLD}In-VM workflow:${NC}"
+    echo "  vm-dev build <github-url> Build package from GitHub"
+    echo "  vm-dev run <pkg>          Test package"
+    echo "  vm-sync push --name <pkg> Stage for host pull"
+}
+
+# Snapshot management
+cmd_snapshot() {
+    local action="$1"
+    local vm_name="$2"
+    local snap_name="${3:-}"
+    local qcow2_path="/var/lib/microvms/${vm_name}/home.qcow2"
+
+    if [[ ! -f "$qcow2_path" ]]; then
+        log_error "No home.qcow2 found for ${vm_name}"
+        log_error "Path: $qcow2_path"
+        return 1
+    fi
+
+    case "$action" in
+        create)
+            [[ -z "$snap_name" ]] && { log_error "Usage: microvm snapshot create <vm> <name>"; return 1; }
+            if is_running "$vm_name"; then
+                log_error "Cannot create snapshot while VM is running. Stop it first."
+                return 1
+            fi
+            log "Creating snapshot '${BOLD}${snap_name}${NC}' for ${vm_name}..."
+            sudo qemu-img snapshot -c "$snap_name" "$qcow2_path"
+            log_success "Snapshot created"
+            ;;
+        list)
+            log "Snapshots for ${BOLD}${vm_name}${NC}:"
+            sudo qemu-img snapshot -l "$qcow2_path" 2>/dev/null || echo "  (no snapshots)"
+            ;;
+        revert)
+            [[ -z "$snap_name" ]] && { log_error "Usage: microvm snapshot revert <vm> <name>"; return 1; }
+            if is_running "$vm_name"; then
+                log_error "Cannot revert while VM is running. Stop it first."
+                return 1
+            fi
+            log "Reverting to snapshot '${BOLD}${snap_name}${NC}'..."
+            sudo qemu-img snapshot -a "$snap_name" "$qcow2_path"
+            log_success "Reverted to $snap_name"
+            ;;
+        delete)
+            [[ -z "$snap_name" ]] && { log_error "Usage: microvm snapshot delete <vm> <name>"; return 1; }
+            log "Deleting snapshot '${BOLD}${snap_name}${NC}'..."
+            sudo qemu-img snapshot -d "$snap_name" "$qcow2_path"
+            log_success "Snapshot deleted"
+            ;;
+        *)
+            echo -e "${BOLD}microvm snapshot${NC} - Manage qcow2 snapshots"
+            echo ""
+            echo "  create <vm> <name>   Create a snapshot (VM must be stopped)"
+            echo "  list <vm>            List all snapshots"
+            echo "  revert <vm> <name>   Revert to a snapshot (VM must be stopped)"
+            echo "  delete <vm> <name>   Delete a snapshot"
+            echo ""
+            echo "Note: Snapshots are stored inside the home.qcow2 file."
+            echo "      For BTRFS snapshots of the entire VM, use:"
+            echo "      sudo btrfs subvolume snapshot /var/lib/microvms/<vm> /path/to/backup"
+            ;;
+    esac
+}
+
+# Full workflow test with timing
+cmd_test() {
+    local vm_name="$1"
+
+    echo -e "${BOLD}${CYAN}═══════════════════════════════════════════════════${NC}"
+    echo -e "${BOLD}${CYAN}  MicroVM Full Workflow Test: ${vm_name}${NC}"
+    echo -e "${BOLD}${CYAN}═══════════════════════════════════════════════════${NC}"
+    echo ""
+
+    local total_start
+    total_start=$(timer_start)
+
+    # Build
+    echo -e "${BOLD}[1/4] BUILD${NC}"
+    cmd_build "$vm_name"
+    echo ""
+
+    # Start
+    echo -e "${BOLD}[2/4] START${NC}"
+    cmd_start "$vm_name"
+    echo ""
+
+    # Launch test app
+    echo -e "${BOLD}[3/4] APP LAUNCH${NC}"
+    cmd_app "$vm_name" alacritty
+    echo ""
+
+    # Summary
+    local total_time
+    total_time=$(timer_end "$total_start")
+
+    echo -e "${BOLD}[4/4] SUMMARY${NC}"
+    echo -e "${GREEN}═══════════════════════════════════════════════════${NC}"
+    echo -e "  Total workflow time: ${BOLD}${total_time}s${NC}"
+    echo -e "${GREEN}═══════════════════════════════════════════════════${NC}"
+    echo ""
+    echo -e "  ${DIM}Stop with:${NC} microvm stop ${vm_name}"
+}
+
+# Purge microVM (delete all persistent data)
+cmd_purge() {
+    local vm_name="$1"
+    local force="${2:-}"
+    local vm_dir="/var/lib/microvms/${vm_name}"
+
+    if [[ ! -d "$vm_dir" ]]; then
+        log_error "No data found for ${vm_name}"
+        log_error "Path: $vm_dir"
+        return 1
+    fi
+
+    # Stop if running
+    if is_running "$vm_name"; then
+        log "Stopping ${vm_name} first..."
+        cmd_stop "$vm_name"
+    fi
+
+    # Show what will be deleted
+    echo -e "${YELLOW}This will delete all persistent data for ${BOLD}${vm_name}${NC}${YELLOW}:${NC}"
+    echo ""
+    ls -lh "$vm_dir"/*.qcow2 2>/dev/null || echo "  (no qcow2 files found)"
+    echo ""
+
+    # Calculate total size
+    local total_size
+    total_size=$(du -sh "$vm_dir" 2>/dev/null | cut -f1)
+    echo -e "  Total size: ${BOLD}${total_size}${NC}"
+    echo ""
+
+    # Confirm unless --force
+    if [[ "$force" != "--force" && "$force" != "-f" ]]; then
+        echo -e "${RED}Are you sure? This cannot be undone.${NC}"
+        read -p "Type 'yes' to confirm: " confirm
+        if [[ "$confirm" != "yes" ]]; then
+            log "Aborted"
+            return 1
+        fi
+    fi
+
+    log "Purging ${BOLD}${vm_name}${NC}..."
+
+    # Delete qcow2 files
+    sudo rm -f "$vm_dir"/*.qcow2
+
+    # Delete socket files and other runtime state
+    sudo rm -f "$vm_dir"/console.sock "$vm_dir"/xpra-ready 2>/dev/null || true
+
+    log_success "Purged ${vm_name}"
+    echo ""
+    echo -e "  ${DIM}Rebuild with:${NC} microvm build ${vm_name}"
+    echo -e "  ${DIM}The VM will start fresh with a new home volume.${NC}"
+}
+
+# Get system toplevel path from current symlink
+get_current_system_path() {
+    local vm_name="$1"
+    local current="/var/lib/microvms/${vm_name}/current"
+
+    if [[ -L "$current" ]]; then
+        # The current symlink points to the declaredRunner
+        # We need share/microvm/system for the NixOS toplevel
+        local runner_path
+        runner_path=$(readlink -f "$current")
+        local system_path="${runner_path}/share/microvm/system"
+        if [[ -d "$system_path" ]]; then
+            echo "$system_path"
+            return 0
+        fi
+    fi
+    return 1
+}
+
+# Wait for switch service to be ready
+wait_for_switch_service() {
+    local cid="$1"
+    local timeout="${2:-10}"
+    local elapsed=0
+
+    while ! { echo "PING"; sleep 0.2; } | socat -t2 -T5 - "VSOCK-CONNECT:${cid}:${SWITCH_PORT}" 2>/dev/null | grep -q "PONG"; do
+        sleep 0.5
+        elapsed=$((elapsed + 1))
+        if [[ $elapsed -ge $((timeout * 2)) ]]; then
+            return 1
+        fi
+    done
+    return 0
+}
+
+# Live switch microVM to new configuration (without restart)
+cmd_switch() {
+    local vm_name="$1"
+    local path="${2:-}"
+
+    [[ -z "$vm_name" ]] && { log_error "Usage: microvm switch <name> [path]"; return 1; }
+
+    if ! is_running "$vm_name"; then
+        log_error "${vm_name} is not running. Use 'microvm start' instead."
+        return 1
+    fi
+
+    local cid
+    cid=$(get_cid "$vm_name")
+    if [[ -z "$cid" ]]; then
+        log_error "Cannot get vsock CID for ${vm_name}"
+        return 1
+    fi
+
+    # If no path provided, get from current symlink
+    if [[ -z "$path" ]]; then
+        path=$(get_current_system_path "$vm_name")
+        if [[ -z "$path" ]]; then
+            log_error "No current symlink found. Run 'microvm build $vm_name' first."
+            return 1
+        fi
+    fi
+
+    log "Switching ${BOLD}${vm_name}${NC} to: ${path}"
+    local start
+    start=$(timer_start)
+
+    # Check if switch service is ready
+    if ! wait_for_switch_service "$cid" 5; then
+        log_error "Switch service not responding. Is the VM running a configuration with vm-switch?"
+        return 1
+    fi
+
+    # Dump nix DB registration for new closure paths so VM can register them.
+    # Without this, the VM's nix DB doesn't know about host-built store paths
+    # and home-manager activation fails during switch-to-configuration.
+    local reg_file="/var/lib/microvms/${vm_name}/config/.switch-reg"
+    log "Registering store paths for VM..."
+    local reg_start
+    reg_start=$(timer_start)
+    nix-store -qR "$path" | xargs nix-store --dump-db | sudo tee "$reg_file" > /dev/null 2>&1
+    local reg_time
+    reg_time=$(timer_end "$reg_start")
+    log_time "Registration dump in ${BOLD}${reg_time}s${NC}"
+
+    # Send switch command
+    # Use -t60 (idle timeout) and keep stdin open briefly with sleep to ensure we get response
+    local result
+    result=$({ echo "SWITCH $path"; sleep 1; } | socat -t60 -T120 - "VSOCK-CONNECT:${cid}:${SWITCH_PORT}" 2>&1)
+
+    local switch_time
+    switch_time=$(timer_end "$start")
+
+    if [[ -z "$result" ]]; then
+        log_error "No response from VM (timeout or connection closed)"
+        log "Check VM logs: journalctl -u vm-switch --no-pager -n 20"
+        return 1
+    elif [[ "$result" == OK:* ]]; then
+        # Extract first line (status) and rest (details)
+        local first_line="${result%%$'\n'*}"
+        local details="${result#*$'\n'}"
+
+        # Check if it's a partial success (some units failed)
+        if [[ "$first_line" == *"some units failed"* ]]; then
+            log_warn "$first_line"
+            if [[ -n "$details" && "$details" != "$first_line" ]]; then
+                echo -e "${DIM}${details}${NC}"
+            fi
+            log_time "Switched in ${BOLD}${switch_time}s${NC} (with warnings)"
+        else
+            log_success "$first_line"
+            log_time "Switched in ${BOLD}${switch_time}s${NC}"
+        fi
+    else
+        log_error "$result"
+        return 1
+    fi
+}
+
+# Combined build + switch (no restart)
+cmd_update() {
+    local vm_name="$1"
+    [[ -z "$vm_name" ]] && { log_error "Usage: microvm update <name>"; return 1; }
+
+    log "Updating ${BOLD}${vm_name}${NC} (build + live switch)..."
+    local start
+    start=$(timer_start)
+
+    # Build first
+    cmd_build "$vm_name" || return 1
+
+    # If VM is running, switch live; otherwise just report
+    if is_running "$vm_name"; then
+        cmd_switch "$vm_name" || return 1
+
+        local total_time
+        total_time=$(timer_end "$start")
+        echo ""
+        log_success "Update complete in ${BOLD}${total_time}s${NC} (no restart required)"
+    else
+        local total_time
+        total_time=$(timer_end "$start")
+        echo ""
+        log_success "Build complete in ${BOLD}${total_time}s${NC}"
+        echo -e "  ${DIM}VM not running. Start with:${NC} microvm start ${vm_name}"
+    fi
+}
+
+# Query switch status from VM
+cmd_switch_status() {
+    local vm_name="$1"
+    [[ -z "$vm_name" ]] && { log_error "Usage: microvm switch-status <name>"; return 1; }
+
+    if ! is_running "$vm_name"; then
+        log_error "${vm_name} is not running"
+        return 1
+    fi
+
+    local cid
+    cid=$(get_cid "$vm_name")
+    if [[ -z "$cid" ]]; then
+        log_error "Cannot get vsock CID for ${vm_name}"
+        return 1
+    fi
+
+    log "Querying switch status for ${BOLD}${vm_name}${NC}..."
+
+    local result
+    result=$({ echo "STATUS"; sleep 0.5; } | socat -t10 -T15 - "VSOCK-CONNECT:${cid}:${SWITCH_PORT}" 2>&1)
+
+    if [[ -z "$result" ]]; then
+        log_error "No response from switch service"
+        return 1
+    fi
+
+    echo ""
+    echo -e "${BOLD}Live System Status${NC}"
+    echo ""
+
+    # Parse and display status
+    while IFS= read -r line; do
+        case "$line" in
+            CURRENT\ *)
+                echo -e "  Current: ${CYAN}${line#CURRENT }${NC}"
+                ;;
+            BOOTED\ *)
+                echo -e "  Booted:  ${DIM}${line#BOOTED }${NC}"
+                ;;
+            PROFILE\ *)
+                echo -e "  Profile: ${DIM}${line#PROFILE }${NC}"
+                ;;
+            *)
+                echo "  $line"
+                ;;
+        esac
+    done <<< "$result"
+
+    # Also show what's built on host
+    local host_path
+    host_path=$(get_current_system_path "$vm_name" 2>/dev/null || echo "")
+    if [[ -n "$host_path" ]]; then
+        echo ""
+        echo -e "  Host:    ${GREEN}${host_path}${NC}"
+    fi
+}
+
+# Detect host machine config name (matches rebuild's detect_machine_config)
+detect_host_config() {
+    # Try product_name first (most common match)
+    local product_name
+    product_name=$(cat /sys/class/dmi/id/product_name 2>/dev/null | xargs || echo "")
+    if [[ -n "$product_name" ]]; then
+        local sanitized
+        sanitized=$(echo "$product_name" | tr '[:upper:]' '[:lower:]' | tr ' _' '-')
+        sanitized=$(echo "$sanitized" | sed 's/[^a-z0-9-]//g; s/-\+/-/g; s/^-//; s/-$//')
+        if [[ -f "${FLAKE_DIR}/machines/${sanitized}.nix" ]]; then
+            echo "$sanitized"
+            return
+        fi
+        if [[ -f "${FLAKE_DIR}/machines/mb-${sanitized}.nix" ]]; then
+            echo "mb-${sanitized}"
+            return
+        fi
+    fi
+
+    # Fallback: if only one non-hardware config exists, use it
+    local configs=()
+    for f in "${FLAKE_DIR}"/machines/*.nix; do
+        [[ ! -f "$f" ]] && continue
+        local base
+        base=$(basename "$f" .nix)
+        [[ "$base" == *-hardware ]] && continue
+        configs+=("$base")
+    done
+
+    if [[ ${#configs[@]} -eq 1 ]]; then
+        echo "${configs[0]}"
+        return
+    fi
+
+    # Last resort: hostname (may not match flake config name)
+    hostname
+}
+
+# Resolve builder target to flake path
+# Uses fixed mount point for builder VM
+resolve_builder_target() {
+    local target="$1"
+    # Inside builder VM, hydrix-config is mounted read-only at /mnt/hydrix
+    local builder_flake="/mnt/hydrix"
+
+    case "$target" in
+        # Short profile names → microvm-* names
+        browsing)
+            echo "${builder_flake}#nixosConfigurations.microvm-browsing.config.microvm.declaredRunner"
+            ;;
+        pentest)
+            echo "${builder_flake}#nixosConfigurations.microvm-pentest.config.microvm.declaredRunner"
+            ;;
+        dev)
+            echo "${builder_flake}#nixosConfigurations.microvm-dev.config.microvm.declaredRunner"
+            ;;
+        comms)
+            echo "${builder_flake}#nixosConfigurations.microvm-comms.config.microvm.declaredRunner"
+            ;;
+        lurking)
+            echo "${builder_flake}#nixosConfigurations.microvm-lurking.config.microvm.declaredRunner"
+            ;;
+        router)
+            echo "${builder_flake}#nixosConfigurations.microvm-router.config.microvm.declaredRunner"
+            ;;
+        builder)
+            echo "${builder_flake}#nixosConfigurations.microvm-builder.config.microvm.declaredRunner"
+            ;;
+        gitsync)
+            echo "${builder_flake}#nixosConfigurations.microvm-gitsync.config.microvm.declaredRunner"
+            ;;
+        host)
+            echo "${builder_flake}#nixosConfigurations.$(detect_host_config).config.system.build.toplevel"
+            ;;
+        micro*)
+            # Direct microVM name (microvm-browsing, microvm-pentest, etc.)
+            echo "${builder_flake}#nixosConfigurations.${target}.config.microvm.declaredRunner"
+            ;;
+        .#*|*#*)
+            # Flake path - pass through as-is
+            echo "$target"
+            ;;
+        *)
+            # Try as VM name
+            echo "${builder_flake}#nixosConfigurations.${target}.config.microvm.declaredRunner"
+            ;;
+    esac
+}
+
+# Get VM name from target (for host builds after fetching)
+get_vm_name_from_target() {
+    local target="$1"
+    case "$target" in
+        # Short profile names → microvm-* names
+        browsing)
+            echo "microvm-browsing"
+            ;;
+        pentest)
+            echo "microvm-pentest"
+            ;;
+        dev)
+            echo "microvm-dev"
+            ;;
+        comms)
+            echo "microvm-comms"
+            ;;
+        lurking)
+            echo "microvm-lurking"
+            ;;
+        router)
+            echo "microvm-router"
+            ;;
+        builder)
+            echo "microvm-builder"
+            ;;
+        gitsync)
+            echo "microvm-gitsync"
+            ;;
+        micro*)
+            # Direct microVM name
+            echo "$target"
+            ;;
+        host|.#*|*#*)
+            # Not a VM
+            echo ""
+            ;;
+        *)
+            echo "$target"
+            ;;
+    esac
+}
+
+# Builder: full workflow (start -> build in VM -> stop -> build on host)
+cmd_builder_build() {
+    local target="$1"
+    [[ -z "$target" ]] && { log_error "Usage: microvm builder build <target>"; return 1; }
+
+    local flake_target
+    flake_target=$(resolve_builder_target "$target")
+    log "Target: ${BOLD}${target}${NC} → ${flake_target}"
+
+    local total_start
+    total_start=$(timer_start)
+
+    # Step 1: Start builder if not running
+    if ! is_running "$BUILDER_NAME"; then
+        log "Starting builder..."
+        cmd_start "$BUILDER_NAME" || return 1
+    else
+        log "Builder already running"
+    fi
+
+    # Step 2: Build in builder via vsock
+    log "Building in builder VM..."
+    local build_output
+    local build_status=0
+    # Use -t600 to wait up to 10 minutes for remote to close after we send command
+    # The { echo; sleep 1; } keeps stdin "open" briefly to prevent early close
+    build_output=$({ echo "BUILD $flake_target"; sleep 1; } | socat -t600 -T900 - "VSOCK-CONNECT:${BUILDER_CID}:${BUILDER_BUILD_PORT}" 2>&1) || build_status=$?
+
+    # Parse and display output
+    local result_path=""
+    while IFS= read -r line; do
+        case "$line" in
+            OK*)
+                log "$line"
+                ;;
+            RESULT\ *)
+                result_path="${line#RESULT }"
+                log_success "Result: ${BOLD}${result_path}${NC}"
+                ;;
+            DONE*)
+                log_success "$line"
+                ;;
+            ERROR*)
+                log_error "$line"
+                ;;
+            *)
+                [[ -n "$line" ]] && echo "  $line"
+                ;;
+        esac
+    done <<< "$build_output"
+
+    # Check for build failure
+    if echo "$build_output" | grep -q "^ERROR"; then
+        log_error "Build failed in builder VM"
+        return 1
+    fi
+
+    # Step 3: Stop builder
+    log "Stopping builder..."
+    cmd_stop "$BUILDER_NAME" || return 1
+
+    # Step 4: Build on host (should be instant since deps are cached)
+    log "Building on host (should be instant)..."
+
+    if [[ "$target" == "host" ]]; then
+        # Detect current specialisation for switch
+        local current_spec
+        current_spec=$(detect_current_specialisation)
+        log "Current specialisation: ${BOLD}${current_spec}${NC}"
+
+        # Host build uses nixos-rebuild
+        local host_start
+        host_start=$(timer_start)
+        if sudo nixos-rebuild build --flake "${FLAKE_DIR}#$(detect_host_config)"; then
+            local host_time
+            host_time=$(timer_end "$host_start")
+            log_time "Host build completed in ${BOLD}${host_time}s${NC}"
+        else
+            log_error "Host build failed"
+            return 1
+        fi
+
+        echo ""
+        log "To apply the build, run:"
+        if [[ "$current_spec" == "lockdown" ]]; then
+            echo "  sudo nixos-rebuild switch --flake ${FLAKE_DIR}#$(detect_host_config)"
+        else
+            echo "  sudo nixos-rebuild switch --flake ${FLAKE_DIR}#$(detect_host_config) --specialisation ${current_spec}"
+        fi
+    else
+        # Get VM name for microvm build
+        local vm_name
+        vm_name=$(get_vm_name_from_target "$target")
+
+        if [[ -n "$vm_name" ]]; then
+            cmd_build "$vm_name" || return 1
+        else
+            # Raw flake path - just verify it exists on host
+            if nix path-info "$flake_target" &>/dev/null; then
+                log_success "Path verified in store"
+            else
+                log_error "Built path not found on host: $flake_target"
+                return 1
+            fi
+        fi
+    fi
+
+    local total_time
+    total_time=$(timer_end "$total_start")
+    echo ""
+    log_success "Build complete: ${BOLD}${target}${NC} in ${BOLD}${total_time}s${NC}"
+}
+
+# Builder: fetch only (prefetch deps, don't stop builder or build on host)
+cmd_builder_fetch() {
+    local target="$1"
+    [[ -z "$target" ]] && { log_error "Usage: microvm builder fetch <target>"; return 1; }
+
+    local flake_target
+    flake_target=$(resolve_builder_target "$target")
+    log "Target: ${BOLD}${target}${NC} → ${flake_target}"
+
+    # Start builder if not running
+    if ! is_running "$BUILDER_NAME"; then
+        log "Starting builder..."
+        cmd_start "$BUILDER_NAME" || return 1
+    else
+        log "Builder already running"
+    fi
+
+    # Prefetch via vsock
+    log "Fetching in builder VM..."
+    local fetch_output
+    # Use -t600 to wait up to 10 minutes for remote to close after we send command
+    fetch_output=$({ echo "BUILD $flake_target"; sleep 1; } | socat -t600 -T900 - "VSOCK-CONNECT:${BUILDER_CID}:${BUILDER_BUILD_PORT}" 2>&1)
+
+    # Parse and display output
+    while IFS= read -r line; do
+        case "$line" in
+            OK*)
+                log "$line"
+                ;;
+            RESULT\ *)
+                log_success "Result: ${BOLD}${line#RESULT }${NC}"
+                ;;
+            DONE*)
+                log_success "$line"
+                ;;
+            ERROR*)
+                log_error "$line"
+                ;;
+            *)
+                [[ -n "$line" ]] && echo "  $line"
+                ;;
+        esac
+    done <<< "$fetch_output"
+
+    if echo "$fetch_output" | grep -q "^ERROR"; then
+        log_error "Fetch failed"
+        return 1
+    fi
+
+    echo ""
+    log "Fetch complete. Builder still running - use 'builder stop' when done."
+}
+
+# Builder: start alias
+cmd_builder_start() {
+    cmd_start "$BUILDER_NAME"
+}
+
+# Builder: stop alias
+cmd_builder_stop() {
+    cmd_stop "$BUILDER_NAME"
+}
+
+# Builder: switch (build + apply with specialisation preservation)
+# Usage: microvm builder switch [specialisation]
+# If specialisation is provided, uses that. Otherwise preserves current.
+cmd_builder_switch() {
+    local target_spec="${1:-}"
+
+    # Detect current specialisation
+    local current_spec
+    current_spec=$(detect_current_specialisation)
+
+    # Use provided spec or default to current
+    if [[ -z "$target_spec" ]]; then
+        target_spec="$current_spec"
+    fi
+
+    log "Current specialisation: ${BOLD}${current_spec}${NC}"
+    if [[ "$target_spec" != "$current_spec" ]]; then
+        log "Target specialisation: ${BOLD}${target_spec}${NC}"
+        log "${YELLOW}Note: Switching specialisations in lockdown mode may have limited effect${NC}"
+        log "${YELLOW}      Consider rebooting and selecting '$target_spec' from boot menu${NC}"
+    fi
+
+    local total_start
+    total_start=$(timer_start)
+
+    # Step 1: Build via builder workflow
+    log "Building host configuration..."
+    if ! cmd_builder_build host; then
+        log_error "Build failed, not switching"
+        return 1
+    fi
+
+    # Step 2: Switch with specialisation
+    log "Applying configuration..."
+    local switch_cmd="sudo nixos-rebuild switch --flake ${FLAKE_DIR}#$(detect_host_config)"
+    if [[ "$target_spec" != "lockdown" ]]; then
+        switch_cmd="$switch_cmd --specialisation ${target_spec}"
+    fi
+
+    log "Running: ${DIM}${switch_cmd}${NC}"
+    if eval "$switch_cmd"; then
+        # Re-attach TAPs to bridges (activation may have recreated bridges)
+        restore_network
+        local total_time
+        total_time=$(timer_end "$total_start")
+        echo ""
+        log_success "Switch complete in ${BOLD}${total_time}s${NC}"
+        log "Now running: ${BOLD}${target_spec}${NC} specialisation"
+    else
+        log_error "Switch failed"
+        log "System is unchanged - previous configuration still active"
+        return 1
+    fi
+}
+
+# Builder: shell (console) alias
+cmd_builder_shell() {
+    cmd_console "$BUILDER_NAME"
+}
+
+# Builder: help
+cmd_builder_help() {
+    cat <<EOF
+${BOLD}microvm builder${NC} - Streamlined lockdown mode builds
+
+${BOLD}USAGE${NC}
+    microvm builder <command> [target]
+
+${BOLD}COMMANDS${NC}
+    build <target>     Full workflow: start → build in VM → stop → build on host
+    switch [spec]      Build + apply host config (default: preserve current spec)
+    fetch <target>     Prefetch deps in builder (don't stop, don't build on host)
+    start              Start builder VM (stops host nix-daemon)
+    stop               Stop builder VM (restarts host nix-daemon)
+    status             Show builder and nix-daemon status
+    shell              Attach to builder console
+
+${BOLD}NAMED TARGETS${NC}
+    browsing           → microvm-browsing
+    pentest            → microvm-pentest
+    dev                → microvm-dev
+    comms              → microvm-comms
+    lurking            → microvm-lurking
+    router             → microvm-router
+    builder            → microvm-builder
+    host               → Host system (nixos-rebuild)
+    micro*             → Direct microVM name
+    .#path             → Raw flake path (passed through)
+
+${BOLD}EXAMPLES${NC}
+    # Build a microVM (full workflow)
+    microvm builder build browsing
+    microvm builder build microvm-pentest
+
+    # Build host config
+    microvm builder build host
+
+    # Build AND apply host config (preserves current specialisation)
+    microvm builder switch
+    microvm builder switch administrative  # Build for specific specialisation
+
+    # Prefetch multiple targets, then stop
+    microvm builder fetch browsing
+    microvm builder fetch pentest
+    microvm builder fetch host
+    microvm builder stop
+
+    # Manual control
+    microvm builder start
+    microvm builder shell          # Interactive console
+    microvm builder stop
+
+    # Check status
+    microvm builder status
+EOF
+}
+
+# Builder: dispatcher
+cmd_builder() {
+    local subcmd="${1:-help}"
+    shift 2>/dev/null || true
+
+    case "$subcmd" in
+        build)   cmd_builder_build "$@" ;;
+        switch)  cmd_builder_switch "$@" ;;
+        fetch)   cmd_builder_fetch "$@" ;;
+        start)   cmd_builder_start ;;
+        stop)    cmd_builder_stop ;;
+        status)  cmd_builder_status ;;
+        shell)   cmd_builder_shell ;;
+        help|-h|--help)  cmd_builder_help ;;
+        *)
+            log_error "Unknown builder command: $subcmd"
+            cmd_builder_help
+            return 1
+            ;;
+    esac
+}
+
+# ===== Network Restoration =====
+# Re-attach TAPs to bridges after switch-to-configuration
+# Bridges may be recreated during activation, detaching TAP interfaces
+restore_network() {
+    log "Restoring network..."
+
+    # Ensure bridges are up
+    for br in $(ip -o link show type bridge 2>/dev/null | awk -F'[ :]+' '{print $2}'); do
+        sudo ip link set "$br" up 2>/dev/null || true
+    done
+
+    # Re-attach router TAPs
+    declare -A router_taps=(
+        ["mv-router-mgmt"]="br-mgmt"
+        ["mv-router-pent"]="br-pentest"
+        ["mv-router-comm"]="br-comms"
+        ["mv-router-lurk"]="br-lurking"
+        ["mv-router-brow"]="br-browse"
+        ["mv-router-dev"]="br-dev"
+        ["mv-router-shar"]="br-shared"
+        ["mv-router-bldr"]="br-builder"
+    )
+    for tap in "${!router_taps[@]}"; do
+        local bridge="${router_taps[$tap]}"
+        if ip link show "$tap" &>/dev/null && ip link show "$bridge" &>/dev/null; then
+            sudo ip link set "$tap" master "$bridge" 2>/dev/null || true
+            sudo ip link set "$tap" up 2>/dev/null || true
+        fi
+    done
+
+    # Re-attach VM TAPs
+    for tap in $(ip -o link show 2>/dev/null | grep -oP 'mv-(?!router)[a-z-]+(?=[@:])' | sort -u); do
+        local bridge="br-browse"
+        case "$tap" in
+            mv-browse*)  bridge="br-browse" ;;
+            mv-pentest*) bridge="br-pentest" ;;
+            mv-hack*)    bridge="br-pentest" ;;
+            mv-dev*)     bridge="br-dev" ;;
+            mv-lurk*)    bridge="br-lurking" ;;
+            mv-comms*)   bridge="br-comms" ;;
+            mv-build*)   bridge="br-builder" ;;
+            mv-gitsyn*)  bridge="br-builder" ;;
+        esac
+        if ip link show "$bridge" &>/dev/null; then
+            sudo ip link set "$tap" master "$bridge" 2>/dev/null || true
+            sudo ip link set "$tap" up 2>/dev/null || true
+        fi
+    done
+
+    # Restore host IPs on management and shared bridges
+    sudo ip addr add 192.168.100.1/24 dev br-mgmt 2>/dev/null || true
+    sudo ip addr add 192.168.105.1/24 dev br-shared 2>/dev/null || true
+}
+
+# ===== Git-Sync Commands =====
+
+# Git-sync: send command via vsock and display output
+gitsync_vsock_cmd() {
+    local cmd="$1"
+
+    # Start git-sync if not running
+    if ! is_running "$GITSYNC_NAME"; then
+        log "Starting git-sync VM..."
+        cmd_start "$GITSYNC_NAME" || return 1
+    fi
+
+    local output
+    local status=0
+    output=$({ echo "$cmd"; sleep 1; } | socat -t60 -T120 - "VSOCK-CONNECT:${GITSYNC_CID}:${GITSYNC_GIT_PORT}" 2>&1) || status=$?
+
+    while IFS= read -r line; do
+        case "$line" in
+            OK*)
+                log "$line"
+                ;;
+            DONE*)
+                log_success "$line"
+                ;;
+            ERROR*)
+                log_error "$line"
+                ;;
+            *)
+                [[ -n "$line" ]] && echo "  $line"
+                ;;
+        esac
+    done <<< "$output"
+
+    if echo "$output" | grep -q "^ERROR"; then
+        return 1
+    fi
+}
+
+cmd_git_push() {
+    local repo="$1"
+    [[ -z "$repo" ]] && { log_error "Usage: microvm git push <repo>"; return 1; }
+    gitsync_vsock_cmd "PUSH $repo"
+}
+
+cmd_git_pull() {
+    local repo="$1"
+    [[ -z "$repo" ]] && { log_error "Usage: microvm git pull <repo>"; return 1; }
+    gitsync_vsock_cmd "PULL $repo"
+}
+
+cmd_git_fetch() {
+    local repo="$1"
+    [[ -z "$repo" ]] && { log_error "Usage: microvm git fetch <repo>"; return 1; }
+    gitsync_vsock_cmd "FETCH $repo"
+}
+
+cmd_git_status() {
+    local repo="$1"
+    [[ -z "$repo" ]] && { log_error "Usage: microvm git status <repo>"; return 1; }
+    gitsync_vsock_cmd "STATUS $repo"
+}
+
+cmd_git_repos() {
+    gitsync_vsock_cmd "REPOS"
+}
+
+cmd_git_auth() {
+    # Open console for interactive gh auth login
+    if ! is_running "$GITSYNC_NAME"; then
+        log "Starting git-sync VM..."
+        cmd_start "$GITSYNC_NAME" || return 1
+    fi
+    log "Attaching to git-sync console for gh auth login..."
+    log "Run: ${BOLD}gh auth login${NC}"
+    log "Press Ctrl+O to detach from console"
+    cmd_console "$GITSYNC_NAME"
+}
+
+cmd_git_help() {
+    cat <<EOF
+${BOLD}microvm git${NC} - Git operations via git-sync VM (lockdown mode)
+
+${BOLD}USAGE${NC}
+    microvm git <command> [repo]
+
+${BOLD}COMMANDS${NC}
+    push <repo>        Push commits to remote
+    pull <repo>        Pull changes from remote
+    fetch <repo>       Fetch from all remotes
+    status <repo>      Show git status and recent commits
+    repos              List available repos
+    auth               Open console for gh auth login
+
+${BOLD}EXAMPLES${NC}
+    # List available repos
+    microvm git repos
+
+    # Check status of a repo
+    microvm git status hydrix-config
+
+    # Push commits (commit on host first, then push via git-sync)
+    microvm git push hydrix-config
+
+    # Pull latest changes
+    microvm git pull Hydrix
+
+    # First-time setup: authenticate with GitHub
+    microvm git auth
+EOF
+}
+
+# Git: dispatcher
+cmd_git() {
+    local subcmd="${1:-help}"
+    shift 2>/dev/null || true
+
+    case "$subcmd" in
+        push)    cmd_git_push "$@" ;;
+        pull)    cmd_git_pull "$@" ;;
+        fetch)   cmd_git_fetch "$@" ;;
+        status)  cmd_git_status "$@" ;;
+        repos)   cmd_git_repos ;;
+        auth)    cmd_git_auth ;;
+        help|-h|--help)  cmd_git_help ;;
+        *)
+            log_error "Unknown git command: $subcmd"
+            cmd_git_help
+            return 1
+            ;;
+    esac
+}
+
+# Usage
+usage() {
+    cat <<EOF
+${BOLD}microvm${NC} - Simple microVM management with timing
+
+${BOLD}USAGE${NC}
+    microvm <command> [args...]
+
+${BOLD}COMMANDS${NC}
+  ${BOLD}Lifecycle:${NC}
+    build <name>            Build/rebuild microVM image
+    start <name>            Start microVM (waits until ready)
+    stop <name>             Stop microVM
+    restart <name>          Restart microVM
+    update <name>           Build + live switch (no restart)
+    switch <name> [path]    Live switch to new config (no restart)
+
+  ${BOLD}Apps & Sessions:${NC}
+    app <name> <cmd>        Launch app in microVM
+    attach <name>           Attach to xpra session
+    console <name>          Attach to serial console (headless VMs)
+
+  ${BOLD}Status:${NC}
+    status [name]           Show status of microVM(s)
+    switch-status <name>    Show live vs built configuration paths
+    list                    List all declared microVMs
+    logs <name>             View microVM logs (follow)
+
+  ${BOLD}Builder (lockdown mode):${NC}
+    builder <cmd>           Streamlined build workflow (see: microvm builder help)
+    builder-status          Show builder VM and nix-daemon status (legacy)
+    builder-exec <flake>    Build flake in builder VM (legacy)
+
+  ${BOLD}Git-Sync (lockdown mode):${NC}
+    git <cmd>               Git operations via git-sync VM (see: microvm git help)
+
+  ${BOLD}Utilities:${NC}
+    test <name>             Full workflow test with timing
+    purge <name> [-f]       Delete all persistent data (fresh start)
+    snapshot <action>       Manage qcow2 snapshots (create/list/revert/delete)
+    sync [vm] <action>      DEPRECATED - use vm-sync instead
+
+${BOLD}MICROVM TYPES${NC}
+    microvm-browsing         Web browsing, persistent (10GB home)
+    microvm-pentest          Pentesting, persistent (20GB home)
+    microvm-dev              Development, persistent (50GB home + 20GB docker)
+    microvm-comms            Communications, ephemeral (privacy)
+    microvm-lurking          Darknet/Tor, ephemeral (maximum privacy)
+    microvm-router           WiFi passthrough router
+    microvm-builder          Builder for lockdown mode (populates host store)
+    microvm-gitsync          Git-sync for lockdown mode (push/pull repos)
+
+${BOLD}EXAMPLES${NC}
+    # Build and start a microVM
+    microvm build microvm-browsing
+    microvm start microvm-browsing
+    microvm app microvm-browsing firefox
+
+    # Live update (build + switch without restart)
+    microvm update microvm-browsing
+
+    # Or build and switch separately
+    microvm build microvm-browsing
+    microvm switch microvm-browsing
+
+    # Check what's running vs what's built
+    microvm switch-status microvm-browsing
+
+    # Restart (for kernel/initrd changes)
+    microvm build microvm-browsing
+    microvm restart microvm-browsing
+
+    # Snapshots (VM must be stopped)
+    microvm snapshot create microvm-browsing before-update
+    microvm snapshot revert microvm-browsing before-update
+
+    # Purge and start fresh (deletes all persistent data)
+    microvm purge microvm-dev
+    microvm build microvm-dev
+
+    # Builder workflow (streamlined)
+    microvm builder build browsing     # Full workflow: start→build→stop→host build
+    microvm builder switch             # Build AND apply host config (preserves specialisation)
+    microvm builder fetch pentest      # Just prefetch deps
+    microvm builder stop               # Stop when done
+
+    # Builder workflow (manual)
+    microvm builder start
+    microvm builder shell              # Interactive console
+    microvm builder stop
+
+${BOLD}NOTE${NC}
+    For multiple named VM instances, use libvirt with deploy-vm.sh:
+      ./scripts/build-base.sh --type pentest
+      ./scripts/deploy-vm.sh --type pentest --name google --user traum
+EOF
+}
+
+# Main
+main() {
+    if [[ $# -lt 1 ]]; then
+        usage
+        exit 0
+    fi
+
+    local cmd="$1"
+    shift
+
+    case "$cmd" in
+        build)
+            [[ $# -lt 1 ]] && { log_error "Usage: microvm build <name>"; exit 1; }
+            cmd_build "$1"
+            ;;
+        start)
+            [[ $# -lt 1 ]] && { log_error "Usage: microvm start <name>"; exit 1; }
+            cmd_start "$1"
+            ;;
+        stop)
+            [[ $# -lt 1 ]] && { log_error "Usage: microvm stop <name>"; exit 1; }
+            cmd_stop "$1"
+            ;;
+        restart)
+            [[ $# -lt 1 ]] && { log_error "Usage: microvm restart <name>"; exit 1; }
+            cmd_restart "$1"
+            ;;
+        update)
+            [[ $# -lt 1 ]] && { log_error "Usage: microvm update <name>"; exit 1; }
+            cmd_update "$1"
+            ;;
+        switch)
+            [[ $# -lt 1 ]] && { log_error "Usage: microvm switch <name> [path]"; exit 1; }
+            cmd_switch "$@"
+            ;;
+        switch-status)
+            [[ $# -lt 1 ]] && { log_error "Usage: microvm switch-status <name>"; exit 1; }
+            cmd_switch_status "$1"
+            ;;
+        app)
+            [[ $# -lt 2 ]] && { log_error "Usage: microvm app <name> <command>"; exit 1; }
+            cmd_app "$@"
+            ;;
+        attach)
+            [[ $# -lt 1 ]] && { log_error "Usage: microvm attach <name>"; exit 1; }
+            cmd_attach "$1"
+            ;;
+        status)
+            cmd_status "${1:-}"
+            ;;
+        list)
+            cmd_list
+            ;;
+        logs)
+            [[ $# -lt 1 ]] && { log_error "Usage: microvm logs <name>"; exit 1; }
+            cmd_logs "$1"
+            ;;
+        console)
+            [[ $# -lt 1 ]] && { log_error "Usage: microvm console <name>"; exit 1; }
+            cmd_console "$1"
+            ;;
+        builder)
+            cmd_builder "$@"
+            ;;
+        git)
+            cmd_git "$@"
+            ;;
+        builder-status)
+            # Legacy alias
+            cmd_builder_status
+            ;;
+        builder-exec)
+            # Legacy alias
+            [[ $# -lt 1 ]] && { log_error "Usage: microvm builder-exec <flake>"; exit 1; }
+            cmd_builder_exec "$1"
+            ;;
+        test)
+            [[ $# -lt 1 ]] && { log_error "Usage: microvm test <name>"; exit 1; }
+            cmd_test "$1"
+            ;;
+        purge)
+            [[ $# -lt 1 ]] && { log_error "Usage: microvm purge <name> [-f|--force]"; exit 1; }
+            cmd_purge "$@"
+            ;;
+        snapshot|snap)
+            [[ $# -lt 1 ]] && { cmd_snapshot help; exit 0; }
+            cmd_snapshot "$@"
+            ;;
+        sync)
+            cmd_sync "$@"
+            ;;
+        -h|--help|help)
+            usage
+            ;;
+        *)
+            log_error "Unknown command: $cmd"
+            usage
+            exit 1
+            ;;
+    esac
+}
+
+main "$@"

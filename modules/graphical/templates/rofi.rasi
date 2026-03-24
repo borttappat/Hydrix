@@ -1,0 +1,14 @@
+@import "colors.rasi"
+
+* {
+    font: "@@FONT_NAME@@ @@FONT_SIZE@@";
+}
+
+window {
+    width: @@ROFI_WIDTH@@px;
+    height: @@ROFI_HEIGHT@@px;
+}
+
+element {
+    padding: @@PADDING_SMALL@@px;
+}

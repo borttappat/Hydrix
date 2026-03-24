@@ -1,0 +1,59 @@
+# Nix build outputs
+result
+result-*
+router-vm-result
+base-image-result
+pentest-vm-image*
+browsing-vm-image*
+comms-vm-image*
+
+# Local configuration (secrets, user-specific settings)
+# See templates/local/ for examples
+local/
+!local/.gitkeep
+
+# Sensitive files
+*credentials.env
+router-credentials.env
+
+# Hardware detection results (may contain sensitive PCI IDs)
+hardware-results.env
+hardware-results.json
+
+# VM disk images
+*.qcow2
+*.img
+
+# Temporary files
+*.tmp
+*.bak
+*~
+
+# Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Other files
+*.txt
+*.env
+
+# Markdown - ignore most but keep key docs
+*.md
+!HYDRIX-GUIDE.md
+!README.md
+!CLAUDE.md
+!REWORK.md
+!DOCUMENTATION.md
+!VM-DEPLOY-IMPROVEMENT.md
+!templates/local/README.md
+!secrets/README.md
+
+# sops-nix - only .sops.yaml is machine-specific (contains age public key)
+# Encrypted yaml files are SAFE to commit - that's the point of sops!
+secrets/.sops.yaml

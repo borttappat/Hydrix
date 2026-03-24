@@ -1,0 +1,5 @@
+[font]
+size = @@FONT_SIZE@@
+
+[font.normal]
+family = "@@FONT_NAME@@"

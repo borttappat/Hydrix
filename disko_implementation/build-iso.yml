@@ -1,0 +1,103 @@
+# .github/workflows/build-iso.yml
+# Automatically build ISO on push to main branch
+
+name: Build Custom NixOS ISO
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'flake.nix'
+      - 'flake.lock'
+      - 'installer/**'
+      - 'hosts/**'
+      - '.github/workflows/build-iso.yml'
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:  # Allow manual trigger
+
+jobs:
+  build-iso:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+    
+    - name: Install Nix
+      uses: cachix/install-nix-action@v26
+      with:
+        nix_path: nixpkgs=channel:nixos-unstable
+        extra_nix_config: |
+          experimental-features = nix-command flakes
+          access-tokens = github.com=${{ secrets.GITHUB_TOKEN }}
+    
+    - name: Setup Cachix (optional - speeds up builds)
+      uses: cachix/cachix-action@v14
+      with:
+        name: your-cachix-cache-name  # Replace with your cache
+        authToken: '${{ secrets.CACHIX_AUTH_TOKEN }}'
+      continue-on-error: true
+    
+    - name: Build ISO
+      run: |
+        nix build .#installer-iso -L
+    
+    - name: Get ISO details
+      id: iso_info
+      run: |
+        ISO_PATH=$(find result/iso -name "*.iso" | head -n1)
+        ISO_NAME=$(basename "$ISO_PATH")
+        ISO_SIZE=$(du -h "$ISO_PATH" | cut -f1)
+        echo "path=$ISO_PATH" >> $GITHUB_OUTPUT
+        echo "name=$ISO_NAME" >> $GITHUB_OUTPUT
+        echo "size=$ISO_SIZE" >> $GITHUB_OUTPUT
+    
+    - name: Create release on tag
+      if: startsWith(github.ref, 'refs/tags/')
+      uses: softprops/action-gh-release@v1
+      with:
+        files: ${{ steps.iso_info.outputs.path }}
+        body: |
+          ## Custom NixOS Installer ISO
+          
+          **Size**: ${{ steps.iso_info.outputs.size }}
+          
+          ### Features:
+          - Interactive installation wizard
+          - Btrfs with reflink support for VM cloning
+          - Declarative disk management via disko
+          - Pre-configured with custom settings
+          
+          ### Usage:
+          1. Download the ISO
+          2. Flash to USB: `sudo dd if=${{ steps.iso_info.outputs.name }} of=/dev/sdX bs=4M status=progress`
+          3. Boot from USB
+          4. Run: `sudo fish /etc/installer/install-wizard.fish`
+          
+          See [QUICKSTART.md](./QUICKSTART.md) for detailed instructions.
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    
+    - name: Upload artifact (for non-release builds)
+      if: "!startsWith(github.ref, 'refs/tags/')"
+      uses: actions/upload-artifact@v4
+      with:
+        name: nixos-installer-iso
+        path: ${{ steps.iso_info.outputs.path }}
+        retention-days: 30
+    
+    - name: Build summary
+      run: |
+        echo "## Build Summary" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "✅ ISO built successfully!" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "- **File**: ${{ steps.iso_info.outputs.name }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Size**: ${{ steps.iso_info.outputs.size }}" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+          echo "📦 ISO will be attached to the GitHub release" >> $GITHUB_STEP_SUMMARY
+        else
+          echo "📦 ISO available as workflow artifact" >> $GITHUB_STEP_SUMMARY
+        fi

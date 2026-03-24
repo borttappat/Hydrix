@@ -1,0 +1,45 @@
+# Corporate VPN OpenVPN Configuration Template
+# Rename to corp.ovpn and fill in your credentials
+#
+client
+dev tun
+proto udp
+remote vpn.yourcompany.com 1194
+resolv-retry infinite
+nobind
+persist-key
+persist-tun
+
+# Certificate authority
+<ca>
+-----BEGIN CERTIFICATE-----
+YOUR_CA_CERTIFICATE_HERE
+-----END CERTIFICATE-----
+</ca>
+
+# Client certificate
+<cert>
+-----BEGIN CERTIFICATE-----
+YOUR_CLIENT_CERTIFICATE_HERE
+-----END CERTIFICATE-----
+</cert>
+
+# Client private key
+<key>
+-----BEGIN PRIVATE KEY-----
+YOUR_PRIVATE_KEY_HERE
+-----END PRIVATE KEY-----
+</key>
+
+# Verify server certificate
+remote-cert-tls server
+
+# Cipher settings
+cipher AES-256-GCM
+auth SHA256
+
+# Compression (if used by server)
+# comp-lzo
+
+# Logging
+verb 3
