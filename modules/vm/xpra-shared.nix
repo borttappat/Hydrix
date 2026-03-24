@@ -113,9 +113,9 @@ in {
       ExecStart = pkgs.writeShellScript "xpra-audio-reconnect" ''
         # Give PipeWire-pulse time to create its socket after restart
         sleep 3
-        ${pkgs.xpra}/bin/xpra control :100 stop-speaker 2>/dev/null || true
+        ${pkgs.xpra}/bin/xpra control :100 audio-output stop 2>/dev/null || true
         sleep 1
-        ${pkgs.xpra}/bin/xpra control :100 start-speaker
+        ${pkgs.xpra}/bin/xpra control :100 audio-output start
       '';
     };
   };
