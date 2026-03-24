@@ -357,8 +357,8 @@ in {
           "extensions.pocket.enabled" = lock-false;
           "extensions.screenshots.disabled" = lock-true;
           # Suppress extension popups and welcome pages
-          "extensions.getAddons.showPane" = lock-false;
-          "extensions.htmlaboutaddons.recommendations.enabled" = lock-false;
+          "extensions.getAddons.showPane" = { Value = false; Status = "default"; };
+          "extensions.htmlaboutaddons.recommendations.enabled" = { Value = false; Status = "default"; };
           "browser.messaging-system.whatsNewPanel.enabled" = lock-false;
           "browser.uitour.enabled" = lock-false;
           "browser.newtabpage.activity-stream.asrouter.userprefs.cfr.addons" = lock-false;
@@ -432,8 +432,6 @@ in {
             "browser.ctrlTab.recentlyUsedOrder" = true;
 
             # Suppress extension welcome pages and popups
-            "extensions.getAddons.showPane" = false;
-            "extensions.htmlaboutaddons.recommendations.enabled" = false;
             "extensions.webextensions.restrictedDomains" = "";
             "browser.messaging-system.whatsNewPanel.enabled" = false;
             "browser.uitour.enabled" = false;
@@ -505,10 +503,7 @@ in {
               visibility: collapse !important;
             }
 
-            /* Hide vertical tabs sidebar completely */
-            #sidebar-main {
-              visibility: collapse !important;
-            }
+
           '';
 
           userContent = ''

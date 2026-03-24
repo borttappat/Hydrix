@@ -72,6 +72,8 @@ in {
         "--speaker=yes"
         "--mdns=no"
         "--notifications=no"
+        "--modal-windows=yes"
+        "--input-method=none"
         "--systemd-run=no"
         "--video=auto"  # Allow video codecs for dynamic content (scrolling, etc.)
         "--sync-xvfb=auto"

@@ -359,6 +359,8 @@ Check with: virt-viewer $vm_name"
             "--min-speed=0"
             "-z0"
             "--video=no"
+            "--modal-windows=yes"
+            "--windows=yes"
         )
 
         if [[ "$background" == "true" ]]; then
