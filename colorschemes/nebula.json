@@ -1,0 +1,28 @@
+{
+    "wallpaper": "/home/traum/Wallpapers/Nebula.jpg",
+    "alpha": "100",
+
+    "special": {
+        "background": "#0F0E15",
+        "foreground": "#aebec5",
+        "cursor": "#aebec5"
+    },
+    "colors": {
+        "color0": "#0F0E15",
+        "color1": "#3F3B51",
+        "color2": "#4D384B",
+        "color3": "#5A5167",
+        "color4": "#936878",
+        "color5": "#34628C",
+        "color6": "#626E8B",
+        "color7": "#aebec5",
+        "color8": "#798589",
+        "color9": "#3F3B51",
+        "color10": "#4D384B",
+        "color11": "#5A5167",
+        "color12": "#936878",
+        "color13": "#34628C",
+        "color14": "#626E8B",
+        "color15": "#aebec5"
+    }
+}

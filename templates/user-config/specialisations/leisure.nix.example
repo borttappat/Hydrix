@@ -1,0 +1,117 @@
+# Leisure Mode - EXAMPLE custom specialisation
+#
+# This is an EXAMPLE of how to create custom specialisations.
+# Rename to leisure.nix and customize for your needs.
+#
+# Ideas for leisure mode:
+#   - Gaming packages (Steam, Lutris, etc.)
+#   - Media consumption (Spotify, Discord, etc.)
+#   - Relaxed security (for convenience)
+#
+# Enable by renaming this file to leisure.nix
+# Then switch: sudo nixos-rebuild switch --specialisation leisure
+#
+{ config, lib, pkgs, ... }:
+
+let
+  cfg = config.hydrix;
+in {
+  imports = [
+    ./_base.nix
+  ];
+
+  # =========================================================================
+  # LEISURE IDENTIFICATION
+  # =========================================================================
+  system.nixos.label = lib.mkForce "leisure";
+
+  environment.etc."HYDRIX_MODE".text = ''
+    MODE=leisure
+    DESCRIPTION=Leisure mode - gaming, media, relaxed
+    INTERNET=via-router-vm
+    VMS=enabled
+  '';
+
+  # =========================================================================
+  # NETWORK (same as administrative - via router)
+  # =========================================================================
+
+  networking.defaultGateway = {
+    address = cfg.networking.routerIp;
+    interface = "br-mgmt";
+  };
+
+  networking.nameservers = [ cfg.networking.routerIp ];
+
+  # =========================================================================
+  # LEISURE PACKAGES
+  # =========================================================================
+
+  environment.systemPackages = with pkgs; [
+    # ─────────────────────────────────────────────────────────────────────
+    # GAMING (uncomment what you need)
+    # ─────────────────────────────────────────────────────────────────────
+    # steam
+    # lutris
+    # wine
+    # gamemode
+    # mangohud
+
+    # ─────────────────────────────────────────────────────────────────────
+    # MEDIA
+    # ─────────────────────────────────────────────────────────────────────
+    spotify
+    vlc
+    mpv
+
+    # ─────────────────────────────────────────────────────────────────────
+    # COMMUNICATION
+    # ─────────────────────────────────────────────────────────────────────
+    discord
+    # slack
+    # zoom-us
+
+    # ─────────────────────────────────────────────────────────────────────
+    # BROWSERS
+    # ─────────────────────────────────────────────────────────────────────
+    firefox
+    # chromium
+
+    # ─────────────────────────────────────────────────────────────────────
+    # CONTENT CREATION
+    # ─────────────────────────────────────────────────────────────────────
+    # obs-studio
+    # gimp
+    # inkscape
+    # blender
+  ];
+
+  # =========================================================================
+  # GAMING OPTIMIZATIONS (uncomment if gaming)
+  # =========================================================================
+
+  # programs.steam.enable = true;
+  # hardware.steam-hardware.enable = true;
+
+  # GameMode for performance
+  # programs.gamemode.enable = true;
+
+  # =========================================================================
+  # MOTD
+  # =========================================================================
+
+  users.motd = lib.mkForce ''
+
+    ╔══════════════════════════════════════════════════════════════════════╗
+    ║                         LEISURE MODE                                 ║
+    ╠══════════════════════════════════════════════════════════════════════╣
+    ║  Gaming, media, and entertainment packages available                 ║
+    ║  Router VM: Active                                                   ║
+    ╠══════════════════════════════════════════════════════════════════════╣
+    ║  Switch modes:                                                       ║
+    ║    Lockdown:       sudo nixos-rebuild switch                         ║
+    ║    Administrative: sudo nixos-rebuild switch --specialisation admin  ║
+    ╚══════════════════════════════════════════════════════════════════════╝
+
+  '';
+}

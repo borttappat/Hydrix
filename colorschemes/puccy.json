@@ -1,0 +1,28 @@
+{
+    "wallpaper": "/home/traum/hydrix-config/Wallpapers/WindowRain.png",
+    "alpha": "100",
+
+    "special": {
+        "background": "#12121b",
+        "foreground": "#c5c9d9",
+        "cursor": "#c5c9d9"
+    },
+    "colors": {
+        "color0": "#12121b",
+        "color1": "#5D718D",
+        "color2": "#7786A4",
+        "color3": "#9B808D",
+        "color4": "#8E97B6",
+        "color5": "#A09BB5",
+        "color6": "#DEAD9C",
+        "color7": "#c5c9d9",
+        "color8": "#898c97",
+        "color9": "#5D718D",
+        "color10": "#7786A4",
+        "color11": "#9B808D",
+        "color12": "#8E97B6",
+        "color13": "#A09BB5",
+        "color14": "#DEAD9C",
+        "color15": "#c5c9d9"
+    }
+}

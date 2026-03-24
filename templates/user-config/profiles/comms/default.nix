@@ -1,0 +1,49 @@
+# Comms Profile - User Customizations
+#
+# This is layered ON TOP of Hydrix's base comms profile.
+# Hydrix base provides: xpra forwarding, sound (required for calls), graphical stack
+# This profile adds: packages (Signal, Firefox)
+#
+# EPHEMERAL by design - all data lost on restart for privacy.
+#
+{ config, lib, pkgs, ... }:
+
+{
+  imports = [
+    # Core VM packages (editors, shell, utils)
+    ../../shared/vm-packages.nix
+    # Profile-specific packages
+    ./packages.nix
+    # Custom packages (added via vm-sync pull)
+    ./packages
+  ];
+
+  # =========================================================================
+  # VM IDENTITY & COLORS
+  # =========================================================================
+
+  # Colorscheme for this VM
+  hydrix.colorscheme = "deeporange";
+
+  # Inherit host colors for consistent look
+  hydrix.vmColors.enable = true;
+
+  # MicroVM resources (ephemeral - no persistence)
+  hydrix.microvm = {
+    vcpu = 2;
+    mem = 2048;  # 2GB (balloon reclaims idle)
+    vsockCid = 104;  # Unique for comms VM
+    bridge = "br-comms";
+    tapId = "mv-comms";
+    persistence.enable = false;
+  };
+
+  # =========================================================================
+  # EXTRA PACKAGES
+  # =========================================================================
+
+  # environment.systemPackages = with pkgs; [
+  #   slack
+  #   zoom-us
+  # ];
+}

@@ -1,0 +1,683 @@
+#!/usr/bin/env bash
+# Hydrix System Rebuild
+# Fast rebuild with auto-detection of lockdown mode (uses builder VM)
+#
+# Architecture:
+#   Base config = LOCKDOWN (no host internet)
+#   Specialisations: administrative, fallback
+#   'rebuild lockdown' = rebuild base (no specialisation flag)
+#   'rebuild administrative' = rebuild with -s administrative
+#   'rebuild fallback' = rebuild with -s fallback
+
+set -uo pipefail  # Note: no -e, we handle errors manually
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Defaults
+UPDATE_FLAKE=false
+PREBUILD_VMS=false
+PREBUILD_MICROVMS=false
+CHECK_BASES=false
+CHECK_MICROVMS=false
+REBUILD_STALE=false
+VERBOSE=false
+IGNORE_ACTIVATION=false
+SPEC_OVERRIDE=""
+
+usage() {
+    cat <<EOF
+Usage: $(basename "$0") [OPTIONS] [MODE]
+
+Modes:
+  lockdown        Hardened default - no host internet (base config)
+  administrative  Full functionality - host internet via router VM
+  admin           Shorthand for administrative
+  fallback        Emergency direct WiFi (requires reboot for kernel changes)
+
+  If no mode is specified, rebuilds the current mode.
+
+Options:
+  -u, --update          Update flake inputs before build
+  -p, --prebuild        Pre-build VM configs after host rebuild
+  -m, --prebuild-microvms  Pre-build microVM runners after host rebuild
+  -c, --check-bases     Check base image status after build
+  --check-microvms      Show microVM status (running/outdated)
+  -r, --rebuild-stale   Rebuild stale base images
+  -i, --ignore-activation  Continue even if activation fails (exit code 4)
+  -v, --verbose         Show verbose output
+  -h, --help            Show this help
+EOF
+    exit 0
+}
+
+# Parse arguments
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        -u|--update) UPDATE_FLAKE=true; shift ;;
+        -p|--prebuild) PREBUILD_VMS=true; shift ;;
+        -m|--prebuild-microvms) PREBUILD_MICROVMS=true; shift ;;
+        -c|--check-bases) CHECK_BASES=true; shift ;;
+        --check-microvms) CHECK_MICROVMS=true; shift ;;
+        -r|--rebuild-stale) REBUILD_STALE=true; shift ;;
+        -i|--ignore-activation) IGNORE_ACTIVATION=true; shift ;;
+        -v|--verbose) VERBOSE=true; shift ;;
+        -h|--help) usage ;;
+        lockdown|administrative|fallback) SPEC_OVERRIDE="$1"; shift ;;
+        admin) SPEC_OVERRIDE="administrative"; shift ;;
+        *) echo "Unknown option: $1"; exit 1 ;;
+    esac
+done
+
+log() { echo ":: $*"; }
+err() { echo "!! $*" >&2; }
+
+# =========================================================================
+# FLAKE DIRECTORY DETECTION
+# =========================================================================
+# Priority:
+#   1. $HYDRIX_FLAKE_DIR (set by mkHydrixScript wrapper)
+#   2. ~/hydrix-config/ (user mode)
+#   3. ~/Hydrix/ (developer mode)
+#   4. Parent of script directory (direct execution from repo)
+
+detect_flake_dir() {
+    if [[ -n "${HYDRIX_FLAKE_DIR:-}" ]] && [[ -f "$HYDRIX_FLAKE_DIR/flake.nix" ]]; then
+        echo "$HYDRIX_FLAKE_DIR"
+        return
+    fi
+    if [[ -f "$HOME/hydrix-config/flake.nix" ]]; then
+        echo "$HOME/hydrix-config"
+        return
+    fi
+    if [[ -f "$HOME/Hydrix/flake.nix" ]]; then
+        echo "$HOME/Hydrix"
+        return
+    fi
+    # Fallback: parent of script directory (for direct execution)
+    local parent
+    parent="$(dirname "$SCRIPT_DIR")"
+    if [[ -f "$parent/flake.nix" ]]; then
+        echo "$parent"
+        return
+    fi
+    err "No Hydrix config found"
+    err "Checked: \$HYDRIX_FLAKE_DIR, ~/hydrix-config, ~/Hydrix"
+    exit 1
+}
+
+FLAKE_DIR="$(detect_flake_dir)"
+
+# =========================================================================
+# HELPERS
+# =========================================================================
+
+# Clean home-manager backup files
+clean_hm_backups() {
+    local count=0
+    while IFS= read -r -d '' f; do
+        rm -f "$f" && ((count++)) || true
+    done < <(find ~/.config -name "*.hm-backup" -type f -print0 2>/dev/null || true)
+    for f in ~/.xinitrc.hm-backup ~/.vimrc.hm-backup ~/.Xmodmap.hm-backup; do
+        [[ -f "$f" ]] && rm -f "$f" && ((count++)) || true
+    done
+    if [[ $count -gt 0 ]]; then
+        log "Cleaned $count hm-backup files"
+    fi
+}
+
+# Detect current mode from /etc/HYDRIX_MODE
+detect_mode() {
+    if [[ -f /etc/HYDRIX_MODE ]]; then
+        local mode
+        mode=$(grep '^MODE=' /etc/HYDRIX_MODE 2>/dev/null | cut -d= -f2 | xargs || true)
+        if [[ -n "$mode" ]]; then
+            echo "$mode"
+            return
+        fi
+    fi
+    # Fallback: check if host has default gateway (administrative) or not (lockdown)
+    if ip route show default 2>/dev/null | grep -q .; then
+        echo "administrative"
+    else
+        echo "lockdown"
+    fi
+}
+
+# Map mode name to nh specialisation flag
+# lockdown = base config (no -s flag)
+# administrative/fallback = specialisation
+mode_to_spec() {
+    local mode="$1"
+    case "$mode" in
+        lockdown) echo "" ;;  # Base config, no specialisation
+        *) echo "$mode" ;;
+    esac
+}
+
+# Check if we're in lockdown mode (host has no network access)
+is_lockdown_mode() {
+    local mode
+    mode=$(detect_mode)
+    [[ "$mode" == "lockdown" ]]
+}
+
+# Restore network after switch-to-configuration
+# Bridges may be recreated during activation, detaching TAP interfaces.
+# This re-attaches all TAPs and restores host IPs so VMs stay connected.
+restore_network() {
+    log "Restoring network..."
+
+    # Ensure bridges are up
+    for br in $(ip -o link show type bridge 2>/dev/null | awk -F'[ :]+' '{print $2}'); do
+        sudo ip link set "$br" up 2>/dev/null || true
+    done
+
+    # Re-attach router TAPs to specific bridges
+    declare -A router_taps=(
+        ["mv-router-mgmt"]="br-mgmt"
+        ["mv-router-pent"]="br-pentest"
+        ["mv-router-comm"]="br-comms"
+        ["mv-router-lurk"]="br-lurking"
+        ["mv-router-brow"]="br-browse"
+        ["mv-router-dev"]="br-dev"
+        ["mv-router-shar"]="br-shared"
+        ["mv-router-bldr"]="br-builder"
+    )
+    for tap in "${!router_taps[@]}"; do
+        local bridge="${router_taps[$tap]}"
+        if ip link show "$tap" &>/dev/null && ip link show "$bridge" &>/dev/null; then
+            sudo ip link set "$tap" master "$bridge" 2>/dev/null || true
+            sudo ip link set "$tap" up 2>/dev/null || true
+        fi
+    done
+
+    # Re-attach VM TAPs to correct bridges
+    for tap in $(ip -o link show 2>/dev/null | grep -oP 'mv-(?!router)[a-z-]+(?=[@:])' | sort -u); do
+        local bridge="br-browse"
+        case "$tap" in
+            mv-browse*)  bridge="br-browse" ;;
+            mv-pentest*) bridge="br-pentest" ;;
+            mv-hack*)    bridge="br-pentest" ;;
+            mv-dev*)     bridge="br-dev" ;;
+            mv-lurk*)    bridge="br-lurking" ;;
+            mv-comms*)   bridge="br-comms" ;;
+            mv-build*)   bridge="br-builder" ;;
+            mv-gitsyn*)  bridge="br-builder" ;;
+        esac
+        if ip link show "$bridge" &>/dev/null; then
+            sudo ip link set "$tap" master "$bridge" 2>/dev/null || true
+            sudo ip link set "$tap" up 2>/dev/null || true
+        fi
+    done
+
+    # Restore host IPs on management and shared bridges
+    sudo ip addr add 192.168.100.1/24 dev br-mgmt 2>/dev/null || true
+    sudo ip addr add 192.168.105.1/24 dev br-shared 2>/dev/null || true
+}
+
+# Build via builder VM (for lockdown mode)
+do_build_via_builder() {
+    local spec="${1:-}"
+
+    log "Lockdown mode detected - using builder VM"
+
+    # The microvm script handles everything: start builder, build, stop, switch
+    local builder_args=("builder" "switch")
+
+    # Pass specialisation if specified
+    if [[ -n "$spec" ]]; then
+        builder_args+=("$spec")
+    fi
+
+    if $VERBOSE; then
+        echo "+ microvm ${builder_args[*]}"
+    fi
+
+    # Run the builder switch which does build + apply
+    if "$SCRIPT_DIR/microvm" "${builder_args[@]}"; then
+        return 0
+    else
+        err "Builder switch failed"
+        return 1
+    fi
+}
+
+# Get system info
+is_vm() {
+    local chassis vendor
+    chassis=$(hostnamectl 2>/dev/null | awk -F': ' '/Chassis/{print $2}' | xargs || true)
+    vendor=$(hostnamectl 2>/dev/null | awk -F': ' '/Hardware Vendor/{print $2}' | xargs || true)
+    [[ "$chassis" == "vm" ]] || [[ "${vendor:-}" =~ QEMU|VMware ]]
+}
+
+get_vm_type() {
+    local hostname
+    hostname=$(hostnamectl hostname 2>/dev/null || true)
+    if [[ "$hostname" =~ ^(pentest|comms|browsing|dev|lurking|transfer|router)- ]] || [[ "$hostname" == "router-vm" ]]; then
+        if [[ "$hostname" == "router-vm" ]]; then
+            echo "router"
+        else
+            echo "${BASH_REMATCH[1]}"
+        fi
+    fi
+}
+
+# Detect machine config name
+# Priority: 1) DMI serial, 2) product_name match, 3) single config fallback
+detect_machine_config() {
+    local flake_dir="$1"
+    local serial=""
+
+    # Try sysfs serial sources in order of preference (no root needed)
+    for path in /sys/class/dmi/id/product_serial \
+                /sys/class/dmi/id/board_serial \
+                /sys/class/dmi/id/chassis_serial; do
+        serial=$(cat "$path" 2>/dev/null | xargs || echo "")
+        local lower
+        lower=$(echo "$serial" | tr '[:upper:]' '[:lower:]')
+
+        # Skip invalid/placeholder values
+        case "$lower" in
+            ""|\
+            "to be filled by o.e.m."|\
+            "to be filled by o.e.m"|\
+            "default string"|\
+            "system serial number"|\
+            "not specified"|\
+            "none"|\
+            "n/a"|\
+            "na"|\
+            "unknown"|\
+            "undefined"|\
+            "chassis serial number"|\
+            "type2 - board serial number")
+                serial=""
+                continue
+                ;;
+        esac
+
+        # Skip all-zeros
+        [[ "$lower" =~ ^0+$ ]] && { serial=""; continue; }
+
+        # Valid serial found
+        [[ -n "$serial" ]] && break
+    done
+
+    # If serial found, sanitize and check for config
+    if [[ -n "$serial" ]]; then
+        serial=$(echo "$serial" | tr '[:upper:]' '[:lower:]' | tr ' _' '-')
+        serial=$(echo "$serial" | sed 's/[^a-z0-9-]//g; s/-\+/-/g; s/^-//; s/-$//')
+        [[ ! "$serial" =~ ^[a-z0-9] ]] && serial="h-$serial"
+        serial="${serial:0:63}"
+
+        if [[ -f "$flake_dir/machines/${serial}.nix" ]]; then
+            echo "$serial"
+            return
+        fi
+    fi
+
+    # Fallback: try product_name (e.g., mb-ux5406sa)
+    local product_name
+    product_name=$(cat /sys/class/dmi/id/product_name 2>/dev/null | xargs || echo "")
+    if [[ -n "$product_name" ]]; then
+        local sanitized
+        sanitized=$(echo "$product_name" | tr '[:upper:]' '[:lower:]' | tr ' _' '-')
+        sanitized=$(echo "$sanitized" | sed 's/[^a-z0-9-]//g; s/-\+/-/g; s/^-//; s/-$//')
+
+        # Check for exact match or mb- prefixed match
+        if [[ -f "$flake_dir/machines/${sanitized}.nix" ]]; then
+            echo "$sanitized"
+            return
+        fi
+        if [[ -f "$flake_dir/machines/mb-${sanitized}.nix" ]]; then
+            echo "mb-${sanitized}"
+            return
+        fi
+    fi
+
+    # Fallback: if only one non-hardware config exists, use it
+    local configs=()
+    while IFS= read -r f; do
+        local base
+        base=$(basename "$f" .nix)
+        # Skip hardware configs
+        [[ "$base" == *-hardware ]] && continue
+        configs+=("$base")
+    done < <(ls -1 "$flake_dir/machines/"*.nix 2>/dev/null)
+
+    if [[ ${#configs[@]} -eq 1 ]]; then
+        echo "${configs[0]}"
+        return
+    fi
+
+    # No config found
+    err "Could not detect machine config"
+    err "No DMI serial and no matching product_name config found"
+    err ""
+    err "Available configs:"
+    for c in "${configs[@]}"; do
+        echo "  - $c"
+    done
+    exit 1
+}
+
+# =========================================================================
+# BUILD
+# =========================================================================
+
+# Build using nh
+do_build() {
+    local target="$1"
+    local spec="${2:-}"
+    # Always build the BASE profile (no -s) so specialisations are preserved
+    # nh -s sets the system profile to the specialisation closure directly,
+    # which loses all other specialisations from the profile
+    local nh_args=("os" "switch" "$FLAKE_DIR" "-H" "$target")
+    local exit_code
+
+    nh_args+=("--" "--impure")
+
+    log "Building $target${spec:+ ($spec)}"
+
+    if $VERBOSE; then
+        echo "+ nh ${nh_args[*]}"
+    fi
+
+    # Stream output in real-time while capturing for activation check
+    local tmpfile
+    tmpfile=$(mktemp)
+    trap "rm -f '$tmpfile'" RETURN
+
+    nh "${nh_args[@]}" 2>&1 | tee "$tmpfile" && exit_code=0 || exit_code=${PIPESTATUS[0]}
+
+    local activation_failure=false
+    if [[ $exit_code -ne 0 ]]; then
+        # Distinguish build failure from activation failure
+        # Activation failures still leave a valid system profile that we can switch to
+        if grep -q "Activation.*failed\|warning: the following units failed" "$tmpfile"; then
+            activation_failure=true
+            log "Activation had non-fatal failures (continuing with specialisation switch)"
+        else
+            err "Build failed (exit $exit_code)"
+            return $exit_code
+        fi
+    fi
+
+    # Re-attach TAPs to bridges (activation may have recreated bridges)
+    restore_network
+
+    # If a specialisation was requested, activate it after the base profile is set
+    # This preserves all specialisations in the system profile while activating the right one
+    if [[ -n "$spec" ]]; then
+        local spec_path="/nix/var/nix/profiles/system/specialisation/${spec}"
+        if [[ -d "$spec_path" ]]; then
+            log "Activating specialisation: $spec"
+            sudo "$spec_path/bin/switch-to-configuration" switch
+            # Re-attach again after specialisation switch
+            restore_network
+        else
+            err "Specialisation '$spec' not found at $spec_path"
+            return 1
+        fi
+    fi
+
+    if $activation_failure && ! $IGNORE_ACTIVATION; then
+        err "Warning: activation had failures (use -i to suppress)"
+        return 1
+    fi
+
+    return 0
+}
+
+# =========================================================================
+# POST-BUILD
+# =========================================================================
+
+# Pre-build VM configs for virtiofs cache
+prebuild_vms() {
+    log "Pre-building VM configs..."
+    local configs=("vm-pentest" "vm-browsing" "vm-comms" "vm-dev")
+    local ok=0
+    for cfg in "${configs[@]}"; do
+        if nix build "$FLAKE_DIR#nixosConfigurations.${cfg}.config.system.build.toplevel" --no-link 2>/dev/null; then
+            ((ok++)) || true
+        fi
+    done
+    log "VM cache: $ok/${#configs[@]}"
+}
+
+# Pre-build microVM runners
+prebuild_microvms() {
+    log "Pre-building microVM runners..."
+    local configs
+    configs=$(nix eval "$FLAKE_DIR#nixosConfigurations" --apply 'builtins.attrNames' --json 2>/dev/null | \
+        jq -r '.[]' | grep -E '^micro(browse|hack|dev|comms|lurk|router|build)$' || true)
+
+    if [[ -z "$configs" ]]; then
+        log "No microVM configs found"
+        return
+    fi
+
+    local ok=0 total=0
+    while IFS= read -r cfg; do
+        [[ -z "$cfg" ]] && continue
+        ((total++)) || true
+        if $VERBOSE; then
+            log "  Building $cfg..."
+        fi
+        if nix build "$FLAKE_DIR#nixosConfigurations.${cfg}.config.microvm.declaredRunner" --no-link 2>/dev/null; then
+            ((ok++)) || true
+        fi
+    done <<< "$configs"
+    log "MicroVM cache: $ok/$total"
+}
+
+# Check microVM status
+check_microvms() {
+    log "Checking microVM status..."
+    local configs
+    configs=$(nix eval "$FLAKE_DIR#nixosConfigurations" --apply 'builtins.attrNames' --json 2>/dev/null | \
+        jq -r '.[]' | grep -E '^micro(browse|hack|dev|comms|lurk|router|build)$' || true)
+
+    if [[ -z "$configs" ]]; then
+        log "No microVM configs declared"
+        return
+    fi
+
+    local running=() stopped=() outdated=()
+
+    while IFS= read -r vm; do
+        [[ -z "$vm" ]] && continue
+        local service="microvm@${vm}.service"
+
+        if systemctl is-active --quiet "$service" 2>/dev/null; then
+            # Check if outdated (current symlink differs from built runner)
+            local current_link="/var/lib/microvms/${vm}/current"
+            if [[ -L "$current_link" ]]; then
+                local current_target booted_target
+                current_target=$(readlink "$current_link" 2>/dev/null || echo "")
+                booted_target=$(readlink "/var/lib/microvms/${vm}/booted" 2>/dev/null || echo "")
+                if [[ "$current_target" != "$booted_target" ]] && [[ -n "$current_target" ]] && [[ -n "$booted_target" ]]; then
+                    outdated+=("$vm")
+                else
+                    running+=("$vm")
+                fi
+            else
+                running+=("$vm")
+            fi
+        else
+            stopped+=("$vm")
+        fi
+    done <<< "$configs"
+
+    if [[ ${#running[@]} -gt 0 ]]; then
+        echo "  Running: ${running[*]}"
+    fi
+    if [[ ${#stopped[@]} -gt 0 ]]; then
+        echo "  Stopped: ${stopped[*]}"
+    fi
+    if [[ ${#outdated[@]} -gt 0 ]]; then
+        echo "  Outdated (needs restart): ${outdated[*]}"
+    fi
+}
+
+# Check base images
+check_bases() {
+    local base_dir="/var/lib/libvirt/base-images"
+    local current_rev stale=()
+    current_rev=$(git -C "$FLAKE_DIR" rev-parse --short HEAD 2>/dev/null || echo "unknown")
+
+    for t in pentest browsing comms dev lurking; do
+        local img="$base_dir/base-${t}.qcow2"
+        local marker="$base_dir/.base-${t}.rev"
+        if [[ ! -f "$img" ]]; then
+            stale+=("$t")
+        elif [[ -f "$marker" ]] && [[ "$(cat "$marker")" != "$current_rev" ]]; then
+            stale+=("$t")
+        fi
+    done
+
+    if [[ ${#stale[@]} -gt 0 ]]; then
+        log "Stale bases: ${stale[*]}"
+        if $REBUILD_STALE; then
+            for t in "${stale[@]}"; do
+                log "Rebuilding base-$t..."
+                "$SCRIPT_DIR/build-base.sh" --type "$t"
+            done
+        fi
+    else
+        log "All base images current"
+    fi
+}
+
+# Post-build tasks
+post_build() {
+    # Wait for home-manager to complete (runs async during activation)
+    local hm_service="home-manager-$USER.service"
+    if systemctl list-units --type=service 2>/dev/null | grep -q "$hm_service"; then
+        local waited=0
+        while systemctl is-active --quiet "$hm_service" 2>/dev/null; do
+            if [[ $waited -eq 0 ]]; then
+                log "Waiting for home-manager..."
+            fi
+            sleep 0.5
+            ((waited++)) || true
+            if [[ $waited -gt 60 ]]; then
+                err "home-manager taking too long, continuing anyway"
+                break
+            fi
+        done
+        if [[ $waited -gt 0 ]]; then
+            log "home-manager completed"
+        fi
+    fi
+
+    # Check home-manager status
+    if systemctl is-failed --quiet "$hm_service" 2>/dev/null; then
+        err "home-manager failed! Check: journalctl -u $hm_service -n 20"
+    fi
+
+    # Restart colorscheme service if exists
+    if systemctl list-units --type=service 2>/dev/null | grep -q "hydrix-colorscheme"; then
+        sudo systemctl restart hydrix-colorscheme.service 2>/dev/null || true
+    fi
+
+    if $PREBUILD_VMS; then
+        prebuild_vms
+    fi
+    if $PREBUILD_MICROVMS; then
+        prebuild_microvms
+    fi
+    if $CHECK_BASES || $REBUILD_STALE; then
+        check_bases
+    fi
+    if $CHECK_MICROVMS; then
+        check_microvms
+    fi
+}
+
+# =========================================================================
+# MAIN
+# =========================================================================
+
+main() {
+    clean_hm_backups
+
+    if is_vm; then
+        # Inside a VM - use standard nh rebuild
+        if $UPDATE_FLAKE; then
+            log "Updating flake..."
+            nix flake update "$FLAKE_DIR"
+        fi
+
+        local vm_type
+        vm_type=$(get_vm_type)
+        if [[ -z "$vm_type" ]]; then
+            err "Unknown VM hostname pattern"
+            exit 1
+        fi
+        if ! do_build "vm-${vm_type}" ""; then
+            exit 1
+        fi
+        log "Done"
+    else
+        # Host system - identify by hardware or hostname
+        local machine_config
+        machine_config=$(detect_machine_config "$FLAKE_DIR")
+
+        log "Machine: $machine_config"
+
+        # Determine target mode
+        local current_mode
+        current_mode=$(detect_mode)
+        local target_mode="${SPEC_OVERRIDE:-$current_mode}"
+
+        # Convert mode to nh specialisation flag
+        # lockdown = base (no -s), administrative/fallback = -s <name>
+        local target_spec
+        target_spec=$(mode_to_spec "$target_mode")
+
+        log "Mode: $current_mode -> $target_mode"
+
+        # Lockdown mode: use builder VM (host has no network)
+        if [[ "$current_mode" == "lockdown" ]]; then
+            # Note: flake update not supported in lockdown (no network)
+            if $UPDATE_FLAKE; then
+                err "Cannot update flake in lockdown mode (no network)"
+                err "Switch to administrative mode first: hydrix-switch admin"
+                exit 1
+            fi
+
+            if ! do_build_via_builder "$target_spec"; then
+                exit 1
+            fi
+
+            restore_network
+            post_build
+            log "Done (lockdown mode via builder)"
+        else
+            # Administrative or fallback mode: direct nh rebuild
+
+            # Check if builder VM is running (it stops nix-daemon, blocking host builds)
+            if systemctl is-active --quiet microvm@microvm-builder.service 2>/dev/null; then
+                err "Builder VM is running — host nix-daemon is stopped"
+                err "Stop it first: microvm stop microvm-builder"
+                exit 1
+            fi
+
+            if $UPDATE_FLAKE; then
+                log "Updating flake..."
+                nix flake update "$FLAKE_DIR"
+            fi
+
+            if ! do_build "$machine_config" "$target_spec"; then
+                exit 1
+            fi
+
+            post_build
+            log "Done ($target_mode)"
+        fi
+    fi
+}
+
+main

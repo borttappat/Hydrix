@@ -1,0 +1,18 @@
+scheme: "Hydrix"
+author: "Hydrix Project"
+base00: "0B0E1B"  # Default Background (pywal color0/background)
+base01: "1B5D68"  # Lighter Background (pywal color1)
+base02: "156D73"  # Selection Background (pywal color2)
+base03: "659b94"  # Comments, Invisibles (pywal color8)
+base04: "659b94"  # Dark Foreground (pywal color8)
+base05: "91ded4"  # Default Foreground (pywal foreground/color7)
+base06: "91ded4"  # Light Foreground (pywal color15)
+base07: "91ded4"  # Light Background (pywal color15)
+base08: "1B5D68"  # Variables, XML Tags (pywal color1)
+base09: "156D73"  # Integers, Boolean (pywal color9/color2)
+base0A: "1E877A"  # Classes, Search BG (pywal color3)
+base0B: "1C7787"  # Strings, Markup Code (pywal color4)
+base0C: "138C89"  # Support, Regex (pywal color6)
+base0D: "26A19B"  # Functions, Methods (pywal color6)
+base0E: "1E877A"  # Keywords, Storage (pywal color5)
+base0F: "1B5D68"  # Deprecated (pywal color1)

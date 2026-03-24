@@ -1,0 +1,28 @@
+{
+    "wallpaper": "/home/traum/Wallpapers/Surfer.jpg",
+    "alpha": "100",
+
+    "special": {
+        "background": "#0B0C16",
+        "foreground": "#cdbdd1",
+        "cursor": "#cdbdd1"
+    },
+    "colors": {
+        "color0": "#0B0C16",
+        "color1": "#924D77",
+        "color2": "#68648F",
+        "color3": "#9A6F9C",
+        "color4": "#C477AC",
+        "color5": "#AE8D8B",
+        "color6": "#9886AC",
+        "color7": "#cdbdd1",
+        "color8": "#8f8492",
+        "color9": "#924D77",
+        "color10": "#68648F",
+        "color11": "#9A6F9C",
+        "color12": "#C477AC",
+        "color13": "#AE8D8B",
+        "color14": "#9886AC",
+        "color15": "#cdbdd1"
+    }
+}
