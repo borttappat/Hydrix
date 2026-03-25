@@ -65,7 +65,7 @@ in {
         serviceConfig = {
           Type = "oneshot";
           User = username;
-          ExecStart = "${pkgs.findutils}/bin/find /home/${username}/.config -name '*.hm-backup' -delete";
+          ExecStart = "${pkgs.findutils}/bin/find /home/${username} -name '*.hm-backup' -type f -delete";
         };
       };
     })
