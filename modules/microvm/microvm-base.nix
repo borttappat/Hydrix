@@ -708,16 +708,18 @@ in {
             # Signal running alacritty instances to reload
             ${pkgs.procps}/bin/pkill -USR1 alacritty 2>/dev/null || true
 
-            # Trigger wal-sync to update wal cache for other apps (pywalfox, dunst, etc.)
-            # By this time, host has synced wal cache to 9p mount
-            WAL_SYNC="/run/current-system/sw/bin/wal-sync"
-            if [ -x "$WAL_SYNC" ]; then
+            # Refresh colors for other apps (i3, polybar, dunst, etc.)
+            # The virtiofs wal cache at /mnt/wal-cache has the host's live colors.
+            # refresh-colors reads from ~/.cache/wal (symlinked to /mnt/wal-cache
+            # by vmThemeSync) and reloads all color-aware apps.
+            REFRESH="/run/current-system/sw/bin/refresh-colors"
+            if [ -x "$REFRESH" ]; then
               UID_NUM=$(${pkgs.coreutils}/bin/id -u "$USERNAME" 2>/dev/null || echo 1000)
               ${pkgs.sudo}/bin/sudo -u "$USERNAME" \
                 HOME="/home/$USERNAME" \
                 DISPLAY=:100 \
                 XDG_RUNTIME_DIR="/run/user/$UID_NUM" \
-                "$WAL_SYNC" 2>/dev/null &
+                "$REFRESH" 2>/dev/null &
             fi
 
             echo "OK: bg=$BG_HEX"
