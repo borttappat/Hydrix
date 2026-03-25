@@ -39,6 +39,7 @@
   # Boot settings
   boot = {
     kernelPackages = pkgs.linuxPackages_latest;
+    kernelParams = [ "quiet" "loglevel=3" ];
 
     kernel.sysctl = {
       "kernel.sysrq" = lib.mkDefault 1;

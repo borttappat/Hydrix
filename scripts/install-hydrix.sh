@@ -1846,8 +1846,11 @@ prebuild_microvms() {
 
         log "Building ${vm_desc} [REQUIRED]..."
 
+        # --store /mnt ensures outputs go to the target system's nix store
+        # --eval-store auto evaluates using the live ISO's daemon
         if nix build "$config_dir#nixosConfigurations.${vm_name}.config.microvm.declaredRunner" \
             --no-link \
+            --store /mnt --eval-store auto \
             --print-build-logs; then
             success "  ${vm_name} built successfully"
         else
@@ -1866,6 +1869,7 @@ prebuild_microvms() {
 
         if nix build "$config_dir#nixosConfigurations.${vm_name}.config.microvm.declaredRunner" \
             --no-link \
+            --store /mnt --eval-store auto \
             --print-build-logs; then
             success "  ${vm_name} built successfully"
         else

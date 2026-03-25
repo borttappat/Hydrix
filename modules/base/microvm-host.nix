@@ -69,6 +69,16 @@ in {
   # Options for hydrix.microvmHost are declared in modules/options.nix
 
   config = lib.mkMerge [
+    # Custom microvm CLI — always available regardless of microvmHost.enable
+    # so fallback mode and fresh installs can still manage VMs
+    {
+      environment.systemPackages = [
+        (lib.hiPrio (pkgs.writeShellScriptBin "microvm"
+          (builtins.readFile ../../scripts/microvm)
+        ))
+      ];
+    }
+
     # Default: enable microvm-router when microvmHost is enabled
     # Note: autostart is controlled by router.nix via hydrix.router.autostart
     (lib.mkIf cfg.enable {

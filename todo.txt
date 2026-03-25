@@ -1,0 +1,9 @@
+[] Review README.md, make sure everything is up to date
+
+[] Add in thanks to Redflake, after testing pentest VM declarative BurpSuite setup both and without pro mode
+
+[] Fix License
+
+[] Remove Claude mentions
+
+[] Rename `microvm` CLI command to `mvm` to avoid overriding the upstream microvm command
