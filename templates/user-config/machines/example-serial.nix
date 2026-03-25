@@ -212,6 +212,18 @@
       #   keycode 66 = Control_L
       #   add control = Control_L Control_R
       # '';
+
+      # ─── Lockscreen ──────────────────────────────────────────────────
+      # lockscreen = {
+      #   idleTimeout = 600;                                              # DEFAULT: 600 (seconds, null to disable)
+      #   font = "CozetteVector";                                         # DEFAULT: "CozetteVector"
+      #   fontSize = 143;                                                 # DEFAULT: 143
+      #   clockSize = 104;                                                # DEFAULT: 104
+      #   text = "Papers, please";                                        # DEFAULT: "Papers, please"
+      #   wrongText = "Ah ah ah! You didn't say the magic word!!";        # DEFAULT
+      #   verifyText = "Verifying...";                                    # DEFAULT
+      #   blur = true;                                                    # DEFAULT: true
+      # };
     };
   };
 }
