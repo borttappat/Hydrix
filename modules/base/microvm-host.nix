@@ -192,10 +192,13 @@ in {
         "d /var/lib/microvms/${name} 0755 microvm kvm -"
         "d /var/lib/microvms/${name}/config 0755 root root -"
       ]
-    ) cfg.vms)) ++ lib.optionals (secretsCfg.enable && secretsCfg.github.enable) (
-      # Create secrets directories for VMs with GitHub secrets enabled
-      lib.mapAttrsToList (name: _: "d /run/hydrix-secrets/${name}/ssh 0700 root root -") vmsWithGithubSecrets
-    );
+    ) cfg.vms))
+    # Always create secrets directories for all enabled VMs.
+    # VM profiles may set hydrix.microvm.secrets.github = true (adding a
+    # virtiofs share), but the host can't see VM-side options at eval time.
+    # Virtiofsd crashes if the source path is missing, so pre-create for all.
+    ++ (lib.mapAttrsToList (name: _: "d /run/hydrix-secrets/${name}/ssh 0700 root root -")
+      (lib.filterAttrs (_: v: v.enable) cfg.vms));
 
     # Declare microVMs from hydrix.microvmHost.vms
     # VM names must match nixosConfigurations in the Hydrix flake
