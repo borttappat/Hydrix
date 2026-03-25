@@ -86,9 +86,17 @@
     #
     # IMPORTANT: Username must match hostUsername for 9p share paths to work.
     # Font family, colorscheme, etc. are also shared so VMs match the host.
+    # Host colorscheme — VMs inherit this via vmColors for consistent theming
+    hostColorscheme = let
+      configs = builtins.attrValues machineConfigs;
+      schemes = map (c: c.config.hydrix.colorscheme) configs;
+    in builtins.head schemes;
+
     hostConfig = { ... }: {
       imports = [ ./shared/fonts.nix ];
       hydrix.username = hostUsername;  # Required for 9p shares
+      hydrix.vmColors.enable = true;
+      hydrix.vmColors.hostColorscheme = hostColorscheme;
     };
 
     # =========================================================================

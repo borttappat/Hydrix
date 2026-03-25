@@ -87,7 +87,7 @@
       font.size = 10;
       ui = {
         gaps = 10;
-        floatingBar = false;
+        floatingBar = true;
         polybarStyle = "modular";
       };
       scaling = {

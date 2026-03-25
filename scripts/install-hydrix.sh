@@ -1447,6 +1447,12 @@ ${source_comment}
     # Host username for builder VM to mount ~/hydrix-config
     hostUsername = "${CONFIG[username]}";
 
+    # Host colorscheme — VMs inherit this via vmColors for consistent theming
+    hostColorscheme = let
+      configs = builtins.attrValues machineConfigs;
+      schemes = map (c: c.config.hydrix.colorscheme) configs;
+    in builtins.head schemes;
+
     userProfiles = ./profiles;
 
     # Custom colorschemes (pywal JSON format) - extend framework built-ins
@@ -1456,10 +1462,12 @@ ${source_comment}
     # VM theme sync module (shared between host and VMs)
     vmThemeSyncModule = ./modules/vm-theme-sync.nix;
 
-    # Host config for microVMs to inherit (username, font family, etc.)
+    # Host config for microVMs to inherit (username, font family, colorscheme, etc.)
     hostConfig = { ... }: {
       imports = [ ./shared/fonts.nix ];
       hydrix.username = hostUsername;
+      hydrix.vmColors.enable = true;
+      hydrix.vmColors.hostColorscheme = hostColorscheme;
     };
 
     # WiFi PCI address for router VM (auto-detected from machine configs)
@@ -1708,7 +1716,7 @@ generate_machine_nix() {
     graphical = {
       enable = true;
       font = { family = "Iosevka"; size = 10; };
-      ui = { gaps = 10; floatingBar = false; polybarStyle = "modular"; };
+      ui = { gaps = 10; floatingBar = true; polybarStyle = "modular"; };
       scaling = { internalResolution = null; standaloneScaleFactor = 1.0; };
       # keyboard.xmodmap = ''
       #   clear lock
