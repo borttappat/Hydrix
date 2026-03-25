@@ -1848,7 +1848,7 @@ prebuild_microvms() {
 
         if nix build "$config_dir#nixosConfigurations.${vm_name}.config.microvm.declaredRunner" \
             --no-link \
-            --print-build-logs 2>&1 | tail -10; then
+            --print-build-logs; then
             success "  ${vm_name} built successfully"
         else
             warn "  ${vm_name} build FAILED"
@@ -1866,7 +1866,7 @@ prebuild_microvms() {
 
         if nix build "$config_dir#nixosConfigurations.${vm_name}.config.microvm.declaredRunner" \
             --no-link \
-            --print-build-logs 2>&1 | tail -5; then
+            --print-build-logs; then
             success "  ${vm_name} built successfully"
         else
             warn "  ${vm_name} build failed (can be built later)"
