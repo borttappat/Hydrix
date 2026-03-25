@@ -1,6 +1,6 @@
 # Hydrix
 
-**Secure VM-based workstation with WiFi passthrough to router VM**
+**Secure VM- and isolation-based workstation framework**
 
 Hydrix is an options-driven NixOS framework that provides complete network isolation through VM compartmentalization. Your WiFi hardware is passed directly to a router VM via VFIO, giving you granular control over network traffic while maintaining a hardened host.
 
@@ -28,15 +28,17 @@ Hydrix is an options-driven NixOS framework that provides complete network isola
 
 ## Quick Start
 
+Fresh install from NixOS live environment
 ```bash
-# Fresh install from NixOS live environment
-curl -sL https://raw.githubusercontent.com/borttappat/Hydrix/master/scripts/install-hydrix.sh | sudo bash
+curl -sL https://raw.githubusercontent.com/borttappat/Hydrix/main/scripts/install-hydrix.sh | sudo bash
+```
 
-# Or create a user config from template
+Or create a user config from template
+```bash
 nix flake init -t github:borttappat/Hydrix
 ```
 
-After installation, your configuration lives at `~/hydrix-config/` (user mode) or `~/Hydrix/` (developer mode).
+After installation, your configuration lives at `~/hydrix-config/`.
 
 ---
 
@@ -59,12 +61,12 @@ After installation, your configuration lives at `~/hydrix-config/` (user mode) o
          +---- br-builder (192.168.106.0/24) -----+
          +---- br-lurking (192.168.107.0/24) -----+
                             |
-     +-----------+----------+-----------+------------+-----------+
-     |           |          |           |            |           |
+     +-----------+----------+------------+-----------+-----------+
+     |           |          |            |           |           |
 +--------+  +--------+  +--------+  +---------+  +--------+  +--------+
 |Browsing|  |Pentest |  |  Dev   |  | Builder |  |Builder |  |Gitsync |
 |  VM    |  |   VM   |  |   VM   |  |   VM    |  |  VM    |  |  VM    |
-|CID:101 |  |CID:102 |  |CID:103 |  |CID:210  |  |CID:101 |  |CID:101 |
+|CID:101 |  |CID:102 |  |CID:103 |  |CID:210  |  |CID:XXX |  |CID:XXX |
 +--------+  +--------+  +--------+  +---------+  +--------+  +--------+
 ```
 
@@ -104,7 +106,7 @@ hydrix-mode                     # Show current mode
 
 ```bash
 # Download and run installer
-curl -sL https://raw.githubusercontent.com/borttappat/Hydrix/master/scripts/install-hydrix.sh | sudo bash
+curl -sL https://raw.githubusercontent.com/borttappat/Hydrix/main/scripts/install-hydrix.sh | sudo bash
 ```
 
 The installer will:
