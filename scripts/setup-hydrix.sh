@@ -18,8 +18,12 @@
 set -euo pipefail
 
 # Source common library for validation functions
-SCRIPT_DIR_LIB="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-if [[ -f "$SCRIPT_DIR_LIB/lib/common.sh" ]]; then
+if [[ -n "${BASH_SOURCE[0]:-}" ]] && [[ -f "${BASH_SOURCE[0]:-}" ]]; then
+    SCRIPT_DIR_LIB="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+else
+    SCRIPT_DIR_LIB=""
+fi
+if [[ -n "$SCRIPT_DIR_LIB" ]] && [[ -f "$SCRIPT_DIR_LIB/lib/common.sh" ]]; then
     # shellcheck source=lib/common.sh
     source "$SCRIPT_DIR_LIB/lib/common.sh"
 else
@@ -37,7 +41,11 @@ fi
 
 HYDRIX_REPO="git+https://github.com/borttappat/Hydrix.git"
 CONFIG_DIR="${HYDRIX_CONFIG_DIR:-$HOME/hydrix-config}"
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [[ -n "${BASH_SOURCE[0]:-}" ]] && [[ -f "${BASH_SOURCE[0]:-}" ]]; then
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+else
+    SCRIPT_DIR=""
+fi
 
 # Mode: "fresh" | "add" | "use-existing"
 MODE=""
