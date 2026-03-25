@@ -378,16 +378,15 @@ in {
         }) vmsWithGithubSecrets
       ))
 
-      # First-boot VM builder: builds any declared VMs that haven't been built yet
-      # Runs once after install — subsequent boots find VMs already built
+      # First-boot VM builder: builds unbuilt VMs and starts autostart VMs.
+      # Closures are typically cached from the installer so builds are instant.
+      # Runs once per install, gated by /var/lib/hydrix/.firstboot-vms-done.
       {
         hydrix-firstboot-vms = {
-          description = "Build microVMs on first boot";
+          description = "Build and start microVMs on first boot";
           wantedBy = [ "multi-user.target" ];
-          after = [ "network-online.target" "nix-daemon.socket" ];
-          wants = [ "network-online.target" ];
+          after = [ "nix-daemon.socket" "local-fs.target" ];
 
-          # Only run if at least one VM is missing its runner
           unitConfig.ConditionPathExists = "!/var/lib/hydrix/.firstboot-vms-done";
 
           serviceConfig = {
@@ -401,33 +400,31 @@ in {
             configDir = config.hydrix.paths.configDir;
             enabledVMs = lib.filterAttrs (_: v: v.enable) cfg.vms;
           in ''
-            set -euo pipefail
-            echo "Checking for unbuilt microVMs..."
+            echo "First boot: building and starting microVMs..."
 
-            BUILT=0
-            FAILED=0
-
-            ${lib.concatStringsSep "\n" (lib.mapAttrsToList (name: _: ''
+            ${lib.concatStringsSep "\n" (lib.mapAttrsToList (name: vmCfg: ''
+              # Build if not yet linked
               if [ ! -e "/var/lib/microvms/${name}/current/bin/microvm-run" ]; then
                 echo "Building ${name}..."
-                if nix build "path:${configDir}#nixosConfigurations.${name}.config.microvm.declaredRunner" \
-                    --no-link --print-build-logs 2>&1; then
-                  echo "${name} built successfully"
-                  # Reset failed state and start if autostart
-                  systemctl reset-failed "microvm@${name}.service" 2>/dev/null || true
-                  BUILT=$((BUILT + 1))
-                else
-                  echo "${name} build FAILED"
-                  FAILED=$((FAILED + 1))
-                fi
-              else
-                echo "${name} already built, skipping"
+                nix build "path:${configDir}#nixosConfigurations.${name}.config.microvm.declaredRunner" \
+                    --no-link --print-build-logs 2>&1 || echo "WARN: ${name} build failed"
               fi
+
+              ${lib.optionalString vmCfg.autostart ''
+              # Start if autostart and runner exists
+              if [ -e "/var/lib/microvms/${name}/current/bin/microvm-run" ]; then
+                if ! systemctl is-active --quiet "microvm@${name}.service"; then
+                  echo "Starting ${name}..."
+                  systemctl reset-failed "microvm@${name}.service" 2>/dev/null || true
+                  systemctl start "microvm@${name}.service" || echo "WARN: ${name} start failed"
+                fi
+              fi
+              ''}
             '') enabledVMs)}
 
-            echo "First-boot VM build complete: $BUILT built, $FAILED failed"
             mkdir -p /var/lib/hydrix
             touch /var/lib/hydrix/.firstboot-vms-done
+            echo "First-boot VM setup complete"
           '';
         };
       }
