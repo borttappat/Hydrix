@@ -22,7 +22,7 @@
 
 set -euo pipefail
 
-# When piped via curl | bash, stdin is the script — redirect reads to the terminal
+# When piped via curl | bash, redirect interactive reads to the terminal
 if [[ ! -t 0 ]] && [[ -e /dev/tty ]]; then
     read() { builtin read "$@" < /dev/tty; }
 fi
@@ -2097,4 +2097,8 @@ access-tokens = github.com=$gh_token"
     fi
 }
 
-main "$@"
+# Brace block forces bash to buffer the entire script before executing,
+# which is required when piped via curl | bash
+{
+    main "$@"
+}

@@ -1996,4 +1996,8 @@ main() {
     fi
 }
 
-main "$@"
+# Brace block forces bash to buffer the entire script before executing,
+# which is required when piped via curl | bash
+{
+    main "$@"
+}
