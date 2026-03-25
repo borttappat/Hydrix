@@ -101,7 +101,7 @@ in {
       '';
 
       # Remove VFIO - release WiFi card
-      boot.kernelParams = lib.mkOverride 10 [];
+      boot.kernelParams = lib.mkOverride 10 [ "quiet" "loglevel=3" ];
       boot.kernelModules = lib.mkOverride 10 [];
       boot.blacklistedKernelModules = lib.mkOverride 10 [];
 

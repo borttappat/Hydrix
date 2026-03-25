@@ -88,7 +88,7 @@
       ui = {
         gaps = 10;
         floatingBar = false;
-        polybarStyle = "unibar";
+        polybarStyle = "modular";
       };
       scaling = {
         internalResolution = null;

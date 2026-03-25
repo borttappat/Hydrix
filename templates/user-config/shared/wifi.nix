@@ -10,7 +10,7 @@
 
 {
   hydrix.router.wifi = {
-    ssid = "YourNetworkName";
-    password = "YourPassword";
+    ssid = lib.mkDefault "YourNetworkName";
+    password = lib.mkDefault "YourPassword";
   };
 }

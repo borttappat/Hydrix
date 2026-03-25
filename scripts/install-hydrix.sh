@@ -1183,6 +1183,32 @@ copy_template_shared() {
     local template_dir="$SCRIPT_DIR/../templates/user-config/shared"
 
     cp -r "$template_dir"/* "$config_dir/shared/"
+
+    # Populate wifi.nix with actual credentials from installer
+    if [[ -n "${CONFIG[wifiSsid]}" ]]; then
+        cat > "$config_dir/shared/wifi.nix" << 'WIFI_HEADER'
+# WiFi Configuration - Shared across all machines
+#
+# This file is read by router VMs during build.
+# Update these credentials to connect to your network.
+#
+# IMPORTANT: If using a private git repo, this is safe to commit.
+# If using a public repo, consider using sops-nix for encryption.
+
+{ config, lib, pkgs, ... }:
+
+{
+WIFI_HEADER
+        cat >> "$config_dir/shared/wifi.nix" << WIFI_BODY
+  hydrix.router.wifi = {
+    ssid = "${CONFIG[wifiSsid]}";
+    password = "${CONFIG[wifiPassword]}";
+  };
+}
+WIFI_BODY
+        log "  WiFi credentials written to shared/wifi.nix"
+    fi
+
     log "  Copied from template"
 }
 
@@ -1620,14 +1646,10 @@ generate_machine_nix() {
       layout = "${CONFIG[layout]}";
     };
 
-    # Router
+    # Router (wifi credentials are in shared/wifi.nix)
     router = {
       type = "${CONFIG[routerType]}";
       autostart = true;
-      wifi = {
-        ssid = "${CONFIG[wifiSsid]}";
-        password = "${CONFIG[wifiPassword]}";
-      };
     };
 
     # Hardware
@@ -1686,7 +1708,7 @@ generate_machine_nix() {
     graphical = {
       enable = true;
       font = { family = "Iosevka"; size = 10; };
-      ui = { gaps = 10; floatingBar = false; polybarStyle = "unibar"; };
+      ui = { gaps = 10; floatingBar = false; polybarStyle = "modular"; };
       scaling = { internalResolution = null; standaloneScaleFactor = 1.0; };
       # keyboard.xmodmap = ''
       #   clear lock
