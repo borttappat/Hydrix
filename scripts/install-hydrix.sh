@@ -2100,5 +2100,8 @@ access-tokens = github.com=$gh_token"
 # Brace block forces bash to buffer the entire script before executing,
 # which is required when piped via curl | bash
 {
+    HYDRIX_LOG="/tmp/hydrix-install-$(date +%Y%m%d-%H%M%S).log"
+    echo "Logging to: $HYDRIX_LOG"
+    exec > >(tee -a "$HYDRIX_LOG") 2>&1
     main "$@"
 }
