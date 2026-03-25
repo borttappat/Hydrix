@@ -503,6 +503,16 @@ in {
               visibility: collapse !important;
             }
 
+            /* Collapse vertical tabs sidebar to icon strip, expand on hover */
+            #sidebar-main {
+              min-width: 0px !important;
+              max-width: 40px !important;
+              overflow: hidden !important;
+              transition: max-width 0.2s ease !important;
+            }
+            #sidebar-main:hover {
+              max-width: 300px !important;
+            }
 
           '';
 
