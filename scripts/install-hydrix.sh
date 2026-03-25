@@ -22,6 +22,11 @@
 
 set -euo pipefail
 
+# When piped via curl | bash, stdin is the script itself — reclaim the terminal
+if [[ ! -t 0 ]] && [[ -e /dev/tty ]]; then
+    exec < /dev/tty
+fi
+
 # Ensure nix experimental features are available (needed on stock NixOS ISO)
 export NIX_CONFIG="experimental-features = nix-command flakes"
 

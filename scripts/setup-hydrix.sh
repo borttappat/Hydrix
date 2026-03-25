@@ -17,6 +17,11 @@
 
 set -euo pipefail
 
+# When piped via curl | bash, stdin is the script itself — reclaim the terminal
+if [[ ! -t 0 ]] && [[ -e /dev/tty ]]; then
+    exec < /dev/tty
+fi
+
 # Source common library for validation functions
 if [[ -n "${BASH_SOURCE[0]:-}" ]] && [[ -f "${BASH_SOURCE[0]:-}" ]]; then
     SCRIPT_DIR_LIB="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
