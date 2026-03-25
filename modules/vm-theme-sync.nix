@@ -217,7 +217,14 @@ in {
     # =========================================================================
     (lib.mkIf isHost {
 
-      # 1. Ensure wal cache dir exists before VMs start (virtiofs needs source)
+      # 1. Ensure wal cache dir exists at boot (before VMs start)
+      # Virtiofsd crashes if the source path doesn't exist, and VMs start
+      # at multi-user.target — before the user session creates the dir.
+      systemd.tmpfiles.rules = [
+        "d /home/${username}/.cache/wal 0755 ${username} users -"
+      ];
+
+      # Also keep the user service for redundancy
       systemd.user.services.wal-cache-ensure = {
         description = "Ensure wal cache directory exists for VM virtiofs";
         wantedBy = [ "default.target" ];
