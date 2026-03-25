@@ -10,7 +10,7 @@
 # - Legacy migration: auto-upgrade old machine.nix format
 #
 # Usage:
-#   curl -sL https://raw.githubusercontent.com/borttappat/Hydrix/master/scripts/setup-hydrix.sh | bash
+#   curl -sL https://raw.githubusercontent.com/borttappat/Hydrix/main/scripts/setup-hydrix.sh | bash
 #
 # Or:
 #   nix run git+https://github.com/borttappat/Hydrix.git#setup
@@ -33,7 +33,7 @@ if [[ -n "$SCRIPT_DIR_LIB" ]] && [[ -f "$SCRIPT_DIR_LIB/lib/common.sh" ]]; then
     source "$SCRIPT_DIR_LIB/lib/common.sh"
 else
     # When running from curl, download common.sh
-    COMMON_URL="https://raw.githubusercontent.com/borttappat/Hydrix/master/scripts/lib/common.sh"
+    COMMON_URL="https://raw.githubusercontent.com/borttappat/Hydrix/main/scripts/lib/common.sh"
     COMMON_TEMP=$(mktemp)
     if curl -sL "$COMMON_URL" -o "$COMMON_TEMP" 2>/dev/null; then
         # shellcheck source=/dev/null

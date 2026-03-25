@@ -110,7 +110,7 @@
         echo "  nix flake init -t github:borttappat/Hydrix"
         echo ""
         echo "Or run the installer:"
-        echo "  curl -sL https://raw.githubusercontent.com/borttappat/Hydrix/master/scripts/install-hydrix.sh | sudo bash"
+        echo "  curl -sL https://raw.githubusercontent.com/borttappat/Hydrix/main/scripts/install-hydrix.sh | sudo bash"
       '';
     };
   };
