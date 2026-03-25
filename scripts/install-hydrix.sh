@@ -22,9 +22,9 @@
 
 set -euo pipefail
 
-# When piped via curl | bash, stdin is the script itself — reclaim the terminal
+# When piped via curl | bash, stdin is the script — redirect reads to the terminal
 if [[ ! -t 0 ]] && [[ -e /dev/tty ]]; then
-    exec < /dev/tty
+    read() { builtin read "$@" < /dev/tty; }
 fi
 
 # Ensure nix experimental features are available (needed on stock NixOS ISO)
