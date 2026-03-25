@@ -45,13 +45,7 @@ Thumbs.db
 
 # Markdown - ignore most but keep key docs
 *.md
-!HYDRIX-GUIDE.md
 !README.md
-!CLAUDE.md
-!REWORK.md
-!DOCUMENTATION.md
-!VM-DEPLOY-IMPROVEMENT.md
-!templates/local/README.md
 !secrets/README.md
 
 # sops-nix - only .sops.yaml is machine-specific (contains age public key)
