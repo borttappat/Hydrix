@@ -1999,7 +1999,8 @@ main() {
 # Brace block forces bash to buffer the entire script before executing,
 # which is required when piped via curl | bash
 {
-    HYDRIX_LOG="/tmp/hydrix-setup-$(date +%Y%m%d-%H%M%S).log"
+    mkdir -p /var/log/hydrix 2>/dev/null || true
+    HYDRIX_LOG="/var/log/hydrix/hydrix-setup-$(date +%Y%m%d-%H%M%S).log"
     echo "Logging to: $HYDRIX_LOG"
     exec > >(tee -a "$HYDRIX_LOG") 2>&1
     main "$@"

@@ -1819,7 +1819,7 @@ prebuild_microvms() {
 
     # Check available disk space before building
     local available_gb
-    available_gb=$(df /tmp --output=avail 2>/dev/null | tail -1 | awk '{print int($1/1024/1024)}')
+    available_gb=$(df /mnt --output=avail 2>/dev/null | tail -1 | awk '{print int($1/1024/1024)}')
     if [[ $available_gb -lt 20 ]]; then
         warn "Low disk space: ${available_gb}GB available (recommend 50GB+)"
         warn "MicroVM builds may fail due to insufficient space"
@@ -2104,4 +2104,10 @@ access-tokens = github.com=$gh_token"
     echo "Logging to: $HYDRIX_LOG"
     exec > >(tee -a "$HYDRIX_LOG") 2>&1
     main "$@"
+    # Copy log to installed system so it survives reboot
+    if [[ -d "/mnt/var/log" ]]; then
+        mkdir -p /mnt/var/log/hydrix
+        cp "$HYDRIX_LOG" /mnt/var/log/hydrix/
+        echo "Install log saved to /var/log/hydrix/$(basename "$HYDRIX_LOG")"
+    fi
 }
