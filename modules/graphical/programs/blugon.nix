@@ -10,6 +10,7 @@
 #
 # Manual temperature stored in ~/.config/blugon/current
 # Mode stored in ~/.config/blugon/mode ("manual" or empty/missing for auto)
+# Active marker: ~/.cache/hydrix/blugon-active (gate for external processes)
 
 { config, lib, pkgs, ... }:
 
@@ -29,9 +30,11 @@ let
     CONFIG_FILE="$CONFIG_DIR/config"
     GAMMA_FILE="$CONFIG_DIR/gamma"
     MODE_FILE="$CONFIG_DIR/mode"
+    BLUGON_MARKER="$HOME/.cache/hydrix/blugon-active"
 
     # Create config directory if needed
     mkdir -p "$CONFIG_DIR"
+    mkdir -p "$HOME/.cache/hydrix"
 
     # Initialize current temperature if not set (for manual mode)
     if [ ! -f "$CURRENT_FILE" ]; then
@@ -40,9 +43,10 @@ let
 
     # Preserve disabled state across rebuilds - only reset if not disabled
     if [ -f "$MODE_FILE" ] && [ "$(cat "$MODE_FILE")" = "disabled" ]; then
-      : # Keep disabled state
+      rm -f "$BLUGON_MARKER"
     else
       rm -f "$MODE_FILE"
+      echo "active" > "$BLUGON_MARKER"
     fi
 
     # Create gamma schedule (time-based for auto mode)
@@ -85,6 +89,7 @@ EOF
     CONFIG_DIR="$HOME/.config/blugon"
     CURRENT_FILE="$CONFIG_DIR/current"
     MODE_FILE="$CONFIG_DIR/mode"
+    BLUGON_MARKER="$HOME/.cache/hydrix/blugon-active"
     MIN_TEMP=${toString cfg.minTemp}
     MAX_TEMP=${toString cfg.maxTemp}
     STEP=${toString cfg.step}
@@ -105,6 +110,7 @@ EOF
         # Switch to manual mode - stop blugon service
         systemctl --user stop blugon.service 2>/dev/null || true
         echo "manual" > "$MODE_FILE"
+        echo "active" > "$BLUGON_MARKER"
         new=$((current - STEP))
         ;;
       -|down|cooler)
@@ -112,11 +118,13 @@ EOF
         # Switch to manual mode - stop blugon service
         systemctl --user stop blugon.service 2>/dev/null || true
         echo "manual" > "$MODE_FILE"
+        echo "active" > "$BLUGON_MARKER"
         new=$((current + STEP))
         ;;
       reset)
         # Resume auto mode - remove mode file and restart blugon service
         rm -f "$MODE_FILE"
+        echo "active" > "$BLUGON_MARKER"
         systemctl --user start blugon.service 2>/dev/null || true
         exit 0  # Let blugon daemon set the temp based on schedule
         ;;
@@ -124,6 +132,7 @@ EOF
         # Disable blugon entirely - stop service and reset screen to neutral
         systemctl --user stop blugon.service 2>/dev/null || true
         echo "disabled" > "$MODE_FILE"
+        rm -f "$BLUGON_MARKER"
         echo "$MAX_TEMP" > "$CURRENT_FILE"
         ${blugonPath} --readcurrent --once 2>/dev/null || true
         exit 0
@@ -131,6 +140,7 @@ EOF
       enable|on)
         # Re-enable blugon in auto mode
         rm -f "$MODE_FILE"
+        echo "active" > "$BLUGON_MARKER"
         systemctl --user start blugon.service 2>/dev/null || true
         exit 0
         ;;
@@ -139,6 +149,7 @@ EOF
         if [ -n "$1" ]; then
           systemctl --user stop blugon.service 2>/dev/null || true
           echo "manual" > "$MODE_FILE"
+          echo "active" > "$BLUGON_MARKER"
           new="$1"
         else
           echo "Usage: blugon-set [+|-|reset|disable|enable|<temp>]"
@@ -197,8 +208,9 @@ in {
         };
         Service = {
           Type = "simple";
-          # Don't start if user has disabled blugon via blugon-set off
-          ExecCondition = "${pkgs.bash}/bin/bash -c '[ ! -f %h/.config/blugon/mode ] || [ \"$(cat %h/.config/blugon/mode)\" != \"disabled\" ]'";
+          # Don't start if user has disabled blugon (marker absent)
+          ExecCondition = "${pkgs.coreutils}/bin/test -f %h/.cache/hydrix/blugon-active";
+          ExecStartPre = "${pkgs.coreutils}/bin/mkdir -p %h/.cache/hydrix";
           # No --readcurrent: follows gamma schedule (time-based)
           ExecStart = "${blugonPath}";
           Restart = if cfg.autoRestart then "on-failure" else "no";

@@ -239,11 +239,10 @@ let
 
   tempDynamicScript = pkgs.writeShellScript "polybar-temp-dynamic" ''
     CURRENT_FILE="$HOME/.config/blugon/current"
-    MODE_FILE="$HOME/.config/blugon/mode"
+    BLUGON_MARKER="$HOME/.cache/hydrix/blugon-active"
 
-    # Check if blugon is disabled
-    mode=$(${cat} "$MODE_FILE" 2>/dev/null || echo "")
-    if [ "$mode" = "disabled" ]; then
+    # Check if blugon is active (marker file)
+    if [ ! -f "$BLUGON_MARKER" ]; then
       ${getColorHelper}
       echo "%{F$color_prefix}BLU %{F-}%{u$color_normal}%{+u}OFF%{-u}"
       exit 0
