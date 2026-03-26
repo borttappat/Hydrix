@@ -1248,10 +1248,10 @@ copy_wallpapers() {
     mkdir -p "$home_dir/wallpapers"
     # Copy wallpapers from Hydrix repo (bundled in nix store or local clone)
     local hydrix_wp="$SCRIPT_DIR/../wallpapers"
-    if [[ -d "$hydrix_wp" ]]; then
-        cp "$hydrix_wp"/*.png "$home_dir/wallpapers/" 2>/dev/null || true
+    if [[ -d "$hydrix_wp" ]] && ls "$hydrix_wp"/*.{png,jpg} &>/dev/null; then
+        cp "$hydrix_wp"/*.png "$hydrix_wp"/*.jpg "$home_dir/wallpapers/" 2>/dev/null || true
         local count
-        count=$(ls "$home_dir/wallpapers/"*.png 2>/dev/null | wc -l)
+        count=$(ls "$home_dir/wallpapers/" 2>/dev/null | wc -l)
         log "  Copied $count wallpaper(s) from Hydrix"
     else
         log "  Created $home_dir/wallpapers/ (add wallpapers here)"
@@ -1509,7 +1509,7 @@ ${source_comment}
     in builtins.listToAttrs (map (file: {
       name = builtins.replaceStrings [ ".nix" ] [ "" ] file;
       value = hydrix.lib.mkHost {
-        specialArgs = { inherit self; };
+        specialArgs = { inherit self hydrix; };
         inherit userColorschemesDir;
         modules = [
           (machinesDir + "/\${file}")
@@ -1615,7 +1615,7 @@ generate_machine_nix() {
 #   rebuild administrative     -> Admin
 #   rebuild fallback           -> Fallback
 
-{ config, lib, pkgs, ... }:
+{ config, lib, pkgs, hydrix, ... }:
 
 {
   # =========================================================================
@@ -1653,6 +1653,7 @@ generate_machine_nix() {
     username = "${CONFIG[username]}";
     hostname = "hydrix";  # Visual hostname (config file identified by serial: ${CONFIG[serial]})
     colorscheme = "${CONFIG[colorscheme]}";
+    graphical.wallpaper = "\${hydrix}/wallpapers/WindowRain.png";
 
     # Locale
     locale = {

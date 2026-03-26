@@ -85,6 +85,7 @@
     username = "user";           # Your username
     hostname = "hydrix";         # Visual hostname (config file identified by serial)
     colorscheme = "puccy";       # Theme (see colorschemes/ in Hydrix repo)
+    graphical.wallpaper = "${hydrix}/wallpapers/WindowRain.png";  # Default wallpaper (nix store path)
     # vmThemeSync.focusDaemon.mode = "dynamic";  # "static" or "dynamic" focus border colors
 
     # ─────────────────────────────────────────────────────────────────────

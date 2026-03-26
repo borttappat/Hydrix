@@ -876,10 +876,10 @@ copy_wallpapers() {
     elif [[ -d "$(dirname "$0")/../wallpapers" ]]; then
         hydrix_wp="$(cd "$(dirname "$0")/.." && pwd)/wallpapers"
     fi
-    if [[ -n "$hydrix_wp" ]]; then
-        cp "$hydrix_wp"/*.png "$home_dir/wallpapers/" 2>/dev/null || true
+    if [[ -n "$hydrix_wp" ]] && ls "$hydrix_wp"/*.{png,jpg} &>/dev/null; then
+        cp "$hydrix_wp"/*.png "$hydrix_wp"/*.jpg "$home_dir/wallpapers/" 2>/dev/null || true
         local count
-        count=$(ls "$home_dir/wallpapers/"*.png 2>/dev/null | wc -l)
+        count=$(ls "$home_dir/wallpapers/" 2>/dev/null | wc -l)
         log "  Copied $count wallpaper(s) from Hydrix"
     else
         log "  Created $home_dir/wallpapers/ (add wallpapers here)"
@@ -984,7 +984,7 @@ ${source_comment}
     in builtins.listToAttrs (map (file: {
       name = builtins.replaceStrings [ ".nix" ] [ "" ] file;
       value = hydrix.lib.mkHost {
-        specialArgs = { inherit self; };
+        specialArgs = { inherit self hydrix; };
         inherit userColorschemesDir;
         modules = [
           (machinesDir + "/\${file}")
@@ -1088,7 +1088,7 @@ generate_machine_nix() {
 #   rebuild administrative     -> Admin mode
 #   rebuild fallback           -> Fallback mode
 
-{ config, lib, pkgs, ... }:
+{ config, lib, pkgs, hydrix, ... }:
 
 {
   # =========================================================================
@@ -1140,6 +1140,7 @@ MACHINE_EOF
     username = "${CONFIG[username]}";           # DETECTED from system
     hostname = "hydrix";  # Visual hostname (config file identified by serial: ${CONFIG[serial]})
     colorscheme = "${CONFIG[colorscheme]}";     # DEFAULT: "puccy"
+    graphical.wallpaper = "\${hydrix}/wallpapers/WindowRain.png";
 MACHINE_EOF
 
     cat >> "$CONFIG_DIR/machines/${CONFIG[serial]}.nix" << 'MACHINE_EOF'

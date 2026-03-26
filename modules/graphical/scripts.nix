@@ -603,6 +603,14 @@ ZEOF
         # Save scheme name for change detection on next boot
         echo "$SCHEME_NAME" > "$SCHEME_MARKER"
 
+        # Set wallpaper via feh so ~/.fehbg exists for i3 startup
+        ${lib.optionalString (!isVM && cfg.wallpaper != null) ''
+        if [ ! -f "$HOME/.fehbg" ]; then
+            echo "Setting initial wallpaper: ${cfg.wallpaper}"
+            ${pkgs.feh}/bin/feh --bg-fill "${cfg.wallpaper}" 2>/dev/null || true
+        fi
+        ''}
+
         # Sync to hydrix-config for VMs to access
         HYDRIX_CONFIG="$HOME/.config/hydrix"
         if [ -d "$HYDRIX_CONFIG" ] || [ ! -e "/mnt/hydrix-config" ]; then
