@@ -31,7 +31,7 @@
 # Or select at boot from GRUB menu.
 # ═══════════════════════════════════════════════════════════════════════════
 
-{ config, lib, pkgs, ... }:
+{ config, lib, pkgs, hydrix, ... }:
 
 {
   # =========================================================================
@@ -84,7 +84,8 @@
     # ─────────────────────────────────────────────────────────────────────
     username = "user";           # Your username
     hostname = "hydrix";         # Visual hostname (config file identified by serial)
-    colorscheme = "nord";        # Theme (see colorschemes/ in Hydrix repo)
+    colorscheme = "puccy";       # Theme (see colorschemes/ in Hydrix repo)
+    # vmThemeSync.focusDaemon.mode = "dynamic";  # "static" or "dynamic" focus border colors
 
     # ─────────────────────────────────────────────────────────────────────
     # LOCALE

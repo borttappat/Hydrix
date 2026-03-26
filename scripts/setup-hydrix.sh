@@ -865,6 +865,26 @@ create_colorschemes_dir() {
     log "  Created $CONFIG_DIR/colorschemes/ (add custom .json colorschemes here)"
 }
 
+copy_wallpapers() {
+    log "Setting up wallpapers..."
+    mkdir -p "$CONFIG_DIR/Wallpapers"
+    local count=0
+    local files
+    files=$(curl -sf "https://api.github.com/repos/borttappat/Hydrix/contents/wallpapers" \
+        | grep '"name"' | sed 's/.*"name": "\([^"]*\)".*/\1/' 2>/dev/null) || true
+    for f in $files; do
+        if wget -q "https://raw.githubusercontent.com/borttappat/Hydrix/main/wallpapers/$f" \
+             -O "$CONFIG_DIR/Wallpapers/$f" 2>/dev/null; then
+            count=$((count + 1))
+        fi
+    done
+    if [[ $count -gt 0 ]]; then
+        log "  Downloaded $count wallpaper(s)"
+    else
+        log "  Created $CONFIG_DIR/Wallpapers/ (add wallpapers here)"
+    fi
+}
+
 copy_template_readme() {
     local template_dir=""
 
@@ -1537,6 +1557,7 @@ generate_full_config() {
     copy_template_shared
     copy_template_modules
     create_colorschemes_dir
+    copy_wallpapers
     copy_template_readme
     generate_machine_nix
     copy_hardware_config
@@ -1987,6 +2008,11 @@ main() {
     echo "Your config: $CONFIG_DIR"
     echo "  Edit:    \$EDITOR $CONFIG_DIR/machines/${CONFIG[serial]}.nix"
     echo "  Rebuild: rebuild"
+    echo ""
+    echo "Set your wallpaper and colorscheme after reboot:"
+    echo "  walrgb ~/hydrix-config/Wallpapers/WindowRain.png"
+    echo "Or pick a random wallpaper from the directory:"
+    echo "  randomwalrgb"
     echo ""
 
     if [[ "${CONFIG[hydrixSource]}" == "local" ]]; then

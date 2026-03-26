@@ -761,6 +761,38 @@ hydrix.vmThemeSync.focusDaemon.mode = "dynamic";
 
 In your flake, import `vmThemeSyncModule` for both host and all VMs.
 
+### Focus Override Colors
+
+A third color mode activated at runtime via the `hydrix-focus` CLI:
+
+| Command | Effect |
+|---------|--------|
+| `hydrix-focus on` | Enable per-VM override colors |
+| `hydrix-focus off` | Disable, revert to static/dynamic mode |
+| `hydrix-focus toggle` | Toggle override on/off (default action) |
+| `hydrix-focus status` | Show current state |
+
+**Per-VM colors** are set in profile configs:
+
+```nix
+# profiles/pentest/default.nix
+hydrix.vmThemeSync.focusOverrideColor = "#FF5555";
+```
+
+When override mode is active (`hydrix-focus on`), the focus daemon reads `focusOverrideColor` from each VM's profile file instead of using the static/dynamic color pipeline. This gives you fixed, hand-picked colors per VM type regardless of wallpaper or colorscheme.
+
+**Marker file:** `~/.cache/hydrix/focus-override-active` — the daemon watches for this via SIGUSR1.
+
+### Wal Cache Pre-population
+
+The `wal-cache-init` service runs on first boot to ensure VMs have colors immediately:
+
+1. Checks if `~/.cache/wal/colors.json` exists — skips if already populated
+2. If `graphical.wallpaper` is set, runs `wal -q -i <wallpaper>` to generate cache
+3. Otherwise, falls back to the configured `colorscheme` JSON file
+
+This solves the cold-start problem where VMs mount an empty virtiofs share on first boot (host has no wal cache yet), resulting in terminals with no colors until the user runs `walrgb`.
+
 ---
 
 ## Font System

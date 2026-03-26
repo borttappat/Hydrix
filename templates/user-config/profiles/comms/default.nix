@@ -24,6 +24,7 @@
 
   # Colorscheme for this VM
   hydrix.colorscheme = "deeporange";
+  # hydrix.vmThemeSync.focusOverrideColor = "#AABBCC";  # Per-VM focus border override (use with hydrix-focus on)
 
   # Inherit host colors for consistent look
   hydrix.vmColors.enable = true;

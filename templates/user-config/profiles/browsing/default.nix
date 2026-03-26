@@ -22,6 +22,7 @@
 
   # Colorscheme for this VM (see colorschemes/ in Hydrix repo)
   hydrix.colorscheme = "punk";
+  # hydrix.vmThemeSync.focusOverrideColor = "#AABBCC";  # Per-VM focus border override (use with hydrix-focus on)
 
   # MicroVM resources (must match CID in host scripts)
   hydrix.microvm = {

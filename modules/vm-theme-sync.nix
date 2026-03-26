@@ -70,9 +70,11 @@
 # ═══════════════════════════════════════════════════════════════════════
 #
 #   wal-cache-ensure    — oneshot: mkdir ~/.cache/wal (virtiofs needs it)
+#   wal-cache-init      — oneshot: pre-populate wal cache from wallpaper/colorscheme
 #   wal-cache-notify    — path unit watches colors.json, service sends
 #                         REFRESH to vsock:14503 on all known VM CIDs
-#   vm-focus-daemon     — enhanced i3 focus handler with static/dynamic
+#   hydrix-focus        — CLI: toggle per-VM override colors (on/off/toggle/status)
+#   vm-focus-daemon     — enhanced i3 focus handler with static/dynamic/override
 #                         color modes for per-VM border colors
 #
 # ═══════════════════════════════════════════════════════════════════════
@@ -93,6 +95,8 @@
 #   hydrix.vmThemeSync.focusDaemon.mode — "static" | "dynamic"
 #     static:  VM type → profile → colorscheme JSON → color4
 #     dynamic: VM type → dynamicColorMap → host wal colors.json key
+#   hydrix.vmThemeSync.focusOverrideColor — nullOr str, default null
+#     Hex color for i3 focus border when override mode is active
 #   hydrix.vmThemeSync.focusDaemon.dynamicColorMap — attrs
 #     Maps VM types to wal color keys (e.g. pentest → color1)
 #
@@ -185,6 +189,12 @@ in {
       description = "Symlink VM ~/.cache/wal to host mount (false = VM uses own colorscheme)";
     };
 
+    focusOverrideColor = lib.mkOption {
+      type = lib.types.nullOr lib.types.str;
+      default = null;
+      description = "Hex color for i3 focus border when override mode is active";
+    };
+
     focusDaemon = {
       mode = lib.mkOption {
         type = lib.types.enum [ "static" "dynamic" ];
@@ -235,7 +245,51 @@ in {
         };
       };
 
-      # 2. Path watcher for automatic VM notification on color changes
+      # 2. Pre-populate wal cache on first boot if empty
+      systemd.user.services.wal-cache-init = {
+        description = "Initialize wal cache from declared wallpaper/colorscheme";
+        wantedBy = [ "default.target" ];
+        after = [ "wal-cache-ensure.service" ];
+        before = [ "wal-cache-notify.path" ];
+        serviceConfig = {
+          Type = "oneshot";
+          RemainAfterExit = true;
+        };
+        path = [ pkgs.pywal ];
+        script = let
+          wallpaper = config.hydrix.graphical.wallpaper;
+          colorscheme = config.hydrix.colorscheme;
+          configDir = config.hydrix.paths.configDir;
+          hydrixDir = config.hydrix.paths.hydrixDir;
+        in ''
+          WAL_COLORS="/home/${username}/.cache/wal/colors.json"
+          if [ -f "$WAL_COLORS" ]; then
+            echo "wal cache already populated, skipping"
+            exit 0
+          fi
+          ${if wallpaper != null then ''
+            echo "Generating wal cache from wallpaper: ${wallpaper}"
+            wal -q -i "${wallpaper}"
+          '' else ''
+            echo "Generating wal cache from colorscheme: ${colorscheme}"
+            SCHEME=""
+            for dir in "${configDir}" "${hydrixDir}"; do
+              if [ -f "$dir/colorschemes/${colorscheme}.json" ]; then
+                SCHEME="$dir/colorschemes/${colorscheme}.json"
+                break
+              fi
+            done
+            if [ -n "$SCHEME" ]; then
+              wal -q --theme "$SCHEME"
+            else
+              echo "Colorscheme file not found: ${colorscheme}"
+              exit 1
+            fi
+          ''}
+        '';
+      };
+
+      # 3. Path watcher for automatic VM notification on color changes
       systemd.user.paths.wal-cache-notify = {
         description = "Watch wal cache for color changes";
         wantedBy = [ "default.target" ];
@@ -267,7 +321,59 @@ in {
         };
       };
 
-      # 4. Enhanced vm-focus-daemon with static/dynamic modes
+      # 4. hydrix-focus CLI for toggling per-VM override colors
+      environment.systemPackages = [
+        (pkgs.writeShellScriptBin "hydrix-focus" ''
+          MARKER="$HOME/.cache/hydrix/focus-override-active"
+          mkdir -p "$(dirname "$MARKER")"
+
+          status() {
+            if [ -f "$MARKER" ]; then
+              echo "Focus override: ON"
+              echo "Mode: per-profile override colors"
+            else
+              echo "Focus override: OFF"
+              echo "Mode: ${cfg.focusDaemon.mode} (wal-based)"
+            fi
+          }
+
+          signal_daemon() {
+            ${pkgs.procps}/bin/pkill -USR1 -f vm-focus-daemon 2>/dev/null || true
+          }
+
+          case "''${1:-toggle}" in
+            on)
+              touch "$MARKER"
+              echo "Focus override: ON"
+              signal_daemon
+              ;;
+            off)
+              rm -f "$MARKER"
+              echo "Focus override: OFF"
+              signal_daemon
+              ;;
+            toggle)
+              if [ -f "$MARKER" ]; then
+                rm -f "$MARKER"
+                echo "Focus override: OFF"
+              else
+                touch "$MARKER"
+                echo "Focus override: ON"
+              fi
+              signal_daemon
+              ;;
+            status)
+              status
+              ;;
+            *)
+              echo "Usage: hydrix-focus [on|off|toggle|status]"
+              exit 1
+              ;;
+          esac
+        '')
+      ];
+
+      # 5. Enhanced vm-focus-daemon with static/dynamic modes
       systemd.user.services.vm-focus-daemon.serviceConfig.ExecStart = let
         focusDaemon = pkgs.writers.writePython3Bin "vm-focus-daemon" {
           libraries = [ pkgs.python3Packages.i3ipc ];
@@ -290,6 +396,9 @@ MODE = "${cfg.focusDaemon.mode}"
 
 # Dynamic color map (VM type -> wal color key)
 DYNAMIC_COLOR_MAP = ${builtins.toJSON cfg.focusDaemon.dynamicColorMap}
+
+# Override marker file
+OVERRIDE_MARKER = Path.home() / ".cache/hydrix/focus-override-active"
 
 # Directories for layered lookup (user config first, then framework)
 CONFIG_DIR = Path("${config.hydrix.paths.configDir}")
@@ -367,8 +476,27 @@ def get_color_for_type_dynamic(vm_type):
     return get_wal_color(color_key)
 
 
+def get_override_color(vm_type):
+    """Get per-VM override color from profile file."""
+    profile = find_profile(vm_type)
+    if not profile:
+        return None
+    try:
+        content = profile.read_text()
+        match = re.search(r'hydrix\.vmThemeSync\.focusOverrideColor\s*=\s*"([^"]+)"', content)
+        if match:
+            return match.group(1)
+    except Exception:
+        pass
+    return None
+
+
 def get_color_for_type(vm_type):
     """Get border color for VM type based on configured mode."""
+    if OVERRIDE_MARKER.exists():
+        override = get_override_color(vm_type)
+        if override:
+            return override
     if MODE == "dynamic":
         return get_color_for_type_dynamic(vm_type)
     else:

@@ -117,7 +117,7 @@
     in builtins.listToAttrs (map (file: {
       name = builtins.replaceStrings [ ".nix" ] [ "" ] file;
       value = hydrix.lib.mkHost {
-        specialArgs = { inherit self; };
+        specialArgs = { inherit self hydrix; };
         inherit userColorschemesDir;
         modules = [
           (machinesDir + "/${file}")
