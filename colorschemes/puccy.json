@@ -1,28 +1,28 @@
 {
-    "wallpaper": "/home/traum/hydrix-config/Wallpapers/WindowRain.png",
+    "wallpaper": "/home/traum/Wallpapers/Nerv.png",
     "alpha": "100",
 
     "special": {
-        "background": "#12121b",
-        "foreground": "#c5c9d9",
-        "cursor": "#c5c9d9"
+        "background": "#0e0f17",
+        "foreground": "#e4d1ef",
+        "cursor": "#e4d1ef"
     },
     "colors": {
-        "color0": "#12121b",
-        "color1": "#5D718D",
-        "color2": "#7786A4",
-        "color3": "#9B808D",
-        "color4": "#8E97B6",
-        "color5": "#A09BB5",
-        "color6": "#DEAD9C",
-        "color7": "#c5c9d9",
-        "color8": "#898c97",
-        "color9": "#5D718D",
-        "color10": "#7786A4",
-        "color11": "#9B808D",
-        "color12": "#8E97B6",
-        "color13": "#A09BB5",
-        "color14": "#DEAD9C",
-        "color15": "#c5c9d9"
+        "color0": "#0e0f17",
+        "color1": "#6C688A",
+        "color2": "#9A759A",
+        "color3": "#7097B8",
+        "color4": "#F09EA2",
+        "color5": "#AAB2CF",
+        "color6": "#DBB4EF",
+        "color7": "#e4d1ef",
+        "color8": "#9f92a7",
+        "color9": "#6C688A",
+        "color10": "#9A759A",
+        "color11": "#7097B8",
+        "color12": "#F09EA2",
+        "color13": "#AAB2CF",
+        "color14": "#DBB4EF",
+        "color15": "#e4d1ef"
     }
 }
