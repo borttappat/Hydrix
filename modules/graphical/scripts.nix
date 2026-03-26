@@ -499,7 +499,7 @@ ZEOF
   # Random wallpaper theme applicator
   randomWalRgbScript = pkgs.writeShellScriptBin "randomwalrgb" ''
     #!/usr/bin/env bash
-    WALLPAPER_DIR="''${1:-$HOME/Wallpapers}"
+    WALLPAPER_DIR="''${1:-$HOME/wallpapers}"
     WAL_ACTIVE="$HOME/.cache/wal/.active"
 
     if [ ! -d "$WALLPAPER_DIR" ]; then

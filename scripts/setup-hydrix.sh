@@ -72,7 +72,7 @@ declare -A CONFIG=(
     [wifiSsid]=""
     [wifiPassword]=""
     [routerType]="microvm"
-    [colorscheme]="nord"
+    [colorscheme]="puccy"
     [diskoDevice]=""
     [hardwareConfigPath]=""
     [hydrixSource]="github"
@@ -867,21 +867,22 @@ create_colorschemes_dir() {
 
 copy_wallpapers() {
     log "Setting up wallpapers..."
-    mkdir -p "$CONFIG_DIR/Wallpapers"
-    local count=0
-    local files
-    files=$(curl -sf "https://api.github.com/repos/borttappat/Hydrix/contents/wallpapers" \
-        | grep '"name"' | sed 's/.*"name": "\([^"]*\)".*/\1/' 2>/dev/null) || true
-    for f in $files; do
-        if wget -q "https://raw.githubusercontent.com/borttappat/Hydrix/main/wallpapers/$f" \
-             -O "$CONFIG_DIR/Wallpapers/$f" 2>/dev/null; then
-            count=$((count + 1))
-        fi
-    done
-    if [[ $count -gt 0 ]]; then
-        log "  Downloaded $count wallpaper(s)"
+    local home_dir="$HOME"
+    mkdir -p "$home_dir/wallpapers"
+    # Copy wallpapers from Hydrix repo (local clone or framework)
+    local hydrix_wp=""
+    if [[ -d "$HOME/Hydrix/wallpapers" ]]; then
+        hydrix_wp="$HOME/Hydrix/wallpapers"
+    elif [[ -d "$(dirname "$0")/../wallpapers" ]]; then
+        hydrix_wp="$(cd "$(dirname "$0")/.." && pwd)/wallpapers"
+    fi
+    if [[ -n "$hydrix_wp" ]]; then
+        cp "$hydrix_wp"/*.png "$home_dir/wallpapers/" 2>/dev/null || true
+        local count
+        count=$(ls "$home_dir/wallpapers/"*.png 2>/dev/null | wc -l)
+        log "  Copied $count wallpaper(s) from Hydrix"
     else
-        log "  Created $CONFIG_DIR/Wallpapers/ (add wallpapers here)"
+        log "  Created $home_dir/wallpapers/ (add wallpapers here)"
     fi
 }
 
@@ -1138,7 +1139,7 @@ MACHINE_EOF
     cat >> "$CONFIG_DIR/machines/${CONFIG[serial]}.nix" << MACHINE_EOF
     username = "${CONFIG[username]}";           # DETECTED from system
     hostname = "hydrix";  # Visual hostname (config file identified by serial: ${CONFIG[serial]})
-    colorscheme = "${CONFIG[colorscheme]}";     # DEFAULT: "nord"
+    colorscheme = "${CONFIG[colorscheme]}";     # DEFAULT: "puccy"
 MACHINE_EOF
 
     cat >> "$CONFIG_DIR/machines/${CONFIG[serial]}.nix" << 'MACHINE_EOF'
@@ -1659,9 +1660,9 @@ prompt_wifi() {
 
 prompt_colorscheme() {
     echo ""
-    log "Available colorschemes: nord, nvid, punk, perp, gruvbox, dracula"
-    read -p "Colorscheme [nord]: " cs
-    CONFIG[colorscheme]="${cs:-nord}"
+    log "Available colorschemes: puccy, nord, nvid, punk, perp, gruvbox, dracula"
+    read -p "Colorscheme [puccy]: " cs
+    CONFIG[colorscheme]="${cs:-puccy}"
 }
 
 # ========== HYDRIX SOURCE SELECTION ==========
@@ -2010,9 +2011,9 @@ main() {
     echo "  Rebuild: rebuild"
     echo ""
     echo "Set your wallpaper and colorscheme after reboot:"
-    echo "  walrgb ~/hydrix-config/Wallpapers/WindowRain.png"
+    echo "  walrgb ~/wallpapers/WindowRain.png"
     echo "Or pick a random wallpaper from the directory:"
-    echo "  randomwalrgb"
+    echo "  randomwalrgb ~/wallpapers"
     echo ""
 
     if [[ "${CONFIG[hydrixSource]}" == "local" ]]; then

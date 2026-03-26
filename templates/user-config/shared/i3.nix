@@ -73,7 +73,7 @@ in {
 
       # === Wallpaper ===
       "${mod}+w" = "exec randomwalrgb";
-      # "${mod}+Shift+w" = "exec feh --bg-fill ~/Wallpapers/Black.jpg";
+      # "${mod}+Shift+w" = "exec feh --bg-fill ~/wallpapers/Black.jpg";
 
       # === Lock / Suspend ===
       "${mod}+Shift+e" = "exec --no-startup-id lock";

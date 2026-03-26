@@ -195,7 +195,7 @@ in {
           "..." = "cd ../..";
           j = "joshuto";
           r = "ranger";
-          wp = "cd ~/Wallpapers && ranger";
+          wp = "cd ~/wallpapers && joshuto";
           # User's config directory (source of truth)
           hyd = "cd ${config.hydrix.paths.configDir} && git status";
           hydrix = "cd ${config.hydrix.paths.configDir}";

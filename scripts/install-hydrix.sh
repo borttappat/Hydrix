@@ -164,7 +164,7 @@ declare -A CONFIG=(
     [wifiSsid]=""
     [wifiPassword]=""
     [routerType]="microvm"
-    [colorscheme]="nord"
+    [colorscheme]="puccy"
     [grubGfxmode]="auto"
     [hydrixSource]="github"
     [hydrixUrl]="github:borttappat/Hydrix"
@@ -1243,23 +1243,18 @@ copy_template_colorschemes() {
 }
 
 copy_wallpapers() {
-    local config_dir="$1"
+    local home_dir="$1"
     log "Setting up wallpapers..."
-    mkdir -p "$config_dir/Wallpapers"
-    local count=0
-    local files
-    files=$(curl -sf "https://api.github.com/repos/borttappat/Hydrix/contents/wallpapers" \
-        | grep '"name"' | sed 's/.*"name": "\([^"]*\)".*/\1/' 2>/dev/null) || true
-    for f in $files; do
-        if wget -q "https://raw.githubusercontent.com/borttappat/Hydrix/main/wallpapers/$f" \
-             -O "$config_dir/Wallpapers/$f" 2>/dev/null; then
-            count=$((count + 1))
-        fi
-    done
-    if [[ $count -gt 0 ]]; then
-        log "  Downloaded $count wallpaper(s)"
+    mkdir -p "$home_dir/wallpapers"
+    # Copy wallpapers from Hydrix repo (bundled in nix store or local clone)
+    local hydrix_wp="$SCRIPT_DIR/../wallpapers"
+    if [[ -d "$hydrix_wp" ]]; then
+        cp "$hydrix_wp"/*.png "$home_dir/wallpapers/" 2>/dev/null || true
+        local count
+        count=$(ls "$home_dir/wallpapers/"*.png 2>/dev/null | wc -l)
+        log "  Copied $count wallpaper(s) from Hydrix"
     else
-        log "  Created $config_dir/Wallpapers/ (add wallpapers here)"
+        log "  Created $home_dir/wallpapers/ (add wallpapers here)"
     fi
 }
 
@@ -1312,7 +1307,7 @@ generate_config_to_temp() {
         copy_template_modules "$TEMP_CONFIG"
         copy_template_fonts "$TEMP_CONFIG"
         copy_template_colorschemes "$TEMP_CONFIG"
-        copy_wallpapers "$TEMP_CONFIG"
+        copy_wallpapers "/mnt/home/${CONFIG[username]}"
         copy_template_readme "$TEMP_CONFIG"
         generate_machine_nix "$TEMP_CONFIG"
         generate_hardware_config "$TEMP_CONFIG"
@@ -2135,9 +2130,9 @@ access-tokens = github.com=$gh_token"
     echo "              FIRST BOOT                "
     echo "=========================================="
     echo "  Set your wallpaper and colorscheme:"
-    echo "    walrgb ~/hydrix-config/Wallpapers/WindowRain.png"
+    echo "    walrgb ~/wallpapers/WindowRain.png"
     echo "  Or pick a random wallpaper from the directory:"
-    echo "    randomwalrgb"
+    echo "    randomwalrgb ~/wallpapers"
     echo "=========================================="
     echo ""
 

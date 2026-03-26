@@ -403,11 +403,24 @@ in {
             echo "First boot: building and starting microVMs..."
 
             ${lib.concatStringsSep "\n" (lib.mapAttrsToList (name: vmCfg: ''
-              # Build if not yet linked
+              # Build and link if runner symlink doesn't exist yet
               if [ ! -e "/var/lib/microvms/${name}/current/bin/microvm-run" ]; then
                 echo "Building ${name}..."
-                nix build "path:${configDir}#nixosConfigurations.${name}.config.microvm.declaredRunner" \
-                    --no-link --print-build-logs 2>&1 || echo "WARN: ${name} build failed"
+                out_link="/tmp/firstboot-${name}"
+                if nix build "path:${configDir}#nixosConfigurations.${name}.config.microvm.declaredRunner" \
+                    -o "$out_link" --print-build-logs 2>&1; then
+                  # Create symlink (same as microvm build CLI)
+                  store_path=$(readlink -f "$out_link")
+                  mkdir -p "/var/lib/microvms/${name}/config"
+                  chown microvm:kvm "/var/lib/microvms/${name}"
+                  chown root:root "/var/lib/microvms/${name}/config"
+                  chmod 755 "/var/lib/microvms/${name}" "/var/lib/microvms/${name}/config"
+                  ln -sfn "$store_path" "/var/lib/microvms/${name}/current"
+                  rm -f "$out_link"
+                  echo "${name} built and linked: $store_path"
+                else
+                  echo "WARN: ${name} build failed"
+                fi
               fi
 
               ${lib.optionalString vmCfg.autostart ''

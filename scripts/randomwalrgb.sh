@@ -3,7 +3,7 @@
 echo "Setting random wallpaper and colors..."
 
 echo "Setting colorscheme from random wallpaper"
-wal -q -i ~/Wallpapers
+wal -q -i ~/wallpapers
 echo "Colorscheme set"
 
 HEX_CODE=$(sed -n '2p' ~/.cache/wal/colors | sed 's/#//')
