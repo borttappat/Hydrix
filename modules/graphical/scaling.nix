@@ -11,6 +11,8 @@
 let
   cfg = config.hydrix.graphical;
   ui = cfg.ui;
+  polybarFont = cfg.font.familyOverrides.polybar or cfg.font.family;
+  barHeightFamilyRel = ui.barHeightFamilyRelations.${polybarFont} or 1.0;
 in {
   options.hydrix.graphical.scaling = {
     # Computed values - aliases to unified ui.* options
@@ -38,7 +40,7 @@ in {
       barHeight = lib.mkOption {
         type = lib.types.int;
         readOnly = true;
-        default = ui.barHeight;
+        default = builtins.floor (ui.barHeight * ui.barHeightRelation * barHeightFamilyRel);
       };
 
       barPadding = lib.mkOption {
