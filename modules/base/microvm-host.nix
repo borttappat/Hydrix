@@ -186,13 +186,14 @@ in {
       # Must exist before microVMs start, otherwise QEMU fails to mount
       "d /home/${username}/.config/hydrix 0755 ${username} users -"
 
-    ] ++ (lib.concatLists (lib.mapAttrsToList (name: vmCfg:
-      lib.optionals vmCfg.enable [
-        # microvm service runs as microvm:kvm, needs write access for booted symlink
-        "d /var/lib/microvms/${name} 0755 microvm kvm -"
-        "d /var/lib/microvms/${name}/config 0755 root root -"
-      ]
-    ) cfg.vms))
+    ]
+    # NOTE: Do NOT create /var/lib/microvms/<name> or subdirectories via tmpfiles.
+    # The upstream microvm.nix install-microvm-<name> service uses
+    # ConditionPathExists=!/var/lib/microvms/<name> to gate first-install
+    # symlink creation. Pre-creating the directory (even implicitly via a
+    # subdirectory) causes the condition to always fail, preventing the runner
+    # symlink from being created on first boot.
+    # The config subdirectory is created by hydrix-microvm-config-dirs below.
     # Always create secrets directories for all enabled VMs.
     # VM profiles may set hydrix.microvm.secrets.github = true (adding a
     # virtiofs share), but the host can't see VM-side options at eval time.
@@ -219,6 +220,22 @@ in {
     # ===== Systemd Services =====
     # Combines router TAP setup and secrets provisioning
     systemd.services = lib.mkMerge [
+      # Create config directories for microVMs after install-microvm-* has run.
+      # Cannot use tmpfiles because creating /var/lib/microvms/<name>/config
+      # would implicitly create the parent directory, which blocks the upstream
+      # install-microvm-<name> ConditionPathExists=!/var/lib/microvms/<name>.
+      (lib.listToAttrs (lib.mapAttrsToList (name: _: lib.nameValuePair "hydrix-microvm-config-dir-${name}" {
+        description = "Create config directory for ${name}";
+        after = [ "install-microvm-${name}.service" ];
+        before = [ "microvm@${name}.service" ];
+        wantedBy = [ "microvms.target" ];
+        serviceConfig.Type = "oneshot";
+        script = ''
+          mkdir -p /var/lib/microvms/${name}/config
+          chmod 755 /var/lib/microvms/${name}/config
+        '';
+      }) (lib.filterAttrs (_: v: v.enable) cfg.vms)))
+
       # Router MicroVM needs to run as root for VFIO PCI passthrough
       (lib.mkIf routerEnabled {
         "microvm@microvm-router" = {
