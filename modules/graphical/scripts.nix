@@ -37,7 +37,14 @@
 
 let
   cfg = config.hydrix.graphical;
-  colorscheme = config.hydrix.colorscheme;
+  # When vmColors.enable is true, VMs inherit the host colorscheme for wal cache
+  # consistency (matches what Stylix uses at build time)
+  ownColorscheme = config.hydrix.colorscheme;
+  hostColorscheme = config.hydrix.vmColors.hostColorscheme;
+  vmColorsEnabled = config.hydrix.vmColors.enable;
+  colorscheme = if vmColorsEnabled && hostColorscheme != null
+    then hostColorscheme
+    else ownColorscheme;
   username = config.hydrix.username;
   vmType = config.hydrix.vmType;
   isVM = vmType != null && vmType != "host";
@@ -603,11 +610,25 @@ ZEOF
         # Save scheme name for change detection on next boot
         echo "$SCHEME_NAME" > "$SCHEME_MARKER"
 
+        ${lib.optionalString (!isVM) ''
         # Set wallpaper via feh so ~/.fehbg exists for i3 startup
-        ${lib.optionalString (!isVM && cfg.wallpaper != null) ''
+        ${lib.optionalString (cfg.wallpaper != null) ''
         if [ ! -f "$HOME/.fehbg" ]; then
             echo "Setting initial wallpaper: ${cfg.wallpaper}"
             ${pkgs.feh}/bin/feh --bg-fill "${cfg.wallpaper}" 2>/dev/null || true
+        fi
+        ''}
+
+        # Refresh all color-aware apps with the new wal cache
+        if command -v refresh-colors >/dev/null 2>&1; then
+            echo "Refreshing app colors..."
+            refresh-colors 2>/dev/null || true
+        fi
+
+        # Push colors to any VMs that are already running
+        if command -v push-colors-to-vms >/dev/null 2>&1; then
+            echo "Pushing colors to running VMs..."
+            push-colors-to-vms &
         fi
         ''}
 
