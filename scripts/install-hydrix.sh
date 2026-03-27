@@ -196,35 +196,72 @@ prompt_auth_method() {
     warn "Authentication required for private repository"
     echo ""
     echo "Options:"
-    if command_exists gh; then
+    local _gh_check_cmd="gh"
+    [[ -n "${SUDO_USER:-}" ]] && _gh_check_cmd="sudo -u $SUDO_USER gh"
+    if command_exists gh || (eval "$_gh_check_cmd auth status" &>/dev/null 2>&1); then
         echo "  1) GitHub CLI (gh auth login) - recommended"
     else
-        echo "  1) GitHub CLI - not available (install with: nix-shell -p gh)"
+        echo "  1) GitHub CLI - not installed (run: nix-shell -p gh, then gh auth login)"
     fi
-    echo "  2) Personal Access Token (HTTPS)"
+    echo "  2) Personal Access Token (type or paste)"
     echo "  3) SSH key"
-    echo "  4) Skip - proceed with fresh installation"
+    echo "  4) Read token from file (e.g. USB drive)"
+    echo "  5) Skip - proceed with fresh installation"
     echo ""
-    read -p "Select authentication method [1-4]: " auth_choice
+    read -p "Select authentication method [1-5]: " auth_choice
     echo "$auth_choice"
 }
 
 authenticate_gh_cli() {
-    if ! command_exists gh; then
-        warn "GitHub CLI not available"
+    # Detect graphical environment — present on GUI live ISOs (GNOME etc.)
+    local has_gui=false
+    if [[ -n "${DISPLAY:-}" ]] || [[ -n "${WAYLAND_DISPLAY:-}" ]]; then
+        has_gui=true
+    fi
+
+    # Under sudo, authenticate as the original user so they get browser access
+    # and their existing gh config. After auth we extract a token for git.
+    local gh_cmd="gh"
+    if [[ -n "${SUDO_USER:-}" ]] && [[ "$SUDO_USER" != "root" ]]; then
+        if sudo -u "$SUDO_USER" which gh &>/dev/null 2>&1; then
+            gh_cmd="sudo -u $SUDO_USER gh"
+        fi
+    fi
+
+    if ! command_exists gh && [[ "$gh_cmd" == "gh" ]]; then
+        warn "GitHub CLI not installed"
         echo ""
-        log "Installing gh temporarily..."
-        if nix-shell -p gh --run "gh auth login"; then
+        echo "Open a second terminal and run:"
+        echo "  nix-shell -p gh"
+        echo "  gh auth login"
+        echo ""
+        echo "Then return here and press Enter to retry."
+        read -p "" _
+        # Re-check after user authenticates externally
+        if command_exists gh && gh auth status &>/dev/null 2>&1; then
+            return 0
+        fi
+        if [[ -n "${SUDO_USER:-}" ]] && sudo -u "$SUDO_USER" gh auth status &>/dev/null 2>&1; then
+            gh_cmd="sudo -u $SUDO_USER gh"
             return 0
         fi
         return 1
     fi
 
     log "Authenticating with GitHub CLI..."
-    if gh auth login; then
-        return 0
+    if $has_gui; then
+        echo "  A browser window will open for authentication."
+        $gh_cmd auth login --hostname github.com --git-protocol https --web
+    else
+        echo ""
+        echo "  No graphical display detected. Inside the gh prompt you can:"
+        echo "    - Select 'Login with a web browser' — gh shows a one-time code;"
+        echo "      open github.com/login/device on any device (phone, another machine)"
+        echo "    - Select 'Paste an authentication token'"
+        echo "      generate one at: github.com/settings/tokens  (scope: repo)"
+        echo ""
+        $gh_cmd auth login --hostname github.com --git-protocol https
     fi
-    return 1
 }
 
 convert_to_token_url() {
@@ -353,11 +390,29 @@ try_clone_with_auth() {
 
     case "$auth_method" in
         1)
-            # GitHub CLI
+            # GitHub CLI — after auth, extract token so clone works under root
             if authenticate_gh_cli; then
-                log "Retrying clone with gh auth..."
-                if git clone "$repo_url" "$dest_dir" 2>&1; then
-                    return 0
+                local gh_token
+                if [[ -n "${SUDO_USER:-}" ]]; then
+                    gh_token=$(sudo -u "$SUDO_USER" gh auth token 2>/dev/null) || true
+                else
+                    gh_token=$(gh auth token 2>/dev/null) || true
+                fi
+                if [[ -n "$gh_token" ]]; then
+                    local token_url
+                    token_url=$(convert_to_token_url "$repo_url" "$gh_token")
+                    unset gh_token
+                    log "Retrying clone with gh token..."
+                    if git clone "$token_url" "$dest_dir" 2>&1; then
+                        unset token_url
+                        return 0
+                    fi
+                    unset token_url
+                else
+                    log "Retrying clone with gh auth..."
+                    if git clone "$repo_url" "$dest_dir" 2>&1; then
+                        return 0
+                    fi
                 fi
             fi
             warn "GitHub CLI authentication failed"
@@ -379,14 +434,13 @@ try_clone_with_auth() {
 
             local token_url
             token_url=$(convert_to_token_url "$repo_url" "$token")
-            # Clear token from memory immediately after constructing URL
             unset token
             log "Retrying clone with token..."
             if git clone "$token_url" "$dest_dir" 2>&1; then
-                unset token_url  # Clear URL containing token
+                unset token_url
                 return 0
             fi
-            unset token_url  # Clear URL containing token
+            unset token_url
             warn "Token authentication failed"
             return 1
             ;;
@@ -405,7 +459,33 @@ try_clone_with_auth() {
             warn "SSH authentication failed"
             return 1
             ;;
-        4|*)
+        4)
+            # Read token from file (e.g. USB drive)
+            echo ""
+            read -p "Path to token file: " token_file
+            if [[ ! -f "$token_file" ]]; then
+                warn "File not found: $token_file"
+                return 1
+            fi
+            local file_token
+            file_token=$(tr -d '[:space:]' < "$token_file")
+            if [[ -z "$file_token" ]]; then
+                warn "Token file is empty"
+                return 1
+            fi
+            local token_url
+            token_url=$(convert_to_token_url "$repo_url" "$file_token")
+            unset file_token
+            log "Retrying clone with token from file..."
+            if git clone "$token_url" "$dest_dir" 2>&1; then
+                unset token_url
+                return 0
+            fi
+            unset token_url
+            warn "Token authentication failed"
+            return 1
+            ;;
+        5|*)
             # Skip
             return 1
             ;;
@@ -433,13 +513,17 @@ select_config_source() {
     echo ""
     echo "Options:"
     echo "  1) Fresh installation (new config)"
-    echo "  2) Clone existing hydrix-config repo"
+    echo "  2) Clone existing hydrix-config repo (from git remote)"
+    echo "  3) Use local hydrix-config directory (e.g. USB drive, reinstall)"
     echo ""
-    read -p "Select [1-2, default=1]: " config_choice
+    read -p "Select [1-3, default=1]: " config_choice
 
     case "${config_choice:-1}" in
         2)
             clone_existing_repo
+            ;;
+        3)
+            use_local_repo
             ;;
         *)
             MODE="fresh"
@@ -484,6 +568,138 @@ clone_existing_repo() {
     # Check if machine already exists in cloned config
     if [[ -f "$CLONED_REPO/machines/${CONFIG[serial]}.nix" ]]; then
         log "Machine '${CONFIG[serial]}' already exists in cloned config"
+        echo ""
+        echo "Options:"
+        echo "  1) Use existing machine config (update hardware detection only)"
+        echo "  2) Regenerate with current system detection (overwrites customizations)"
+        echo "  3) Cancel"
+        echo ""
+        read -p "Select [1-3, default=1]: " existing_choice
+
+        case "${existing_choice:-1}" in
+            1)
+                MODE="use-existing"
+                log "Will use existing config, regenerate hardware detection"
+                ;;
+            2)
+                MODE="add"
+                warn "Existing machine config will be overwritten"
+                ;;
+            3)
+                rm -rf "$temp_dir"
+                error "Cancelled by user"
+                ;;
+            *)
+                MODE="use-existing"
+                log "Will use existing config, regenerate hardware detection"
+                ;;
+        esac
+    else
+        MODE="add"
+        echo ""
+        log "Your new machine (${CONFIG[serial]:-<serial>}) will be added to this config"
+    fi
+}
+
+detect_usb_mounts() {
+    # Return a list of likely removable/external media mount points.
+    # Sources: udisks2 automounts (/run/media), legacy (/media),
+    # and /proc/mounts for any /dev/sd[b-z] that isn't a system path.
+    local -a mounts=()
+
+    # udisks2 automount (GNOME live ISOs)
+    if [[ -d /run/media ]]; then
+        while IFS= read -r -d '' mp; do
+            [[ -d "$mp" ]] && mounts+=("$mp")
+        done < <(find /run/media -mindepth 2 -maxdepth 2 -type d -print0 2>/dev/null)
+    fi
+
+    # Legacy automount
+    if [[ -d /media ]]; then
+        while IFS= read -r -d '' mp; do
+            [[ -d "$mp" ]] && mounts+=("$mp")
+        done < <(find /media -mindepth 1 -maxdepth 2 -type d -print0 2>/dev/null)
+    fi
+
+    # /proc/mounts — external drives mounted manually (skip sda = install target)
+    while IFS=' ' read -r dev mp _rest; do
+        [[ "$dev" =~ ^/dev/sd[b-z] ]] || continue
+        [[ "$mp" == /boot* ]] || [[ "$mp" == /nix* ]] || [[ "$mp" == /run/media* ]] && continue
+        [[ -d "$mp" ]] && mounts+=("$mp")
+    done < /proc/mounts
+
+    # Deduplicate and print
+    printf '%s\n' "${mounts[@]}" | sort -u
+}
+
+use_local_repo() {
+    echo ""
+    log "=== Use Local hydrix-config ==="
+    echo ""
+
+    local config_path=""
+
+    # Try to detect removable media
+    local -a usb_mounts=()
+    mapfile -t usb_mounts < <(detect_usb_mounts)
+
+    if [[ ${#usb_mounts[@]} -gt 0 ]]; then
+        echo "Detected removable media:"
+        local i
+        for i in "${!usb_mounts[@]}"; do
+            echo "  $((i+1))) ${usb_mounts[$i]}"
+        done
+        echo "  $((${#usb_mounts[@]}+1))) Enter path manually"
+        echo ""
+        read -p "Select [1-$((${#usb_mounts[@]}+1))]: " media_choice
+
+        if [[ "$media_choice" =~ ^[0-9]+$ ]] \
+            && [[ "$media_choice" -ge 1 ]] \
+            && [[ "$media_choice" -le "${#usb_mounts[@]}" ]]; then
+            local mount="${usb_mounts[$((media_choice-1))]}"
+            # Look for hydrix-config in common locations on the mount
+            if [[ -d "$mount/hydrix-config/machines" ]]; then
+                config_path="$mount/hydrix-config"
+            elif [[ -d "$mount/machines" ]]; then
+                config_path="$mount"
+            else
+                echo ""
+                read -p "Path to hydrix-config within $mount (leave blank for root): " subpath
+                config_path="$mount/${subpath#/}"
+            fi
+        fi
+    fi
+
+    if [[ -z "$config_path" ]]; then
+        read -p "Full path to hydrix-config directory: " config_path
+    fi
+
+    if [[ -z "$config_path" ]]; then
+        warn "No path provided - proceeding with fresh installation"
+        MODE="fresh"
+        return
+    fi
+
+    if [[ ! -d "$config_path/machines" ]]; then
+        warn "Invalid hydrix-config at '$config_path' (missing machines/) - proceeding with fresh installation"
+        MODE="fresh"
+        return
+    fi
+
+    # Copy to temp dir so the config is available after USB is unmounted
+    local temp_dir
+    temp_dir=$(mktemp -d)
+    log "Copying configuration from $config_path..."
+    cp -r "$config_path/." "$temp_dir/hydrix-config"
+
+    success "Configuration loaded from local path"
+    list_existing_machines "$temp_dir/hydrix-config"
+
+    CLONED_REPO="$temp_dir/hydrix-config"
+
+    # Same machine-serial detection as clone_existing_repo
+    if [[ -f "$CLONED_REPO/machines/${CONFIG[serial]}.nix" ]]; then
+        log "Machine '${CONFIG[serial]}' already exists in config"
         echo ""
         echo "Options:"
         echo "  1) Use existing machine config (update hardware detection only)"
