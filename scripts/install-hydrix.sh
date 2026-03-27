@@ -1307,7 +1307,6 @@ generate_config_to_temp() {
         copy_template_modules "$TEMP_CONFIG"
         copy_template_fonts "$TEMP_CONFIG"
         copy_template_colorschemes "$TEMP_CONFIG"
-        copy_wallpapers "/mnt/home/${CONFIG[username]}"
         copy_template_readme "$TEMP_CONFIG"
         generate_machine_nix "$TEMP_CONFIG"
         generate_hardware_config "$TEMP_CONFIG"
@@ -1843,6 +1842,9 @@ install_nixos() {
         git -c user.name="Hydrix Installer" -c user.email="installer@hydrix" add .
         git -c user.name="Hydrix Installer" -c user.email="installer@hydrix" commit --amend --no-edit
     )
+
+    # Copy wallpapers to user home (disk is now mounted)
+    copy_wallpapers "/mnt/home/${CONFIG[username]}"
 
     # Fix ownership
     local uid gid
