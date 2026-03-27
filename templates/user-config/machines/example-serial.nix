@@ -75,6 +75,14 @@
   #
   # hydrix.user.hashedPassword = "$6$...";  # Generate with: mkpasswd -m sha-512
 
+  # SSH public keys for authorized_keys (optional)
+  # hydrix.user.sshPublicKeys = [
+  #   "ssh-ed25519 AAAA... user@host"
+  # ];
+
+  # Extra groups beyond defaults (wheel, audio, video, etc.)
+  # hydrix.user.extraGroups = [ "libvirtd" "kvm" ];
+
   # =========================================================================
   # HYDRIX CONFIGURATION
   # =========================================================================
@@ -87,6 +95,22 @@
     colorscheme = "puccy";       # Theme (see colorschemes/ in Hydrix repo)
     graphical.wallpaper = "${hydrix}/wallpapers/WindowRain.png";  # Default wallpaper (nix store path)
     # vmThemeSync.focusDaemon.mode = "dynamic";  # "static" or "dynamic" focus border colors
+
+    # ─────────────────────────────────────────────────────────────────────
+    # DEFAULT APPLICATIONS
+    # ─────────────────────────────────────────────────────────────────────
+    # These values are used throughout the graphical environment (i3, scripts, etc.)
+    # Change them to substitute different programs - the framework references these
+    # names rather than hardcoding specific apps.
+    #
+    # terminal = "alacritty";   # DEFAULT: alacritty
+    # shell    = "fish";        # DEFAULT: fish  (options: fish, bash, zsh)
+    # browser  = "firefox";     # DEFAULT: firefox
+    # editor   = "vim";         # DEFAULT: vim
+    # fileManager  = "ranger";  # DEFAULT: ranger
+    # imageViewer  = "feh";     # DEFAULT: feh
+    # mediaPlayer  = "mpv";     # DEFAULT: mpv
+    # pdfViewer    = "zathura"; # DEFAULT: zathura
 
     # ─────────────────────────────────────────────────────────────────────
     # LOCALE
@@ -106,16 +130,28 @@
       enable = true;
       device = "/dev/nvme0n1";
       swapSize = "16G";
-      layout = "full-disk-plain";  # full-disk-plain, full-disk-luks, dual-boot-luks
+      layout = "full-disk-plain";  # full-disk-plain, full-disk-luks, dual-boot-luks, dual-boot-plain
     };
 
     # ─────────────────────────────────────────────────────────────────────
     # ROUTER
     # ─────────────────────────────────────────────────────────────────────
-    # WiFi credentials are in shared/wifi.nix (shared across all machines)
+    # WiFi credentials are in shared/wifi.nix (shared across all machines).
     router = {
       type = "microvm";  # "microvm" (recommended), "libvirt", or "none"
       autostart = true;  # Start router VM automatically
+
+      # ─── Mullvad VPN (optional) ────────────────────────────────────────
+      # Copy vpn/mullvad.nix.example to vpn/mullvad.nix, fill in your
+      # credentials, then uncomment this line:
+      #
+      # vpn.mullvad = import ../vpn/mullvad.nix;
+      #
+      # Each exit node becomes a WireGuard interface on the router.
+      # Assign networks at runtime with: vpn-assign <bridge> <node>
+      #   vpn-assign browse mullvad-se
+      #   vpn-assign lurking mullvad-ch
+      #   vpn-assign --persistent comms mullvad-de  # persist across reboots
     };
 
     # ─────────────────────────────────────────────────────────────────────
@@ -144,7 +180,7 @@
     power = {
       defaultProfile = "balanced";  # "powersave", "balanced", "performance"
       # chargeLimit = 60;           # Battery charge limit (20-100, preserves battery)
-      # autoCpuFreq = true;          # DEFAULT: true - auto-cpufreq service
+      # autoCpuFreq = true;         # DEFAULT: true - auto-cpufreq service
     };
 
     # ─────────────────────────────────────────────────────────────────────
@@ -169,16 +205,29 @@
     microvmHost = {
       enable = true;
       vms = {
-        "microvm-router".enable = true;
+        "microvm-router".enable   = true;
         "microvm-router".autostart = true;
         "microvm-browsing".enable = true;
-        "microvm-pentest".enable = true;
-        "microvm-dev".enable = true;
-        "microvm-comms".enable = true;
-        "microvm-lurking".enable = true;
-        "microvm-builder".enable = true;
-        "microvm-gitsync".enable = true;
+        "microvm-pentest".enable  = true;
+        "microvm-dev".enable      = true;
+        "microvm-comms".enable    = true;
+        "microvm-lurking".enable  = true;
+        "microvm-builder".enable  = true;
+        "microvm-gitsync".enable  = true;
       };
+
+      # Per-VM GitHub SSH key provisioning (requires secrets.github.enable = true)
+      # vms."microvm-dev".secrets.github = true;
+
+      # Custom VM names (change what the systemd units are called)
+      # vmNames.browse  = "microvm-browsing";  # DEFAULT
+      # vmNames.hack    = "microvm-pentest";   # DEFAULT
+      # vmNames.dev     = "microvm-dev";       # DEFAULT
+      # vmNames.comms   = "microvm-comms";     # DEFAULT
+      # vmNames.lurk    = "microvm-lurking";   # DEFAULT
+      # vmNames.build   = "microvm-builder";   # DEFAULT
+      # vmNames.router  = "microvm-router";    # DEFAULT
+      # vmNames.gitsync = "microvm-gitsync";   # DEFAULT
     };
 
     # ─────────────────────────────────────────────────────────────────────
@@ -198,16 +247,46 @@
     # Only override what you need to customize.
     graphical = {
       enable = true;
-      # font.family = "Iosevka";              # Font profile auto-selected
-      # font.size = 10;                       # Override base size
-      # ui.gaps = 10;                         # Window gaps (default: 15)
-      # ui.barGaps = 5;                       # Bar-to-screen-edge gap (default: gaps/2)
-      # ui.barHeight = 23;                    # Bar height (default: 23)
-      # ui.barPadding = 2;                    # Padding inside bar (default: 2)
-      # ui.border = 2;                        # Window border width (default: 2)
-      # ui.polybarStyle = "unibar";           # unibar, modular, pills
-      # bluelight.autoRestart = false;              # DEFAULT: false - only starts on boot
-      # scaling.internalResolution = "1920x1200";  # For HiDPI laptops
+
+      # polarity = "dark";  # DEFAULT: "dark" - color scheme polarity ("dark" or "light")
+
+      # ─── Applications ────────────────────────────────────────────────
+      # firefox.hostEnable  = false;  # DEFAULT: false - Firefox on host (admin mode sets this)
+      # obsidian.hostEnable = false;  # DEFAULT: false - Obsidian on host
+      # obsidian.vaultPaths = [];     # e.g. [ "notes" "projects" ] — deploys CSS to each vault
+
+      # ─── Font ────────────────────────────────────────────────────────
+      # font.family = "Iosevka";      # Font profile auto-selected
+      # font.size   = 10;             # Override base size
+      # font.overrides = { alacritty = 10.5; };  # Direct per-app size override (bypasses DPI scaling)
+      # font.maxSizes  = { alacritty = 10.5; polybar = 13; };  # Per-app size cap
+
+      # ─── UI layout ───────────────────────────────────────────────────
+      # ui.gaps        = 15;          # DEFAULT: 15 - i3 inner gaps
+      # ui.barGaps     = null;        # DEFAULT: gaps/2 - polybar float margin (null = auto)
+      # ui.barHeight   = 23;          # DEFAULT: 23 - polybar height
+      # ui.barPadding  = 2;           # DEFAULT: 2  - padding inside bar
+      # ui.border      = 2;           # DEFAULT: 2  - window border width
+      # ui.floatingBar = true;        # DEFAULT: true  - floating polybar
+      # ui.bottomBar   = true;        # DEFAULT: true  - bottom bar with VM metrics
+      # ui.polybarStyle = "modular";  # DEFAULT: "modular" - unibar, modular, pills
+      # ui.cornerRadius = 2;          # DEFAULT: 2  - picom corner radius
+
+      # ─── Workspace labels ────────────────────────────────────────────
+      # Default labels are roman numerals: I, II, III ... X
+      # ui.workspaceLabels = { "1" = "web"; "2" = "code"; "3" = "term"; };
+      # ui.workspaceDescriptions = { "1" = "browsing"; "2" = "dev"; };
+
+      # ─── Opacity / transparency ──────────────────────────────────────
+      # ui.opacity.overlay         = 0.85;   # DEFAULT: 0.85 - terminals and overlay elements
+      # ui.opacity.overlayOverrides = { alacritty = 0.95; };  # Per-app overrides
+      # ui.opacity.active          = 1.0;    # DEFAULT: 1.0 - active window
+      # ui.opacity.inactive        = 1.0;    # DEFAULT: 1.0 - inactive window
+
+      # ─── Compositor (picom) ──────────────────────────────────────────
+      # ui.compositor.animations = "modern";  # DEFAULT: "modern" - "none" or "modern"
+
+      # ─── Keyboard remapping ──────────────────────────────────────────
       # keyboard.xmodmap = ''
       #   clear lock
       #   clear control
@@ -215,17 +294,70 @@
       #   add control = Control_L Control_R
       # '';
 
+      # ─── Blue light filter (blugon) ──────────────────────────────────
+      # bluelight.enable       = true;   # DEFAULT: true
+      # bluelight.defaultTemp  = 4500;   # DEFAULT: 4500K - manual temperature
+      # bluelight.autoRestart  = false;  # DEFAULT: false - only starts on boot
+      #
+      # Time-based auto schedule (when autoRestart = true):
+      # bluelight.schedule.dayTemp   = 6500;  # DEFAULT: 6500K - daytime temperature
+      # bluelight.schedule.nightTemp = 3500;  # DEFAULT: 3500K - nighttime temperature
+      # bluelight.schedule.dayStart  = 7;     # DEFAULT: 7 - hour daytime begins (0-23)
+      # bluelight.schedule.nightStart = 20;   # DEFAULT: 20 - hour nighttime begins (0-23)
+
+      # ─── HiDPI scaling ───────────────────────────────────────────────
+      # scaling.internalResolution = "1920x1200";  # For HiDPI laptops
+      # scaling.auto = true;                       # DEFAULT: true - auto DPI detection
+
       # ─── Lockscreen ──────────────────────────────────────────────────
       # lockscreen = {
       #   idleTimeout = 600;                                              # DEFAULT: 600 (seconds, null to disable)
-      #   font = "CozetteVector";                                         # DEFAULT: "CozetteVector"
-      #   fontSize = 143;                                                 # DEFAULT: 143
-      #   clockSize = 104;                                                # DEFAULT: 104
-      #   text = "Papers, please";                                        # DEFAULT: "Papers, please"
-      #   wrongText = "Ah ah ah! You didn't say the magic word!!";        # DEFAULT
-      #   verifyText = "Verifying...";                                    # DEFAULT
-      #   blur = true;                                                    # DEFAULT: true
+      #   font        = "CozetteVector";                                  # DEFAULT: "CozetteVector"
+      #   fontSize    = 143;                                              # DEFAULT: 143
+      #   clockSize   = 104;                                              # DEFAULT: 104
+      #   text        = "Papers, please";                                 # DEFAULT: "Papers, please"
+      #   wrongText   = "Ah ah ah! You didn't say the magic word!!";      # DEFAULT
+      #   verifyText  = "Verifying...";                                   # DEFAULT
+      #   blur        = true;                                             # DEFAULT: true
+      # };
+
+      # ─── Startup splash screen ───────────────────────────────────────
+      # Displays a brief branded splash while the desktop loads.
+      # splash = {
+      #   enable   = false;          # DEFAULT: false - enable splash on login
+      #   title    = "HYDRIX";       # DEFAULT: "HYDRIX"
+      #   text     = "initializing...";  # DEFAULT
+      #   maxTimeout = 15;           # DEFAULT: 15s safety timeout
       # };
     };
+
+    # ─────────────────────────────────────────────────────────────────────
+    # VM COLOR INHERITANCE
+    # ─────────────────────────────────────────────────────────────────────
+    # Controls how VMs inherit colors from the host colorscheme.
+    # colorschemeInheritance = "dynamic";  # DEFAULT: "dynamic"
+    #   "full"    - All colors from host
+    #   "dynamic" - Host background, VM text colors (default)
+    #   "none"    - VM uses own colorscheme independently
+
+    # ─────────────────────────────────────────────────────────────────────
+    # NETWORKING (advanced - defaults work for most setups)
+    # ─────────────────────────────────────────────────────────────────────
+    # Only change these if you have IP conflicts on your LAN or need custom subnets.
+    #
+    # networking = {
+    #   hostIp   = "192.168.100.1";    # DEFAULT: Host IP on management bridge
+    #   routerIp = "192.168.100.253";  # DEFAULT: Router VM gateway IP
+    #   subnets  = {
+    #     mgmt    = "192.168.100";
+    #     pentest = "192.168.101";
+    #     comms   = "192.168.102";
+    #     browse  = "192.168.103";
+    #     dev     = "192.168.104";
+    #     shared  = "192.168.105";
+    #     builder = "192.168.106";
+    #     lurking = "192.168.107";
+    #   };
+    # };
   };
 }

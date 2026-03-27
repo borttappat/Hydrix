@@ -55,7 +55,7 @@ in {
       # Tamzen sits lower than Iosevka — less vertical offset needed
       polybarFontOffset = lib.mkDefault 1;
       # Extra bottom padding so the underline is more visible
-      barPadding = lib.mkDefault 4;
+      barPadding = lib.mkDefault 1;
     };
 
     # Bitmap fonts don't work for lockscreen (ImageMagick)

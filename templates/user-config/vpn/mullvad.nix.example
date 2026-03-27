@@ -1,0 +1,64 @@
+# Mullvad VPN Configuration for Hydrix Router
+# Copy this file to your hydrix-config as vpn/mullvad.nix and fill in credentials
+#
+# To get your credentials:
+# 1. Log into https://mullvad.net/account
+# 2. Go to "WireGuard configuration"
+# 3. Generate a key pair or use existing
+# 4. Note your private key and assigned IP address
+# 5. Get public keys from: https://mullvad.net/servers/
+#
+# This file should be gitignored - your credentials stay local
+#
+# Usage in your hydrix-config flake.nix or machine config:
+#   hydrix.router.vpn.mullvad = import ./vpn/mullvad.nix;
+{
+  enable = true;
+
+  # Your Mullvad WireGuard private key
+  privateKey = "YOUR_PRIVATE_KEY_HERE";
+
+  # Your assigned Mullvad IP address (from account page)
+  # Format: 10.x.x.x/32
+  address = "10.x.x.x/32";
+
+  # Exit nodes to generate configs for
+  # Each becomes a WireGuard interface on the router: mullvad-se, mullvad-de, etc.
+  # Server hostnames and public keys from: https://mullvad.net/servers/
+  exitNodes = {
+    # Sweden - Stockholm (e.g. for surfing/banking)
+    se = {
+      server = "se-sto-wg-001.relays.mullvad.net";
+      publicKey = "SERVER_PUBLIC_KEY_SE";
+    };
+    # Germany - Frankfurt (e.g. for lurking/privacy)
+    de = {
+      server = "de-fra-wg-001.relays.mullvad.net";
+      publicKey = "SERVER_PUBLIC_KEY_DE";
+    };
+    # Switzerland - Zurich
+    ch = {
+      server = "ch-zrh-wg-001.relays.mullvad.net";
+      publicKey = "SERVER_PUBLIC_KEY_CH";
+    };
+    # United States - New York
+    us = {
+      server = "us-nyc-wg-001.relays.mullvad.net";
+      publicKey = "SERVER_PUBLIC_KEY_US";
+    };
+  };
+
+  # Per-bridge VPN assignments are handled at runtime via vpn-assign on the router:
+  #   vpn-assign browse mullvad-se       # Route browsing through Sweden
+  #   vpn-assign lurking mullvad-de      # Route lurking through Germany
+  #   vpn-assign --persistent browse mullvad-se  # Persist across reboots
+  #
+  # Defaults (when Mullvad is enabled):
+  #   pentest = direct     (needs direct WAN)
+  #   comms   = mullvad-se
+  #   browse  = mullvad-ch
+  #   dev     = direct
+  #   lurking = mullvad-ch
+  #
+  # Override defaults in libvirt-router.nix vpn-persistent-load service
+}

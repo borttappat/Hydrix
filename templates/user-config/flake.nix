@@ -25,7 +25,7 @@
   inputs = {
     # Hydrix framework
     # Fork support: change to git+https://github.com/<youruser>/Hydrix.git
-    hydrix.url = "git+https://github.com/borttappat/Hydrix.git";
+    hydrix.url = "@HYDRIX_URL@";
 
     # Inherit nixpkgs from Hydrix for consistency
     nixpkgs.follows = "hydrix/nixpkgs";
@@ -37,7 +37,7 @@
     # HOST USERNAME (for builder VM)
     # =========================================================================
     # Set this to your username - used by builder VM to mount ~/hydrix-config
-    hostUsername = "user";  # TODO: Change this to your username
+    hostUsername = "@USERNAME@";
 
     # =========================================================================
     # USER PROFILES
