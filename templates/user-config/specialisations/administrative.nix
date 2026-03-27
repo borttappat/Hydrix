@@ -17,13 +17,6 @@
   hydrix.graphical.firefox.hostEnable = true;
   hydrix.graphical.obsidian.hostEnable = true;
 
-  hardware.graphics = {
-    enable = true;
-    enable32Bit = true;  # Steam needs this
-  };
-
-  programs.steam.enable = true;
-
   environment.systemPackages = with pkgs; [
     # Network tools
     iproute2
