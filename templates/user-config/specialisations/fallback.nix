@@ -32,12 +32,6 @@
     # Browser (direct access in fallback)
     firefox
 
-    # Virtualisation (for recovery)
-    virt-manager
-    virt-viewer
-    libvirt
-    qemu
-
     # Development
     git
     gh
