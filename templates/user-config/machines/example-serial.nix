@@ -128,9 +128,18 @@
     # ─────────────────────────────────────────────────────────────────────
     disko = {
       enable = true;
-      device = "/dev/nvme0n1";
-      swapSize = "16G";
-      layout = "full-disk-plain";  # full-disk-plain, full-disk-luks, dual-boot-luks, dual-boot-plain
+      device = "/dev/nvme0n1";  # Run: lsblk -d to find your disk
+      swapSize = "16G";         # Match your RAM, or half for hibernation
+
+      # Layout options:
+      # ┌─────────────────────┬──────────────────────────────────────────────┐
+      # │ full-disk-plain     │ BTRFS, no encryption (fastest, simplest)     │
+      # │ full-disk-luks      │ BTRFS + LUKS full-disk encryption            │
+      # │ dual-boot-luks      │ Preserve existing EFI + LUKS for NixOS part  │
+      # │ dual-boot-plain     │ Preserve existing EFI, no encryption         │
+      # └─────────────────────┴──────────────────────────────────────────────┘
+      # LUKS password is prompted interactively at install — never stored here.
+      layout = "full-disk-plain";
     };
 
     # ─────────────────────────────────────────────────────────────────────
@@ -143,23 +152,36 @@
 
       # ─── Mullvad VPN (optional) ────────────────────────────────────────
       # Copy vpn/mullvad.nix.example to vpn/mullvad.nix, fill in your
-      # credentials, then uncomment this line:
+      # credentials from https://mullvad.net/account → WireGuard, then:
       #
       # vpn.mullvad = import ../vpn/mullvad.nix;
       #
-      # Each exit node becomes a WireGuard interface on the router.
-      # Assign networks at runtime with: vpn-assign <bridge> <node>
-      #   vpn-assign browse mullvad-se
-      #   vpn-assign lurking mullvad-ch
-      #   vpn-assign --persistent comms mullvad-de  # persist across reboots
+      # Each exitNode in mullvad.nix becomes a WireGuard interface on the router.
+      # Assign VM bridges to exit nodes at runtime:
+      #   vpn-assign browse mullvad-se                   # Route browsing via Sweden
+      #   vpn-assign lurking mullvad-ch                  # Route lurking via Switzerland
+      #   vpn-assign --persistent comms mullvad-de       # Persist assignment across reboots
+      #   vpn-assign pentest none                        # Direct (no VPN) for engagements
+
+      # ─── libvirt router (if type = "libvirt") ──────────────────────────
+      # router.libvirt.vmName  = "router";        # DEFAULT: "router"
+      # router.libvirt.memory  = 2048;            # DEFAULT: 2048 MB
+      # router.libvirt.vcpus   = 2;               # DEFAULT: 2
+      # router.libvirt.wan.mode = "auto";         # DEFAULT: "auto"
+      #   # Options: "auto" (detects WiFi for passthrough, falls back to macvtap)
+      #   #          "pci-passthrough", "macvtap", "none"
     };
 
     # ─────────────────────────────────────────────────────────────────────
     # HARDWARE
     # ─────────────────────────────────────────────────────────────────────
     hardware = {
-      platform = "intel";  # "intel", "amd", or "generic"
-      isAsus = false;      # Set true for ASUS laptops
+      platform = "intel";  # "intel"   → intel-microcode, iommu=pt for VFIO, VA-API drivers
+                           # "amd"     → amd-microcode (TODO: amd.nix needs iommu params,
+                           #              VA-API drivers and power management parity with intel.nix)
+                           # "generic" → no vendor microcode, generic IOMMU
+      isAsus = false;      # true → enables asus-linux (asusctl, supergfxctl, ROG features)
+                           #        required for ASUS audio (cs42l43), keyboard backlight, fan curves
 
       vfio = {
         enable = true;
@@ -186,14 +208,37 @@
     # ─────────────────────────────────────────────────────────────────────
     # SERVICES
     # ─────────────────────────────────────────────────────────────────────
+    # Host-level Hydrix-managed service toggles.
+    # VM-level services (Docker, MariaDB, Tor, PostgreSQL) are NixOS options
+    # set directly in the relevant profile (profiles/<name>/default.nix).
+    #
     # services = {
-    #   tailscale.enable = false;     # DEFAULT: false - Tailscale VPN
-    #   ssh.enable = true;            # DEFAULT: true - OpenSSH daemon
+    #   tailscale.enable = false;  # DEFAULT: false - Tailscale VPN mesh
+    #                              # Note: disables resolvconf to avoid DNS conflicts
+    #   ssh.enable = true;         # DEFAULT: true  - OpenSSH daemon
     # };
+
+    # ─────────────────────────────────────────────────────────────────────
+    # LIBVIRT (only needed if using libvirt router or virt-manager)
+    # ─────────────────────────────────────────────────────────────────────
+    # libvirt.enable = false;  # DEFAULT: false
+    #                          # Auto-enabled when router.type = "libvirt"
+    #                          # Set manually if you need virt-manager/QEMU on host
 
     # ─────────────────────────────────────────────────────────────────────
     # SECRETS (optional - for GitHub SSH keys, etc.)
     # ─────────────────────────────────────────────────────────────────────
+    # Setup workflow:
+    #   1. Rebuild once (generates /etc/ssh/ssh_host_ed25519_key)
+    #   2. Run: sops-age-pubkey          (prints your age public key)
+    #   3. Add key to secrets/.sops.yaml (see that file in this repo)
+    #   4. Fill in secrets/github.yaml.example → secrets/github.yaml
+    #      then encrypt: sops -e -i secrets/github.yaml
+    #   5. Set enable = true + github.enable = true, then rebuild
+    #
+    # When github.enable = true, /run/secrets/github/id_ed25519 is available at boot.
+    # VMs with secrets.github = true (in microvmHost.vms) get the key provisioned
+    # into their home directory at startup.
     secrets = {
       enable = false;
       github.enable = false;
@@ -205,19 +250,17 @@
     microvmHost = {
       enable = true;
       vms = {
-        "microvm-router".enable   = true;
-        "microvm-router".autostart = true;
-        "microvm-browsing".enable = true;
-        "microvm-pentest".enable  = true;
-        "microvm-dev".enable      = true;
-        "microvm-comms".enable    = true;
-        "microvm-lurking".enable  = true;
-        "microvm-builder".enable  = true;
-        "microvm-gitsync".enable  = true;
+        "microvm-router"   = { enable = true; autostart = true; };
+        "microvm-browsing" = { enable = true; /* secrets.github = true; */ };
+        "microvm-pentest"  = { enable = true; /* secrets.github = true; */ };
+        "microvm-dev"      = { enable = true; secrets.github = true; };  # git push/pull inside VM
+        "microvm-comms"    = { enable = true; /* secrets.github = true; */ };
+        "microvm-lurking"  = { enable = true; };  # ephemeral - privacy-first
+        "microvm-builder"  = { enable = true; /* secrets.github = true; */ };
+        "microvm-gitsync"  = { enable = true; };  # uses host sops key, not VM secrets
       };
-
-      # Per-VM GitHub SSH key provisioning (requires secrets.github.enable = true)
-      # vms."microvm-dev".secrets.github = true;
+      # secrets.github = true  requires: secrets.github.enable = true (above)
+      # autostart = true       starts VM at boot (default: false — start manually)
 
       # Custom VM names (change what the systemd units are called)
       # vmNames.browse  = "microvm-browsing";  # DEFAULT
@@ -231,13 +274,21 @@
     };
 
     # ─────────────────────────────────────────────────────────────────────
-    # BUILDER (for lockdown mode nix builds)
+    # BUILDER (lockdown mode nix builds via microvm-builder)
     # ─────────────────────────────────────────────────────────────────────
+    # Enables host nix-daemon stop/start and /nix/store R/W remount.
+    # Builder VM is declared in flake.nix → mkMicrovmBuilder { ... }
+    # Usage: microvm builder build browsing
+    #        microvm builder switch
     builder.enable = true;
 
     # ─────────────────────────────────────────────────────────────────────
-    # GIT-SYNC (for lockdown mode git push/pull)
+    # GIT-SYNC (lockdown mode git push/pull via microvm-gitsync)
     # ─────────────────────────────────────────────────────────────────────
+    # Repos are declared in flake.nix → mkMicrovmGitSync { repos = [...]; }
+    # Each repo is mounted R/W into the VM at /mnt/repos/<name>
+    # Usage: microvm console microvm-gitsync
+    #        → cd /mnt/repos/hydrix-config && git push
     gitsync.enable = true;
 
     # ─────────────────────────────────────────────────────────────────────
@@ -285,13 +336,28 @@
 
       # ─── Compositor (picom) ──────────────────────────────────────────
       # ui.compositor.animations = "modern";  # DEFAULT: "modern" - "none" or "modern"
+      # ui.shadowRadius = 18;          # DEFAULT: 18 - picom shadow size
+      # ui.shadowOffset = 17;          # DEFAULT: 17 - picom shadow position offset
+      # ui.polybarFontOffset = 3;      # DEFAULT: 3  - vertical text centering in bar
+      # ui.rofiWidth  = 800;           # DEFAULT: 800 - launcher window width (px)
+      # ui.rofiHeight = 400;           # DEFAULT: 400 - launcher window height (px)
+      # ui.dunstWidth  = 300;          # DEFAULT: 300 - notification popup width (px)
+      # ui.dunstOffset = 24;           # DEFAULT: 24  - notification edge offset (px)
+      # ui.dunstSound  = true;         # DEFAULT: true - play sound on notifications
+      # ui.outerGapsMatchBar = false;  # DEFAULT: false - match outer i3 gaps to bar margins
+      # ui.barEdgeGapsFactor = 1.0;    # DEFAULT: 1.0 - bar-to-screen-edge gap multiplier
+      # ui.gapsStandaloneRelation = 1.0;  # DEFAULT: 1.0 - gap multiplier without external monitor
 
       # ─── Keyboard remapping ──────────────────────────────────────────
       # keyboard.xmodmap = ''
+      #   # CapsLock → Ctrl (common remapping)
       #   clear lock
       #   clear control
       #   keycode 66 = Control_L
       #   add control = Control_L Control_R
+      #
+      #   # Remap key 49 to tilde/backtick (common on SE/Nordic layouts)
+      #   # keycode 49 = asciitilde grave asciitilde grave
       # '';
 
       # ─── Blue light filter (blugon) ──────────────────────────────────
@@ -306,8 +372,12 @@
       # bluelight.schedule.nightStart = 20;   # DEFAULT: 20 - hour nighttime begins (0-23)
 
       # ─── HiDPI scaling ───────────────────────────────────────────────
-      # scaling.internalResolution = "1920x1200";  # For HiDPI laptops
-      # scaling.auto = true;                       # DEFAULT: true - auto DPI detection
+      # scaling.internalResolution = "1920x1200";  # Native panel resolution
+      #                                            # Find yours: xrandr | grep connected
+      # scaling.auto = true;             # DEFAULT: true  - auto-detect connected display DPI
+      # scaling.applyOnLogin = true;     # DEFAULT: true  - xrandr --auto on session start
+      # scaling.referenceDpi = 96;       # DEFAULT: 96    - base DPI (96 = 100% scale)
+      # scaling.standaloneScaleFactor = 1.0;  # DEFAULT: 1.0 - override when no external monitor
 
       # ─── Lockscreen ──────────────────────────────────────────────────
       # lockscreen = {

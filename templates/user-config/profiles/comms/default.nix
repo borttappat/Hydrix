@@ -4,8 +4,6 @@
 # Hydrix base provides: xpra forwarding, sound (required for calls), graphical stack
 # This profile adds: packages (Signal, Firefox)
 #
-# EPHEMERAL by design - all data lost on restart for privacy.
-#
 { config, lib, pkgs, ... }:
 
 {
@@ -29,14 +27,18 @@
   # Inherit host colors for consistent look
   hydrix.vmColors.enable = true;
 
-  # MicroVM resources (ephemeral - no persistence)
+  # MicroVM resources
   hydrix.microvm = {
     vcpu = 2;
     mem = 2048;  # 2GB (balloon reclaims idle)
     vsockCid = 104;  # Unique for comms VM
     bridge = "br-comms";
     tapId = "mv-comms";
-    persistence.enable = false;
+    persistence = {
+      enable = true;
+      homeSize = 10240;  # 10GB - accounts, chat history, credentials
+    };
+    # Set persistence.enable = false for ephemeral/privacy-first comms
   };
 
   # =========================================================================

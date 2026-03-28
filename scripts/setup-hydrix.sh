@@ -842,6 +842,26 @@ copy_template_shared() {
     log "  Copied from template"
 }
 
+substitute_shared_locale() {
+    local common="$CONFIG_DIR/shared/common.nix"
+
+    # Skip if placeholders are already gone (existing repo has real values)
+    if ! grep -q "@TIMEZONE@" "$common" 2>/dev/null; then
+        log "  shared/common.nix already configured, skipping locale substitution"
+        return
+    fi
+
+    log "  Substituting locale placeholders in shared/common.nix..."
+    sed -i \
+        -e "s|@TIMEZONE@|${CONFIG[timezone]}|g" \
+        -e "s|@LOCALE@|${CONFIG[locale]}|g" \
+        -e "s|@CONSOLE_KEYMAP@|${CONFIG[consoleKeymap]}|g" \
+        -e "s|@XKB_LAYOUT@|${CONFIG[xkbLayout]}|g" \
+        -e "s|@XKB_VARIANT@|${CONFIG[xkbVariant]}|g" \
+        "$common"
+    log "  Locale: tz=${CONFIG[timezone]} lang=${CONFIG[locale]} kb=${CONFIG[xkbLayout]}"
+}
+
 copy_template_modules() {
     log "Creating modules from template..."
 
@@ -884,6 +904,26 @@ copy_wallpapers() {
     else
         log "  Created $home_dir/wallpapers/ (add wallpapers here)"
     fi
+}
+
+copy_template_secrets() {
+    log "Creating secrets scaffold..."
+
+    local template_dir=""
+    if [[ -d "$HOME/Hydrix/templates/user-config" ]]; then
+        template_dir="$HOME/Hydrix/templates/user-config"
+    elif [[ -d "$SCRIPT_DIR/../templates/user-config" ]]; then
+        template_dir="$SCRIPT_DIR/../templates/user-config"
+    fi
+
+    mkdir -p "$CONFIG_DIR/secrets"
+    [[ -f "$template_dir/secrets/.sops.yaml" ]] && \
+        cp "$template_dir/secrets/.sops.yaml" "$CONFIG_DIR/secrets/.sops.yaml"
+    [[ -f "$template_dir/secrets/github.yaml.example" ]] && \
+        cp "$template_dir/secrets/github.yaml.example" "$CONFIG_DIR/secrets/github.yaml.example"
+    [[ -f "$template_dir/.gitignore" ]] && \
+        cp "$template_dir/.gitignore" "$CONFIG_DIR/.gitignore"
+    log "  secrets/ scaffold created (see secrets/.sops.yaml for setup instructions)"
 }
 
 copy_template_readme() {
@@ -991,6 +1031,7 @@ ${source_comment}
           ./shared/wifi.nix
           ./shared/fonts.nix
           ./shared/i3.nix
+          ./shared/common.nix
           vmThemeSyncModule
           { hydrix.vmThemeSync.enable = true; }
         ];
@@ -1176,21 +1217,6 @@ MACHINE_EOF
     # imageViewer = "feh";       # DEFAULT: "feh"
     # mediaPlayer = "mpv";       # DEFAULT: "mpv"
     # pdfViewer = "zathura";     # DEFAULT: "zathura"
-
-    # -----------------------------------------------------------------------
-    # LOCALE
-    # -----------------------------------------------------------------------
-MACHINE_EOF
-
-    cat >> "$CONFIG_DIR/machines/${CONFIG[serial]}.nix" << MACHINE_EOF
-    locale = {
-      timezone = "${CONFIG[timezone]}";          # DETECTED (DEFAULT: "Europe/Stockholm")
-      language = "${CONFIG[locale]}";            # DETECTED (DEFAULT: "en_US.UTF-8")
-      consoleKeymap = "${CONFIG[consoleKeymap]}";  # DETECTED (DEFAULT: "sv-latin1")
-      xkbLayout = "${CONFIG[xkbLayout]}";        # DETECTED (DEFAULT: "se")
-      xkbVariant = "${CONFIG[xkbVariant]}";      # DETECTED (DEFAULT: "")
-    };
-MACHINE_EOF
 
     cat >> "$CONFIG_DIR/machines/${CONFIG[serial]}.nix" << 'MACHINE_EOF'
 
@@ -1557,10 +1583,12 @@ generate_full_config() {
     copy_template_specialisations
     copy_template_profiles
     copy_template_shared
+    substitute_shared_locale
     copy_template_modules
     create_colorschemes_dir
     copy_wallpapers
     copy_template_readme
+    copy_template_secrets
     generate_machine_nix
     copy_hardware_config
 

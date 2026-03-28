@@ -94,9 +94,13 @@
 
     hostConfig = { ... }: {
       imports = [ ./shared/fonts.nix ];
-      hydrix.username = hostUsername;  # Required for 9p shares
-      hydrix.vmColors.enable = true;
-      hydrix.vmColors.hostColorscheme = hostColorscheme;
+      hydrix.username = hostUsername;  # Required: VMs use this for virtiofs share paths
+      hydrix.vmColors.enable = true;   # VMs inherit host colorscheme (reads wal cache at runtime)
+      hydrix.vmColors.hostColorscheme = hostColorscheme;  # Build-time colorscheme fallback
+      # hydrix.colorschemeInheritance = "dynamic";  # DEFAULT: "dynamic"
+      #   "full"    — VMs use all host wal colors
+      #   "dynamic" — VMs use host background + their own text colors
+      #   "none"    — VMs use their own colorscheme independently
     };
 
     # =========================================================================
@@ -126,7 +130,7 @@
           ./shared/i3.nix           # i3 keybindings (user-customizable)
           vmThemeSyncModule         # VM theme sync (host-side)
           { hydrix.vmThemeSync.enable = true; }
-          # ./shared/common.nix     # Other shared settings
+          ./shared/common.nix       # Locale + shared settings (all machines)
         ];
       };
     }) machineFiles);
@@ -199,8 +203,13 @@
       # MicroVM Git-Sync (for lockdown mode git push/pull)
       "microvm-gitsync" = hydrix.lib.mkMicrovmGitSync {
         inherit hostUsername;
+        # Repos mounted R/W into the VM at /mnt/repos/<name>
+        # Usage: microvm console microvm-gitsync
+        #        → cd /mnt/repos/hydrix-config && git push
         repos = [
           { name = "hydrix-config"; source = "/home/" + hostUsername + "/hydrix-config"; }
+          # { name = "Hydrix"; source = "/home/" + hostUsername + "/Hydrix"; }
+          # { name = "my-notes"; source = "/home/" + hostUsername + "/my-notes"; }
         ];
       };
     };

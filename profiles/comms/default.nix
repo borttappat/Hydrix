@@ -4,8 +4,6 @@
 # MicroVMs use this directly (headless, xpra forwarding).
 # Libvirt VMs can layer user profiles on top for graphical settings.
 #
-# EPHEMERAL by design - all data lost on restart for privacy.
-#
 # Includes:
 # - VM identity (vmType)
 # - Sound (required for xpra audio + calls)
