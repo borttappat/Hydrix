@@ -341,13 +341,6 @@ in {
     microvm.optimize.enable = false;
     system.switch.enable = true;
 
-    # ===== Disable heavy/host-only services =====
-    # These services are either wasteful in VMs or host-specific
-    services.ollama.enable = lib.mkForce false;      # LLM service - 500MB-8GB RAM, useless in VMs
-    services.auto-cpufreq.enable = lib.mkForce false; # CPU freq scaling - useless in QEMU
-    services.rsyncd.enable = lib.mkForce false;       # rsync daemon - not needed in VMs
-    services.tailscale.enable = lib.mkForce false;    # VPN - host-only
-
     # ===== MicroVMs run headless =====
     # GUI apps are forwarded to host via xpra (port 14500)
     # No local graphical environment needed

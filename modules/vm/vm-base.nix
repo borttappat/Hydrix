@@ -81,13 +81,6 @@ in {
   };
 
   config = {
-    # ===== Disable heavy/host-only services =====
-    # These services are either wasteful in VMs or host-specific
-    services.ollama.enable = lib.mkForce false;      # LLM service - 500MB-8GB RAM, useless in VMs
-    services.auto-cpufreq.enable = lib.mkForce false; # CPU freq scaling - useless in QEMU
-    services.rsyncd.enable = lib.mkForce false;       # rsync daemon - not needed in VMs
-    services.tailscale.enable = lib.mkForce false;    # VPN - host-only
-
     # ===== Graphical environment =====
     # When standalone = true, the VM has its own i3/polybar environment (for virt-manager)
     # When standalone = false (default), apps are forwarded via xpra to host
