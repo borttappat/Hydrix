@@ -42,14 +42,6 @@
     colorscheme = "@COLORSCHEME@";
     graphical.wallpaper = "${hydrix}/wallpapers/WindowRain.png";
 
-    locale = {
-      timezone = "@TIMEZONE@";
-      language = "@LOCALE@";
-      consoleKeymap = "@CONSOLE_KEYMAP@";
-      xkbLayout = "@XKB_LAYOUT@";
-      xkbVariant = "@XKB_VARIANT@";
-    };
-
     disko = {
       enable = true;
       device = "@DEVICE@";

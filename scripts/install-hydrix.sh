@@ -1400,6 +1400,15 @@ copy_template_shared() {
 
     cp -r "$template_dir"/* "$config_dir/shared/"
 
+    # Populate common.nix with locale settings detected by installer
+    sed -i \
+        -e "s|@TIMEZONE@|${CONFIG[timezone]}|g" \
+        -e "s|@LOCALE@|${CONFIG[locale]}|g" \
+        -e "s|@CONSOLE_KEYMAP@|${CONFIG[consoleKeymap]}|g" \
+        -e "s|@XKB_LAYOUT@|${CONFIG[xkbLayout]}|g" \
+        -e "s|@XKB_VARIANT@|${CONFIG[xkbVariant]}|g" \
+        "$config_dir/shared/common.nix"
+
     # Populate wifi.nix with actual credentials from installer
     if [[ -n "${CONFIG[wifiSsid]}" ]]; then
         cat > "$config_dir/shared/wifi.nix" << 'WIFI_HEADER'
@@ -1673,11 +1682,6 @@ generate_machine_nix() {
         -e "s|@USERNAME@|${CONFIG[username]}|g" \
         -e "s|@PASSWORD_HASH@|${password_hash}|g" \
         -e "s|@COLORSCHEME@|${CONFIG[colorscheme]}|g" \
-        -e "s|@TIMEZONE@|${CONFIG[timezone]}|g" \
-        -e "s|@LOCALE@|${CONFIG[locale]}|g" \
-        -e "s|@CONSOLE_KEYMAP@|${CONFIG[consoleKeymap]}|g" \
-        -e "s|@XKB_LAYOUT@|${CONFIG[xkbLayout]}|g" \
-        -e "s|@XKB_VARIANT@|${CONFIG[xkbVariant]}|g" \
         -e "s|@DEVICE@|${CONFIG[device]}|g" \
         -e "s|@SWAP_SIZE@|${CONFIG[swapSize]}|g" \
         -e "s|@LAYOUT@|${CONFIG[layout]}|g" \
