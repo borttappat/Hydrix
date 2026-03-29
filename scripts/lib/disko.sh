@@ -73,7 +73,7 @@ detect_efi_partition() {
     local efi_part
     efi_part=$(lsblk -n -o NAME,PARTTYPE "$device" 2>/dev/null | \
         grep -i "c12a7328-f81f-11d2-ba4b-00a0c93ec93b" | \
-        awk '{print $1}')
+        awk '{print $1}' | tr -dc 'a-zA-Z0-9\n_-')
 
     if [[ -n "$efi_part" ]]; then
         # Handle nvme vs sata naming
