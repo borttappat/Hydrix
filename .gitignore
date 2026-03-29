@@ -12,6 +12,9 @@ comms-vm-image*
 local/
 !local/.gitkeep
 
+# Misc
+todo.txt
+
 # Sensitive files
 *credentials.env
 router-credentials.env
