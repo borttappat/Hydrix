@@ -1024,8 +1024,8 @@ select_layout() {
         log "Detecting existing EFI partition on ${CONFIG[device]}..."
 
         local detected_efi
-        detected_efi=$(lsblk -n -o NAME,PARTTYPE "${CONFIG[device]}" 2>/dev/null | \
-            grep -i "c12a7328-f81f-11d2-ba4b-00a0c93ec93b" | awk '{print $1}' | tr -dc 'a-zA-Z0-9\n_-' | head -1 | sed 's|^|/dev/|')
+        detected_efi=$(lsblk -rn -o NAME,PARTTYPE "${CONFIG[device]}" 2>/dev/null | \
+            grep -i "c12a7328-f81f-11d2-ba4b-00a0c93ec93b" | awk '{print "/dev/"$1}' | head -1)
 
         if [[ -n "$detected_efi" ]]; then
             log "Detected EFI partition: $detected_efi"
