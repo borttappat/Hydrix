@@ -168,9 +168,26 @@ run_in_terminal() {
 # ========== MICROVM ==========
 
 get_microvms() {
-    # Match microvm-* names (excluding router)
+    # Match microvm-* names (excluding router/builder/gitsync)
+    # Includes pentest-task* slots (microvm-pentest-task1, etc.)
     nix eval "$FLAKE_DIR#nixosConfigurations" --apply 'builtins.attrNames' --json 2>/dev/null | \
         jq -r '.[]' | grep -E '^microvm-(browsing|pentest|dev|comms|lurking)' || true
+}
+
+# Get engagement name for a pentest task slot (empty if unassigned)
+pentest_task_engagement() {
+    local vm="$1"
+    local registry="${FLAKE_DIR}/tasks/.engagement-registry"
+    [[ ! -f "$registry" ]] && echo "" && return
+    python3 -c "
+import json, sys
+try:
+    with open(sys.argv[1]) as f:
+        d = json.load(f)
+    print(d.get(sys.argv[2]) or '')
+except Exception:
+    print('')
+" "$registry" "$vm" 2>/dev/null || echo ""
 }
 
 microvm_state() {
@@ -317,12 +334,19 @@ show_microvm_menu() {
             local name="${entry#*|}"
             local indent=""
             [[ "$name" == "$pinned_vm" ]] && indent="   "
+            # For task pentest slots, append engagement name to state label
+            local state_label="$state"
+            if [[ "$name" == microvm-pentest-task* && "$state" != "action" ]]; then
+                local eng
+                eng=$(pentest_task_engagement "$name")
+                [[ -n "$eng" ]] && state_label="${state}: ${eng}" || state_label="${state}: unassigned"
+            fi
             case "$state" in
-                running)   display+=("${indent}[*] $name (running)") ;;
-                stopped)   display+=("${indent}[-] $name (stopped)") ;;
-                not-built) display+=("${indent}[?] $name (not-built)") ;;
+                running)   display+=("${indent}[*] $name ($state_label)") ;;
+                stopped)   display+=("${indent}[-] $name ($state_label)") ;;
+                not-built) display+=("${indent}[?] $name ($state_label)") ;;
                 action)    display+=("--- $name") ;;
-                *)         display+=("${indent}[!] $name ($state)") ;;  # Catch unexpected states
+                *)         display+=("${indent}[!] $name ($state_label)") ;;
             esac
         done
 
@@ -426,6 +450,15 @@ show_microvm_actions() {
         local state
         state=$(microvm_state "$vm")
 
+        # Build header — include engagement for task slots
+        local header="$vm ($state)"
+        if [[ "$vm" == microvm-pentest-task* ]]; then
+            local eng
+            eng=$(pentest_task_engagement "$vm")
+            header="$vm ($state)"
+            [[ -n "$eng" ]] && header+=" — engagement: $eng" || header+=" — unassigned (microvm pentest create <name>)"
+        fi
+
         local actions=()
         case "$state" in
             running)
@@ -438,6 +471,10 @@ show_microvm_actions() {
                 actions+=("Build")
                 ;;
         esac
+        # Snapshot management for task pentest slots (VM must be stopped)
+        if [[ "$vm" == microvm-pentest-task* && "$state" == "stopped" ]]; then
+            actions+=("Snapshots")
+        fi
         actions+=("Logs" "Back")
 
         clear
@@ -445,7 +482,7 @@ show_microvm_actions() {
 
         local action
         action=$(printf '%s\n' "${actions[@]}" | fzf --height=85% --reverse --disabled --no-info \
-            --header="$vm ($state)") || action="Back"
+            --header="$header") || action="Back"
 
         case "$action" in
             Start) microvm_start "$vm" || true ;;
@@ -458,9 +495,73 @@ show_microvm_actions() {
             Purge) microvm_purge "$vm" || true; return ;;
             Attach) microvm_attach "$vm" ;;
             "Launch App") microvm_app "$vm" ;;
+            Snapshots) show_task_snapshot_menu "$vm" ;;
             Logs)
                 sudo journalctl -u "microvm@${vm}.service" -n 100 --no-pager
                 press_enter  # Keep for logs - user needs time to read
+                ;;
+            Back) return ;;
+        esac
+    done
+}
+
+show_task_snapshot_menu() {
+    local vm="$1"
+
+    while true; do
+        local qcow2="/var/lib/microvms/${vm}/home.qcow2"
+        local snap_list=""
+        [[ -f "$qcow2" ]] && snap_list=$(sudo qemu-img snapshot -l "$qcow2" 2>/dev/null | tail -n +3 | awk '{print $2}' | grep -v '^$' || true)
+
+        local actions=("Create snapshot" "Back")
+        if [[ -n "$snap_list" ]]; then
+            while IFS= read -r snap; do
+                [[ -n "$snap" ]] && actions+=("Revert → $snap" "Delete → $snap")
+            done <<< "$snap_list"
+        fi
+
+        clear
+        show_session_log_bottom
+
+        local header="Snapshots: $vm"
+        [[ -z "$snap_list" ]] && header+=$'\n(no snapshots yet)'
+
+        local sel
+        sel=$(printf '%s\n' "${actions[@]}" | fzf --height=85% --reverse --disabled --no-info \
+            --header="$header") || sel="Back"
+
+        case "$sel" in
+            "Create snapshot")
+                local snap_name
+                snap_name=$(echo "" | fzf --height=10 --reverse --no-info \
+                    --prompt="Snapshot name: " --print-query | head -1) || true
+                if [[ -n "$snap_name" ]]; then
+                    if run_logged sudo qemu-img snapshot -c "$snap_name" "$qcow2"; then
+                        log_action ok "Snapshot '$snap_name' created"
+                    else
+                        log_action err "Snapshot creation failed"
+                    fi
+                fi
+                ;;
+            Revert\ →\ *)
+                local snap_name="${sel#Revert → }"
+                echo -e "${YELLOW}Revert to snapshot '${snap_name}'? Current state will be lost.${NC}"
+                read -rp "Type 'yes' to confirm: " confirm
+                if [[ "$confirm" == "yes" ]]; then
+                    if run_logged sudo qemu-img snapshot -a "$snap_name" "$qcow2"; then
+                        log_action ok "Reverted to '$snap_name'"
+                    else
+                        log_action err "Revert failed"
+                    fi
+                fi
+                ;;
+            Delete\ →\ *)
+                local snap_name="${sel#Delete → }"
+                if run_logged sudo qemu-img snapshot -d "$snap_name" "$qcow2"; then
+                    log_action ok "Snapshot '$snap_name' deleted"
+                else
+                    log_action err "Snapshot deletion failed"
+                fi
                 ;;
             Back) return ;;
         esac

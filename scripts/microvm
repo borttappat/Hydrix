@@ -132,6 +132,10 @@ declare -A KNOWN_CIDS=(
     ["microvm-router"]=200
     ["microvm-builder"]=210
     ["microvm-gitsync"]=211
+    # Task pentest slots (pre-declared, permanent)
+    ["microvm-pentest-task1"]=115
+    ["microvm-pentest-task2"]=116
+    ["microvm-pentest-task3"]=117
     # Legacy names (backwards compatibility)
     ["microbrowse"]=101
     ["microhack"]=102
@@ -1525,6 +1529,316 @@ cmd_builder() {
     esac
 }
 
+# ===== Task Pentest VM Commands =====
+# Pre-declared task slots with a shared engagement registry.
+# Slots are permanent (registered with host config). Engagements are assigned
+# to slots via this registry — no rebuild needed per engagement.
+
+readonly PENTEST_TASK_SLOTS=("microvm-pentest-task1" "microvm-pentest-task2" "microvm-pentest-task3")
+
+pentest_registry_path() {
+    echo "${FLAKE_DIR}/tasks/.engagement-registry"
+}
+
+pentest_registry_read() {
+    local path
+    path=$(pentest_registry_path)
+    [[ -f "$path" ]] && cat "$path" || echo "{}"
+}
+
+# Get engagement for a slot (empty string if unassigned)
+pentest_registry_get() {
+    local slot="$1"
+    local reg
+    reg=$(pentest_registry_read)
+    python3 -c "
+import json, sys
+d = json.loads(sys.argv[1])
+v = d.get(sys.argv[2])
+print(v if v else '')
+" "$reg" "$slot" 2>/dev/null || echo ""
+}
+
+# Set or clear engagement for a slot (empty engagement = clear)
+pentest_registry_set() {
+    local slot="$1"
+    local engagement="$2"
+    local path
+    path=$(pentest_registry_path)
+    local reg
+    reg=$(pentest_registry_read)
+    local new_reg
+    if [[ -z "$engagement" ]]; then
+        new_reg=$(python3 -c "
+import json, sys
+d = json.loads(sys.argv[1])
+d.pop(sys.argv[2], None)
+print(json.dumps(d, indent=2))
+" "$reg" "$slot" 2>/dev/null)
+    else
+        new_reg=$(python3 -c "
+import json, sys
+d = json.loads(sys.argv[1])
+d[sys.argv[2]] = sys.argv[3]
+print(json.dumps(d, indent=2))
+" "$reg" "$slot" "$engagement" 2>/dev/null)
+    fi
+    echo "$new_reg" > "$path"
+}
+
+# Find which slot an engagement is assigned to (empty if not found)
+pentest_find_slot() {
+    local engagement="$1"
+    local reg
+    reg=$(pentest_registry_read)
+    python3 -c "
+import json, sys
+d = json.loads(sys.argv[1])
+target = sys.argv[2]
+for slot, eng in d.items():
+    if eng == target:
+        print(slot)
+        break
+" "$reg" "$engagement" 2>/dev/null || echo ""
+}
+
+# Find first free slot (returns slot name or fails)
+pentest_find_free_slot() {
+    for slot in "${PENTEST_TASK_SLOTS[@]}"; do
+        local engagement
+        engagement=$(pentest_registry_get "$slot")
+        if [[ -z "$engagement" ]]; then
+            echo "$slot"
+            return 0
+        fi
+    done
+    return 1
+}
+
+# Print engagement table
+pentest_print_table() {
+    printf "${BOLD}%-26s %-20s %-8s %-10s${NC}\n" "SLOT" "ENGAGEMENT" "RUNNING" "VOLUME"
+    printf '%s\n' "──────────────────────────────────────────────────────────────────"
+    for slot in "${PENTEST_TASK_SLOTS[@]}"; do
+        local engagement
+        engagement=$(pentest_registry_get "$slot")
+        local running_str="-"
+        is_running "$slot" 2>/dev/null && running_str="${GREEN}yes${NC}"
+        local vol_size="-"
+        local vol="/var/lib/microvms/${slot}/home.qcow2"
+        [[ -f "$vol" ]] && vol_size=$(du -sh "$vol" 2>/dev/null | cut -f1)
+        # shellcheck disable=SC2059
+        printf "${DIM}%-26s${NC} %-20s %-8b %-10s\n" \
+            "$slot" "${engagement:--}" "$running_str" "$vol_size"
+    done
+}
+
+# microvm pentest create <name> [--slot N]
+cmd_pentest_create() {
+    local engagement="${1:-}"
+    [[ -z "$engagement" ]] && { log_error "Usage: microvm pentest create <name> [--slot N]"; return 1; }
+    shift
+
+    local slot_override=""
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --slot) slot_override="microvm-pentest-task${2}"; shift 2 ;;
+            *)      shift ;;
+        esac
+    done
+
+    # Reject if engagement already registered
+    local existing_slot
+    existing_slot=$(pentest_find_slot "$engagement")
+    if [[ -n "$existing_slot" ]]; then
+        log_error "Engagement '${engagement}' is already assigned to ${existing_slot}"
+        return 1
+    fi
+
+    # Resolve slot
+    local slot
+    if [[ -n "$slot_override" ]]; then
+        local occupied
+        occupied=$(pentest_registry_get "$slot_override")
+        if [[ -n "$occupied" ]]; then
+            log_error "Slot ${slot_override} is occupied by '${occupied}'"
+            log "Close it first: microvm pentest close ${occupied}"
+            return 1
+        fi
+        slot="$slot_override"
+    else
+        slot=$(pentest_find_free_slot) || {
+            log_error "No free task slots available."
+            log "Close an existing engagement or rebuild after adding more slot configs."
+            pentest_print_table
+            return 1
+        }
+    fi
+
+    log "Creating engagement ${BOLD}${engagement}${NC} → slot ${BOLD}${slot}${NC}"
+
+    # Register first (before potentially long build)
+    pentest_registry_set "$slot" "$engagement"
+
+    # Build the slot closure
+    log "Building ${slot} closure..."
+    if ! cmd_build "$slot"; then
+        log_warn "Build failed — rolling back registry"
+        pentest_registry_set "$slot" ""
+        return 1
+    fi
+
+    log_success "Engagement '${BOLD}${engagement}${NC}' ready in slot ${slot}"
+    echo ""
+    echo -e "  ${DIM}Start VM:${NC}        microvm start ${slot}"
+    echo -e "  ${DIM}Baseline snapshot:${NC} microvm snapshot create ${slot} ${engagement}-clean"
+    echo -e "  ${DIM}Launch terminal:${NC}  microvm app ${slot} alacritty"
+    echo -e "  ${DIM}Close when done:${NC}  microvm pentest close ${engagement}"
+}
+
+# microvm pentest list
+cmd_pentest_list() {
+    pentest_print_table
+}
+
+# microvm pentest close <name>
+cmd_pentest_close() {
+    local engagement="${1:-}"
+    [[ -z "$engagement" ]] && { log_error "Usage: microvm pentest close <name>"; return 1; }
+
+    local slot
+    slot=$(pentest_find_slot "$engagement")
+    if [[ -z "$slot" ]]; then
+        log_error "No engagement named '${engagement}' found"
+        echo ""
+        pentest_print_table
+        return 1
+    fi
+
+    if is_running "$slot"; then
+        log "Stopping ${slot}..."
+        cmd_stop "$slot"
+    fi
+
+    local vol="/var/lib/microvms/${slot}/home.qcow2"
+    [[ -f "$vol" ]] && log_warn "Volume preserved at ${vol} (snapshots intact)"
+
+    pentest_registry_set "$slot" ""
+    log_success "Engagement '${engagement}' closed. Slot ${slot} is now free."
+    echo ""
+    local slot_num
+    slot_num=$(echo "$slot" | grep -oP '[0-9]+$')
+    echo -e "  ${DIM}Reopen later:${NC} microvm pentest create ${engagement} --slot ${slot_num}"
+}
+
+# microvm pentest purge <name> [--force]
+cmd_pentest_purge() {
+    local engagement="${1:-}"
+    local force="${2:-}"
+    [[ -z "$engagement" ]] && { log_error "Usage: microvm pentest purge <name> [--force]"; return 1; }
+
+    local slot
+    slot=$(pentest_find_slot "$engagement")
+    if [[ -z "$slot" ]]; then
+        log_error "No engagement named '${engagement}' found"
+        echo ""
+        pentest_print_table
+        return 1
+    fi
+
+    if is_running "$slot"; then
+        log "Stopping ${slot}..."
+        cmd_stop "$slot"
+    fi
+
+    local vol="/var/lib/microvms/${slot}/home.qcow2"
+    if [[ -f "$vol" ]]; then
+        local vol_size
+        vol_size=$(du -sh "$vol" 2>/dev/null | cut -f1)
+        echo -e "${YELLOW}This will delete all data for engagement ${BOLD}${engagement}${NC}${YELLOW} in ${slot}:${NC}"
+        echo -e "  Volume: ${vol} (${vol_size})"
+        echo ""
+    fi
+
+    if [[ "$force" != "--force" && "$force" != "-f" ]]; then
+        echo -e "${RED}This cannot be undone.${NC}"
+        read -rp "Type 'yes' to confirm: " confirm
+        [[ "$confirm" != "yes" ]] && { log "Aborted"; return 1; }
+    fi
+
+    [[ -f "$vol" ]] && sudo rm -f "$vol"
+    pentest_registry_set "$slot" ""
+    log_success "Engagement '${engagement}' purged. Slot ${slot} is now free."
+}
+
+# microvm pentest help
+cmd_pentest_help() {
+    cat <<EOF
+${BOLD}microvm pentest${NC} - Task-specific pentest VM management
+
+${BOLD}USAGE${NC}
+    microvm pentest <command> [args]
+
+${BOLD}COMMANDS${NC}
+    create <name> [--slot N]   Assign engagement to a task slot and build its closure
+    list                       Show all slots, their engagements, and status
+    close <name>               Free slot (volume and snapshots preserved)
+    purge <name> [--force]     Free slot and delete volume
+
+${BOLD}WORKFLOW${NC}
+    # New engagement
+    microvm pentest create google
+    microvm start microvm-pentest-task1
+    microvm snapshot create microvm-pentest-task1 google-clean
+    microvm app microvm-pentest-task1 alacritty
+
+    # Between sessions (revert to clean state)
+    microvm stop microvm-pentest-task1
+    microvm snapshot revert microvm-pentest-task1 google-clean
+    microvm start microvm-pentest-task1
+
+    # Close engagement (slot freed, volume/snapshots kept)
+    microvm pentest close google
+
+    # Reopen from snapshot
+    microvm pentest create google --slot 1
+    microvm snapshot revert microvm-pentest-task1 google-clean
+    microvm start microvm-pentest-task1
+
+    # Delete all data
+    microvm pentest purge google
+
+${BOLD}SLOTS${NC}
+    task1  CID 115  TAP mv-task-1
+    task2  CID 116  TAP mv-task-2
+    task3  CID 117  TAP mv-task-3
+
+${BOLD}NOTES${NC}
+    - Slots are permanently registered in the host NixOS config (no rebuild per engagement)
+    - Snapshots use: microvm snapshot create/revert/list <slot> <name>
+    - Add more slots by creating tasks/task4.nix (CID 118) and rebuilding once
+EOF
+}
+
+# microvm pentest dispatcher
+cmd_pentest() {
+    local subcmd="${1:-help}"
+    shift 2>/dev/null || true
+
+    case "$subcmd" in
+        create) cmd_pentest_create "$@" ;;
+        list)   cmd_pentest_list ;;
+        close)  cmd_pentest_close "$@" ;;
+        purge)  cmd_pentest_purge "$@" ;;
+        help|-h|--help) cmd_pentest_help ;;
+        *)
+            log_error "Unknown pentest command: $subcmd"
+            cmd_pentest_help
+            return 1
+            ;;
+    esac
+}
+
 # ===== Network Restoration =====
 # Re-attach TAPs to bridges after switch-to-configuration
 # Bridges may be recreated during activation, detaching TAP interfaces
@@ -1567,6 +1881,7 @@ restore_network() {
             mv-comms*)   bridge="br-comms" ;;
             mv-build*)   bridge="br-builder" ;;
             mv-gitsyn*)  bridge="br-builder" ;;
+            mv-task-*)   bridge="br-pentest" ;;
         esac
         if ip link show "$bridge" &>/dev/null; then
             sudo ip link set "$tap" master "$bridge" 2>/dev/null || true
@@ -1747,6 +2062,9 @@ ${BOLD}COMMANDS${NC}
   ${BOLD}Git-Sync (lockdown mode):${NC}
     git <cmd>               Git operations via git-sync VM (see: microvm git help)
 
+  ${BOLD}Task pentest VMs:${NC}
+    pentest <cmd>           Manage engagement slots (see: microvm pentest help)
+
   ${BOLD}Utilities:${NC}
     test <name>             Full workflow test with timing
     purge <name> [-f]       Delete all persistent data (fresh start)
@@ -1762,6 +2080,7 @@ ${BOLD}MICROVM TYPES${NC}
     microvm-router           WiFi passthrough router
     microvm-builder          Builder for lockdown mode (populates host store)
     microvm-gitsync          Git-sync for lockdown mode (push/pull repos)
+    microvm-pentest-task{1-3} Task pentest slots (per-engagement, see: microvm pentest)
 
 ${BOLD}EXAMPLES${NC}
     # Build and start a microVM
@@ -1803,9 +2122,8 @@ ${BOLD}EXAMPLES${NC}
     microvm builder stop
 
 ${BOLD}NOTE${NC}
-    For multiple named VM instances, use libvirt with deploy-vm.sh:
-      ./scripts/build-base.sh --type pentest
-      ./scripts/deploy-vm.sh --type pentest --name google --user traum
+    For task-specific pentest VMs (per-engagement): microvm pentest help
+    For lab environments (Windows, AD, multi-machine): use libvirt with deploy-vm.sh
 EOF
 }
 
@@ -1872,6 +2190,9 @@ main() {
             ;;
         builder)
             cmd_builder "$@"
+            ;;
+        pentest|task)
+            cmd_pentest "$@"
             ;;
         git)
             cmd_git "$@"

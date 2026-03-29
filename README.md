@@ -14,6 +14,7 @@ Hydrix is an options-driven NixOS framework that provides complete network isola
 - [VM Theme Sync](#vm-theme-sync)
 - [Font System](#font-system)
 - [MicroVM Management](#microvm-management)
+  - [Task Pentest VMs](#task-pentest-vms-per-engagement)
 - [Vsock Communication](#vsock-communication)
 - [VM Store Sharing](#vm-store-sharing)
 - [Build System](#build-system)
@@ -907,6 +908,71 @@ microvm purge <name>                   # Delete all data (fresh start)
 hydrix-tui              # Interactive TUI for VM management
 # Or press Mod+v for rofi launcher
 ```
+
+The TUI's MicroVM menu includes task pentest slots. Task slots display their active engagement name and offer a **Snapshots** sub-menu when stopped.
+
+### Task Pentest VMs (per-engagement)
+
+For work that benefits from isolation per target or engagement, Hydrix supports **task slots**: a fixed pool of pre-declared pentest VMs that can be assigned to named engagements without a host rebuild.
+
+**How it works:**
+- Three task slots (`microvm-pentest-task1/2/3`, CIDs 115–117) are declared permanently in the host config via `hydrix-config/tasks/task*.nix`
+- Service units, TAP interfaces, and bridges are created once during the initial rebuild
+- `microvm pentest create <name>` assigns an engagement to a free slot and builds its closure — no rebuild needed
+
+**One-time setup** (done during any normal rebuild window):
+
+```bash
+# Add tasks/task1.nix, task2.nix, task3.nix to your hydrix-config
+# See hydrix-config/tasks/ for the slot configs
+rebuild    # Registers the slot service units permanently
+```
+
+**Engagement workflow:**
+
+```bash
+# Start a new engagement
+microvm pentest create google           # Assign 'google' to a free slot
+microvm start microvm-pentest-task1     # Service unit already exists
+microvm snapshot create microvm-pentest-task1 google-clean  # Baseline
+microvm app microvm-pentest-task1 alacritty
+
+# Between sessions (revert to known-good state)
+microvm stop microvm-pentest-task1
+microvm snapshot revert microvm-pentest-task1 google-clean
+microvm start microvm-pentest-task1
+
+# Close engagement (volume and snapshots preserved, slot freed)
+microvm pentest close google
+
+# Reopen from snapshot
+microvm pentest create google --slot 1
+microvm snapshot revert microvm-pentest-task1 google-clean
+microvm start microvm-pentest-task1
+
+# Purge all data for an engagement
+microvm pentest purge google
+
+# View all slots and their status
+microvm pentest list
+```
+
+**Task slot table:**
+
+| Slot | CID | TAP | Bridge |
+|------|-----|-----|--------|
+| `microvm-pentest-task1` | 115 | `mv-task-1` | `br-pentest` |
+| `microvm-pentest-task2` | 116 | `mv-task-2` | `br-pentest` |
+| `microvm-pentest-task3` | 117 | `mv-task-3` | `br-pentest` |
+
+**Adding more slots:** Create `tasks/task4.nix` with CID 118 and `tapId = "mv-task-4"`, then rebuild once. The `microvm pentest` command will discover it automatically.
+
+**Engagement registry:** `hydrix-config/tasks/.engagement-registry` is a JSON file mapping slot names to engagement names. Commit it to track which slot held which engagement.
+
+**When libvirt is better:**
+- Engagement needs elastic disk beyond the fixed qcow2 max size
+- Lab environment (Windows, Active Directory, multi-machine networks)
+- RAM snapshots (suspended mid-session state)
 
 ### In-VM Development (vm-dev workflow)
 

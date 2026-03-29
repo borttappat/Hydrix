@@ -108,9 +108,12 @@ in {
       # Git-sync VM TAP → builder bridge (trusted utility VM, shares builder network)
       ACTION=="add", SUBSYSTEM=="net", KERNEL=="mv-gitsync", RUN+="${attachTapScript} %k br-builder"
 
+      # Task pentest slot TAP interfaces (mv-task-*) → pentest bridge
+      ACTION=="add", SUBSYSTEM=="net", KERNEL=="mv-task-*", RUN+="${attachTapScript} %k br-pentest"
+
       # Other microVM TAP interfaces (mv-*) go to default bridge
-      # Exclude router interfaces which are handled above
-      ACTION=="add", SUBSYSTEM=="net", KERNEL=="mv-*", KERNEL!="mv-router-*", KERNEL!="mv-gitsync", RUN+="${attachTapScript} %k ${cfg.defaultBridge}"
+      # Exclude router, gitsync, and task interfaces which are handled above
+      ACTION=="add", SUBSYSTEM=="net", KERNEL=="mv-*", KERNEL!="mv-router-*", KERNEL!="mv-gitsync", KERNEL!="mv-task-*", RUN+="${attachTapScript} %k ${cfg.defaultBridge}"
 
       # VFIO device permissions for microvm user (needed for PCI passthrough)
       # This allows the microvm user to access VFIO IOMMU group devices
