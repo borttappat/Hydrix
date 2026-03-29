@@ -3,7 +3,8 @@
 # This module provides the common foundation for microVM-based VMs:
 # - QEMU hypervisor with vsock support
 # - virtiofs for shared /nix/store
-# - 9p shares for config and persistence (vm-config, hydrix-config, vm-persist)
+# - 9p shares for vm-config and vm-persist
+# - virtiofs for hydrix-config (scaling.json) and per-VM profile writeback
 # - TAP networking for bridge attachment
 # - Xpra for seamless app forwarding to host
 # - Full graphical stack (Stylix theming, HM programs, fonts, colors)
@@ -79,6 +80,19 @@ in {
       type = lib.types.str;
       default = "/var/lib/microvms/${config.networking.hostName}/config";
       description = "Host path for VM config (read-only 9p mount)";
+    };
+
+    profileWriteback = {
+      enable = lib.mkOption {
+        type = lib.types.bool;
+        default = true;
+        description = "Share only the VM's own profile directory (RW 9p) for live development";
+      };
+      hostProfilesPath = lib.mkOption {
+        type = lib.types.str;
+        default = "/home/${config.hydrix.username}/hydrix-config/profiles";
+        description = "Path to the user's profiles directory on the host";
+      };
     };
 
     tapId = lib.mkOption {
@@ -250,11 +264,22 @@ in {
           mountPoint = "/mnt/vm-config";
           proto = "9p";
         }
-        # Host config directory (for scaling.json - dynamic DPI)
+        # Host config directory (for scaling.json - dynamic DPI, read-only)
         {
           tag = "hydrix-config";
           source = "/home/${config.hydrix.username}/.config/hydrix";
           mountPoint = "/mnt/hydrix-config";
+          proto = "virtiofs";
+        }
+      ] ++ lib.optionals (config.hydrix.microvm.profileWriteback.enable
+        && config.hydrix.vmType != null
+        && config.hydrix.vmType != ""
+        && config.hydrix.vmType != "host") [
+        # Per-VM profile writeback (RW 9p) - only this VM's own profile directory
+        {
+          tag = "hydrix-profile";
+          source = "${config.hydrix.microvm.profileWriteback.hostProfilesPath}/${config.hydrix.vmType}";
+          mountPoint = "/mnt/hydrix-profile";
           proto = "9p";
         }
       ] ++ lib.optionals (config.hydrix.microvm.persistence.hostPersist && config.hydrix.vmType != "") [
@@ -823,6 +848,49 @@ in {
         fi
 
         chown -h ${config.hydrix.username}:users "$CONFIG_DIR"
+      '';
+    };
+
+    # ===== Per-VM profile writeback symlink =====
+    # Links ~/hydrix-config/profiles/<vmType> → /mnt/hydrix-profile
+    # Each VM only has its own profile mounted, so cross-VM writes are impossible
+    systemd.services.hydrix-profile-link = lib.mkIf (config.hydrix.microvm.profileWriteback.enable
+      && config.hydrix.vmType != null
+      && config.hydrix.vmType != ""
+      && config.hydrix.vmType != "host") {
+      description = "Create profile writeback symlink for ${config.hydrix.vmType} VM";
+      wantedBy = [ "multi-user.target" ];
+      after = [ "local-fs.target" ] ++ lib.optionals config.hydrix.microvm.persistence.enable [ "home.mount" ];
+      serviceConfig = {
+        Type = "oneshot";
+        RemainAfterExit = true;
+      };
+      path = [ pkgs.util-linux pkgs.coreutils ];
+      script = ''
+        USER_HOME="/home/${config.hydrix.username}"
+        PROFILE_LINK="$USER_HOME/hydrix-config/profiles/${config.hydrix.vmType}"
+
+        if ! mountpoint -q /mnt/hydrix-profile 2>/dev/null; then
+          echo "Profile mount not present, skipping symlink"
+          exit 0
+        fi
+
+        mkdir -p "$USER_HOME/hydrix-config/profiles"
+
+        if [ -L "$PROFILE_LINK" ]; then
+          current=$(readlink "$PROFILE_LINK")
+          if [ "$current" != "/mnt/hydrix-profile" ]; then
+            rm "$PROFILE_LINK"
+            ln -s /mnt/hydrix-profile "$PROFILE_LINK"
+          fi
+        elif [ -d "$PROFILE_LINK" ]; then
+          mv "$PROFILE_LINK" "$PROFILE_LINK.bak"
+          ln -s /mnt/hydrix-profile "$PROFILE_LINK"
+        else
+          ln -s /mnt/hydrix-profile "$PROFILE_LINK"
+        fi
+
+        chown -h ${config.hydrix.username}:users "$PROFILE_LINK"
       '';
     };
 
