@@ -1786,7 +1786,7 @@ prepare_dual_boot_space() {
     local needed_gb=$(( needed_bytes / 1073741824 ))
     log "Need to free ${needed_gb}GB more by shrinking an existing partition"
 
-    # Find the largest NTFS partition as shrink target
+    # Find the largest non-EFI, non-swap partition as shrink target
     local target_part="" target_size_bytes=0
     local devname="${device##*/}"
     local sector_size
@@ -1796,58 +1796,108 @@ prepare_dual_boot_space() {
         [[ "$part_name" == "${devname}"* ]] || continue
         [[ -f "${part_sys}partition" ]] || continue
         local devpath="/dev/$part_name"
+        [[ "$devpath" == "${CONFIG[efiPartition]}" ]] && continue
         local part_sectors size_bytes fstype
         part_sectors=$(cat "${part_sys}size" 2>/dev/null || echo 0)
         size_bytes=$(( part_sectors * sector_size ))
         fstype=$(blkid -o value -s TYPE "$devpath" 2>/dev/null || echo "")
-        if [[ "$fstype" == "ntfs" ]] && (( size_bytes > target_size_bytes )); then
+        [[ "$fstype" == "swap" ]] && continue
+        if (( size_bytes > target_size_bytes )); then
             target_part="$devpath"; target_size_bytes="$size_bytes"
         fi
     done
 
     if [[ -z "$target_part" ]]; then
-        error "No NTFS partition found to shrink. Resize manually (e.g. from Windows Disk Management) then re-run the installer."
+        error "No suitable partition found to shrink on $device."
     fi
 
-    if ! command -v ntfsresize &>/dev/null; then
-        error "ntfsresize is not available. Boot a live environment with ntfs-3g (e.g. GParted live) to resize first."
-    fi
+    local target_fstype
+    target_fstype=$(blkid -o value -s TYPE "$target_part" 2>/dev/null || echo "unknown")
 
     local new_size_bytes=$(( target_size_bytes - needed_bytes ))
     local new_size_gb=$(( new_size_bytes / 1073741824 ))
     echo ""
-    warn "Will shrink $target_part: $(( target_size_bytes / 1073741824 ))GB → ${new_size_gb}GB"
+    warn "Will shrink $target_part ($target_fstype): $(( target_size_bytes / 1073741824 ))GB → ${new_size_gb}GB"
     warn "Data is preserved but back up important files before continuing."
     echo ""
-
-    # Dry-run check
-    log "Checking if filesystem can be safely shrunk..."
-    if ! ntfsresize --no-action --force --size "${new_size_bytes}" "$target_part"; then
-        error "ntfsresize pre-check failed. Run 'chkdsk' from Windows, then retry."
-    fi
 
     read -p "Proceed with shrinking $target_part? [y/N]: " confirm
     [[ "${confirm,,}" == "y" ]] || error "Aborted by user"
 
-    # Shrink NTFS filesystem
-    log "Shrinking NTFS on $target_part..."
-    ntfsresize --force --size "${new_size_bytes}" "$target_part"
-
-    # Shrink the partition entry to match
-    local part_num
-    part_num=$(echo "$target_part" | grep -oP '\d+$')
-    local part_start
-    part_start=$(parted -m "$device" unit B print 2>/dev/null | \
-        grep "^${part_num}:" | cut -d: -f2 | tr -d 'B')
-    local new_end=$(( part_start + new_size_bytes - 1 ))
-
-    log "Updating partition table..."
-    parted -s "$device" resizepart "$part_num" "${new_end}B"
-    partprobe "$device"
-    udevadm settle
+    shrink_partition "$target_part" "$new_size_bytes" "$device" "$sector_size"
 
     log "Partition shrunk. Updated layout:"
     show_disk_layout "$device"
+}
+
+# Shrink a partition and its filesystem in-place.
+# Handles ntfs, btrfs, ext2/3/4, and crypto_LUKS wrappers around those.
+shrink_partition() {
+    local devpath="$1" new_size_bytes="$2" disk="$3" sector_size="$4"
+
+    local fstype
+    fstype=$(blkid -o value -s TYPE "$devpath" 2>/dev/null || echo "")
+
+    local inner_dev="$devpath" luks_name=""
+
+    if [[ "$fstype" == "crypto_LUKS" ]]; then
+        luks_name="hydrix-resize-$$"
+        log "Opening LUKS container on $devpath..."
+        cryptsetup open "$devpath" "$luks_name"
+        inner_dev="/dev/mapper/$luks_name"
+        fstype=$(blkid -o value -s TYPE "$inner_dev" 2>/dev/null || echo "")
+        log "Inner filesystem: $fstype"
+    fi
+
+    # Reserve space for LUKS header when resizing inner filesystem
+    local fs_size="$new_size_bytes"
+    [[ -n "$luks_name" ]] && fs_size=$(( new_size_bytes - 4194304 ))
+
+    case "$fstype" in
+        ntfs)
+            log "Checking NTFS filesystem..."
+            if ! ntfsresize --no-action --force --size "$fs_size" "$inner_dev"; then
+                [[ -n "$luks_name" ]] && cryptsetup close "$luks_name"
+                error "ntfsresize pre-check failed. Run chkdsk from Windows first."
+            fi
+            log "Shrinking NTFS filesystem..."
+            ntfsresize --force --size "$fs_size" "$inner_dev"
+            ;;
+        btrfs)
+            local mnt="/tmp/hydrix-resize-$$"
+            mkdir -p "$mnt"
+            log "Mounting btrfs for resize..."
+            mount -o noatime "$inner_dev" "$mnt"
+            log "Shrinking btrfs filesystem..."
+            btrfs filesystem resize "$fs_size" "$mnt"
+            umount "$mnt"; rmdir "$mnt"
+            ;;
+        ext4|ext3|ext2)
+            log "Checking ext filesystem..."
+            e2fsck -f "$inner_dev"
+            log "Shrinking ext filesystem..."
+            resize2fs "$inner_dev" "$(( fs_size / 1024 ))K"
+            ;;
+        *)
+            [[ -n "$luks_name" ]] && cryptsetup close "$luks_name"
+            error "Unsupported filesystem type '$fstype' on $devpath. Resize manually."
+            ;;
+    esac
+
+    [[ -n "$luks_name" ]] && cryptsetup close "$luks_name"
+
+    # Resize the partition entry to match
+    local part_name="${devpath##*/}"
+    local part_num="${part_name##*[!0-9]}"
+    local part_start_sector
+    part_start_sector=$(cat "/sys/class/block/$part_name/start" 2>/dev/null || echo 0)
+    local part_start=$(( part_start_sector * sector_size ))
+    local new_end=$(( part_start + new_size_bytes - 1 ))
+
+    log "Updating partition table..."
+    parted -s "$disk" resizepart "$part_num" "${new_end}B"
+    partprobe "$disk"
+    udevadm settle
 }
 
 # ========== INSTALLATION ==========
