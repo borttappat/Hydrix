@@ -372,6 +372,16 @@ cmd_start() {
     # Desktop notification
     notify-send "MicroVM Ready" "${vm_name} is ready for interaction" 2>/dev/null || true
 
+    # Register task pentest slots as the active pentest VM for polybar/rofi
+    if [[ "$vm_name" == microvm-pentest-task* ]]; then
+        local active_vms_file="$HOME/.cache/hydrix/active-vms.json"
+        mkdir -p "$(dirname "$active_vms_file")"
+        [[ ! -f "$active_vms_file" ]] && echo '{}' > "$active_vms_file"
+        local tmp
+        tmp=$(mktemp)
+        jq --arg vm "$vm_name" '."pentest" = $vm' "$active_vms_file" > "$tmp" && mv "$tmp" "$active_vms_file"
+    fi
+
     echo ""
     echo -e "  ${DIM}Launch app:${NC} microvm app ${vm_name} firefox"
 }
@@ -432,6 +442,16 @@ cmd_stop() {
     local stop_time
     stop_time=$(timer_end "$start")
     log_success "Stopped in ${BOLD}${stop_time}s${NC}"
+
+    # Deregister task pentest slots from active-vms.json
+    if [[ "$vm_name" == microvm-pentest-task* ]]; then
+        local active_vms_file="$HOME/.cache/hydrix/active-vms.json"
+        if [[ -f "$active_vms_file" ]]; then
+            local tmp
+            tmp=$(mktemp)
+            jq 'del(."pentest")' "$active_vms_file" > "$tmp" && mv "$tmp" "$active_vms_file"
+        fi
+    fi
 
     # Builder VM: remount store read-only and restart host nix-daemon
     if is_builder "$vm_name"; then

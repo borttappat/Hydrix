@@ -751,7 +751,7 @@ ${workspaceDescCases}
       microvm-dev) cid="103" ;;
       *)
         # Dynamic resolve: read CID from the microVM's qemu launch script
-        local run_script="/var/lib/microvms/$vm_name/current/bin/microvm-run"
+        run_script="/var/lib/microvms/$vm_name/current/bin/microvm-run"
         if [ -f "$run_script" ]; then
           cid=$(${grep} -oP 'guest-cid=\K[0-9]+' "$run_script" 2>/dev/null)
         else
@@ -1066,7 +1066,7 @@ ${workspaceDescCases}
     vm_name=$(echo "$vm_info" | ${awk} '{print $3}')
 
     if ! systemctl is-active --quiet "microvm@$vm_name" 2>/dev/null; then
-      echo "%{F$color_prefix}TUN %{F-}%{u$color_normal}%{+u}○%{-u}"
+      echo ""
       exit 0
     fi
 
@@ -1075,7 +1075,7 @@ ${workspaceDescCases}
     if [ -n "$result" ] && [ "$result" != "none" ]; then
       echo "%{F$color_prefix}TUN %{F-}%{u$color_normal}%{+u}$result%{-u}"
     else
-      echo "%{F$color_prefix}TUN %{F-}%{u$color_normal}%{+u}○%{-u}"
+      echo ""
     fi
   '';
 
