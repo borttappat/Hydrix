@@ -111,9 +111,13 @@ in {
       # Task pentest slot TAP interfaces (mv-task-*) → pentest bridge
       ACTION=="add", SUBSYSTEM=="net", KERNEL=="mv-task-*", RUN+="${attachTapScript} %k br-pentest"
 
-      # Other microVM TAP interfaces (mv-*) go to default bridge
-      # Exclude router, gitsync, and task interfaces which are handled above
-      ACTION=="add", SUBSYSTEM=="net", KERNEL=="mv-*", KERNEL!="mv-router-*", KERNEL!="mv-gitsync", KERNEL!="mv-task-*", RUN+="${attachTapScript} %k ${cfg.defaultBridge}"
+      # VM TAP interfaces → explicit bridge mapping (no fallback — unknown TAPs stay unattached)
+      ACTION=="add", SUBSYSTEM=="net", KERNEL=="mv-browse*",  RUN+="${attachTapScript} %k br-browse"
+      ACTION=="add", SUBSYSTEM=="net", KERNEL=="mv-pentest*", RUN+="${attachTapScript} %k br-pentest"
+      ACTION=="add", SUBSYSTEM=="net", KERNEL=="mv-dev*",     RUN+="${attachTapScript} %k br-dev"
+      ACTION=="add", SUBSYSTEM=="net", KERNEL=="mv-lurk*",    RUN+="${attachTapScript} %k br-lurking"
+      ACTION=="add", SUBSYSTEM=="net", KERNEL=="mv-comms*",   RUN+="${attachTapScript} %k br-comms"
+      ACTION=="add", SUBSYSTEM=="net", KERNEL=="mv-build*",   RUN+="${attachTapScript} %k br-builder"
 
       # VFIO device permissions for microvm user (needed for PCI passthrough)
       # This allows the microvm user to access VFIO IOMMU group devices
@@ -334,7 +338,6 @@ in {
               case "$tap" in
                 mv-browse*)  bridge="br-browse" ;;
                 mv-pentest*) bridge="br-pentest" ;;
-                mv-hack*)    bridge="br-pentest" ;;
                 mv-dev*)     bridge="br-dev" ;;
                 mv-lurk*)    bridge="br-lurking" ;;
                 mv-comms*)   bridge="br-comms" ;;
