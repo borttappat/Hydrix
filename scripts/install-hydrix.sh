@@ -1725,6 +1725,15 @@ partition_and_mount() {
 
     if [[ "$layout" == dual-boot-* ]]; then
         disko_args+=(--arg efiDevice "\"${CONFIG[efiPartition]}\"")
+
+        # Live environments often automount the EFI partition; unmount it first
+        # or disko will fail with "can't open blockdev" (device already in use)
+        local efi_mount
+        efi_mount=$(findmnt -n -o TARGET "${CONFIG[efiPartition]}" 2>/dev/null)
+        if [[ -n "$efi_mount" ]]; then
+            log "Unmounting ${CONFIG[efiPartition]} (currently at $efi_mount)..."
+            umount "${CONFIG[efiPartition]}"
+        fi
     fi
 
     # Run disko
