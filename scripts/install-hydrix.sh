@@ -1730,7 +1730,7 @@ show_disk_layout() {
             usage_str="[reserved]"
         fi
         printf "  %-18s %7dGB  %-6s  %s\n" "$devpath" "$size_gb" "${fstype:-?}" "$usage_str"
-    done < <(lsblk -rn -b -o NAME,SIZE,FSTYPE "$device" 2>/dev/null | tail -n +2)
+    done < <(lsblk -rn -b -o NAME,SIZE,FSTYPE,TYPE "$device" 2>/dev/null | awk '$4 == "part" {print $1, $2, $3}')
 
     local free_bytes
     free_bytes=$(parted -s "$device" unit B print free 2>/dev/null | \
@@ -1778,7 +1778,7 @@ prepare_dual_boot_space() {
         if [[ "$fstype" == "ntfs" ]] && (( size_bytes > target_size_bytes )); then
             target_part="/dev/$name"; target_size_bytes="$size_bytes"
         fi
-    done < <(lsblk -rn -b -o NAME,SIZE,FSTYPE "$device" 2>/dev/null | tail -n +2)
+    done < <(lsblk -rn -b -o NAME,SIZE,FSTYPE,TYPE "$device" 2>/dev/null | awk '$4 == "part" {print $1, $2, $3}')
 
     if [[ -z "$target_part" ]]; then
         error "No NTFS partition found to shrink. Resize manually (e.g. from Windows Disk Management) then re-run the installer."
