@@ -711,6 +711,8 @@ in {
       iw
       wirelesstools
       networkmanager
+      termshark
+      bandwhich
 
       # VPN management scripts
       (writeShellScriptBin "vpn-assign" (builtins.readFile ../../scripts/vpn-assign.sh))
