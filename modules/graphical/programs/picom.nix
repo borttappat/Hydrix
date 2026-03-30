@@ -293,7 +293,7 @@ in {
 
           # Corners
           corner-radius = sc.cornerRadius;
-          round-borders = 2;
+          round-borders = 1;
           rounded-corners-exclude = [
             "window_type = 'dock'"
             "window_type = 'desktop'"
