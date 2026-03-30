@@ -1726,6 +1726,24 @@ partition_and_mount() {
     if [[ "$layout" == dual-boot-* ]]; then
         disko_args+=(--arg efiDevice "\"${CONFIG[efiPartition]}\"")
 
+        # Verify there is unallocated space for the new partition
+        local free_bytes
+        free_bytes=$(parted -s "${CONFIG[device]}" unit B print free 2>/dev/null | \
+            grep "Free Space" | tail -1 | awk '{print $3}' | tr -d 'B')
+        if [[ -z "$free_bytes" ]] || (( free_bytes < 10737418240 )); then
+            local free_gb=$(( ${free_bytes:-0} / 1073741824 ))
+            error "Not enough unallocated space on ${CONFIG[device]} (found ${free_gb}GB, need at least 10GB). Shrink the existing OS partition first."
+        fi
+        log "Unallocated space available: $(( free_bytes / 1073741824 ))GB"
+
+        # Warn if other OS may have been hibernated (Windows fast startup)
+        if lsblk -rn -o FSTYPE "${CONFIG[device]}" 2>/dev/null | grep -q "ntfs"; then
+            warn "NTFS partition detected — ensure the other OS was fully shut down."
+            warn "Windows fast startup leaves a hibernation file that may cause issues."
+            read -p "Continue anyway? [y/N]: " cont
+            [[ "${cont,,}" == "y" ]] || error "Aborted by user"
+        fi
+
         # Live environments often automount the EFI partition; unmount it first
         # or disko will fail with "can't open blockdev" (device already in use)
         local efi_mount
