@@ -1774,6 +1774,10 @@ prepare_dual_boot_space() {
     local nixos_bytes=$(( total_bytes * pct / 100 ))
     log "NixOS allocation: $(( nixos_bytes / 1073741824 ))GB (${pct}% of ${total_gb}GB)"
 
+    local devname="${device##*/}"
+    local sector_size
+    sector_size=$(cat "/sys/class/block/$devname/queue/logical_block_size" 2>/dev/null || echo 512)
+
     # Check how much free space already exists
     local free_bytes
     free_bytes=$(parted -s "$device" unit B print free 2>/dev/null | \
@@ -1793,9 +1797,6 @@ prepare_dual_boot_space() {
     # Find the largest non-EFI, non-swap partition as shrink target
     # Use lsblk -rn -b for reliable output in all live environments
     local target_part="" target_size_bytes=0
-    local devname="${device##*/}"
-    local sector_size
-    sector_size=$(cat "/sys/class/block/$devname/queue/logical_block_size" 2>/dev/null || echo 512)
     while read -r pname psize; do
         local devpath="/dev/$pname"
         [[ "$devpath" == "${CONFIG[efiPartition]}" ]] && continue
@@ -1838,12 +1839,9 @@ _create_nixos_partition() {
 
     # Snapshot existing partitions so we can identify the new one after creation
     local -A before=()
-    for part_sys in "/sys/class/block/$devname/"/*/; do
-        local pname="${part_sys%/}"; pname="${pname##*/}"
-        [[ "$pname" == "${devname}"* ]] || continue
-        [[ -f "${part_sys}partition" ]] || continue
+    while read -r pname; do
         before["/dev/$pname"]=1
-    done
+    done < <(lsblk -rn -o NAME "$device" 2>/dev/null | awk 'NR>1 {print $1}')
 
     log "Creating NixOS partition in free space..."
     printf ",\n" | sfdisk --no-reread -a "$device"
@@ -1852,15 +1850,12 @@ _create_nixos_partition() {
 
     # Find the newly created partition
     local nixos_part=""
-    for part_sys in "/sys/class/block/$devname/"/*/; do
-        local pname="${part_sys%/}"; pname="${pname##*/}"
-        [[ "$pname" == "${devname}"* ]] || continue
-        [[ -f "${part_sys}partition" ]] || continue
+    while read -r pname; do
         local devpath="/dev/$pname"
         [[ -n "${before[$devpath]:-}" ]] && continue
         nixos_part="$devpath"
         break
-    done
+    done < <(lsblk -rn -o NAME "$device" 2>/dev/null | awk 'NR>1 {print $1}')
 
     if [[ -z "$nixos_part" ]]; then
         error "Failed to detect newly created NixOS partition on $device"
