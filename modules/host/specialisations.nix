@@ -316,6 +316,7 @@ in {
             mv-comms*)   bridge="br-comms" ;;
             mv-build*)   bridge="br-builder" ;;
             mv-gitsyn*)  bridge="br-builder" ;;
+            mv-task-*)   bridge="br-pentest" ;;
             *)           bridge="br-browse" ;;
           esac
           if [[ -n "''${bridge:-}" ]]; then

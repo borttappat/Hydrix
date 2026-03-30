@@ -340,6 +340,7 @@ in {
                 mv-comms*)   bridge="br-comms" ;;
                 mv-build*)   bridge="br-builder" ;;
                 mv-gitsyn*)  bridge="br-builder" ;;
+                mv-task-*)   bridge="br-pentest" ;;
               esac
               if ip link show "$bridge" &>/dev/null; then
                 ip link set "$tap" master "$bridge" 2>/dev/null || true
