@@ -351,13 +351,12 @@ Check with: virt-viewer $vm_name"
             "--notifications=no"
             # Audio forwarding
             "--speaker=yes"
-            # Quality settings - vsock is fast, prioritize crispness
+            # Encoding: rgb over vsock = zero compression, zero CPU
+            # quality/speed/auto-refresh flags must NOT be set — quality=100 triggers
+            # xpra's lossless path which silently overrides encoding=rgb back to png
             "--encoding=rgb"
-            "--quality=100"
-            "--min-quality=100"
-            "--speed=0"
-            "--min-speed=0"
             "-z0"
+            "--auto-refresh-delay=0"  # Disable periodic full-screen lossless PNG refreshes
             "--video=no"
             "--modal-windows=yes"
             "--windows=yes"

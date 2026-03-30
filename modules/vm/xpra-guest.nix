@@ -29,18 +29,16 @@
         "--start-new-commands=yes"
         "--vsock-auth=none"
         "--sharing=yes"
-        # Quality settings - lossless but compressed to reduce memory/CPU
-        "--encoding=png"
-        "--quality=100"
-        "--min-quality=90"
-        "--speed=50"
-        "--min-speed=30"
+        # Encoding: rgb = zero compression, zero CPU overhead
+        # vsock is a local kernel transport — bandwidth is free, compression is pure waste
+        "--encoding=rgb"
+        "--speed=100"
+        "--video=no"
         # Disable unneeded features
         "--pulseaudio=no"
         "--mdns=no"
         "--notifications=no"
         "--systemd-run=no"
-        "--video=auto"  # Allow video codecs for dynamic content (scrolling, etc.)
       ];
       Restart = "always";
       RestartSec = 5;

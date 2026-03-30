@@ -64,8 +64,9 @@ in {
         # Encoding: rgb = zero compression, zero CPU overhead
         # vsock is a local kernel transport — bandwidth is free, compression is pure waste
         "--encoding=rgb"
-        "--speed=100"        # Fastest encoding path
-        "--video=no"         # No software video codecs — high CPU, unnecessary for local vsock
+        "--speed=100"              # Fastest encoding path
+        "--auto-refresh-delay=0"   # Disable periodic full-screen lossless PNG refreshes
+        "--video=no"               # No software video codecs — high CPU, unnecessary for local vsock
         # Audio forwarding
         "--pulseaudio=yes"
         "--speaker=yes"
