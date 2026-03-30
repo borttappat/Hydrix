@@ -1048,6 +1048,9 @@ select_layout() {
         fi
 
         log "EFI partition: ${CONFIG[efiPartition]}"
+
+        # Show disk layout and offer to shrink an existing partition if needed
+        prepare_dual_boot_space
     fi
 }
 
@@ -1696,6 +1699,132 @@ generate_machine_nix() {
     log "Generated: $config_dir/machines/${CONFIG[serial]}.nix"
 }
 
+# ========== DUAL BOOT SPACE PREPARATION ==========
+
+_usage_bar() {
+    local pct="${1:-0}" filled=$(( pct * 20 / 100 )) bar="" i
+    for (( i=0; i<20; i++ )); do
+        [[ $i -lt $filled ]] && bar+="█" || bar+="░"
+    done
+    printf "[%s] %3d%%" "$bar" "$pct"
+}
+
+show_disk_layout() {
+    local device="$1"
+    local total_bytes
+    total_bytes=$(lsblk -rn -b -d -o SIZE "$device" 2>/dev/null)
+    printf "\n  Disk: %s  (%dGB total)\n\n" "$device" "$(( total_bytes / 1073741824 ))"
+    printf "  %-18s %8s  %-6s  %s\n" "Partition" "Size" "Type" "Usage"
+    printf "  %-18s %8s  %-6s  %s\n" "---------" "----" "----" "-----"
+
+    while read -r name size_bytes fstype; do
+        local devpath="/dev/$name" size_gb=$(( size_bytes / 1073741824 )) usage_str="-"
+        if [[ "$fstype" == "ntfs" ]] && command -v ntfsresize &>/dev/null; then
+            local used_pct
+            used_pct=$(ntfsresize --info --force "$devpath" 2>&1 | \
+                grep "Space in use" | grep -oP '\K[0-9]+(?=\.)' | head -1)
+            usage_str=$(_usage_bar "${used_pct:-0}")
+        elif [[ "$fstype" == "vfat" ]]; then
+            usage_str="[EFI / boot]"
+        elif [[ -z "$fstype" ]]; then
+            usage_str="[reserved]"
+        fi
+        printf "  %-18s %7dGB  %-6s  %s\n" "$devpath" "$size_gb" "${fstype:-?}" "$usage_str"
+    done < <(lsblk -rn -b -o NAME,SIZE,FSTYPE "$device" 2>/dev/null | tail -n +2)
+
+    local free_bytes
+    free_bytes=$(parted -s "$device" unit B print free 2>/dev/null | \
+        grep "Free Space" | tail -1 | awk '{print $3}' | tr -d 'B')
+    printf "\n  Unallocated: %dGB\n\n" "$(( ${free_bytes:-0} / 1073741824 ))"
+}
+
+prepare_dual_boot_space() {
+    local device="${CONFIG[device]}"
+    local total_bytes
+    total_bytes=$(lsblk -rn -b -d -o SIZE "$device" 2>/dev/null)
+    local total_gb=$(( total_bytes / 1073741824 ))
+
+    show_disk_layout "$device"
+
+    # Ask how much of the disk NixOS should get
+    local pct
+    while true; do
+        read -p "How much of the disk for NixOS? (10-90%, default 50): " pct
+        pct="${pct:-50}"; pct="${pct//%/}"
+        [[ "$pct" =~ ^[0-9]+$ ]] && (( pct >= 10 && pct <= 90 )) && break
+        warn "Enter a number between 10 and 90"
+    done
+    local nixos_bytes=$(( total_bytes * pct / 100 ))
+    log "NixOS allocation: $(( nixos_bytes / 1073741824 ))GB (${pct}% of ${total_gb}GB)"
+
+    # Check how much free space already exists
+    local free_bytes
+    free_bytes=$(parted -s "$device" unit B print free 2>/dev/null | \
+        grep "Free Space" | tail -1 | awk '{print $3}' | tr -d 'B')
+    free_bytes="${free_bytes:-0}"
+
+    if (( free_bytes >= nixos_bytes )); then
+        log "$(( free_bytes / 1073741824 ))GB already unallocated — no shrinking needed"
+        return
+    fi
+
+    local needed_bytes=$(( nixos_bytes - free_bytes ))
+    local needed_gb=$(( needed_bytes / 1073741824 ))
+    log "Need to free ${needed_gb}GB more by shrinking an existing partition"
+
+    # Find the largest NTFS partition as shrink target
+    local target_part="" target_size_bytes=0
+    while read -r name size_bytes fstype; do
+        if [[ "$fstype" == "ntfs" ]] && (( size_bytes > target_size_bytes )); then
+            target_part="/dev/$name"; target_size_bytes="$size_bytes"
+        fi
+    done < <(lsblk -rn -b -o NAME,SIZE,FSTYPE "$device" 2>/dev/null | tail -n +2)
+
+    if [[ -z "$target_part" ]]; then
+        error "No NTFS partition found to shrink. Resize manually (e.g. from Windows Disk Management) then re-run the installer."
+    fi
+
+    if ! command -v ntfsresize &>/dev/null; then
+        error "ntfsresize is not available. Boot a live environment with ntfs-3g (e.g. GParted live) to resize first."
+    fi
+
+    local new_size_bytes=$(( target_size_bytes - needed_bytes ))
+    local new_size_gb=$(( new_size_bytes / 1073741824 ))
+    echo ""
+    warn "Will shrink $target_part: $(( target_size_bytes / 1073741824 ))GB → ${new_size_gb}GB"
+    warn "Data is preserved but back up important files before continuing."
+    echo ""
+
+    # Dry-run check
+    log "Checking if filesystem can be safely shrunk..."
+    if ! ntfsresize --no-action --force --size "${new_size_bytes}" "$target_part"; then
+        error "ntfsresize pre-check failed. Run 'chkdsk' from Windows, then retry."
+    fi
+
+    read -p "Proceed with shrinking $target_part? [y/N]: " confirm
+    [[ "${confirm,,}" == "y" ]] || error "Aborted by user"
+
+    # Shrink NTFS filesystem
+    log "Shrinking NTFS on $target_part..."
+    ntfsresize --force --size "${new_size_bytes}" "$target_part"
+
+    # Shrink the partition entry to match
+    local part_num
+    part_num=$(echo "$target_part" | grep -oP '\d+$')
+    local part_start
+    part_start=$(parted -m "$device" unit B print 2>/dev/null | \
+        grep "^${part_num}:" | cut -d: -f2 | tr -d 'B')
+    local new_end=$(( part_start + new_size_bytes - 1 ))
+
+    log "Updating partition table..."
+    parted -s "$device" resizepart "$part_num" "${new_end}B"
+    partprobe "$device"
+    udevadm settle
+
+    log "Partition shrunk. Updated layout:"
+    show_disk_layout "$device"
+}
+
 # ========== INSTALLATION ==========
 
 partition_and_mount() {
@@ -1725,24 +1854,6 @@ partition_and_mount() {
 
     if [[ "$layout" == dual-boot-* ]]; then
         disko_args+=(--arg efiDevice "\"${CONFIG[efiPartition]}\"")
-
-        # Verify there is unallocated space for the new partition
-        local free_bytes
-        free_bytes=$(parted -s "${CONFIG[device]}" unit B print free 2>/dev/null | \
-            grep "Free Space" | tail -1 | awk '{print $3}' | tr -d 'B')
-        if [[ -z "$free_bytes" ]] || (( free_bytes < 10737418240 )); then
-            local free_gb=$(( ${free_bytes:-0} / 1073741824 ))
-            error "Not enough unallocated space on ${CONFIG[device]} (found ${free_gb}GB, need at least 10GB). Shrink the existing OS partition first."
-        fi
-        log "Unallocated space available: $(( free_bytes / 1073741824 ))GB"
-
-        # Warn if other OS may have been hibernated (Windows fast startup)
-        if lsblk -rn -o FSTYPE "${CONFIG[device]}" 2>/dev/null | grep -q "ntfs"; then
-            warn "NTFS partition detected — ensure the other OS was fully shut down."
-            warn "Windows fast startup leaves a hibernation file that may cause issues."
-            read -p "Continue anyway? [y/N]: " cont
-            [[ "${cont,,}" == "y" ]] || error "Aborted by user"
-        fi
 
         # Live environments often automount the EFI partition; unmount it first
         # or disko will fail with "can't open blockdev" (device already in use)
