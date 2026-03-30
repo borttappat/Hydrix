@@ -1717,8 +1717,13 @@ show_disk_layout() {
     printf "  %-18s %8s  %-6s  %s\n" "Partition" "Size" "Type" "Usage"
     printf "  %-18s %8s  %-6s  %s\n" "---------" "----" "----" "-----"
 
-    while read -r name size_bytes fstype; do
-        local devpath="/dev/$name" size_gb=$(( size_bytes / 1073741824 )) usage_str="-"
+    while IFS= read -r line; do
+        [[ "$line" != *'TYPE="part"'* ]] && continue
+        local name size_bytes fstype
+        name=$(grep -oP 'NAME="\K[^"]+' <<< "$line")
+        size_bytes=$(grep -oP 'SIZE="\K[^"]+' <<< "$line")
+        fstype=$(grep -oP 'FSTYPE="\K[^"]*' <<< "$line")
+        local devpath="/dev/$name" size_gb=$(( ${size_bytes:-0} / 1073741824 )) usage_str="-"
         if [[ "$fstype" == "ntfs" ]] && command -v ntfsresize &>/dev/null; then
             local used_pct
             used_pct=$(ntfsresize --info --force "$devpath" 2>&1 | \
@@ -1730,8 +1735,7 @@ show_disk_layout() {
             usage_str="[reserved]"
         fi
         printf "  %-18s %7dGB  %-6s  %s\n" "$devpath" "$size_gb" "${fstype:-?}" "$usage_str"
-    done < <(lsblk -rn -b -o NAME,SIZE,FSTYPE,TYPE "$device" 2>/dev/null | \
-        awk '$NF == "part" {print $1, $2, (NF==4 ? $3 : "")}')
+    done < <(lsblk -Pb -o NAME,SIZE,FSTYPE,TYPE "$device" 2>/dev/null)
 
     local free_bytes
     free_bytes=$(parted -s "$device" unit B print free 2>/dev/null | \
@@ -1775,12 +1779,16 @@ prepare_dual_boot_space() {
 
     # Find the largest NTFS partition as shrink target
     local target_part="" target_size_bytes=0
-    while read -r name size_bytes fstype; do
-        if [[ "$fstype" == "ntfs" ]] && (( size_bytes > target_size_bytes )); then
-            target_part="/dev/$name"; target_size_bytes="$size_bytes"
+    while IFS= read -r line; do
+        [[ "$line" != *'TYPE="part"'* ]] && continue
+        local name size_bytes fstype
+        name=$(grep -oP 'NAME="\K[^"]+' <<< "$line")
+        size_bytes=$(grep -oP 'SIZE="\K[^"]+' <<< "$line")
+        fstype=$(grep -oP 'FSTYPE="\K[^"]*' <<< "$line")
+        if [[ "$fstype" == "ntfs" ]] && (( ${size_bytes:-0} > target_size_bytes )); then
+            target_part="/dev/$name"; target_size_bytes="${size_bytes:-0}"
         fi
-    done < <(lsblk -rn -b -o NAME,SIZE,FSTYPE,TYPE "$device" 2>/dev/null | \
-        awk '$NF == "part" {print $1, $2, (NF==4 ? $3 : "")}')
+    done < <(lsblk -Pb -o NAME,SIZE,FSTYPE,TYPE "$device" 2>/dev/null)
 
     if [[ -z "$target_part" ]]; then
         error "No NTFS partition found to shrink. Resize manually (e.g. from Windows Disk Management) then re-run the installer."
