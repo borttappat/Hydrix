@@ -1711,31 +1711,40 @@ _usage_bar() {
 
 show_disk_layout() {
     local device="$1"
-    # parted -m: BYT; disk-line; part-lines (colon-delimited, always fixed fields)
-    local total_bytes
-    total_bytes=$(parted -m "$device" unit B print 2>/dev/null | \
-        awk -F: '/^\/dev\// {gsub("B","",$2); print $2}')
-    printf "\n  Disk: %s  (%dGB total)\n\n" "$device" "$(( ${total_bytes:-0} / 1073741824 ))"
+    local devname="${device##*/}"
+    local sector_size total_sectors
+    sector_size=$(cat "/sys/class/block/$devname/queue/logical_block_size" 2>/dev/null || echo 512)
+    total_sectors=$(cat "/sys/class/block/$devname/size" 2>/dev/null || echo 0)
+
+    printf "\n  Disk: %s  (%dGB total)\n\n" "$device" \
+        "$(( total_sectors * sector_size / 1073741824 ))"
     printf "  %-18s %8s  %-8s  %s\n" "Partition" "Size" "Type" "Usage"
     printf "  %-18s %8s  %-8s  %s\n" "---------" "----" "----" "-----"
 
-    while IFS=: read -r num start end size fstype name flags; do
-        [[ "$num" =~ ^[0-9]+$ ]] || continue
-        local devpath
-        [[ "$device" =~ [0-9]$ ]] && devpath="${device}p${num}" || devpath="${device}${num}"
-        local size_bytes="${size//B/}" size_gb=$(( ${size//B/} / 1073741824 )) usage_str="-"
+    for part_sys in "/sys/class/block/$devname/"/*/; do
+        local part_name="${part_sys%/}"; part_name="${part_name##*/}"
+        [[ "$part_name" == "${devname}"* ]] || continue
+        [[ -f "${part_sys}partition" ]] || continue
+        local devpath="/dev/$part_name"
+        local part_sectors
+        part_sectors=$(cat "${part_sys}size" 2>/dev/null || echo 0)
+        local size_bytes=$(( part_sectors * sector_size ))
+        local size_gb=$(( size_bytes / 1073741824 ))
+        local fstype
+        fstype=$(blkid -o value -s TYPE "$devpath" 2>/dev/null || echo "")
+        local usage_str="-"
         if [[ "$fstype" == "ntfs" ]] && command -v ntfsresize &>/dev/null; then
             local used_pct
             used_pct=$(ntfsresize --info --force "$devpath" 2>&1 | \
-                grep "Space in use" | grep -oP '\K[0-9]+(?=\.)' | head -1)
+                grep "Space in use" | sed 's/.*(\([0-9]*\)\..*/\1/')
             usage_str=$(_usage_bar "${used_pct:-0}")
-        elif [[ "$fstype" == fat* ]]; then
+        elif [[ "$fstype" == "vfat" ]]; then
             usage_str="[EFI / boot]"
         elif [[ -z "$fstype" ]]; then
             usage_str="[reserved]"
         fi
         printf "  %-18s %7dGB  %-8s  %s\n" "$devpath" "$size_gb" "${fstype:-?}" "$usage_str"
-    done < <(parted -m "$device" unit B print 2>/dev/null)
+    done
 
     local free_bytes
     free_bytes=$(parted -s "$device" unit B print free 2>/dev/null | \
@@ -1779,15 +1788,22 @@ prepare_dual_boot_space() {
 
     # Find the largest NTFS partition as shrink target
     local target_part="" target_size_bytes=0
-    while IFS=: read -r num start end size fstype name flags; do
-        [[ "$num" =~ ^[0-9]+$ ]] || continue
-        local devpath
-        [[ "$device" =~ [0-9]$ ]] && devpath="${device}p${num}" || devpath="${device}${num}"
-        local size_bytes="${size//B/}"
-        if [[ "$fstype" == "ntfs" ]] && (( ${size_bytes:-0} > target_size_bytes )); then
-            target_part="$devpath"; target_size_bytes="${size_bytes:-0}"
+    local devname="${device##*/}"
+    local sector_size
+    sector_size=$(cat "/sys/class/block/$devname/queue/logical_block_size" 2>/dev/null || echo 512)
+    for part_sys in "/sys/class/block/$devname/"/*/; do
+        local part_name="${part_sys%/}"; part_name="${part_name##*/}"
+        [[ "$part_name" == "${devname}"* ]] || continue
+        [[ -f "${part_sys}partition" ]] || continue
+        local devpath="/dev/$part_name"
+        local part_sectors size_bytes fstype
+        part_sectors=$(cat "${part_sys}size" 2>/dev/null || echo 0)
+        size_bytes=$(( part_sectors * sector_size ))
+        fstype=$(blkid -o value -s TYPE "$devpath" 2>/dev/null || echo "")
+        if [[ "$fstype" == "ntfs" ]] && (( size_bytes > target_size_bytes )); then
+            target_part="$devpath"; target_size_bytes="$size_bytes"
         fi
-    done < <(parted -m "$device" unit B print 2>/dev/null)
+    done
 
     if [[ -z "$target_part" ]]; then
         error "No NTFS partition found to shrink. Resize manually (e.g. from Windows Disk Management) then re-run the installer."
