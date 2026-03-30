@@ -370,7 +370,11 @@ in {
             read -r cmd
             case "$cmd" in
               cpu)
-                ${pkgs.gawk}/bin/awk '/^cpu / {usage=100-($5*100/($2+$3+$4+$5+$6+$7+$8))} END {printf "%.0f", usage}' /proc/stat
+                ${pkgs.gawk}/bin/awk '
+                  /^cpu / && !s1 { s1=$2+$3+$4+$5+$6+$7+$8; i1=$5; next }
+                  /^cpu / { s2=$2+$3+$4+$5+$6+$7+$8; i2=$5 }
+                  END { printf "%.0f", (s2-s1>0) ? 100-(i2-i1)*100/(s2-s1) : 0 }
+                ' /proc/stat <(${pkgs.coreutils}/bin/sleep 0.5; ${pkgs.coreutils}/bin/cat /proc/stat)
                 ;;
               ram)
                 ${pkgs.procps}/bin/free | ${pkgs.gawk}/bin/awk '/Mem:/ { printf "%.0f", $3/$2 * 100 }'
