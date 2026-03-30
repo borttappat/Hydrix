@@ -1895,7 +1895,7 @@ shrink_partition() {
     local new_end=$(( part_start + new_size_bytes - 1 ))
 
     log "Updating partition table..."
-    parted -s "$disk" resizepart "$part_num" "${new_end}B"
+    echo "Yes" | parted -s "$disk" resizepart "$part_num" "${new_end}B"
     partprobe "$disk"
     udevadm settle
 }
