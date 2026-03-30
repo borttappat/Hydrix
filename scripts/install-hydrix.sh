@@ -1751,7 +1751,7 @@ show_disk_layout() {
 
     local free_bytes
     free_bytes=$(parted -s "$device" unit B print free 2>/dev/null | \
-        grep "Free Space" | tail -1 | awk '{print $3}' | tr -d 'B')
+        grep "Free Space" | tail -1 | awk '{print $3}' | tr -d 'B') || true
     printf "\n  Unallocated: %dGB\n\n" "$(( ${free_bytes:-0} / 1073741824 ))"
 }
 
@@ -1777,7 +1777,7 @@ prepare_dual_boot_space() {
     # Check how much free space already exists
     local free_bytes
     free_bytes=$(parted -s "$device" unit B print free 2>/dev/null | \
-        grep "Free Space" | tail -1 | awk '{print $3}' | tr -d 'B')
+        grep "Free Space" | tail -1 | awk '{print $3}' | tr -d 'B') || true
     free_bytes="${free_bytes:-0}"
 
     if (( free_bytes >= nixos_bytes )); then
