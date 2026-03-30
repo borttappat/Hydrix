@@ -21,6 +21,7 @@
 #   └── shared/common.nix     # Shared settings (locale, timezone)
 
 set -euo pipefail
+trap 'echo "[ERR] Script exited unexpectedly at line $LINENO (exit $?)" >&2' ERR
 
 # When piped via curl | bash, redirect interactive reads to the terminal
 if [[ ! -t 0 ]] && [[ -e /dev/tty ]]; then
@@ -1795,18 +1796,25 @@ prepare_dual_boot_space() {
     log "Need to free ${needed_gb}GB more by shrinking an existing partition"
 
     # Find the largest non-EFI, non-swap partition as shrink target
-    # Use lsblk -rn -b for reliable output in all live environments
     local target_part="" target_size_bytes=0
+    log "[DEBUG] Scanning partitions on $device (EFI=${CONFIG[efiPartition]}):"
     while read -r pname psize; do
         local devpath="/dev/$pname"
-        [[ "$devpath" == "${CONFIG[efiPartition]}" ]] && continue
+        log "[DEBUG]  $devpath ($psize bytes)"
+        if [[ "$devpath" == "${CONFIG[efiPartition]}" ]]; then
+            log "[DEBUG]   → skipped (EFI)"; continue
+        fi
         local fstype
         fstype=$(blkid -o value -s TYPE "$devpath" 2>/dev/null || true)
-        [[ "$fstype" == "swap" ]] && continue
+        if [[ "$fstype" == "swap" ]]; then
+            log "[DEBUG]   → skipped (swap)"; continue
+        fi
         if (( psize > target_size_bytes )); then
             target_part="$devpath"; target_size_bytes="$psize"
+            log "[DEBUG]   → new best candidate"
         fi
     done < <(lsblk -rn -b -o NAME,SIZE "$device" 2>/dev/null | awk 'NR>1 {print $1, $2}')
+    log "[DEBUG] Scan done, target: ${target_part:-NONE}"
 
     if [[ -z "$target_part" ]]; then
         error "No suitable partition found to shrink on $device."
