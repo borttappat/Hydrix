@@ -258,7 +258,7 @@ in {
         # colors-runtime.toml (written by write-alacritty-colors on vsock push)
         alacritty.enable = !vmColorsEnabled;
         bat.enable = true;
-        btop.enable = true;
+        btop.enable = false;
         cava.enable = true;
         feh.enable = true;
         firefox = { enable = true; profileNames = [ "default" ]; };

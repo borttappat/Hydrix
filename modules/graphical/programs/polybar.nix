@@ -1406,7 +1406,7 @@ ${workspaceDescCases}
     ; Order: PWR BAT TTL gap RPROC CPROC | RAM CPU gap DEV STG FS gap TUN gap UP
     modules-left = power-profile-dynamic battery-dynamic battery-time-dynamic spacer rproc-dynamic cproc-dynamic
     modules-center =
-    modules-right = rproc-bottom cproc-bottom vm-ram-bottom vm-cpu-bottom spacer vm-sync-dev-bottom vm-sync-stg-bottom vm-fs-bottom spacer vm-tun-bottom spacer vm-up-bottom
+    modules-right = rproc-bottom cproc-bottom vm-ram-bottom vm-cpu-bottom spacer vm-sync-dev-bottom vm-sync-stg-bottom vm-fs-bottom spacer vm-tun-bottom vm-up-bottom
 
     override-redirect = ${if floatingBar then "true" else "false"}
     wm-restack = i3
