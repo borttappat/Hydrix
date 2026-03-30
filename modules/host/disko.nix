@@ -130,31 +130,24 @@ in {
 
       # =========================================================================
       # DUAL BOOT LUKS (preserve existing EFI)
+      # The installer pre-creates the NixOS partition; disko formats it directly
+      # without touching the partition table (no sgdisk --clear).
       # =========================================================================
       (lib.mkIf (diskoCfg.layout == "dual-boot-luks") {
-        disk.main = {
+        disk.nixos = {
           type = "disk";
-          device = diskoCfg.device;
+          device = diskoCfg.nixosPartition;
           content = {
-            type = "gpt";
-            partitions = {
-              # Don't create ESP - use existing one
-              luks = {
-                size = "100%";
-                content = {
-                  type = "luks";
-                  name = "cryptroot";
-                  settings = {
-                    allowDiscards = true;
-                    bypassWorkqueues = true;
-                  };
-                  content = {
-                    type = "btrfs";
-                    extraArgs = [ "-f" "-L" "nixos" ];
-                    subvolumes = commonSubvolumes;
-                  };
-                };
-              };
+            type = "luks";
+            name = "cryptroot";
+            settings = {
+              allowDiscards = true;
+              bypassWorkqueues = true;
+            };
+            content = {
+              type = "btrfs";
+              extraArgs = [ "-f" "-L" "nixos" ];
+              subvolumes = commonSubvolumes;
             };
           };
         };
@@ -164,25 +157,25 @@ in {
       # DUAL BOOT PLAIN (preserve existing EFI, no encryption)
       # =========================================================================
       (lib.mkIf (diskoCfg.layout == "dual-boot-plain") {
-        disk.main = {
+        disk.nixos = {
           type = "disk";
-          device = diskoCfg.device;
+          device = diskoCfg.nixosPartition;
           content = {
-            type = "gpt";
-            partitions = {
-              root = {
-                size = "100%";
-                content = {
-                  type = "btrfs";
-                  extraArgs = [ "-f" "-L" "nixos" ];
-                  subvolumes = commonSubvolumes;
-                };
-              };
-            };
+            type = "btrfs";
+            extraArgs = [ "-f" "-L" "nixos" ];
+            subvolumes = commonSubvolumes;
           };
         };
       })
     ];
+
+    # For dual-boot, /boot is the reused EFI partition; declare it explicitly
+    # since disko doesn't manage it (we avoid nodev to prevent automount conflicts).
+    fileSystems."/boot" = lib.mkIf (lib.hasPrefix "dual-boot" diskoCfg.layout) {
+      device = diskoCfg.efiPartition;
+      fsType = "vfat";
+      options = [ "defaults" "umask=0077" ];
+    };
 
     # Boot loader config
     boot.loader = {

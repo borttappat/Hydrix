@@ -152,6 +152,7 @@ declare -A CONFIG=(
     [swapSize]="16G"
     [diskPassword]=""
     [efiPartition]=""
+    [nixosPartition]=""
     [timezone]="Europe/Stockholm"
     [locale]="en_US.UTF-8"
     [consoleKeymap]="us"
@@ -1688,6 +1689,8 @@ generate_machine_nix() {
         -e "s|@DEVICE@|${CONFIG[device]}|g" \
         -e "s|@SWAP_SIZE@|${CONFIG[swapSize]}|g" \
         -e "s|@LAYOUT@|${CONFIG[layout]}|g" \
+        -e "s|@EFI_PARTITION@|${CONFIG[efiPartition]}|g" \
+        -e "s|@NIXOS_PARTITION@|${CONFIG[nixosPartition]}|g" \
         -e "s|@ROUTER_TYPE@|${CONFIG[routerType]}|g" \
         -e "s|@PLATFORM@|${CONFIG[platform]}|g" \
         -e "s|@IS_ASUS@|${CONFIG[isAsus]}|g" \
@@ -1779,6 +1782,7 @@ prepare_dual_boot_space() {
 
     if (( free_bytes >= nixos_bytes )); then
         log "$(( free_bytes / 1073741824 ))GB already unallocated — no shrinking needed"
+        _create_nixos_partition "$device" "$devname" "$sector_size"
         return
     fi
 
@@ -1828,6 +1832,46 @@ prepare_dual_boot_space() {
 
     log "Partition shrunk. Updated layout:"
     show_disk_layout "$device"
+
+    _create_nixos_partition "$device" "$devname" "$sector_size"
+}
+
+# Create a new partition using all remaining free space and store its path in CONFIG.
+_create_nixos_partition() {
+    local device="$1" devname="$2" sector_size="$3"
+
+    # Snapshot existing partitions so we can identify the new one after creation
+    local -A before=()
+    for part_sys in "/sys/class/block/$devname/"/*/; do
+        local pname="${part_sys%/}"; pname="${pname##*/}"
+        [[ "$pname" == "${devname}"* ]] || continue
+        [[ -f "${part_sys}partition" ]] || continue
+        before["/dev/$pname"]=1
+    done
+
+    log "Creating NixOS partition in free space..."
+    printf ",\n" | sfdisk --no-reread -a "$device"
+    partprobe "$device"
+    udevadm settle
+
+    # Find the newly created partition
+    local nixos_part=""
+    for part_sys in "/sys/class/block/$devname/"/*/; do
+        local pname="${part_sys%/}"; pname="${pname##*/}"
+        [[ "$pname" == "${devname}"* ]] || continue
+        [[ -f "${part_sys}partition" ]] || continue
+        local devpath="/dev/$pname"
+        [[ -n "${before[$devpath]:-}" ]] && continue
+        nixos_part="$devpath"
+        break
+    done
+
+    if [[ -z "$nixos_part" ]]; then
+        error "Failed to detect newly created NixOS partition on $device"
+    fi
+
+    CONFIG[nixosPartition]="$nixos_part"
+    log "NixOS partition: $nixos_part"
 }
 
 # Shrink a partition and its filesystem in-place.
@@ -1926,21 +1970,26 @@ partition_and_mount() {
     )
 
     if [[ "$layout" == dual-boot-* ]]; then
-        disko_args+=(--arg efiDevice "\"${CONFIG[efiPartition]}\"")
+        disko_args+=(--arg nixosPartition "\"${CONFIG[nixosPartition]}\"")
 
-        # Live environments often automount the EFI partition; unmount it first
-        # or disko will fail with "can't open blockdev" (device already in use)
-        local efi_mount
-        efi_mount=$(findmnt -n -o TARGET "${CONFIG[efiPartition]}" 2>/dev/null || true)
-        if [[ -n "$efi_mount" ]]; then
-            log "Unmounting ${CONFIG[efiPartition]} (currently at $efi_mount)..."
-            umount "${CONFIG[efiPartition]}"
-        fi
+        # Stop udisks2 automounter so it can't re-mount the EFI partition
+        # between our unmount and disko's mount step
+        systemctl stop udisks2.service 2>/dev/null || true
+        umount "${CONFIG[efiPartition]}" 2>/dev/null || true
     fi
 
-    # Run disko
+    # Run disko (formats and mounts the NixOS partition only)
     log "Running disko..."
     nix run github:nix-community/disko -- --mode disko "${disko_args[@]}" "$disko_file"
+
+    if [[ "$layout" == dual-boot-* ]]; then
+        # Mount the existing EFI partition at /mnt/boot manually.
+        # Disko does not manage it to avoid automount conflicts during install.
+        log "Mounting EFI partition at /mnt/boot..."
+        mkdir -p /mnt/boot
+        mount -t vfat -o defaults,umask=0077 "${CONFIG[efiPartition]}" /mnt/boot
+        systemctl start udisks2.service 2>/dev/null || true
+    fi
 
     # Clean up LUKS password
     if [[ -f /tmp/luks-password ]]; then

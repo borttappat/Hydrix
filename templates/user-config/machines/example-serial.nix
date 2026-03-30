@@ -140,6 +140,12 @@
       # └─────────────────────┴──────────────────────────────────────────────┘
       # LUKS password is prompted interactively at install — never stored here.
       layout = "full-disk-plain";
+
+      # Dual-boot only: set by the installer, do not edit manually.
+      # nixosPartition is the pre-created NixOS partition disko will format.
+      # efiPartition is the existing Windows/Linux EFI partition to reuse for /boot.
+      # nixosPartition = "";
+      # efiPartition = "";
     };
 
     # ─────────────────────────────────────────────────────────────────────

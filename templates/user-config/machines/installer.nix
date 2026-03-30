@@ -47,6 +47,8 @@
       device = "@DEVICE@";
       swapSize = "@SWAP_SIZE@";
       layout = "@LAYOUT@";
+      nixosPartition = "@NIXOS_PARTITION@";
+      efiPartition = "@EFI_PARTITION@";
     };
 
     router = {

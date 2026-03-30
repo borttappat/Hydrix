@@ -558,6 +558,20 @@ in {
         '';
       };
 
+      nixosPartition = lib.mkOption {
+        type = lib.types.str;
+        default = "";
+        description = "Pre-created NixOS partition device path (dual-boot only, set by installer)";
+        example = "/dev/nvme0n1p3";
+      };
+
+      efiPartition = lib.mkOption {
+        type = lib.types.str;
+        default = "";
+        description = "Existing EFI partition to reuse (dual-boot only)";
+        example = "/dev/nvme0n1p1";
+      };
+
       # Note: LUKS password is prompted at install time and written to /tmp/luks-password
       # It is NEVER stored in the declarative config for security reasons.
     };
