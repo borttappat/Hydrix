@@ -75,6 +75,11 @@ in {
       default = [];
       description = "Additional repos (for site-specific modules to add repos without overriding)";
     };
+    secrets.github = lib.mkOption {
+      type = lib.types.bool;
+      default = false;
+      description = "Mount GitHub SSH key from host secrets (requires host secrets.github provisioning)";
+    };
   };
 
   config = {
@@ -106,12 +111,18 @@ in {
       ];
 
       # ===== Shared Filesystems =====
-      shares = map (repo: {
+      shares = (map (repo: {
         tag = "repo-${repo.name}";
         source = repo.source;
         mountPoint = "/mnt/repos/${repo.name}";
         proto = "virtiofs";
-      }) repos;
+      }) repos) ++ lib.optionals config.hydrix.gitsync.secrets.github [{
+        tag = "vm-secrets";
+        source = "/run/hydrix-secrets/${vmName}";
+        mountPoint = "/mnt/vm-secrets";
+        proto = "virtiofs";
+        readOnly = true;
+      }];
 
       # Persistent volume for gh auth token
       volumes = [{
@@ -190,6 +201,8 @@ in {
     environment.etc."gitconfig".text = ''
       [safe]
     ${safeDirectories}
+      [url "git@github.com:"]
+        insteadOf = https://github.com/
     '';
 
     # ===== Persistent auth directory =====
@@ -215,8 +228,28 @@ in {
         ln -sfn /var/lib/gitsync/gh-config /home/gitsync/.config/gh
         chown -R gitsync:users /home/gitsync/.config
 
-        # Link SSH config
+        # Link SSH dir
         ln -sfn /var/lib/gitsync/ssh /home/gitsync/.ssh
+
+        # Copy GitHub SSH keys from host secrets virtiofs share
+        if [ -f "/mnt/vm-secrets/ssh/id_ed25519" ]; then
+          cp /mnt/vm-secrets/ssh/id_ed25519 /var/lib/gitsync/ssh/
+          chmod 600 /var/lib/gitsync/ssh/id_ed25519
+        fi
+        if [ -f "/mnt/vm-secrets/ssh/id_ed25519.pub" ]; then
+          cp /mnt/vm-secrets/ssh/id_ed25519.pub /var/lib/gitsync/ssh/
+          chmod 644 /var/lib/gitsync/ssh/id_ed25519.pub
+        fi
+
+        # Write SSH config so git uses the provisioned key for GitHub
+        cat > /var/lib/gitsync/ssh/config << 'SSHEOF'
+        Host github.com
+          User git
+          IdentityFile ~/.ssh/id_ed25519
+          StrictHostKeyChecking accept-new
+        SSHEOF
+        chmod 600 /var/lib/gitsync/ssh/config
+
         chown -R gitsync:users /var/lib/gitsync/gh-config
         chown -R gitsync:users /var/lib/gitsync/ssh
       '';

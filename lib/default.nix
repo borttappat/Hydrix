@@ -206,6 +206,7 @@ in {
     hostUsername,
     repos ? [],
     modules ? [],
+    enableGithubSecrets ? false,
   }: nixpkgs.lib.nixosSystem {
     inherit system;
     modules = [
@@ -218,6 +219,7 @@ in {
         networking.hostName = "microvm-gitsync";
         hydrix.gitsync.hostUsername = hostUsername;
         hydrix.gitsync.repos = repos;
+        hydrix.gitsync.secrets.github = enableGithubSecrets;
       }
     ] ++ modules;
   };
