@@ -1711,31 +1711,31 @@ _usage_bar() {
 
 show_disk_layout() {
     local device="$1"
+    # parted -m: BYT; disk-line; part-lines (colon-delimited, always fixed fields)
     local total_bytes
-    total_bytes=$(lsblk -rn -b -d -o SIZE "$device" 2>/dev/null)
-    printf "\n  Disk: %s  (%dGB total)\n\n" "$device" "$(( total_bytes / 1073741824 ))"
-    printf "  %-18s %8s  %-6s  %s\n" "Partition" "Size" "Type" "Usage"
-    printf "  %-18s %8s  %-6s  %s\n" "---------" "----" "----" "-----"
+    total_bytes=$(parted -m "$device" unit B print 2>/dev/null | \
+        awk -F: '/^\/dev\// {gsub("B","",$2); print $2}')
+    printf "\n  Disk: %s  (%dGB total)\n\n" "$device" "$(( ${total_bytes:-0} / 1073741824 ))"
+    printf "  %-18s %8s  %-8s  %s\n" "Partition" "Size" "Type" "Usage"
+    printf "  %-18s %8s  %-8s  %s\n" "---------" "----" "----" "-----"
 
-    while IFS= read -r line; do
-        [[ "$line" != *'TYPE="part"'* ]] && continue
-        local name size_bytes fstype
-        name=$(grep -oP 'NAME="\K[^"]+' <<< "$line")
-        size_bytes=$(grep -oP 'SIZE="\K[^"]+' <<< "$line")
-        fstype=$(grep -oP 'FSTYPE="\K[^"]*' <<< "$line")
-        local devpath="/dev/$name" size_gb=$(( ${size_bytes:-0} / 1073741824 )) usage_str="-"
+    while IFS=: read -r num start end size fstype name flags; do
+        [[ "$num" =~ ^[0-9]+$ ]] || continue
+        local devpath
+        [[ "$device" =~ [0-9]$ ]] && devpath="${device}p${num}" || devpath="${device}${num}"
+        local size_bytes="${size//B/}" size_gb=$(( ${size//B/} / 1073741824 )) usage_str="-"
         if [[ "$fstype" == "ntfs" ]] && command -v ntfsresize &>/dev/null; then
             local used_pct
             used_pct=$(ntfsresize --info --force "$devpath" 2>&1 | \
                 grep "Space in use" | grep -oP '\K[0-9]+(?=\.)' | head -1)
             usage_str=$(_usage_bar "${used_pct:-0}")
-        elif [[ "$fstype" == "vfat" ]]; then
+        elif [[ "$fstype" == fat* ]]; then
             usage_str="[EFI / boot]"
         elif [[ -z "$fstype" ]]; then
             usage_str="[reserved]"
         fi
-        printf "  %-18s %7dGB  %-6s  %s\n" "$devpath" "$size_gb" "${fstype:-?}" "$usage_str"
-    done < <(lsblk -Pb -o NAME,SIZE,FSTYPE,TYPE "$device" 2>/dev/null)
+        printf "  %-18s %7dGB  %-8s  %s\n" "$devpath" "$size_gb" "${fstype:-?}" "$usage_str"
+    done < <(parted -m "$device" unit B print 2>/dev/null)
 
     local free_bytes
     free_bytes=$(parted -s "$device" unit B print free 2>/dev/null | \
@@ -1779,16 +1779,15 @@ prepare_dual_boot_space() {
 
     # Find the largest NTFS partition as shrink target
     local target_part="" target_size_bytes=0
-    while IFS= read -r line; do
-        [[ "$line" != *'TYPE="part"'* ]] && continue
-        local name size_bytes fstype
-        name=$(grep -oP 'NAME="\K[^"]+' <<< "$line")
-        size_bytes=$(grep -oP 'SIZE="\K[^"]+' <<< "$line")
-        fstype=$(grep -oP 'FSTYPE="\K[^"]*' <<< "$line")
+    while IFS=: read -r num start end size fstype name flags; do
+        [[ "$num" =~ ^[0-9]+$ ]] || continue
+        local devpath
+        [[ "$device" =~ [0-9]$ ]] && devpath="${device}p${num}" || devpath="${device}${num}"
+        local size_bytes="${size//B/}"
         if [[ "$fstype" == "ntfs" ]] && (( ${size_bytes:-0} > target_size_bytes )); then
-            target_part="/dev/$name"; target_size_bytes="${size_bytes:-0}"
+            target_part="$devpath"; target_size_bytes="${size_bytes:-0}"
         fi
-    done < <(lsblk -Pb -o NAME,SIZE,FSTYPE,TYPE "$device" 2>/dev/null)
+    done < <(parted -m "$device" unit B print 2>/dev/null)
 
     if [[ -z "$target_part" ]]; then
         error "No NTFS partition found to shrink. Resize manually (e.g. from Windows Disk Management) then re-run the installer."
