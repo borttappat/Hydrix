@@ -1791,25 +1791,21 @@ prepare_dual_boot_space() {
     log "Need to free ${needed_gb}GB more by shrinking an existing partition"
 
     # Find the largest non-EFI, non-swap partition as shrink target
+    # Use lsblk -rn -b for reliable output in all live environments
     local target_part="" target_size_bytes=0
     local devname="${device##*/}"
     local sector_size
     sector_size=$(cat "/sys/class/block/$devname/queue/logical_block_size" 2>/dev/null || echo 512)
-    for part_sys in "/sys/class/block/$devname/"/*/; do
-        local part_name="${part_sys%/}"; part_name="${part_name##*/}"
-        [[ "$part_name" == "${devname}"* ]] || continue
-        [[ -f "${part_sys}partition" ]] || continue
-        local devpath="/dev/$part_name"
+    while read -r pname psize; do
+        local devpath="/dev/$pname"
         [[ "$devpath" == "${CONFIG[efiPartition]}" ]] && continue
-        local part_sectors size_bytes fstype
-        part_sectors=$(cat "${part_sys}size" 2>/dev/null || echo 0)
-        size_bytes=$(( part_sectors * sector_size ))
-        fstype=$(blkid -o value -s TYPE "$devpath" 2>/dev/null || echo "")
+        local fstype
+        fstype=$(blkid -o value -s TYPE "$devpath" 2>/dev/null || true)
         [[ "$fstype" == "swap" ]] && continue
-        if (( size_bytes > target_size_bytes )); then
-            target_part="$devpath"; target_size_bytes="$size_bytes"
+        if (( psize > target_size_bytes )); then
+            target_part="$devpath"; target_size_bytes="$psize"
         fi
-    done
+    done < <(lsblk -rn -b -o NAME,SIZE "$device" 2>/dev/null | awk 'NR>1 {print $1, $2}')
 
     if [[ -z "$target_part" ]]; then
         error "No suitable partition found to shrink on $device."
