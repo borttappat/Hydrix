@@ -257,6 +257,7 @@ in {
           source = "/home/${config.hydrix.username}/.config/hydrix";
           mountPoint = "/mnt/hydrix-config";
           proto = "virtiofs";
+          readOnly = true;
         }
       ] ++ lib.optionals (config.hydrix.microvm.persistence.hostPersist && config.hydrix.vmType != "") [
         # Host persist directory (read-only access)
@@ -268,6 +269,7 @@ in {
           source = "/home/${config.hydrix.username}/persist/${config.hydrix.vmType}";
           mountPoint = "/mnt/vm-persist";
           proto = "9p";
+          readOnly = true;
         }
       ] ++ lib.optionals config.hydrix.microvm.shareStore [
         # Share host /nix/store via virtiofs (read-only base)
@@ -277,6 +279,7 @@ in {
           source = "/nix/store";
           mountPoint = "/nix/.ro-store";
           proto = "virtiofs";
+          readOnly = true;
         }
       ] ++ lib.optionals config.hydrix.microvm.secrets.github [
         # Host secrets directory (provisioned by host-side hydrix-secrets service)
@@ -286,7 +289,7 @@ in {
           source = "/run/hydrix-secrets/${vmName}";
           mountPoint = "/mnt/vm-secrets";
           proto = "virtiofs";
-          # microvm.nix manages virtiofsd; socket is placed in working dir by default
+          readOnly = true;
         }
       ];
 

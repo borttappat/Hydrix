@@ -173,6 +173,10 @@ let
     "microvm-dev" = 103;
     "microvm-comms" = 104;
     "microvm-lurking" = 105;
+    # Task pentest slots
+    "microvm-pentest-task1" = 115;
+    "microvm-pentest-task2" = 116;
+    "microvm-pentest-task3" = 117;
   };
 
 in {
@@ -611,6 +615,7 @@ if __name__ == "__main__":
         source = "/home/${username}/.cache/wal";
         mountPoint = "/mnt/wal-cache";
         proto = "virtiofs";
+        readOnly = true;
       }];
     } else {})
 
