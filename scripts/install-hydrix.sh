@@ -1931,7 +1931,7 @@ partition_and_mount() {
         # Live environments often automount the EFI partition; unmount it first
         # or disko will fail with "can't open blockdev" (device already in use)
         local efi_mount
-        efi_mount=$(findmnt -n -o TARGET "${CONFIG[efiPartition]}" 2>/dev/null)
+        efi_mount=$(findmnt -n -o TARGET "${CONFIG[efiPartition]}" 2>/dev/null || true)
         if [[ -n "$efi_mount" ]]; then
             log "Unmounting ${CONFIG[efiPartition]} (currently at $efi_mount)..."
             umount "${CONFIG[efiPartition]}"
