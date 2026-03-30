@@ -9,7 +9,7 @@
 #   - System service (not user service) for faster startup
 #   - Runs as the configured user to access their home directory
 #   - Uses vsock port 14500 for host connections
-#   - PNG encoding for lossless compressed output (lower memory than raw RGB)
+#   - RGB encoding (no compression) — vsock is local kernel transport, bandwidth is free
 #
 { config, pkgs, lib, ... }:
 
@@ -61,12 +61,11 @@ in {
         "--start-new-commands=yes"
         "--vsock-auth=none"
         "--sharing=yes"
-        # Quality settings - lossless but compressed to reduce memory/CPU
-        "--encoding=png"
-        "--quality=100"
-        "--min-quality=90"
-        "--speed=50"
-        "--min-speed=30"
+        # Encoding: rgb = zero compression, zero CPU overhead
+        # vsock is a local kernel transport — bandwidth is free, compression is pure waste
+        "--encoding=rgb"
+        "--speed=100"        # Fastest encoding path
+        "--video=no"         # No software video codecs — high CPU, unnecessary for local vsock
         # Audio forwarding
         "--pulseaudio=yes"
         "--speaker=yes"
@@ -75,7 +74,6 @@ in {
         "--modal-windows=yes"
         "--input-method=none"
         "--systemd-run=no"
-        "--video=auto"  # Allow video codecs for dynamic content (scrolling, etc.)
         "--sync-xvfb=auto"
       ]);
       Restart = "always";

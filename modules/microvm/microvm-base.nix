@@ -231,7 +231,7 @@ in {
 
       # ===== Virtiofs tuning =====
       # Default spawns `nproc` threads per share — wasteful when idle
-      virtiofsd.threadPoolSize = 4;
+      virtiofsd.threadPoolSize = 2;
 
       # Disable graphics for headless operation (serial console only)
       graphics.enable = false;
