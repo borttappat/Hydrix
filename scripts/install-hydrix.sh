@@ -1886,16 +1886,14 @@ shrink_partition() {
 
     [[ -n "$luks_name" ]] && cryptsetup close "$luks_name"
 
-    # Resize the partition entry to match
+    # Resize the partition entry to match using sfdisk.
+    # sfdisk reads confirmation from stdin; a pipe bypasses the prompt entirely.
     local part_name="${devpath##*/}"
     local part_num="${part_name##*[!0-9]}"
-    local part_start_sector
-    part_start_sector=$(cat "/sys/class/block/$part_name/start" 2>/dev/null || echo 0)
-    local part_start=$(( part_start_sector * sector_size ))
-    local new_end=$(( part_start + new_size_bytes - 1 ))
+    local new_size_sectors=$(( new_size_bytes / sector_size ))
 
     log "Updating partition table..."
-    echo "Yes" | parted -s "$disk" resizepart "$part_num" "${new_end}B"
+    printf ",%s\n" "$new_size_sectors" | sfdisk --no-reread -N "$part_num" "$disk"
     partprobe "$disk"
     udevadm settle
 }
