@@ -62,21 +62,10 @@ in {
         "--vsock-auth=none"
         "--sharing=yes"
         # Encoding: rgb = zero compression, zero CPU overhead
-        # vsock is a local kernel transport — bandwidth is free, compression is pure waste.
-        #
-        # IMPORTANT: --min-quality=1 is required alongside --encoding=rgb.
-        # Without it, xpra's lossless threshold heuristic (base=64) detects "static"
-        # content and overrides encoding=rgb with png regardless of the flag.
-        # Keeping quality below 64 prevents the lossless path from activating.
+        # vsock is a local kernel transport — bandwidth is free, compression is pure waste
         "--encoding=rgb"
-        "--min-quality=1"          # Prevent lossless threshold from overriding encoding=rgb
         "--speed=100"              # Fastest encoding path
-        "--max-fps=30"             # Cap encode rate — Firefox software WebRender ticks
-                                   # continuously even on blank pages, generating damage
-                                   # events at display refresh rate. Cap limits encoding
-                                   # CPU regardless of what the browser compositor does.
         "--auto-refresh-delay=0"   # Disable periodic full-screen lossless PNG refreshes
-        "--sync-xvfb=0"            # Rely on X11 damage events only, no periodic Xvfb polling
         "--video=no"               # No software video codecs — high CPU, unnecessary for local vsock
         # Audio forwarding
         "--pulseaudio=yes"
@@ -86,6 +75,7 @@ in {
         "--modal-windows=yes"
         "--input-method=none"
         "--systemd-run=no"
+        "--sync-xvfb=auto"
       ]);
       Restart = "always";
       RestartSec = 2;
