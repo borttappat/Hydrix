@@ -1843,7 +1843,7 @@ shrink_partition() {
     if [[ "$fstype" == "crypto_LUKS" ]]; then
         luks_name="hydrix-resize-$$"
         log "Opening LUKS container on $devpath..."
-        cryptsetup open "$devpath" "$luks_name"
+        cryptsetup open "$devpath" "$luks_name" </dev/tty
         inner_dev="/dev/mapper/$luks_name"
         fstype=$(blkid -o value -s TYPE "$inner_dev" 2>/dev/null || echo "")
         log "Inner filesystem: $fstype"
