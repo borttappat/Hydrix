@@ -93,7 +93,7 @@ let
         location: north;
         anchor: north;
         y-offset: 15%;
-        width: 250px;
+        width: 500px;
         background-color: @bg;
         border: 0px;
         border-radius: ''${corner_radius}px;
