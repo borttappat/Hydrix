@@ -49,6 +49,7 @@
       layout = "@LAYOUT@";
       nixosPartition = "@NIXOS_PARTITION@";
       efiPartition = "@EFI_PARTITION@";
+      grubExtraEntries = "@GRUB_EXTRA_ENTRIES@";
     };
 
     router = {

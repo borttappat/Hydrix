@@ -572,6 +572,12 @@ in {
         example = "/dev/nvme0n1p1";
       };
 
+      grubExtraEntries = lib.mkOption {
+        type = lib.types.str;
+        default = "";
+        description = "Extra GRUB menu entries for booting existing OS installs (set by installer for dual-boot)";
+      };
+
       # Note: LUKS password is prompted at install time and written to /tmp/luks-password
       # It is NEVER stored in the declarative config for security reasons.
     };

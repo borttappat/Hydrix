@@ -154,6 +154,7 @@ declare -A CONFIG=(
     [diskPassword]=""
     [efiPartition]=""
     [nixosPartition]=""
+    [grubExtraEntries]=""
     [timezone]="Europe/Stockholm"
     [locale]="en_US.UTF-8"
     [consoleKeymap]="us"
@@ -1068,6 +1069,65 @@ select_layout() {
 
         # Show disk layout and offer to shrink an existing partition if needed
         prepare_dual_boot_space
+
+        # After partition creation, generate GRUB menu entries for any remaining
+        # encrypted partitions (other OS installs the user may want to boot into).
+        _detect_existing_os_entries
+    fi
+}
+
+# Scan for LUKS partitions that are neither the new NixOS partition nor the EFI
+# partition, and generate GRUB cryptomount+configfile stanzas for them.
+# Works for any OS that had GRUB installed (NixOS, Ubuntu, Fedora, etc.).
+_detect_existing_os_entries() {
+    local device="${CONFIG[device]}"
+    local devname="${device##*/}"
+    local sector_size
+    sector_size=$(cat "/sys/class/block/$devname/queue/logical_block_size" 2>/dev/null || echo 512)
+
+    local entries=""
+    for part_sys in "/sys/class/block/$devname/"/*/; do
+        local part_name="${part_sys%/}"; part_name="${part_name##*/}"
+        [[ "$part_name" == "${devname}"* ]] || continue
+        [[ -f "${part_sys}partition" ]] || continue
+        local devpath="/dev/$part_name"
+        [[ -b "$devpath" ]] || continue
+        # Skip the partitions we just created
+        [[ "$devpath" == "${CONFIG[nixosPartition]}" ]] && continue
+        [[ "$devpath" == "${CONFIG[efiPartition]}" ]] && continue
+
+        local fstype
+        fstype=$(timeout 5 blkid -o value -s TYPE "$devpath" 2>/dev/null || true)
+        [[ "$fstype" == "crypto_LUKS" ]] || continue
+
+        # Get LUKS UUID without dashes (GRUB cryptomount -u format)
+        local uuid uuid_nodash
+        uuid=$(timeout 5 blkid -o value -s UUID "$devpath" 2>/dev/null || true)
+        [[ -z "$uuid" ]] && continue
+        uuid_nodash="${uuid//-/}"
+
+        local part_sectors size_gb
+        part_sectors=$(cat "${part_sys}size" 2>/dev/null || echo 0)
+        size_gb=$(( part_sectors * sector_size / 1073741824 ))
+
+        log "Found existing encrypted partition: $devpath ($size_gb GB, UUID $uuid)"
+
+        entries+="menuentry \"Existing OS ($devpath)\" {\n"
+        entries+="  insmod part_gpt\n"
+        entries+="  insmod cryptodisk\n"
+        entries+="  insmod luks2\n"
+        entries+="  insmod btrfs\n"
+        entries+="  insmod ext2\n"
+        entries+="  cryptomount -u $uuid_nodash\n"
+        entries+="  configfile (crypto0)/boot/grub/grub.cfg\n"
+        entries+="}\n"
+    done
+
+    if [[ -n "$entries" ]]; then
+        # Escape the entries for sed substitution (convert \n literals to real newlines
+        # via printf so the Nix string contains actual newlines)
+        CONFIG[grubExtraEntries]="$(printf '%b' "$entries")"
+        log "Generated GRUB entries for existing encrypted partitions"
     fi
 }
 
@@ -1696,6 +1756,8 @@ generate_machine_nix() {
         error "Machine installer template not found: $template_file"
     fi
 
+    # First pass: single-line substitutions via sed
+    # Second pass: grubExtraEntries via awk (supports multiline content)
     sed \
         -e "s|@SERIAL@|${CONFIG[serial]}|g" \
         -e "s|@DATE@|${gen_date}|g" \
@@ -1713,7 +1775,10 @@ generate_machine_nix() {
         -e "s|@WIFI_PCI_ID@|${CONFIG[wifiPciId]}|g" \
         -e "s|@WIFI_PCI_ADDRESS@|${CONFIG[wifiPciAddress]}|g" \
         -e "s|@GRUB_GFXMODE@|${CONFIG[grubGfxmode]}|g" \
-        "$template_file" > "$config_dir/machines/${CONFIG[serial]}.nix"
+        "$template_file" \
+    | awk -v entries="${CONFIG[grubExtraEntries]}" \
+        '{ gsub(/@GRUB_EXTRA_ENTRIES@/, entries); print }' \
+    > "$config_dir/machines/${CONFIG[serial]}.nix"
 
     log "Generated: $config_dir/machines/${CONFIG[serial]}.nix"
 }
