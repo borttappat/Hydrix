@@ -2074,7 +2074,11 @@ shrink_partition() {
     local devpath="$1" new_size_bytes="$2" disk="$3" sector_size="$4"
 
     local fstype
-    fstype=$(timeout 5 blkid -o value -s TYPE "$devpath" 2>/dev/null || true)
+    fstype=$(timeout 10 blkid -o value -s TYPE "$devpath" 2>/dev/null || true)
+    # Fallback: lsblk if blkid returned empty (e.g. timed out on LUKS2 probe)
+    if [[ -z "$fstype" ]]; then
+        fstype=$(lsblk -no FSTYPE "$devpath" 2>/dev/null | head -1 || true)
+    fi
 
     local inner_dev="$devpath" luks_name=""
 
@@ -2083,7 +2087,10 @@ shrink_partition() {
         log "Opening LUKS container on $devpath..."
         cryptsetup open "$devpath" "$luks_name" </dev/tty
         inner_dev="/dev/mapper/$luks_name"
-        fstype=$(timeout 5 blkid -o value -s TYPE "$inner_dev" 2>/dev/null || true)
+        fstype=$(timeout 10 blkid -o value -s TYPE "$inner_dev" 2>/dev/null || true)
+        if [[ -z "$fstype" ]]; then
+            fstype=$(lsblk -no FSTYPE "$inner_dev" 2>/dev/null | head -1 || true)
+        fi
         log "Inner filesystem: $fstype"
     fi
 
@@ -2116,9 +2123,13 @@ shrink_partition() {
             log "Shrinking ext filesystem..."
             resize2fs "$inner_dev" "$(( fs_size / 1024 ))K"
             ;;
+        "")
+            [[ -n "$luks_name" ]] && cryptsetup close "$luks_name"
+            error "Could not detect filesystem type on $devpath (blkid and lsblk both returned empty). The partition may be unformatted or use an unrecognised format. Cannot shrink automatically."
+            ;;
         *)
             [[ -n "$luks_name" ]] && cryptsetup close "$luks_name"
-            error "Unsupported filesystem type '$fstype' on $devpath. Resize manually."
+            error "Unsupported filesystem type '$fstype' on $devpath. Only ntfs, btrfs, ext4, and LUKS-wrapped versions are supported. Resize manually."
             ;;
     esac
 
