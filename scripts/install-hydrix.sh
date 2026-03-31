@@ -1906,8 +1906,10 @@ prepare_dual_boot_space() {
         return
     fi
 
-    # Before shrinking, check for unformatted partitions from a previous failed install.
-    # These can be reused directly without shrinking — they have no data to preserve.
+    # Before shrinking, look for partitions from a previous failed install that can be
+    # reused directly. A partition is a reuse candidate if it has no recognised filesystem
+    # OR is LUKS with no inner filesystem (luksFormat ran but install never completed).
+    # Disko will overwrite the partition entirely, so no existing data matters.
     local -a reuse_parts=() reuse_sizes=()
     for part_sys in "/sys/class/block/$devname/"/*/; do
         local part_name="${part_sys%/}"; part_name="${part_name##*/}"
@@ -1916,25 +1918,37 @@ prepare_dual_boot_space() {
         local devpath="/dev/$part_name"
         [[ -b "$devpath" ]] || continue
         [[ "$devpath" == "${CONFIG[efiPartition]}" ]] && continue
-        # Must have no detectable filesystem AND not be LUKS
-        cryptsetup isLuks "$devpath" 2>/dev/null && continue
-        local fs; fs=$(timeout 5 blkid -o value -s TYPE "$devpath" 2>/dev/null || true)
-        [[ -n "$fs" ]] && continue
         local part_sectors; part_sectors=$(cat "${part_sys}size" 2>/dev/null || echo 0)
         local psize=$(( part_sectors * sector_size ))
+        if cryptsetup isLuks "$devpath" 2>/dev/null; then
+            # LUKS partition: check if inner filesystem is empty (failed install left just a LUKS header)
+            local tmp_name="hydrix-probe-$$-$part_name"
+            if cryptsetup open --batch-mode "$devpath" "$tmp_name" 2>/dev/null; then
+                local inner_fs; inner_fs=$(timeout 5 blkid -o value -s TYPE "/dev/mapper/$tmp_name" 2>/dev/null || true)
+                cryptsetup close "$tmp_name" 2>/dev/null || true
+                [[ -n "$inner_fs" ]] && continue  # Has data inside — skip
+            else
+                continue  # Can't open without password — skip (treat as live OS)
+            fi
+        else
+            local fs; fs=$(timeout 5 blkid -o value -s TYPE "$devpath" 2>/dev/null || true)
+            [[ "$fs" == "swap" ]] && continue
+            [[ -n "$fs" ]] && continue  # Has a real filesystem — skip
+        fi
         reuse_parts+=("$devpath")
         reuse_sizes+=("$psize")
     done
 
     if [[ "${#reuse_parts[@]}" -gt 0 ]]; then
         echo ""
-        log "Found existing unformatted partition(s) — likely from a previous install attempt:"
+        log "Found partition(s) from a previous install attempt with no data:"
         for i in "${!reuse_parts[@]}"; do
             printf "  %d) %s  %dGB\n" $(( i + 1 )) "${reuse_parts[$i]}" "$(( reuse_sizes[i] / 1073741824 ))"
         done
         echo ""
+        warn "The selected partition will be completely erased and used for NixOS."
         local pick_reuse
-        read -p "Reuse one of these as the NixOS partition instead of shrinking? [1]: " pick_reuse </dev/tty
+        read -p "Use one of these instead of shrinking another partition? [1]: " pick_reuse </dev/tty
         pick_reuse="${pick_reuse:-1}"
         if [[ "$pick_reuse" =~ ^[0-9]+$ ]] && (( pick_reuse >= 1 && pick_reuse <= ${#reuse_parts[@]} )); then
             CONFIG[nixosPartition]="${reuse_parts[$(( pick_reuse - 1 ))]}"
