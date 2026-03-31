@@ -1818,20 +1818,24 @@ prepare_dual_boot_space() {
     local needed_gb=$(( needed_bytes / 1073741824 ))
     log "Need to free ${needed_gb}GB more by shrinking an existing partition"
 
-    # Build list of shrink candidates: all partitions except EFI and swap.
-    # Guards: skip blank names and non-block-device paths to prevent blkid hangs.
+    # Build list of shrink candidates using sysfs — never blocks unlike lsblk on LUKS devices.
     local -a cand_parts=() cand_sizes=()
-    while read -r pname psize; do
-        [[ -z "$pname" ]] && continue
-        local devpath="/dev/$pname"
+    for part_sys in "/sys/class/block/$devname/"/*/; do
+        local part_name="${part_sys%/}"; part_name="${part_name##*/}"
+        [[ "$part_name" == "${devname}"* ]] || continue
+        [[ -f "${part_sys}partition" ]] || continue
+        local devpath="/dev/$part_name"
         [[ -b "$devpath" ]] || continue
         [[ "$devpath" == "${CONFIG[efiPartition]}" ]] && continue
+        local part_sectors
+        part_sectors=$(cat "${part_sys}size" 2>/dev/null || echo 0)
+        local psize=$(( part_sectors * sector_size ))
         local fstype
         fstype=$(timeout 5 blkid -o value -s TYPE "$devpath" 2>/dev/null || true)
         [[ "$fstype" == "swap" ]] && continue
         cand_parts+=("$devpath")
         cand_sizes+=("$psize")
-    done < <(lsblk -rn -b -o NAME,SIZE "$device" 2>/dev/null | awk 'NR>1 {print $1, $2}')
+    done
 
     local target_part="" target_size_bytes=0
 
@@ -1839,7 +1843,13 @@ prepare_dual_boot_space() {
         echo ""
         warn "No shrinkable partitions found (all are EFI or swap)."
         echo "Available partitions on $device:"
-        lsblk -o NAME,SIZE,FSTYPE,MOUNTPOINT "$device" 2>/dev/null || true
+        for part_sys in "/sys/class/block/$devname/"/*/; do
+            local pn="${part_sys%/}"; pn="${pn##*/}"
+            [[ "$pn" == "${devname}"* ]] || continue
+            [[ -f "${part_sys}partition" ]] || continue
+            local ps; ps=$(cat "${part_sys}size" 2>/dev/null || echo 0)
+            printf "  /dev/%s  %dGB\n" "$pn" "$(( ps * sector_size / 1073741824 ))"
+        done
         echo ""
         read -p "Enter partition to shrink (e.g. /dev/nvme0n1p2), or blank to abort: " target_part </dev/tty
         [[ -z "$target_part" ]] && error "Aborted"
@@ -1895,13 +1905,16 @@ prepare_dual_boot_space() {
 # Stores results in CONFIG[nixosPartition] and CONFIG[efiPartition].
 _create_nixos_partition() {
     local device="$1"
+    local devname="${device##*/}"
 
-    # Snapshot existing partitions before creation
+    # Snapshot existing partitions via sysfs — never blocks
     local -A before=()
-    while read -r pname; do
-        [[ -z "$pname" ]] && continue
-        before["/dev/$pname"]=1
-    done < <(lsblk -rn -o NAME "$device" 2>/dev/null | awk 'NR>1 {print $1}')
+    for part_sys in "/sys/class/block/$devname/"/*/; do
+        local pn="${part_sys%/}"; pn="${pn##*/}"
+        [[ "$pn" == "${devname}"* ]] || continue
+        [[ -f "${part_sys}partition" ]] || continue
+        before["/dev/$pn"]=1
+    done
 
     _settle() {
         sleep 2
@@ -1909,16 +1922,17 @@ _create_nixos_partition() {
         udevadm settle --timeout=10 2>/dev/null || true
     }
 
+    # Return partitions present now that weren't in the before snapshot
     _new_parts() {
-        local -a new=()
-        while read -r pname; do
-            [[ -z "$pname" ]] && continue
-            local devpath="/dev/$pname"
+        for part_sys in "/sys/class/block/$devname/"/*/; do
+            local pn="${part_sys%/}"; pn="${pn##*/}"
+            [[ "$pn" == "${devname}"* ]] || continue
+            [[ -f "${part_sys}partition" ]] || continue
+            local devpath="/dev/$pn"
             [[ -b "$devpath" ]] || continue
             [[ -n "${before[$devpath]:-}" ]] && continue
-            new+=("$devpath")
-        done < <(lsblk -rn -o NAME "$device" 2>/dev/null | awk 'NR>1 {print $1}')
-        printf '%s\n' "${new[@]}"
+            echo "$devpath"
+        done
     }
 
     if [[ -z "${CONFIG[efiPartition]}" ]]; then
