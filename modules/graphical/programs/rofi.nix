@@ -291,24 +291,28 @@ EOF
         [[ -n "$(find_vms_by_type "$vm_type")" ]]
     }
 
-    # Locate the VM's current NixOS system path in the nix store
+    # Locate the VM's current NixOS system path via its microvm-run script
     get_vm_system_path() {
         local vm_name="$1"
-        local vm_system
+        local runner vm_system
 
-        vm_system=$(${pkgs.systemd}/bin/systemctl show "microvm@''${vm_name}.service" \
-            --property=ExecStart --value 2>/dev/null \
-            | ${pkgs.gnugrep}/bin/grep -oP '/nix/store/\S+-nixos-system-\S+' | head -1)
+        # Resolve the microvm runner (current takes priority over booted)
+        runner=""
+        for p in \
+            "/var/lib/microvms/''${vm_name}/current" \
+            "/var/lib/microvms/''${vm_name}/booted"; do
+            [[ -L "$p" ]] && { runner=$(readlink -f "$p"); break; }
+        done
 
-        if [[ -z "$vm_system" ]]; then
-            for p in \
-                "/var/lib/microvms/''${vm_name}/current" \
-                "/var/lib/microvms/''${vm_name}/system"; do
-                [[ -L "$p" ]] && { vm_system=$(readlink -f "$p"); break; }
-            done
-        fi
+        [[ -z "$runner" ]] && return 1
 
-        [[ -n "$vm_system" ]] && echo "$vm_system" || return 1
+        # The nixos-system path is embedded in the microvm-run script
+        vm_system=$(${pkgs.gnugrep}/bin/grep -oP '/nix/store/\S+-nixos-system-\S+' \
+            "''${runner}/bin/microvm-run" 2>/dev/null \
+            | head -1 | ${pkgs.gnused}/bin/sed 's|/[^/]*$||')
+
+        [[ -n "$vm_system" && -d "''${vm_system}/sw/share/applications" ]] \
+            && echo "$vm_system" || return 1
     }
 
     # Prompt to start a VM of the given type
