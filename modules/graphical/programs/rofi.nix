@@ -2,7 +2,7 @@
 #
 # Provides host-rofi command with:
 # - Dynamic theming from xrdb colors and scaling.json
-# - Unified launcher: host apps + apps from all running microvms
+# - Workspace-aware: host launcher, VM app launcher, or VM start prompt
 #
 # The scaling.json values come from hydrix.graphical.* Nix options.
 
@@ -12,11 +12,11 @@ let
   username = config.hydrix.username;
   fontFamily = config.hydrix.graphical.font.family;
 
-  # host-rofi script with dynamic theming
   hostRofi = pkgs.writeShellScriptBin "host-rofi" ''
     set -euo pipefail
 
     readonly SCALING_JSON="$HOME/.config/hydrix/scaling.json"
+    readonly MICROVM_SCRIPT="microvm"
 
     get_scaling_value() {
         local key="$1"
@@ -34,7 +34,9 @@ let
         local name="$1"
         local fallback="$2"
         local color
-        color=$(${pkgs.xorg.xrdb}/bin/xrdb -query 2>/dev/null | ${pkgs.gnugrep}/bin/grep -E "^\*\.?$name:" | head -1 | ${pkgs.gawk}/bin/awk '{print $2}')
+        color=$(${pkgs.xorg.xrdb}/bin/xrdb -query 2>/dev/null \
+            | ${pkgs.gnugrep}/bin/grep -E "^\*\.?$name:" \
+            | head -1 | ${pkgs.gawk}/bin/awk '{print $2}')
         echo "''${color:-$fallback}"
     }
 
@@ -44,6 +46,12 @@ let
         else
             echo "D9"
         fi
+    }
+
+    get_current_workspace() {
+        ${pkgs.i3}/bin/i3-msg -t get_workspaces 2>/dev/null \
+            | ${pkgs.jq}/bin/jq -r '.[] | select(.focused==true) | .name' \
+            || echo "1"
     }
 
     build_theme() {
@@ -147,11 +155,140 @@ let
 EOF
     }
 
-    # Get running microvms
+    build_prompt_theme() {
+        local corner_radius font_size font_name overlay_alpha
+        corner_radius=$(get_scaling_value '.sizes.corner_radius' '8')
+        font_size=$(get_scaling_value '.fonts.rofi' '12')
+        font_name=$(get_scaling_value '.font_names.rofi' "$(get_scaling_value '.font_name' '${fontFamily}')")
+        overlay_alpha=$(get_overlay_alpha)
+
+        local bg fg accent prefix
+        bg=$(get_color "color0" "#101116")
+        fg=$(get_color "color7" "#c0caf5")
+        accent=$(get_color "color4" "#7aa2f7")
+        prefix=$(get_color "color3" "#e0af68")
+
+        cat <<EOF
+    configuration {
+        font: "''${font_name} Bold ''${font_size}";
+        show-icons: false;
+        disable-history: true;
+        hover-select: true;
+        me-select-entry: "";
+        me-accept-entry: "MousePrimary";
+        kb-cancel: "Escape,q,n";
+        kb-accept-entry: "Return,KP_Enter,y";
+        kb-row-up: "Up";
+        kb-row-down: "Down";
+    }
+
+    * {
+        bg: ''${bg}''${overlay_alpha};
+        bg-solid: ''${bg};
+        fg: ''${fg};
+        accent: ''${accent};
+        prefix: ''${prefix};
+    }
+
+    window {
+        location: north;
+        anchor: north;
+        y-offset: 15%;
+        width: 180px;
+        background-color: @bg;
+        border: 0px;
+        border-radius: ''${corner_radius}px;
+    }
+
+    mainbox {
+        background-color: transparent;
+        children: [inputbar, message, listview];
+        padding: 4px;
+    }
+
+    message {
+        background-color: transparent;
+        padding: 6px 10px;
+    }
+
+    textbox {
+        background-color: transparent;
+        text-color: @prefix;
+    }
+
+    inputbar {
+        enabled: true;
+        children: [entry];
+        padding: 0;
+        margin: 0;
+        background-color: transparent;
+        border: 0;
+    }
+
+    entry {
+        enabled: true;
+        padding: 0;
+        margin: 0;
+        background-color: transparent;
+        text-color: transparent;
+        cursor: text;
+        placeholder: "";
+    }
+
+    listview {
+        lines: 4;
+        fixed-height: false;
+        dynamic: true;
+        scrollbar: false;
+        background-color: transparent;
+        spacing: 2px;
+        padding: 4px 0 0 0;
+    }
+
+    element {
+        padding: 8px 12px;
+        background-color: transparent;
+        text-color: @fg;
+        border-radius: ''${corner_radius}px;
+        cursor: pointer;
+    }
+
+    element selected.normal {
+        background-color: @accent;
+        text-color: @bg-solid;
+    }
+
+    element-text {
+        background-color: transparent;
+        text-color: inherit;
+    }
+
+    scrollbar { enabled: false; }
+    mode-switcher { enabled: false; }
+EOF
+    }
+
+    # Get running microvms by name
     get_running_microvms() {
         ${pkgs.systemd}/bin/systemctl list-units --type=service --state=running --no-legend 2>/dev/null \
             | ${pkgs.gnugrep}/bin/grep -oP 'microvm@\Kmicrovm-[a-z]+(-[a-z0-9-]+)?(?=\.service)' \
             | ${pkgs.gnugrep}/bin/grep -v '^$' || true
+    }
+
+    # Find running VMs matching a type (exact base name or prefixed variants)
+    find_vms_by_type() {
+        local vm_type="$1"
+        local running
+        running=$(get_running_microvms)
+        {
+            echo "$running" | ${pkgs.gnugrep}/bin/grep "^microvm-''${vm_type}$" || true
+            echo "$running" | ${pkgs.gnugrep}/bin/grep "^microvm-''${vm_type}-" || true
+        } | ${pkgs.gnugrep}/bin/grep -v '^$' | ${pkgs.coreutils}/bin/sort -u || true
+    }
+
+    is_vm_running() {
+        local vm_type="$1"
+        [[ -n "$(find_vms_by_type "$vm_type")" ]]
     }
 
     # Locate the VM's current NixOS system path in the nix store
@@ -174,73 +311,137 @@ EOF
         [[ -n "$vm_system" ]] && echo "$vm_system" || return 1
     }
 
-    # Populate out_dir with synthetic .desktop files for all running VM apps
-    build_vm_desktop_dir() {
-        local out_dir="$1"
-        local running_vms
-        running_vms=$(get_running_microvms)
-        [[ -z "$running_vms" ]] && return
+    # Prompt to start a VM of the given type
+    show_vm_prompt() {
+        local vm_type="$1"
 
-        while IFS= read -r vm; do
-            [[ -z "$vm" ]] && continue
-            local vm_system
-            vm_system=$(get_vm_system_path "''${vm}") || continue
-            [[ -d "''${vm_system}/sw/share/applications" ]] || continue
+        # Collect available (declared) microvms of this type
+        local display_list=""
+        local -a vm_names=()
+        local microvm_base="microvm-''${vm_type}"
 
-            local vm_short="''${vm#microvm-}"
+        if [[ -d "/var/lib/microvms/''${microvm_base}" ]]; then
+            display_list+="''${microvm_base}"$'\n'
+            vm_names+=("$microvm_base")
+        fi
 
-            for desktop in "''${vm_system}/sw/share/applications"/*.desktop; do
-                [[ -f "$desktop" ]] || continue
-                ${pkgs.gnugrep}/bin/grep -q "^NoDisplay=true" "$desktop" 2>/dev/null && continue
-                ${pkgs.gnugrep}/bin/grep -q "^Hidden=true"    "$desktop" 2>/dev/null && continue
-                ${pkgs.gnugrep}/bin/grep -q "^Type=Application" "$desktop" 2>/dev/null || continue
+        # Also find any task/variant VMs (e.g. microvm-pentest-task1)
+        for d in /var/lib/microvms/microvm-''${vm_type}-*/; do
+            [[ -d "$d" ]] || continue
+            local vname
+            vname=$(${pkgs.coreutils}/bin/basename "$d")
+            display_list+="''${vname}"$'\n'
+            vm_names+=("$vname")
+        done
 
-                local name exec_line
-                name=$(${pkgs.gnugrep}/bin/grep -m1 "^Name=" "$desktop" | cut -d= -f2-)
-                exec_line=$(${pkgs.gnugrep}/bin/grep -m1 "^Exec=" "$desktop" | cut -d= -f2- \
-                    | ${pkgs.gnused}/bin/sed 's/ *%[a-zA-Z]//g' \
-                    | ${pkgs.gawk}/bin/awk '{print $1}')
-                [[ -n "$name" && -n "$exec_line" ]] || continue
+        if [[ -z "$display_list" ]]; then
+            ${pkgs.libnotify}/bin/notify-send -t 3000 "VM" "No ''${vm_type} VMs available"
+            return
+        fi
 
-                local safe="''${vm}__''${name// /_}"
-                {
-                    echo '[Desktop Entry]'
-                    echo 'Type=Application'
-                    echo "Name=[''${vm_short}] ''${name}"
-                    echo "Exec=vm-app ''${vm} ''${exec_line}"
-                    echo 'Terminal=false'
-                } > "''${out_dir}/applications/''${safe}.desktop"
-            done
-        done <<< "$running_vms"
+        display_list+="cancel"
+
+        local theme_file selection
+        theme_file=$(${pkgs.coreutils}/bin/mktemp /tmp/host-rofi-XXXXXX.rasi)
+        build_prompt_theme > "$theme_file"
+
+        selection=$(echo -n "$display_list" \
+            | ${pkgs.rofi}/bin/rofi -dmenu -theme "$theme_file" -m -4 \
+              -i -no-custom -p "" -mesg "Start ''${vm_type} VM" 2>/dev/null) || true
+        ${pkgs.coreutils}/bin/rm -f "$theme_file"
+
+        [[ -z "$selection" || "$selection" == "cancel" ]] && return
+
+        ${pkgs.libnotify}/bin/notify-send -t 2000 "MicroVM" "Starting ''${selection}..."
+        "$MICROVM_SCRIPT" start "$selection" &
+        disown 2>/dev/null || true
     }
 
-    show_app_launcher() {
-        local theme_file vm_apps_dir
+    # Show rofi drun scoped to the VM's installed apps
+    show_vm_app_launcher() {
+        local vm_type="$1"
+        local running_vms vm_count selected
+
+        running_vms=$(find_vms_by_type "$vm_type")
+        vm_count=$(echo "$running_vms" | ${pkgs.gnugrep}/bin/grep -c . 2>/dev/null || echo 0)
+
+        if [[ "$vm_count" -eq 1 ]]; then
+            selected=$(echo "$running_vms" | head -1)
+        else
+            # Multiple — let user pick
+            local theme_file
+            theme_file=$(${pkgs.coreutils}/bin/mktemp /tmp/host-rofi-XXXXXX.rasi)
+            build_prompt_theme > "$theme_file"
+            selected=$(echo "$running_vms" \
+                | ${pkgs.rofi}/bin/rofi -dmenu -theme "$theme_file" -m -4 \
+                  -i -no-custom -p "" -mesg "Select VM" 2>/dev/null) || true
+            ${pkgs.coreutils}/bin/rm -f "$theme_file"
+            [[ -z "$selected" ]] && return
+        fi
+
+        local vm_system
+        vm_system=$(get_vm_system_path "''${selected}") || true
+
+        local theme_file
         theme_file=$(${pkgs.coreutils}/bin/mktemp /tmp/host-rofi-XXXXXX.rasi)
-        vm_apps_dir=$(${pkgs.coreutils}/bin/mktemp -d /tmp/host-rofi-apps-XXXXXX)
-        mkdir -p "''${vm_apps_dir}/applications"
-
         build_theme > "$theme_file"
-        build_vm_desktop_dir "$vm_apps_dir"
 
-        XDG_DATA_DIRS="''${vm_apps_dir}:''${XDG_DATA_DIRS:-/run/current-system/sw/share:$HOME/.nix-profile/share}" \
-            ${pkgs.rofi}/bin/rofi -show drun -theme "$theme_file" -m -4 \
-            -drun-reload-desktop-files 2>/dev/null || true
+        if [[ -n "$vm_system" && -d "''${vm_system}/sw/share/applications" ]]; then
+            XDG_DATA_DIRS="''${vm_system}/sw/share" \
+                ${pkgs.rofi}/bin/rofi -show drun \
+                -theme "$theme_file" -m -4 \
+                -drun-reload-desktop-files \
+                -run-command "vm-app ''${selected} {cmd}" \
+                2>/dev/null || true
+        else
+            ${pkgs.libnotify}/bin/notify-send -t 3000 "VM" "Could not locate ''${selected} system path"
+        fi
 
-        ${pkgs.coreutils}/bin/rm -rf "$vm_apps_dir"
         ${pkgs.coreutils}/bin/rm -f "$theme_file"
     }
 
-    show_app_launcher
+    # Host app launcher (no VM injection)
+    show_app_launcher() {
+        local theme_file
+        theme_file=$(${pkgs.coreutils}/bin/mktemp /tmp/host-rofi-XXXXXX.rasi)
+        build_theme > "$theme_file"
+        ${pkgs.rofi}/bin/rofi -show drun -theme "$theme_file" -m -4 2>/dev/null || true
+        ${pkgs.coreutils}/bin/rm -f "$theme_file"
+    }
+
+    # Map workspace number to VM type, or "host"
+    ws_to_vm_type() {
+        case "$1" in
+            2)  echo "pentest" ;;
+            3)  echo "browsing" ;;
+            4)  echo "comms" ;;
+            5)  echo "dev" ;;
+            *)  echo "host" ;;
+        esac
+    }
+
+    main() {
+        local ws vm_type
+        ws=$(get_current_workspace)
+        vm_type=$(ws_to_vm_type "$ws")
+
+        if [[ "$vm_type" == "host" ]]; then
+            show_app_launcher
+        elif is_vm_running "$vm_type"; then
+            show_vm_app_launcher "$vm_type"
+        else
+            show_vm_prompt "$vm_type"
+        fi
+    }
+
+    main "$@"
   '';
 
 in {
   config = lib.mkIf config.hydrix.graphical.enable {
-    # Add host-rofi to system packages
     environment.systemPackages = [ hostRofi ];
 
     home-manager.users.${username} = { pkgs, ... }: {
-      # Disable Stylix rofi theming - we use runtime colors via host-rofi
       stylix.targets.rofi.enable = false;
 
       programs.rofi = {
