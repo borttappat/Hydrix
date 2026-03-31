@@ -513,22 +513,22 @@ EOF
         local vm_system
 
         # Try to locate the VM's current system via its systemd service ExecStart
-        vm_system=$(${pkgs.systemd}/bin/systemctl show "microvm@${vm_name}.service" \
+        vm_system=$(${pkgs.systemd}/bin/systemctl show "microvm@''${vm_name}.service" \
             --property=ExecStart --value 2>/dev/null \
             | ${pkgs.gnugrep}/bin/grep -oP '/nix/store/\S+-nixos-system-\S+' | head -1)
 
         # Fallback: check common symlink locations
         if [[ -z "$vm_system" ]]; then
             for p in \
-                "/var/lib/microvms/${vm_name}/current" \
-                "/var/lib/microvms/${vm_name}/system"; do
+                "/var/lib/microvms/''${vm_name}/current" \
+                "/var/lib/microvms/''${vm_name}/system"; do
                 [[ -L "$p" ]] && { vm_system=$(readlink -f "$p"); break; }
             done
         fi
 
-        [[ -z "$vm_system" || ! -d "${vm_system}/sw/share/applications" ]] && return 1
+        [[ -z "$vm_system" || ! -d "''${vm_system}/sw/share/applications" ]] && return 1
 
-        for desktop in "${vm_system}/sw/share/applications"/*.desktop; do
+        for desktop in "''${vm_system}/sw/share/applications"/*.desktop; do
             [[ -f "$desktop" ]] || continue
             ${pkgs.gnugrep}/bin/grep -q "^NoDisplay=true" "$desktop" 2>/dev/null && continue
             ${pkgs.gnugrep}/bin/grep -q "^Hidden=true"    "$desktop" 2>/dev/null && continue
