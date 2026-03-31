@@ -125,9 +125,8 @@ let
     }
 
     build_theme() {
-        local bar_gaps bar_height corner_radius font_size font_name overlay_alpha
+        local bar_gaps corner_radius font_size font_name overlay_alpha
         bar_gaps=$(get_scaling_value '.sizes.bar_gaps' '10')
-        bar_height=$(get_scaling_value '.sizes.bar_height' '25')
         corner_radius=$(get_scaling_value '.sizes.corner_radius' '8')
         font_size=$(get_scaling_value '.fonts.rofi' '12')
         font_name=$(get_scaling_value '.font_names.rofi' "$(get_scaling_value '.font_name' '${fontFamily}')")
@@ -228,9 +227,8 @@ EOF
     }
 
     build_prompt_theme() {
-        local bar_gaps bar_height corner_radius font_size font_name overlay_alpha
+        local bar_gaps corner_radius font_size font_name overlay_alpha
         bar_gaps=$(get_scaling_value '.sizes.bar_gaps' '10')
-        bar_height=$(get_scaling_value '.sizes.bar_height' '25')
         corner_radius=$(get_scaling_value '.sizes.corner_radius' '8')
         font_size=$(get_scaling_value '.fonts.rofi' '12')
         font_name=$(get_scaling_value '.font_names.rofi' "$(get_scaling_value '.font_name' '${fontFamily}')")
