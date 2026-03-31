@@ -495,7 +495,7 @@ EOF
             [[ -z "$app_name" ]] && return
 
             exec_cmd=$(printf '%s' "$apps_tsv" \
-                | ${pkgs.gnugrep}/bin/grep -F "${app_name}"$'\t' | head -1 | cut -f2)
+                | ${pkgs.gnugrep}/bin/grep -F "''${app_name}"$'\t' | head -1 | cut -f2)
             [[ -z "$exec_cmd" ]] && return
 
             vm-app "$selected" "$exec_cmd" &
