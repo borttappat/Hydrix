@@ -1096,13 +1096,15 @@ _detect_existing_os_entries() {
         [[ "$devpath" == "${CONFIG[nixosPartition]}" ]] && continue
         [[ "$devpath" == "${CONFIG[efiPartition]}" ]] && continue
 
-        local fstype
-        fstype=$(timeout 5 blkid -o value -s TYPE "$devpath" 2>/dev/null || true)
-        [[ "$fstype" == "crypto_LUKS" ]] || continue
+        # Use cryptsetup isLuks — more reliable than blkid in live environments
+        cryptsetup isLuks "$devpath" 2>/dev/null || continue
 
-        # Get LUKS UUID without dashes (GRUB cryptomount -u format)
+        # Get LUKS UUID — try blkid first, fall back to cryptsetup luksDump
         local uuid uuid_nodash
-        uuid=$(timeout 5 blkid -o value -s UUID "$devpath" 2>/dev/null || true)
+        uuid=$(timeout 10 blkid -o value -s UUID "$devpath" 2>/dev/null || true)
+        if [[ -z "$uuid" ]]; then
+            uuid=$(cryptsetup luksDump "$devpath" 2>/dev/null | awk '/^UUID:/ {print $2}' || true)
+        fi
         [[ -z "$uuid" ]] && continue
         uuid_nodash="${uuid//-/}"
 
@@ -1112,14 +1114,20 @@ _detect_existing_os_entries() {
 
         log "Found existing encrypted partition: $devpath ($size_gb GB, UUID $uuid)"
 
+        # Boot the old NixOS directly from its nix store inside the LUKS+btrfs container.
+        # NixOS keeps /boot on the EFI partition (outside LUKS), so configfile doesn't work.
+        # Instead: open LUKS, set root to the btrfs device, load kernel+initrd from the
+        # @ subvolume via the system profile symlink. The old initrd handles LUKS mounting
+        # (GRUB with enableCryptodisk passes the key so no second password prompt).
         entries+="menuentry 'Existing OS ($devpath)' {\n"
         entries+="  insmod part_gpt\n"
         entries+="  insmod cryptodisk\n"
         entries+="  insmod luks2\n"
         entries+="  insmod btrfs\n"
-        entries+="  insmod ext2\n"
         entries+="  cryptomount -u $uuid_nodash\n"
-        entries+="  configfile (crypto0)/boot/grub/grub.cfg\n"
+        entries+="  set root=(crypto0)\n"
+        entries+="  linux /@/nix/var/nix/profiles/system/kernel init=/nix/var/nix/profiles/system/init\n"
+        entries+="  initrd /@/nix/var/nix/profiles/system/initrd\n"
         entries+="}\n"
     done
 
