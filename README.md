@@ -515,6 +515,30 @@ All configuration is done through `hydrix.*` options in your machine config file
 }
 ```
 
+### Graphical Package Tiers
+
+`modules/graphical/packages.nix` and `modules/graphical/home.nix` install different sets of packages depending on the system type, controlled by two derived booleans:
+
+```nix
+isHost    = vmType == null || vmType == "host";
+isMicrovm = !isHost && !graphical.standalone;
+```
+
+| Tier | Condition | What it gets |
+|---|---|---|
+| **microvm** | VM with `standalone = false` | Theming only: pywal, wpgtk, feh, imagemagick, xrdb, pulseaudio, xclip/xsel |
+| **standalone** | VM with `standalone = true` | Adds: polybar, rofi, picom, xdotool, unclutter, xcape, scrot, flameshot, X11 tools |
+| **host** | `vmType = "host"` | Adds: i3lock, brightnessctl, libvibrant, xorg.xinit, xorg.xorgserver |
+
+**Why:** MicroVMs forward apps to the host via xpra — they have no local window manager and no physical display. Installing a compositor (picom), screenshot tools (flameshot, scrot), or hardware controls (brightnessctl, libvibrant) would be dead weight. Standalone libvirt VMs run a full i3 desktop via virt-manager and need the WM stack, but still have no physical backlight or lockscreen. Only the host needs those.
+
+The `standalone` option on a VM config is the switch:
+
+```nix
+hydrix.graphical.standalone = true;   # libvirt VM with own display → full WM tier
+hydrix.graphical.standalone = false;  # microVM via xpra → theming only (default)
+```
+
 ### Power Management
 
 ```nix
