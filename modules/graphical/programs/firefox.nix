@@ -419,6 +419,8 @@ in {
 
             # UI customization
             "browser.uidensity" = 1;  # Compact mode
+            # Dark base theme so startup flash is dark (pywalfox overrides dynamically)
+            "extensions.activeThemeID" = "firefox-compact-dark@mozilla.org";
             "browser.tabs.inTitlebar" = 1;
             
             # Native Vertical Tabs - start collapsed, expand on hover
