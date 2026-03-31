@@ -104,9 +104,10 @@ burpsuite"
         running_vms=$(get_running_vms)
 
         {
+            echo "$running_vms" | ${pkgs.gnugrep}/bin/grep "^microvm-$vm_type$" || true
             echo "$running_vms" | ${pkgs.gnugrep}/bin/grep "^microvm-$vm_type-" || true
             echo "$running_vms" | ${pkgs.gnugrep}/bin/grep "^$vm_type-" || true
-        } | ${pkgs.gnugrep}/bin/grep -v '^$' || true
+        } | ${pkgs.gnugrep}/bin/grep -v '^$' | ${pkgs.coreutils}/bin/sort -u || true
     }
 
     # Check if a specific VM is running
@@ -447,52 +448,50 @@ EOF
         ${pkgs.coreutils}/bin/rm -f "$theme_file"
     }
 
-    # Show VM selection menu, then app menu
-    # Always shows all running VMs of the type, marks active with ★
-    # Updates active VM on selection
+    # Show VM app menu, with optional VM selection if multiple are running
     show_vm_app_launcher() {
         local vm_type="$1"
-        local running_vms active_vm
+        local running_vms vm_count selected
 
         running_vms=$(find_vms_by_type "$vm_type")
-        active_vm=$(get_active_vm "$vm_type")
+        vm_count=$(echo "$running_vms" | ${pkgs.gnugrep}/bin/grep -c . 2>/dev/null || echo 0)
 
-        # Build display list with active marker
-        local display_list=""
-        while IFS= read -r vm; do
-            [[ -z "$vm" ]] && continue
-            if [[ "$vm" == "$active_vm" ]] && is_specific_vm_running "$vm"; then
-                display_list+="★ $vm"$'\n'
-            else
-                display_list+="  $vm"$'\n'
-            fi
-        done <<< "$running_vms"
+        if [[ "$vm_count" -eq 1 ]]; then
+            # Only one VM running — skip selection step
+            selected=$(echo "$running_vms" | head -1)
+        else
+            # Multiple VMs — show selection menu with active marker
+            local active_vm display_list theme_file
+            active_vm=$(get_active_vm "$vm_type")
+            display_list=""
 
-        # Show VM selection
-        local theme_file
-        theme_file=$(${pkgs.coreutils}/bin/mktemp /tmp/host-rofi-XXXXXX.rasi)
-        build_prompt_theme > "$theme_file"
+            while IFS= read -r vm; do
+                [[ -z "$vm" ]] && continue
+                if [[ "$vm" == "$active_vm" ]] && is_specific_vm_running "$vm"; then
+                    display_list+="★ $vm"$'\n'
+                else
+                    display_list+="  $vm"$'\n'
+                fi
+            done <<< "$running_vms"
 
-        local selected
-        selected=$(echo -n "$display_list" | ${pkgs.rofi}/bin/rofi -dmenu -theme "$theme_file" -m -4 -i -no-custom -p "" -mesg "Select $vm_type VM" 2>/dev/null) || true
+            theme_file=$(${pkgs.coreutils}/bin/mktemp /tmp/host-rofi-XXXXXX.rasi)
+            build_prompt_theme > "$theme_file"
 
-        ${pkgs.coreutils}/bin/rm -f "$theme_file"
+            selected=$(echo -n "$display_list" | ${pkgs.rofi}/bin/rofi -dmenu -theme "$theme_file" -m -4 -i -no-custom -p "" -mesg "Select $vm_type VM" 2>/dev/null) || true
+            ${pkgs.coreutils}/bin/rm -f "$theme_file"
 
-        if [[ -z "$selected" ]]; then
-            return
+            [[ -z "$selected" ]] && return
+            selected=$(echo "$selected" | ${pkgs.gnused}/bin/sed 's/^★ //; s/^  //')
         fi
 
-        # Strip the marker prefix
-        selected=$(echo "$selected" | ${pkgs.gnused}/bin/sed 's/^★ //; s/^  //')
         set_active_vm "$vm_type" "$selected"
 
-        # Now show app menu for this VM
+        # Show app menu for the selected VM
+        local theme_file app
         theme_file=$(${pkgs.coreutils}/bin/mktemp /tmp/host-rofi-XXXXXX.rasi)
         build_theme > "$theme_file"
 
-        local app
         app=$(echo -n "$COMMON_APPS" | ${pkgs.rofi}/bin/rofi -dmenu -theme "$theme_file" -m -4 -i -p "$selected" 2>/dev/null) || true
-
         ${pkgs.coreutils}/bin/rm -f "$theme_file"
 
         if [[ -n "$app" ]]; then
@@ -534,10 +533,9 @@ EOF
                 vm_spec="''${config##*:}"
 
                 if ! is_vm_running "$vm_type"; then
-                    # No VMs running - prompt to start
-                    show_vm_prompt "$vm_type"
+                    # No VM running - fall back to host launcher
+                    show_app_launcher
                 else
-                    # VMs running - show VM selection + app menu
                     show_vm_app_launcher "$vm_type"
                 fi
                 ;;
