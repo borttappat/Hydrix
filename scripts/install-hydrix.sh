@@ -2074,10 +2074,15 @@ shrink_partition() {
     local devpath="$1" new_size_bytes="$2" disk="$3" sector_size="$4"
 
     local fstype
-    fstype=$(timeout 10 blkid -o value -s TYPE "$devpath" 2>/dev/null || true)
-    # Fallback: lsblk if blkid returned empty (e.g. timed out on LUKS2 probe)
-    if [[ -z "$fstype" ]]; then
-        fstype=$(lsblk -no FSTYPE "$devpath" 2>/dev/null | head -1 || true)
+    # cryptsetup isLuks is the most reliable LUKS detector in live environments
+    # where blkid/lsblk fail to probe LUKS2 headers
+    if cryptsetup isLuks "$devpath" 2>/dev/null; then
+        fstype="crypto_LUKS"
+    else
+        fstype=$(timeout 10 blkid -o value -s TYPE "$devpath" 2>/dev/null || true)
+        if [[ -z "$fstype" ]]; then
+            fstype=$(lsblk -no FSTYPE "$devpath" 2>/dev/null | head -1 || true)
+        fi
     fi
 
     local inner_dev="$devpath" luks_name=""
@@ -2088,8 +2093,12 @@ shrink_partition() {
         cryptsetup open "$devpath" "$luks_name" </dev/tty
         inner_dev="/dev/mapper/$luks_name"
         fstype=$(timeout 10 blkid -o value -s TYPE "$inner_dev" 2>/dev/null || true)
+        # lsblk on the mapped device is safe (it's already unlocked, not a raw LUKS block)
         if [[ -z "$fstype" ]]; then
             fstype=$(lsblk -no FSTYPE "$inner_dev" 2>/dev/null | head -1 || true)
+        fi
+        if [[ -z "$fstype" ]]; then
+            error "Could not detect inner filesystem type in LUKS container $devpath. Run 'blkid $inner_dev' manually to inspect."
         fi
         log "Inner filesystem: $fstype"
     fi
