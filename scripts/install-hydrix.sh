@@ -1049,6 +1049,16 @@ select_layout() {
             error "EFI partition ${CONFIG[efiPartition]} does not exist"
         fi
 
+        # Warn if the selected partition doesn't look like EFI
+        local efi_fstype
+        efi_fstype=$(timeout 5 blkid -o value -s TYPE "${CONFIG[efiPartition]}" 2>/dev/null || true)
+        if [[ "$efi_fstype" != "vfat" ]]; then
+            warn "Partition ${CONFIG[efiPartition]} has type '${efi_fstype:-unknown}', expected vfat for EFI."
+            warn "If this is correct, continue. Otherwise re-run and enter the right partition."
+            read -p "Continue anyway? [y/N]: " _efi_ok </dev/tty
+            [[ "${_efi_ok,,}" == "y" ]] || error "Aborted"
+        fi
+
         log "EFI partition: ${CONFIG[efiPartition]}"
 
         # Show disk layout and offer to shrink an existing partition if needed
@@ -1795,33 +1805,60 @@ prepare_dual_boot_space() {
     local needed_gb=$(( needed_bytes / 1073741824 ))
     log "Need to free ${needed_gb}GB more by shrinking an existing partition"
 
-    # Find the largest non-EFI, non-swap partition as shrink target
-    local target_part="" target_size_bytes=0
-    log "[DEBUG] Scanning partitions on $device (EFI=${CONFIG[efiPartition]}):"
+    # Build list of shrink candidates: all partitions except EFI and swap.
+    # Guards: skip blank names and non-block-device paths to prevent blkid hangs.
+    local -a cand_parts=() cand_sizes=()
     while read -r pname psize; do
+        [[ -z "$pname" ]] && continue
         local devpath="/dev/$pname"
-        log "[DEBUG]  $devpath ($psize bytes)"
-        if [[ "$devpath" == "${CONFIG[efiPartition]}" ]]; then
-            log "[DEBUG]   → skipped (EFI)"; continue
-        fi
+        [[ -b "$devpath" ]] || continue
+        [[ "$devpath" == "${CONFIG[efiPartition]}" ]] && continue
         local fstype
-        fstype=$(blkid -o value -s TYPE "$devpath" 2>/dev/null || true)
-        if [[ "$fstype" == "swap" ]]; then
-            log "[DEBUG]   → skipped (swap)"; continue
-        fi
-        if (( psize > target_size_bytes )); then
-            target_part="$devpath"; target_size_bytes="$psize"
-            log "[DEBUG]   → new best candidate"
-        fi
+        fstype=$(timeout 5 blkid -o value -s TYPE "$devpath" 2>/dev/null || true)
+        [[ "$fstype" == "swap" ]] && continue
+        cand_parts+=("$devpath")
+        cand_sizes+=("$psize")
     done < <(lsblk -rn -b -o NAME,SIZE "$device" 2>/dev/null | awk 'NR>1 {print $1, $2}')
-    log "[DEBUG] Scan done, target: ${target_part:-NONE}"
 
-    if [[ -z "$target_part" ]]; then
-        error "No suitable partition found to shrink on $device."
+    local target_part="" target_size_bytes=0
+
+    if [[ "${#cand_parts[@]}" -eq 0 ]]; then
+        echo ""
+        warn "No shrinkable partitions found (all are EFI or swap)."
+        echo "Available partitions on $device:"
+        lsblk -o NAME,SIZE,FSTYPE,MOUNTPOINT "$device" 2>/dev/null || true
+        echo ""
+        read -p "Enter partition to shrink (e.g. /dev/nvme0n1p2), or blank to abort: " target_part </dev/tty
+        [[ -z "$target_part" ]] && error "Aborted"
+        [[ -b "$target_part" ]] || error "$target_part is not a block device"
+        target_size_bytes=$(lsblk -rn -b -o SIZE "$target_part" 2>/dev/null || echo 0)
+    elif [[ "${#cand_parts[@]}" -eq 1 ]]; then
+        target_part="${cand_parts[0]}"
+        target_size_bytes="${cand_sizes[0]}"
+    else
+        # Multiple candidates — show numbered list, pick largest as default
+        echo ""
+        log "Multiple shrinkable partitions found:"
+        local best_idx=0
+        for i in "${!cand_parts[@]}"; do
+            local sz_gb=$(( cand_sizes[i] / 1073741824 ))
+            printf "  %d) %s  %dGB\n" $(( i + 1 )) "${cand_parts[$i]}" "$sz_gb"
+            if (( cand_sizes[i] > cand_sizes[best_idx] )); then best_idx=$i; fi
+        done
+        echo ""
+        local pick
+        read -p "Which partition to shrink? [default: $(( best_idx + 1 ))]: " pick </dev/tty
+        pick="${pick:-$(( best_idx + 1 ))}"
+        if [[ "$pick" =~ ^[0-9]+$ ]] && (( pick >= 1 && pick <= ${#cand_parts[@]} )); then
+            target_part="${cand_parts[$(( pick - 1 ))]}"
+            target_size_bytes="${cand_sizes[$(( pick - 1 ))]}"
+        else
+            error "Invalid selection"
+        fi
     fi
 
     local target_fstype
-    target_fstype=$(blkid -o value -s TYPE "$target_part" 2>/dev/null || echo "unknown")
+    target_fstype=$(timeout 5 blkid -o value -s TYPE "$target_part" 2>/dev/null || echo "unknown")
 
     local new_size_bytes=$(( target_size_bytes - needed_bytes ))
     local new_size_gb=$(( new_size_bytes / 1073741824 ))
@@ -1830,7 +1867,7 @@ prepare_dual_boot_space() {
     warn "Data is preserved but back up important files before continuing."
     echo ""
 
-    read -p "Proceed with shrinking $target_part? [y/N]: " confirm
+    read -p "Proceed? [y/N]: " confirm </dev/tty
     [[ "${confirm,,}" == "y" ]] || error "Aborted by user"
 
     shrink_partition "$target_part" "$new_size_bytes" "$device" "$sector_size"
@@ -1848,18 +1885,22 @@ _create_nixos_partition() {
     # Snapshot existing partitions so we can identify the new one after creation
     local -A before=()
     while read -r pname; do
+        [[ -z "$pname" ]] && continue
         before["/dev/$pname"]=1
     done < <(lsblk -rn -o NAME "$device" 2>/dev/null | awk 'NR>1 {print $1}')
 
     log "Creating NixOS partition in free space..."
-    printf ",\n" | sfdisk --no-reread -a "$device"
-    partprobe "$device"
-    udevadm settle
+    printf ",\n" | sfdisk -a "$device"
+    sleep 2
+    partprobe "$device" 2>/dev/null || true
+    udevadm settle --timeout=10 2>/dev/null || true
 
     # Find the newly created partition
     local nixos_part=""
     while read -r pname; do
+        [[ -z "$pname" ]] && continue
         local devpath="/dev/$pname"
+        [[ -b "$devpath" ]] || continue
         [[ -n "${before[$devpath]:-}" ]] && continue
         nixos_part="$devpath"
         break
@@ -1879,7 +1920,7 @@ shrink_partition() {
     local devpath="$1" new_size_bytes="$2" disk="$3" sector_size="$4"
 
     local fstype
-    fstype=$(blkid -o value -s TYPE "$devpath" 2>/dev/null || echo "")
+    fstype=$(timeout 5 blkid -o value -s TYPE "$devpath" 2>/dev/null || true)
 
     local inner_dev="$devpath" luks_name=""
 
@@ -1888,7 +1929,7 @@ shrink_partition() {
         log "Opening LUKS container on $devpath..."
         cryptsetup open "$devpath" "$luks_name" </dev/tty
         inner_dev="/dev/mapper/$luks_name"
-        fstype=$(blkid -o value -s TYPE "$inner_dev" 2>/dev/null || echo "")
+        fstype=$(timeout 5 blkid -o value -s TYPE "$inner_dev" 2>/dev/null || true)
         log "Inner filesystem: $fstype"
     fi
 
@@ -1936,9 +1977,10 @@ shrink_partition() {
     local new_size_sectors=$(( new_size_bytes / sector_size ))
 
     log "Updating partition table..."
-    printf ",%s\n" "$new_size_sectors" | sfdisk --no-reread -N "$part_num" "$disk"
-    partprobe "$disk"
-    udevadm settle
+    printf ",%s\n" "$new_size_sectors" | sfdisk -N "$part_num" "$disk"
+    sleep 1
+    partprobe "$disk" 2>/dev/null || true
+    udevadm settle --timeout=10 2>/dev/null || true
 }
 
 # ========== INSTALLATION ==========
