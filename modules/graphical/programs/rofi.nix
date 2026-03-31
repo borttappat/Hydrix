@@ -209,7 +209,7 @@ EOF
                     echo "Name=[''${vm_short}] ''${name}"
                     echo "Exec=vm-app ''${vm} ''${exec_line}"
                     echo 'Terminal=false'
-                } > "''${out_dir}/''${safe}.desktop"
+                } > "''${out_dir}/applications/''${safe}.desktop"
             done
         done <<< "$running_vms"
     }
@@ -218,12 +218,14 @@ EOF
         local theme_file vm_apps_dir
         theme_file=$(${pkgs.coreutils}/bin/mktemp /tmp/host-rofi-XXXXXX.rasi)
         vm_apps_dir=$(${pkgs.coreutils}/bin/mktemp -d /tmp/host-rofi-apps-XXXXXX)
+        mkdir -p "''${vm_apps_dir}/applications"
 
         build_theme > "$theme_file"
         build_vm_desktop_dir "$vm_apps_dir"
 
         XDG_DATA_DIRS="''${vm_apps_dir}:''${XDG_DATA_DIRS:-/run/current-system/sw/share:$HOME/.nix-profile/share}" \
-            ${pkgs.rofi}/bin/rofi -show drun -theme "$theme_file" -m -4 2>/dev/null || true
+            ${pkgs.rofi}/bin/rofi -show drun -theme "$theme_file" -m -4 \
+            -drun-reload-desktop-files 2>/dev/null || true
 
         ${pkgs.coreutils}/bin/rm -rf "$vm_apps_dir"
         ${pkgs.coreutils}/bin/rm -f "$theme_file"
