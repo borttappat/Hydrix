@@ -1977,6 +1977,14 @@ prepare_dual_boot_space() {
 
     local new_size_bytes=$(( target_size_bytes - needed_bytes ))
     local new_size_gb=$(( new_size_bytes / 1073741824 ))
+
+    if (( new_size_bytes <= 0 )); then
+        error "$target_part is only $(( target_size_bytes / 1073741824 ))GB but needs to free ${needed_gb}GB — not enough space. Choose a smaller NixOS allocation or pick a larger partition."
+    fi
+    if (( new_size_gb < 10 )); then
+        error "$target_part would be shrunk to ${new_size_gb}GB — too small for a usable OS. Choose a smaller NixOS allocation percentage."
+    fi
+
     echo ""
     warn "Will shrink $target_part ($target_fstype): $(( target_size_bytes / 1073741824 ))GB → ${new_size_gb}GB"
     warn "Data is preserved but back up important files before continuing."
