@@ -84,7 +84,7 @@ let
     window {
         location: north;
         anchor: north;
-        y-offset: 20%;
+        y-offset: 15%;
         width: 250px;
         background-color: @bg;
         border: 0px;
