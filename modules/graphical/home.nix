@@ -19,6 +19,9 @@ let
   isVM = config.hydrix.vmType != null && config.hydrix.vmType != "host";
   modKey = if isVM then "Mod1" else "Mod4";
 
+  isHost = config.hydrix.vmType == null || config.hydrix.vmType == "host";
+  isMicrovm = !isHost && !config.hydrix.graphical.standalone;
+
 in {
   imports = [
     ./programs/alacritty.nix
@@ -62,21 +65,21 @@ in {
         ranger
         joshuto
 
-        # X11 utilities
-        xdotool
+        # Clipboard (useful in all graphical environments including xpra)
         xclip
         xsel
-        unclutter
-
-        # Screenshot and screen recording
-        scrot
-        slop
 
         # Notifications
         libnotify
 
         # Pywal for color experimentation
         pywal
+      ] ++ lib.optionals (!isMicrovm) [
+        # Standalone + host: WM utilities and screenshot tools
+        xdotool
+        unclutter
+        scrot
+        slop
       ];
     };
   };
