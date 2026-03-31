@@ -1023,43 +1023,48 @@ select_layout() {
     # Detect EFI partition for dual-boot
     if [[ "${CONFIG[layout]}" == dual-boot-* ]]; then
         echo ""
-        log "Detecting existing EFI partition on ${CONFIG[device]}..."
+        log "Scanning ${CONFIG[device]} for existing EFI partition..."
 
         local detected_efi
         detected_efi=$(lsblk -rn -o NAME,PARTTYPE "${CONFIG[device]}" 2>/dev/null | \
             grep -i "c12a7328-f81f-11d2-ba4b-00a0c93ec93b" | awk '{print "/dev/"$1}' | head -1) || true
 
         if [[ -n "$detected_efi" ]]; then
-            log "Detected EFI partition: $detected_efi"
-            read -p "Use this EFI partition? [$detected_efi]: " efi_input
-            CONFIG[efiPartition]="${efi_input:-$detected_efi}"
-        else
-            warn "No EFI partition detected automatically"
-            echo "Available partitions on ${CONFIG[device]}:"
-            lsblk -n -o NAME,SIZE,FSTYPE,PARTTYPE "${CONFIG[device]}"
+            log "Found EFI partition: $detected_efi"
             echo ""
-            read -p "Enter EFI partition device (e.g., /dev/nvme0n1p1): " efi_input
-            if [[ -z "$efi_input" ]]; then
-                error "EFI partition is required for dual-boot"
+            echo "  This partition will be reused as /boot alongside the existing OS."
+            echo "  It will NOT be reformatted."
+            echo ""
+            read -p "Use $detected_efi as /boot? [Y/n]: " efi_input </dev/tty
+            efi_input="${efi_input:-y}"
+            if [[ "${efi_input,,}" == "y" ]]; then
+                CONFIG[efiPartition]="$detected_efi"
+            else
+                read -p "Enter EFI partition to use (e.g. /dev/nvme0n1p1): " efi_input </dev/tty
+                [[ -z "$efi_input" ]] && error "EFI partition is required"
+                [[ -b "$efi_input" ]] || error "$efi_input is not a block device"
+                CONFIG[efiPartition]="$efi_input"
             fi
-            CONFIG[efiPartition]="$efi_input"
+        else
+            echo ""
+            warn "No EFI partition found on ${CONFIG[device]}."
+            echo ""
+            echo "  Current partitions:"
+            lsblk -o NAME,SIZE,FSTYPE,MOUNTPOINT "${CONFIG[device]}" 2>/dev/null || true
+            echo ""
+            echo "  This is normal for full-disk Linux installs, BIOS systems, or fresh disks."
+            echo "  A 512MB EFI partition will be created automatically in the freed space."
+            echo "  (If you DO have an EFI partition on a different disk, enter it below.)"
+            echo ""
+            read -p "Enter existing EFI partition, or press Enter to create a new one: " efi_input </dev/tty
+            if [[ -n "$efi_input" ]]; then
+                [[ -b "$efi_input" ]] || error "$efi_input is not a block device"
+                CONFIG[efiPartition]="$efi_input"
+            fi
+            # efiPartition stays empty → prepare_dual_boot_space will create one
         fi
 
-        if [[ ! -b "${CONFIG[efiPartition]}" ]]; then
-            error "EFI partition ${CONFIG[efiPartition]} does not exist"
-        fi
-
-        # Warn if the selected partition doesn't look like EFI
-        local efi_fstype
-        efi_fstype=$(timeout 5 blkid -o value -s TYPE "${CONFIG[efiPartition]}" 2>/dev/null || true)
-        if [[ "$efi_fstype" != "vfat" ]]; then
-            warn "Partition ${CONFIG[efiPartition]} has type '${efi_fstype:-unknown}', expected vfat for EFI."
-            warn "If this is correct, continue. Otherwise re-run and enter the right partition."
-            read -p "Continue anyway? [y/N]: " _efi_ok </dev/tty
-            [[ "${_efi_ok,,}" == "y" ]] || error "Aborted"
-        fi
-
-        log "EFI partition: ${CONFIG[efiPartition]}"
+        log "EFI partition: ${CONFIG[efiPartition]:-'(will be created)'}"
 
         # Show disk layout and offer to shrink an existing partition if needed
         prepare_dual_boot_space
@@ -1783,7 +1788,15 @@ prepare_dual_boot_space() {
         warn "Enter a number between 10 and 90"
     done
     local nixos_bytes=$(( total_bytes * pct / 100 ))
-    log "NixOS allocation: $(( nixos_bytes / 1073741824 ))GB (${pct}% of ${total_gb}GB)"
+    # When creating a new EFI partition, reserve 512MB from the allocation
+    local efi_create_bytes=0
+    if [[ -z "${CONFIG[efiPartition]}" ]]; then
+        efi_create_bytes=$(( 512 * 1024 * 1024 ))
+        log "NixOS allocation: $(( nixos_bytes / 1073741824 ))GB (${pct}% of ${total_gb}GB) + 512MB new EFI"
+    else
+        log "NixOS allocation: $(( nixos_bytes / 1073741824 ))GB (${pct}% of ${total_gb}GB)"
+    fi
+    nixos_bytes=$(( nixos_bytes + efi_create_bytes ))
 
     local devname="${device##*/}"
     local sector_size
@@ -1878,37 +1891,64 @@ prepare_dual_boot_space() {
     _create_nixos_partition "$device" "$devname" "$sector_size"
 }
 
-# Create a new partition using all remaining free space and store its path in CONFIG.
+# Create NixOS partition (and EFI partition if none exists) in the free space.
+# Stores results in CONFIG[nixosPartition] and CONFIG[efiPartition].
 _create_nixos_partition() {
-    local device="$1" devname="$2" sector_size="$3"
+    local device="$1"
 
-    # Snapshot existing partitions so we can identify the new one after creation
+    # Snapshot existing partitions before creation
     local -A before=()
     while read -r pname; do
         [[ -z "$pname" ]] && continue
         before["/dev/$pname"]=1
     done < <(lsblk -rn -o NAME "$device" 2>/dev/null | awk 'NR>1 {print $1}')
 
-    log "Creating NixOS partition in free space..."
-    printf ",\n" | sfdisk -a "$device"
-    sleep 2
-    partprobe "$device" 2>/dev/null || true
-    udevadm settle --timeout=10 2>/dev/null || true
+    _settle() {
+        sleep 2
+        partprobe "$device" 2>/dev/null || true
+        udevadm settle --timeout=10 2>/dev/null || true
+    }
 
-    # Find the newly created partition
-    local nixos_part=""
-    while read -r pname; do
-        [[ -z "$pname" ]] && continue
-        local devpath="/dev/$pname"
-        [[ -b "$devpath" ]] || continue
-        [[ -n "${before[$devpath]:-}" ]] && continue
-        nixos_part="$devpath"
-        break
-    done < <(lsblk -rn -o NAME "$device" 2>/dev/null | awk 'NR>1 {print $1}')
+    _new_parts() {
+        local -a new=()
+        while read -r pname; do
+            [[ -z "$pname" ]] && continue
+            local devpath="/dev/$pname"
+            [[ -b "$devpath" ]] || continue
+            [[ -n "${before[$devpath]:-}" ]] && continue
+            new+=("$devpath")
+        done < <(lsblk -rn -o NAME "$device" 2>/dev/null | awk 'NR>1 {print $1}')
+        printf '%s\n' "${new[@]}"
+    }
 
-    if [[ -z "$nixos_part" ]]; then
-        error "Failed to detect newly created NixOS partition on $device"
+    if [[ -z "${CONFIG[efiPartition]}" ]]; then
+        # No existing EFI — create 512MB EFI then NixOS in remaining space
+        log "Creating 512MB EFI partition..."
+        printf "size=512MiB,type=C12A7328-F81F-11D2-BA4B-00A0C93EC93B\n" | sfdisk -a "$device"
+        _settle
+
+        local efi_part
+        efi_part=$(_new_parts | head -1)
+        [[ -z "$efi_part" ]] && error "Failed to detect newly created EFI partition on $device"
+        mkfs.vfat -F32 "$efi_part"
+        CONFIG[efiPartition]="$efi_part"
+        log "EFI partition: $efi_part"
+
+        # Update snapshot to include the EFI partition
+        before["$efi_part"]=1
+
+        log "Creating NixOS partition in remaining free space..."
+        printf ",\n" | sfdisk -a "$device"
+        _settle
+    else
+        log "Creating NixOS partition in free space..."
+        printf ",\n" | sfdisk -a "$device"
+        _settle
     fi
+
+    local nixos_part
+    nixos_part=$(_new_parts | tail -1)
+    [[ -z "$nixos_part" ]] && error "Failed to detect newly created NixOS partition on $device"
 
     CONFIG[nixosPartition]="$nixos_part"
     log "NixOS partition: $nixos_part"
