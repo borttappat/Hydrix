@@ -1906,11 +1906,49 @@ prepare_dual_boot_space() {
         return
     fi
 
+    # Before shrinking, check for unformatted partitions from a previous failed install.
+    # These can be reused directly without shrinking — they have no data to preserve.
+    local -a reuse_parts=() reuse_sizes=()
+    for part_sys in "/sys/class/block/$devname/"/*/; do
+        local part_name="${part_sys%/}"; part_name="${part_name##*/}"
+        [[ "$part_name" == "${devname}"* ]] || continue
+        [[ -f "${part_sys}partition" ]] || continue
+        local devpath="/dev/$part_name"
+        [[ -b "$devpath" ]] || continue
+        [[ "$devpath" == "${CONFIG[efiPartition]}" ]] && continue
+        # Must have no detectable filesystem AND not be LUKS
+        cryptsetup isLuks "$devpath" 2>/dev/null && continue
+        local fs; fs=$(timeout 5 blkid -o value -s TYPE "$devpath" 2>/dev/null || true)
+        [[ -n "$fs" ]] && continue
+        local part_sectors; part_sectors=$(cat "${part_sys}size" 2>/dev/null || echo 0)
+        local psize=$(( part_sectors * sector_size ))
+        reuse_parts+=("$devpath")
+        reuse_sizes+=("$psize")
+    done
+
+    if [[ "${#reuse_parts[@]}" -gt 0 ]]; then
+        echo ""
+        log "Found existing unformatted partition(s) — likely from a previous install attempt:"
+        for i in "${!reuse_parts[@]}"; do
+            printf "  %d) %s  %dGB\n" $(( i + 1 )) "${reuse_parts[$i]}" "$(( reuse_sizes[i] / 1073741824 ))"
+        done
+        echo ""
+        local pick_reuse
+        read -p "Reuse one of these as the NixOS partition instead of shrinking? [1]: " pick_reuse </dev/tty
+        pick_reuse="${pick_reuse:-1}"
+        if [[ "$pick_reuse" =~ ^[0-9]+$ ]] && (( pick_reuse >= 1 && pick_reuse <= ${#reuse_parts[@]} )); then
+            CONFIG[nixosPartition]="${reuse_parts[$(( pick_reuse - 1 ))]}"
+            log "Using existing partition ${CONFIG[nixosPartition]} for NixOS"
+            return
+        fi
+    fi
+
     local needed_bytes=$(( nixos_bytes - free_bytes ))
     local needed_gb=$(( needed_bytes / 1073741824 ))
     log "Need to free ${needed_gb}GB more by shrinking an existing partition"
 
     # Build list of shrink candidates using sysfs — never blocks unlike lsblk on LUKS devices.
+    # Exclude: EFI, swap, and unformatted partitions (can't shrink what has no filesystem).
     local -a cand_parts=() cand_sizes=()
     for part_sys in "/sys/class/block/$devname/"/*/; do
         local part_name="${part_sys%/}"; part_name="${part_name##*/}"
@@ -1923,8 +1961,13 @@ prepare_dual_boot_space() {
         part_sectors=$(cat "${part_sys}size" 2>/dev/null || echo 0)
         local psize=$(( part_sectors * sector_size ))
         local fstype
-        fstype=$(timeout 5 blkid -o value -s TYPE "$devpath" 2>/dev/null || true)
+        if cryptsetup isLuks "$devpath" 2>/dev/null; then
+            fstype="crypto_LUKS"
+        else
+            fstype=$(timeout 5 blkid -o value -s TYPE "$devpath" 2>/dev/null || true)
+        fi
         [[ "$fstype" == "swap" ]] && continue
+        [[ -z "$fstype" ]] && continue  # unformatted — skip, can't shrink
         cand_parts+=("$devpath")
         cand_sizes+=("$psize")
     done
