@@ -75,7 +75,9 @@ in {
         "--refresh-rate=30"
         "--auto-refresh-delay=0"   # Disable periodic full-screen lossless PNG refreshes
         "--video=no"               # No software video codecs — high CPU, unnecessary for local vsock
-        "--sync-xvfb=auto"
+        # --sync-xvfb omitted: default is 5s safety-net scan
+        # "auto" caused xpra to scan Xvfb at the display refresh rate (30Hz with
+        # --refresh-rate=30), burning CPU with full framebuffer scans even when idle
         # Audio forwarding
         "--pulseaudio=yes"
         "--speaker=yes"
