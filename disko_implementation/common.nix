@@ -111,14 +111,10 @@
     
     # System monitoring
     htop
-    btop
-    iotop
     
     # Network tools
     wget
     curl
-    rsync
-    nmap
     
     # Development
     git
@@ -161,7 +157,7 @@
 
   # Docker (optional)
   virtualisation.docker = {
-    enable = true;
+    enable = false;
     enableOnBoot = true;
   };
 
@@ -180,7 +176,7 @@
 
   # SSH server
   services.openssh = {
-    enable = true;
+    enable = false;
     settings = {
       PermitRootLogin = "no";
       PasswordAuthentication = false;
@@ -190,5 +186,5 @@
   # Sudo without password for wheel group
   security.sudo.wheelNeedsPassword = false;
 
-  system.stateVersion = "24.11";
+  system.stateVersion = "25.11";
 }

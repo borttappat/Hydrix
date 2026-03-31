@@ -909,7 +909,6 @@ in {
       packages.''${system} = {
         # === ADD PACKAGES TO TEST BELOW ===
         # zellij = pkgs.zellij;
-        # btop = pkgs.btop;
       };
 
       # Dev shell - enter with: nix develop

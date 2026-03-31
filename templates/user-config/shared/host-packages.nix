@@ -40,7 +40,6 @@ in {
 
     # System monitoring
     htop
-    btop
 
     # Network tools
     wget

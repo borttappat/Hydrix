@@ -37,11 +37,9 @@
 
     # System monitoring
     htop
-    btop
 
     # File management
     ranger
-    joshuto
     file
     tree
 
