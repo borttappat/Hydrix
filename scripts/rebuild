@@ -349,8 +349,9 @@ detect_machine_config() {
     while IFS= read -r f; do
         local base
         base=$(basename "$f" .nix)
-        # Skip hardware configs
+        # Skip hardware configs and known generated helper files
         [[ "$base" == *-hardware ]] && continue
+        [[ "$base" == "grub-entries" ]] && continue
         configs+=("$base")
     done < <(ls -1 "$flake_dir/machines/"*.nix 2>/dev/null)
 

@@ -114,9 +114,12 @@
       allNixFiles = builtins.filter
         (name: builtins.match ".*\\.nix" name != null)
         (builtins.attrNames (builtins.readDir machinesDir));
-      # Filter out hardware configs (imported by machine configs, not standalone)
+      # Filter out hardware configs and generated helper files (not standalone machines)
       machineFiles = builtins.filter
-        (name: builtins.match ".*-hardware\\.nix" name == null)
+        (name:
+          builtins.match ".*-hardware\\.nix" name == null &&
+          name != "grub-entries.nix"
+        )
         allNixFiles;
     in builtins.listToAttrs (map (file: {
       name = builtins.replaceStrings [ ".nix" ] [ "" ] file;
