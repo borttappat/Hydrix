@@ -1116,9 +1116,9 @@ _detect_existing_os_entries() {
 
         # Boot the old NixOS directly from its nix store inside the LUKS+btrfs container.
         # NixOS keeps /boot on the EFI partition (outside LUKS), so configfile doesn't work.
-        # Instead: open LUKS, set root to the btrfs device, load kernel+initrd from the
-        # @ subvolume via the system profile symlink. The old initrd handles LUKS mounting
-        # (GRUB with enableCryptodisk passes the key so no second password prompt).
+        # Instead: open LUKS here in the entry, set root to the btrfs device, and load
+        # kernel+initrd from the @ subvolume via the system profile symlink.
+        # Note: the old OS's initrd will re-prompt for the LUKS password (two prompts total).
         entries+="menuentry 'Existing OS ($devpath)' {\n"
         entries+="  insmod part_gpt\n"
         entries+="  insmod cryptodisk\n"

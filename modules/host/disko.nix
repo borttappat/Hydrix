@@ -184,9 +184,11 @@ in {
         device = "nodev";
         efiSupport = true;
         useOSProber = lib.hasPrefix "dual-boot" diskoCfg.layout;
-        # Allow GRUB to unlock LUKS partitions at boot time (needed to
-        # chain-boot other encrypted installs from dual-boot menus)
-        enableCryptodisk = lib.hasPrefix "dual-boot" diskoCfg.layout;
+        # Chain-boot entries use insmod cryptodisk + cryptomount -u <UUID>
+        # directly, so no global LUKS scan at GRUB startup is needed.
+        # (enableCryptodisk = true would prompt for all LUKS devices before
+        # the menu is shown, and is incorrect here since Hydrix kernel/initrd
+        # are on the unencrypted EFI partition.)
         extraEntries = lib.mkIf (diskoCfg.grubExtraEntries != "") diskoCfg.grubExtraEntries;
       };
       efi = {
