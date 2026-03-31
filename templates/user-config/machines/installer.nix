@@ -23,6 +23,7 @@
   imports = [
     ./@SERIAL@-hardware.nix
     ../specialisations/lockdown.nix
+    ./grub-entries.nix
   ];
 
   specialisation.administrative.configuration = {
@@ -49,7 +50,6 @@
       layout = "@LAYOUT@";
       nixosPartition = "@NIXOS_PARTITION@";
       efiPartition = "@EFI_PARTITION@";
-      grubExtraEntries = "@GRUB_EXTRA_ENTRIES@";
     };
 
     router = {

@@ -1112,7 +1112,7 @@ _detect_existing_os_entries() {
 
         log "Found existing encrypted partition: $devpath ($size_gb GB, UUID $uuid)"
 
-        entries+="menuentry \"Existing OS ($devpath)\" {\n"
+        entries+="menuentry 'Existing OS ($devpath)' {\n"
         entries+="  insmod part_gpt\n"
         entries+="  insmod cryptodisk\n"
         entries+="  insmod luks2\n"
@@ -1775,12 +1775,39 @@ generate_machine_nix() {
         -e "s|@WIFI_PCI_ID@|${CONFIG[wifiPciId]}|g" \
         -e "s|@WIFI_PCI_ADDRESS@|${CONFIG[wifiPciAddress]}|g" \
         -e "s|@GRUB_GFXMODE@|${CONFIG[grubGfxmode]}|g" \
-        "$template_file" \
-    | awk -v entries="${CONFIG[grubExtraEntries]}" \
-        '{ gsub(/@GRUB_EXTRA_ENTRIES@/, entries); print }' \
-    > "$config_dir/machines/${CONFIG[serial]}.nix"
+        "$template_file" > "$config_dir/machines/${CONFIG[serial]}.nix"
+
+    # Write GRUB extra entries as a separate Nix file to avoid quoting issues
+    generate_grub_entries_nix "$config_dir"
 
     log "Generated: $config_dir/machines/${CONFIG[serial]}.nix"
+}
+
+# Write machines/grub-entries.nix with chainboot entries for existing encrypted OSes.
+# Using a separate file avoids Nix string quoting issues that arise from substituting
+# GRUB stanzas (which contain double quotes) directly into a template.
+generate_grub_entries_nix() {
+    local config_dir="$1"
+    local outfile="$config_dir/machines/grub-entries.nix"
+
+    if [[ -z "${CONFIG[grubExtraEntries]}" ]]; then
+        # No entries — write an empty module so the import still resolves
+        printf '{ ... }: {}\n' > "$outfile"
+        return
+    fi
+
+    # Nix ''...'' strings allow double quotes without escaping, so write the
+    # entries verbatim inside that string literal.
+    {
+        printf '{ ... }:\n'
+        printf '{\n'
+        printf "  boot.loader.grub.extraEntries = ''\n"
+        printf '%s' "${CONFIG[grubExtraEntries]}"
+        printf "  '';\n"
+        printf '}\n'
+    } > "$outfile"
+
+    log "Generated: $config_dir/machines/grub-entries.nix"
 }
 
 # ========== DUAL BOOT SPACE PREPARATION ==========

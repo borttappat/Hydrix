@@ -187,7 +187,7 @@ in {
         # Allow GRUB to unlock LUKS partitions at boot time (needed to
         # chain-boot other encrypted installs from dual-boot menus)
         enableCryptodisk = lib.hasPrefix "dual-boot" diskoCfg.layout;
-        extraEntries = diskoCfg.grubExtraEntries;
+        extraEntries = lib.mkIf (diskoCfg.grubExtraEntries != "") diskoCfg.grubExtraEntries;
       };
       efi = {
         canTouchEfiVariables = true;
