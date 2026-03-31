@@ -1284,7 +1284,7 @@ MACHINE_EOF
     # SERVICES
     # -----------------------------------------------------------------------
     services = {
-      tailscale.enable = false;       # DEFAULT: false - Tailscale VPN
+      tailscale.enable = true;        # DEFAULT: true  - Tailscale VPN
       ssh.enable = true;              # DEFAULT: true - OpenSSH daemon
     };
 

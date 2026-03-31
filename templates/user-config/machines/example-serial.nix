@@ -219,7 +219,7 @@
     # set directly in the relevant profile (profiles/<name>/default.nix).
     #
     # services = {
-    #   tailscale.enable = false;  # DEFAULT: false - Tailscale VPN mesh
+    #   tailscale.enable = true;   # DEFAULT: true  - Tailscale VPN mesh
     #                              # Note: disables resolvconf to avoid DNS conflicts
     #   ssh.enable = true;         # DEFAULT: true  - OpenSSH daemon
     # };

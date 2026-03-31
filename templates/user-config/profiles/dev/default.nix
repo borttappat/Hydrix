@@ -50,6 +50,10 @@
   # SERVICES
   # =========================================================================
 
+  # Tailscale VPN (run `tailscale up` after first boot to authenticate)
+  services.tailscale.enable = true;
+  networking.resolvconf.enable = lib.mkDefault false;
+
   # Docker available but not started on boot
   # Start on demand: sudo systemctl start docker
   virtualisation.docker = {

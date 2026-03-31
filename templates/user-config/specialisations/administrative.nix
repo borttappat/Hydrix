@@ -17,6 +17,8 @@
   hydrix.graphical.firefox.hostEnable = true;
   hydrix.graphical.obsidian.hostEnable = true;
 
+  hydrix.services.tailscale.enable = true;
+
   environment.systemPackages = with pkgs; [
     # Network tools
     iproute2
