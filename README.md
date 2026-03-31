@@ -1282,10 +1282,11 @@ hydrix.graphical.lockscreen = {
 
 | Key | Action |
 |-----|--------|
-| `Mod+d` | Rofi launcher |
+| `Mod+d` | Launcher (workspace-aware: host rofi or VM app menu) |
 | `Mod+b` | Firefox |
 | `Mod+o` | Obsidian |
 | `Mod+Shift+f` | File manager (joshuto) |
+| `Mod+Shift+m` | VM app launcher (vm-launch) |
 | `Mod+z` | Zathura (PDF viewer) |
 | `Mod+m` | Hydrix TUI |
 

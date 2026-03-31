@@ -21,7 +21,7 @@ in {
       # === Launcher ===
       "${mod}+q" = "kill";
       "${mod}+d" = "exec --no-startup-id host-rofi";
-      "${mod}+Shift+d" = "exec --no-startup-id vm-launch";
+      "${mod}+Shift+d" = null;
 
       # === Browser (via VM) ===
       "${mod}+b" = "exec --no-startup-id ws-app firefox";
@@ -30,7 +30,7 @@ in {
 
       # === Applications ===
       "${mod}+m" = "exec alacritty-dpi --class floating -e hydrix-tui";
-      "${mod}+Shift+m" = "exec microvm-rofi";
+      "${mod}+Shift+m" = "exec --no-startup-id vm-launch";
       # "${mod}+o" = "exec --no-startup-id ws-app obsidian";
       # "${mod}+z" = "exec --no-startup-id ws-app zathura";
 
