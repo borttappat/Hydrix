@@ -194,7 +194,7 @@ EOF
         location: north;
         anchor: north;
         y-offset: 15%;
-        width: 180px;
+        width: 400px;
         background-color: @bg;
         border: 0px;
         border-radius: ''${corner_radius}px;
