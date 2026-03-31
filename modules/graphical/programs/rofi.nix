@@ -164,7 +164,7 @@ let
     window {
         location: north;
         anchor: north;
-        y-offset: $((bar_gaps + bar_height))px;
+        y-offset: 20%;
         width: 250px;
         background-color: @bg;
         border: 0px;
@@ -267,7 +267,7 @@ EOF
     window {
         location: north;
         anchor: north;
-        y-offset: $((bar_gaps + bar_height))px;
+        y-offset: 20%;
         width: 180px;
         background-color: @bg;
         border: 0px;
@@ -442,7 +442,27 @@ EOF
         ${pkgs.coreutils}/bin/rm -f "$theme_file"
     }
 
-    # Launch rofi drun inside the VM via xpra — dynamic, uses VM's actual installed apps
+    # Locate the VM's current NixOS system path in the nix store
+    get_vm_system_path() {
+        local vm_name="$1"
+        local vm_system
+
+        vm_system=$(${pkgs.systemd}/bin/systemctl show "microvm@''${vm_name}.service" \
+            --property=ExecStart --value 2>/dev/null \
+            | ${pkgs.gnugrep}/bin/grep -oP '/nix/store/\S+-nixos-system-\S+' | head -1)
+
+        if [[ -z "$vm_system" ]]; then
+            for p in \
+                "/var/lib/microvms/''${vm_name}/current" \
+                "/var/lib/microvms/''${vm_name}/system"; do
+                [[ -L "$p" ]] && { vm_system=$(readlink -f "$p"); break; }
+            done
+        fi
+
+        [[ -n "$vm_system" ]] && echo "$vm_system" || return 1
+    }
+
+    # Launch rofi drun scoped to the VM's apps — identical styling to host launcher
     show_vm_app_launcher() {
         local vm_type="$1"
         local running_vms vm_count selected
@@ -479,67 +499,28 @@ EOF
 
         set_active_vm "$vm_type" "$selected"
 
-        # Read apps from the VM's nix store closure and show in host rofi
-        local apps_tsv
-        apps_tsv=$(get_vm_desktop_apps "$selected") || true
-
-        if [[ -n "$apps_tsv" ]]; then
-            local theme_file app_name exec_cmd
-            theme_file=$(${pkgs.coreutils}/bin/mktemp /tmp/host-rofi-XXXXXX.rasi)
-            build_theme > "$theme_file"
-
-            app_name=$(echo "$apps_tsv" | cut -f1 \
-                | ${pkgs.rofi}/bin/rofi -dmenu -theme "$theme_file" -m -4 -i -p "$selected" 2>/dev/null) || true
-            ${pkgs.coreutils}/bin/rm -f "$theme_file"
-
-            [[ -z "$app_name" ]] && return
-
-            exec_cmd=$(printf '%s' "$apps_tsv" \
-                | ${pkgs.gnugrep}/bin/grep -F "''${app_name}"$'\t' | head -1 | cut -f2)
-            [[ -z "$exec_cmd" ]] && return
-
-            vm-app "$selected" "$exec_cmd" &
-            disown 2>/dev/null || true
-        else
-            # Fallback: run rofi inside the VM via xpra
-            vm-app "$selected" "rofi -show drun" &
-            disown 2>/dev/null || true
-        fi
-    }
-
-    # Read GUI apps from the VM's NixOS system closure (.desktop files in shared nix store)
-    get_vm_desktop_apps() {
-        local vm_name="$1"
         local vm_system
+        vm_system=$(get_vm_system_path "''${selected}") || true
 
-        # Try to locate the VM's current system via its systemd service ExecStart
-        vm_system=$(${pkgs.systemd}/bin/systemctl show "microvm@''${vm_name}.service" \
-            --property=ExecStart --value 2>/dev/null \
-            | ${pkgs.gnugrep}/bin/grep -oP '/nix/store/\S+-nixos-system-\S+' | head -1)
+        local theme_file
+        theme_file=$(${pkgs.coreutils}/bin/mktemp /tmp/host-rofi-XXXXXX.rasi)
+        build_theme > "$theme_file"
 
-        # Fallback: check common symlink locations
-        if [[ -z "$vm_system" ]]; then
-            for p in \
-                "/var/lib/microvms/''${vm_name}/current" \
-                "/var/lib/microvms/''${vm_name}/system"; do
-                [[ -L "$p" ]] && { vm_system=$(readlink -f "$p"); break; }
-            done
+        if [[ -n "$vm_system" && -d "''${vm_system}/sw/share/applications" ]]; then
+            # Use VM's desktop files via XDG_DATA_DIRS; route launches through vm-app
+            XDG_DATA_DIRS="''${vm_system}/sw/share" \
+                ${pkgs.rofi}/bin/rofi -show drun \
+                -theme "$theme_file" \
+                -m -4 \
+                -run-command "vm-app ''${selected} {cmd}" \
+                2>/dev/null || true
+        else
+            # Fallback: push rofi launch into the VM via xpra
+            vm-app "''${selected}" "rofi -show drun" &
+            disown 2>/dev/null || true
         fi
 
-        [[ -z "$vm_system" || ! -d "''${vm_system}/sw/share/applications" ]] && return 1
-
-        for desktop in "''${vm_system}/sw/share/applications"/*.desktop; do
-            [[ -f "$desktop" ]] || continue
-            ${pkgs.gnugrep}/bin/grep -q "^NoDisplay=true" "$desktop" 2>/dev/null && continue
-            ${pkgs.gnugrep}/bin/grep -q "^Hidden=true"    "$desktop" 2>/dev/null && continue
-            ${pkgs.gnugrep}/bin/grep -q "^Type=Application" "$desktop" 2>/dev/null || continue
-            local name exec_cmd
-            name=$(${pkgs.gnugrep}/bin/grep -m1 "^Name=" "$desktop" | cut -d= -f2-)
-            exec_cmd=$(${pkgs.gnugrep}/bin/grep -m1 "^Exec=" "$desktop" | cut -d= -f2- \
-                | ${pkgs.gnused}/bin/sed 's/ *%[a-zA-Z]//g' \
-                | ${pkgs.gawk}/bin/awk '{print $1}')
-            [[ -n "$name" && -n "$exec_cmd" ]] && printf '%s\t%s\n' "$name" "$exec_cmd"
-        done | ${pkgs.coreutils}/bin/sort
+        ${pkgs.coreutils}/bin/rm -f "$theme_file"
     }
 
     # Get workspace VM config
