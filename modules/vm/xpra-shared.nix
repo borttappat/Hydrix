@@ -62,11 +62,20 @@ in {
         "--vsock-auth=none"
         "--sharing=yes"
         # Encoding: rgb = zero compression, zero CPU overhead
-        # vsock is a local kernel transport — bandwidth is free, compression is pure waste
+        # vsock is a local kernel transport — bandwidth is free, compression is pure waste.
+        # --min-quality=1 is required: without it xpra's lossless threshold heuristic
+        # (base≈64) overrides --encoding=rgb back to png for "static" content.
         "--encoding=rgb"
-        "--speed=100"              # Fastest encoding path
+        "--min-quality=1"
+        "--speed=100"
+        # Run virtual display at 30Hz. Firefox's software WebRender ticks at the
+        # display refresh rate — even on blank pages. Lowering this from 60Hz halves
+        # the damage event rate and reduces both focused and unfocused CPU usage.
+        # (flag name is --refresh-rate, not --max-fps which does not exist in xpra)
+        "--refresh-rate=30"
         "--auto-refresh-delay=0"   # Disable periodic full-screen lossless PNG refreshes
         "--video=no"               # No software video codecs — high CPU, unnecessary for local vsock
+        "--sync-xvfb=auto"
         # Audio forwarding
         "--pulseaudio=yes"
         "--speaker=yes"
@@ -75,7 +84,6 @@ in {
         "--modal-windows=yes"
         "--input-method=none"
         "--systemd-run=no"
-        "--sync-xvfb=auto"
       ]);
       Restart = "always";
       RestartSec = 2;
