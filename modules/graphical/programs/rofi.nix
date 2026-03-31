@@ -52,12 +52,6 @@ let
     }
 
     readonly ACTIVE_VMS_FILE="$HOME/.cache/hydrix/active-vms.json"
-    readonly COMMON_APPS="firefox
-alacritty
-thunar
-chromium
-code
-burpsuite"
 
     # Ensure cache directory exists
     init_cache() {
@@ -448,7 +442,7 @@ EOF
         ${pkgs.coreutils}/bin/rm -f "$theme_file"
     }
 
-    # Show VM app menu, with optional VM selection if multiple are running
+    # Launch rofi drun inside the VM via xpra — dynamic, uses VM's actual installed apps
     show_vm_app_launcher() {
         local vm_type="$1"
         local running_vms vm_count selected
@@ -457,7 +451,6 @@ EOF
         vm_count=$(echo "$running_vms" | ${pkgs.gnugrep}/bin/grep -c . 2>/dev/null || echo 0)
 
         if [[ "$vm_count" -eq 1 ]]; then
-            # Only one VM running — skip selection step
             selected=$(echo "$running_vms" | head -1)
         else
             # Multiple VMs — show selection menu with active marker
@@ -486,18 +479,9 @@ EOF
 
         set_active_vm "$vm_type" "$selected"
 
-        # Show app menu for the selected VM
-        local theme_file app
-        theme_file=$(${pkgs.coreutils}/bin/mktemp /tmp/host-rofi-XXXXXX.rasi)
-        build_theme > "$theme_file"
-
-        app=$(echo -n "$COMMON_APPS" | ${pkgs.rofi}/bin/rofi -dmenu -theme "$theme_file" -m -4 -i -p "$selected" 2>/dev/null) || true
-        ${pkgs.coreutils}/bin/rm -f "$theme_file"
-
-        if [[ -n "$app" ]]; then
-            vm-app "$selected" "$app" &
-            disown 2>/dev/null || true
-        fi
+        # Run rofi drun inside the VM — xpra forwards the window to the host desktop
+        vm-app "$selected" "rofi -show drun" &
+        disown 2>/dev/null || true
     }
 
     # Get workspace VM config
@@ -533,8 +517,8 @@ EOF
                 vm_spec="''${config##*:}"
 
                 if ! is_vm_running "$vm_type"; then
-                    # No VM running - fall back to host launcher
-                    show_app_launcher
+                    # No VM running - prompt to start one
+                    show_vm_prompt "$vm_type"
                 else
                     show_vm_app_launcher "$vm_type"
                 fi
