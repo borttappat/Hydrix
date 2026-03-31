@@ -125,8 +125,9 @@ let
     }
 
     build_theme() {
-        local bar_gaps corner_radius font_size font_name overlay_alpha
+        local bar_gaps bar_height corner_radius font_size font_name overlay_alpha
         bar_gaps=$(get_scaling_value '.sizes.bar_gaps' '10')
+        bar_height=$(get_scaling_value '.sizes.bar_height' '25')
         corner_radius=$(get_scaling_value '.sizes.corner_radius' '8')
         font_size=$(get_scaling_value '.fonts.rofi' '12')
         font_name=$(get_scaling_value '.font_names.rofi' "$(get_scaling_value '.font_name' '${fontFamily}')")
@@ -148,8 +149,8 @@ let
         me-accept-entry: "MousePrimary";
         kb-cancel: "Escape,q";
         kb-accept-entry: "Return,KP_Enter";
-        kb-row-up: "Up,k";
-        kb-row-down: "Down,j";
+        kb-row-up: "Up";
+        kb-row-down: "Down";
     }
 
     * {
@@ -163,8 +164,7 @@ let
     window {
         location: north;
         anchor: north;
-        x-offset: -18%;
-        y-offset: ''${bar_gaps}px;
+        y-offset: $((bar_gaps + bar_height))px;
         width: 250px;
         background-color: @bg;
         border: 0px;
@@ -228,8 +228,9 @@ EOF
     }
 
     build_prompt_theme() {
-        local bar_gaps corner_radius font_size font_name overlay_alpha
+        local bar_gaps bar_height corner_radius font_size font_name overlay_alpha
         bar_gaps=$(get_scaling_value '.sizes.bar_gaps' '10')
+        bar_height=$(get_scaling_value '.sizes.bar_height' '25')
         corner_radius=$(get_scaling_value '.sizes.corner_radius' '8')
         font_size=$(get_scaling_value '.fonts.rofi' '12')
         font_name=$(get_scaling_value '.font_names.rofi' "$(get_scaling_value '.font_name' '${fontFamily}')")
@@ -251,8 +252,8 @@ EOF
         me-accept-entry: "MousePrimary";
         kb-cancel: "Escape,q,n";
         kb-accept-entry: "Return,KP_Enter,y";
-        kb-row-up: "Up,k";
-        kb-row-down: "Down,j";
+        kb-row-up: "Up";
+        kb-row-down: "Down";
     }
 
     * {
@@ -266,8 +267,7 @@ EOF
     window {
         location: north;
         anchor: north;
-        x-offset: -18%;
-        y-offset: ''${bar_gaps}px;
+        y-offset: $((bar_gaps + bar_height))px;
         width: 180px;
         background-color: @bg;
         border: 0px;
@@ -479,9 +479,67 @@ EOF
 
         set_active_vm "$vm_type" "$selected"
 
-        # Run rofi drun inside the VM — xpra forwards the window to the host desktop
-        vm-app "$selected" "rofi -show drun" &
-        disown 2>/dev/null || true
+        # Read apps from the VM's nix store closure and show in host rofi
+        local apps_tsv
+        apps_tsv=$(get_vm_desktop_apps "$selected") || true
+
+        if [[ -n "$apps_tsv" ]]; then
+            local theme_file app_name exec_cmd
+            theme_file=$(${pkgs.coreutils}/bin/mktemp /tmp/host-rofi-XXXXXX.rasi)
+            build_theme > "$theme_file"
+
+            app_name=$(echo "$apps_tsv" | cut -f1 \
+                | ${pkgs.rofi}/bin/rofi -dmenu -theme "$theme_file" -m -4 -i -p "$selected" 2>/dev/null) || true
+            ${pkgs.coreutils}/bin/rm -f "$theme_file"
+
+            [[ -z "$app_name" ]] && return
+
+            exec_cmd=$(printf '%s' "$apps_tsv" \
+                | ${pkgs.gnugrep}/bin/grep -F "${app_name}"$'\t' | head -1 | cut -f2)
+            [[ -z "$exec_cmd" ]] && return
+
+            vm-app "$selected" "$exec_cmd" &
+            disown 2>/dev/null || true
+        else
+            # Fallback: run rofi inside the VM via xpra
+            vm-app "$selected" "rofi -show drun" &
+            disown 2>/dev/null || true
+        fi
+    }
+
+    # Read GUI apps from the VM's NixOS system closure (.desktop files in shared nix store)
+    get_vm_desktop_apps() {
+        local vm_name="$1"
+        local vm_system
+
+        # Try to locate the VM's current system via its systemd service ExecStart
+        vm_system=$(${pkgs.systemd}/bin/systemctl show "microvm@${vm_name}.service" \
+            --property=ExecStart --value 2>/dev/null \
+            | ${pkgs.gnugrep}/bin/grep -oP '/nix/store/\S+-nixos-system-\S+' | head -1)
+
+        # Fallback: check common symlink locations
+        if [[ -z "$vm_system" ]]; then
+            for p in \
+                "/var/lib/microvms/${vm_name}/current" \
+                "/var/lib/microvms/${vm_name}/system"; do
+                [[ -L "$p" ]] && { vm_system=$(readlink -f "$p"); break; }
+            done
+        fi
+
+        [[ -z "$vm_system" || ! -d "${vm_system}/sw/share/applications" ]] && return 1
+
+        for desktop in "${vm_system}/sw/share/applications"/*.desktop; do
+            [[ -f "$desktop" ]] || continue
+            ${pkgs.gnugrep}/bin/grep -q "^NoDisplay=true" "$desktop" 2>/dev/null && continue
+            ${pkgs.gnugrep}/bin/grep -q "^Hidden=true"    "$desktop" 2>/dev/null && continue
+            ${pkgs.gnugrep}/bin/grep -q "^Type=Application" "$desktop" 2>/dev/null || continue
+            local name exec_cmd
+            name=$(${pkgs.gnugrep}/bin/grep -m1 "^Name=" "$desktop" | cut -d= -f2-)
+            exec_cmd=$(${pkgs.gnugrep}/bin/grep -m1 "^Exec=" "$desktop" | cut -d= -f2- \
+                | ${pkgs.gnused}/bin/sed 's/ *%[a-zA-Z]//g' \
+                | ${pkgs.gawk}/bin/awk '{print $1}')
+            [[ -n "$name" && -n "$exec_cmd" ]] && printf '%s\t%s\n' "$name" "$exec_cmd"
+        done | ${pkgs.coreutils}/bin/sort
     }
 
     # Get workspace VM config
