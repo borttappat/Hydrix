@@ -264,7 +264,7 @@ get_vm_type() {
 }
 
 # Detect machine config name
-# Priority: 1) DMI serial, 2) product_name match, 3) single config fallback
+# Priority: 1) DMI serial, 2) board_name (mb-<name>), 3) product_name (prod-/<name>/mb-<name>), 4) single config
 detect_machine_config() {
     local flake_dir="$1"
     local serial=""
@@ -317,23 +317,31 @@ detect_machine_config() {
         fi
     fi
 
-    # Fallback: try product_name (e.g., mb-ux5406sa)
-    local product_name
+    # Fallback: mirror generate_fallback_id() from lib/common.sh
+    # 1) board_name -> mb-<name>
+    local board_name board_id
+    board_name=$(cat /sys/class/dmi/id/board_name 2>/dev/null | xargs || echo "")
+    board_id=$(echo "$board_name" | tr '[:upper:]' '[:lower:]' | tr ' _' '-' | sed 's/[^a-z0-9-]//g; s/-\+/-/g; s/^-//; s/-$//')
+    if [[ -n "$board_id" ]] && [[ "$board_id" != "default-string" ]] && [[ "$board_id" != "not-applicable" ]]; then
+        if [[ -f "$flake_dir/machines/mb-${board_id}.nix" ]]; then
+            echo "mb-${board_id}"
+            return
+        fi
+    fi
+
+    # 2) product_name -> prod-<name>, bare, or mb- prefixed (legacy)
+    local product_name sanitized
     product_name=$(cat /sys/class/dmi/id/product_name 2>/dev/null | xargs || echo "")
     if [[ -n "$product_name" ]]; then
-        local sanitized
         sanitized=$(echo "$product_name" | tr '[:upper:]' '[:lower:]' | tr ' _' '-')
         sanitized=$(echo "$sanitized" | sed 's/[^a-z0-9-]//g; s/-\+/-/g; s/^-//; s/-$//')
 
-        # Check for exact match or mb- prefixed match
-        if [[ -f "$flake_dir/machines/${sanitized}.nix" ]]; then
-            echo "$sanitized"
-            return
-        fi
-        if [[ -f "$flake_dir/machines/mb-${sanitized}.nix" ]]; then
-            echo "mb-${sanitized}"
-            return
-        fi
+        for candidate in "prod-${sanitized}" "${sanitized}" "mb-${sanitized}"; do
+            if [[ -f "$flake_dir/machines/${candidate}.nix" ]]; then
+                echo "$candidate"
+                return
+            fi
+        done
     fi
 
     # Fallback: if only one non-hardware config exists, use it
@@ -353,7 +361,7 @@ detect_machine_config() {
 
     # No config found
     err "Could not detect machine config"
-    err "No DMI serial and no matching product_name config found"
+    err "No DMI serial, board_name, or product_name matched any config in machines/"
     err ""
     err "Available configs:"
     for c in "${configs[@]}"; do
