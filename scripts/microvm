@@ -1170,6 +1170,7 @@ detect_host_config() {
         local base
         base=$(basename "$f" .nix)
         [[ "$base" == *-hardware ]] && continue
+        [[ "$base" == "grub-entries" ]] && continue
         configs+=("$base")
     done
     if [[ ${#configs[@]} -eq 1 ]]; then
@@ -1216,7 +1217,9 @@ resolve_builder_target() {
             echo "${builder_flake}#nixosConfigurations.microvm-gitsync.config.microvm.declaredRunner"
             ;;
         host)
-            echo "${builder_flake}#nixosConfigurations.$(detect_host_config).config.system.build.toplevel"
+            local host_config
+            host_config=$(detect_host_config) || return 1
+            echo "${builder_flake}#nixosConfigurations.${host_config}.config.system.build.toplevel"
             ;;
         micro*)
             # Direct microVM name (microvm-browsing, microvm-pentest, etc.)
