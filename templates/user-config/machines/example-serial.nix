@@ -220,7 +220,6 @@
     #
     # services = {
     #   tailscale.enable = true;   # DEFAULT: true  - Tailscale VPN mesh
-    #                              # Note: disables resolvconf to avoid DNS conflicts
     #   ssh.enable = true;         # DEFAULT: true  - OpenSSH daemon
     # };
 

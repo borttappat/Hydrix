@@ -385,10 +385,6 @@ services.openssh.enable = lib.mkIf cfg.services.ssh.enable true;
 # Enabling tailscale VPN
 services.tailscale.enable = lib.mkIf cfg.services.tailscale.enable true;
 
-# When Tailscale manages DNS, prevent NixOS resolvconf from conflicting
-# Tailscale overwrites /etc/resolv.conf; resolvconf detects signature mismatch
-networking.resolvconf.enable = lib.mkIf cfg.services.tailscale.enable (lib.mkDefault false);
-
 # Enable i2c-bus
 hardware.i2c.enable = lib.mkIf cfg.hardware.i2c.enable true;
 
