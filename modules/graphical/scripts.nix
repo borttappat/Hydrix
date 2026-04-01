@@ -424,24 +424,37 @@ ZEOF
       exit 1
     fi
 
+    # Detect virtual desktop dimensions and primary monitor position for correct text placement
+    VIRT_SIZE=$(${pkgs.xorg.xdpyinfo}/bin/xdpyinfo | ${pkgs.gnugrep}/bin/grep -oP 'dimensions:\s+\K[0-9]+x[0-9]+' | head -1)
+    VIRT_SIZE="''${VIRT_SIZE:-1920x1200}"
+    PRIMARY_GEOM=$(${pkgs.xorg.xrandr}/bin/xrandr --query | ${pkgs.gnugrep}/bin/grep " connected primary " | ${pkgs.gnugrep}/bin/grep -oE '[0-9]+x[0-9]+\+[0-9]+\+[0-9]+' | head -1)
+    [ -z "$PRIMARY_GEOM" ] && PRIMARY_GEOM=$(${pkgs.xorg.xrandr}/bin/xrandr --query | ${pkgs.gnugrep}/bin/grep " connected " | ${pkgs.gnugrep}/bin/grep -oE '[0-9]+x[0-9]+\+[0-9]+\+[0-9]+' | head -1)
+    MON_X=0; MON_Y=0
+    if [ -n "$PRIMARY_GEOM" ]; then
+      MON_X=$(echo "$PRIMARY_GEOM" | cut -d+ -f2)
+      MON_Y=$(echo "$PRIMARY_GEOM" | cut -d+ -f3)
+    fi
+    TEXT_X=$((MON_X + 50))
+    TEXT_Y=$((MON_Y + 50))
+
     # Create temp files
     blur_img="/tmp/lockscreen_blur_$$.png"
 
     ${if cfg.lockscreen.blur then ''
-    # Apply blur/pixelate effect
-    ${pkgs.imagemagick}/bin/magick "$WALLPAPER" -scale 20% -scale 500% "$blur_img" 2>>"$LOCK_LOG"
+    # Scale wallpaper to virtual desktop size, then pixelate
+    ${pkgs.imagemagick}/bin/magick "$WALLPAPER" -resize "$VIRT_SIZE^" -gravity Center -extent "$VIRT_SIZE" -scale 20% -scale 500% "$blur_img" 2>>"$LOCK_LOG"
     '' else ''
-    cp "$WALLPAPER" "$blur_img"
+    ${pkgs.imagemagick}/bin/magick "$WALLPAPER" -resize "$VIRT_SIZE^" -gravity Center -extent "$VIRT_SIZE" "$blur_img" 2>>"$LOCK_LOG"
     ''}
 
-    # Add text overlay (fall back to CozetteVector if font fails - bitmap fonts don't work)
+    # Add text overlay on primary monitor (fall back to CozetteVector if font fails - bitmap fonts don't work)
     if ! ${pkgs.imagemagick}/bin/magick "$blur_img" -gravity NorthWest \
         -pointsize $FONT_SIZE -font "$FONT" -fill "$color1" \
-        -annotate +50+50 "$LOCK_TEXT" "$LOCK_CACHE" 2>>"$LOCK_LOG"; then
+        -annotate +"$TEXT_X"+"$TEXT_Y" "$LOCK_TEXT" "$LOCK_CACHE" 2>>"$LOCK_LOG"; then
       FONT="CozetteVector"
       ${pkgs.imagemagick}/bin/magick "$blur_img" -gravity NorthWest \
           -pointsize $FONT_SIZE -font "$FONT" -fill "$color1" \
-          -annotate +50+50 "$LOCK_TEXT" "$LOCK_CACHE" 2>>"$LOCK_LOG"
+          -annotate +"$TEXT_X"+"$TEXT_Y" "$LOCK_TEXT" "$LOCK_CACHE" 2>>"$LOCK_LOG"
     fi
 
     # Cleanup
@@ -1075,6 +1088,27 @@ ZEOF
     WRONG_TEXT="${cfg.lockscreen.wrongText}"
     VERIFY_TEXT="${cfg.lockscreen.verifyText}"
 
+    # Detect primary monitor position for correct text/element placement on multi-monitor setups
+    PRIMARY_GEOM=$(${pkgs.xorg.xrandr}/bin/xrandr --query | ${pkgs.gnugrep}/bin/grep " connected primary " | ${pkgs.gnugrep}/bin/grep -oE '[0-9]+x[0-9]+\+[0-9]+\+[0-9]+' | head -1)
+    [ -z "$PRIMARY_GEOM" ] && PRIMARY_GEOM=$(${pkgs.xorg.xrandr}/bin/xrandr --query | ${pkgs.gnugrep}/bin/grep " connected " | ${pkgs.gnugrep}/bin/grep -oE '[0-9]+x[0-9]+\+[0-9]+\+[0-9]+' | head -1)
+    MON_W=1920; MON_H=1200; MON_X=0; MON_Y=0
+    if [ -n "$PRIMARY_GEOM" ]; then
+      MON_W=$(echo "$PRIMARY_GEOM" | cut -dx -f1)
+      MON_H=$(echo "$PRIMARY_GEOM" | cut -dx -f2 | cut -d+ -f1)
+      MON_X=$(echo "$PRIMARY_GEOM" | cut -d+ -f2)
+      MON_Y=$(echo "$PRIMARY_GEOM" | cut -d+ -f3)
+    fi
+    # Positions proportional to primary monitor (ratios derived from 1920x1200 originals)
+    IND_X=$((MON_X + MON_W * 171 / 1000))
+    IND_Y=$((MON_Y + MON_H * 225 / 1000))
+    TIME_X=$((MON_X + MON_W * 128 / 1000))
+    DATE_X=$((MON_X + MON_W * 115 / 1000))
+    DATE_Y=$((MON_Y + MON_H * 158 / 1000))
+    VERIF_X=$((MON_X + MON_W * 162 / 1000))
+    WRONG_X=$((MON_X + MON_W * 479 / 1000))
+    TEXT_X=$((MON_X + 50))
+    TEXT_Y=$((MON_Y + 50))
+
     # Always take a live screenshot, blur it, and apply colors
     LOCK_TEXT="${cfg.lockscreen.text}"
     FONT_SIZE=${toString cfg.lockscreen.fontSize}
@@ -1092,11 +1126,11 @@ ZEOF
 
       if ! ${pkgs.imagemagick}/bin/magick "$blur_img" -gravity NorthWest \
           -pointsize $FONT_SIZE -font "$FONT" -fill "$color1" \
-          -annotate +50+50 "$LOCK_TEXT" /tmp/i3lock_text.png 2>/dev/null; then
+          -annotate +"$TEXT_X"+"$TEXT_Y" "$LOCK_TEXT" /tmp/i3lock_text.png 2>/dev/null; then
         FONT="CozetteVector"
         ${pkgs.imagemagick}/bin/magick "$blur_img" -gravity NorthWest \
             -pointsize $FONT_SIZE -font "$FONT" -fill "$color1" \
-            -annotate +50+50 "$LOCK_TEXT" /tmp/i3lock_text.png 2>/dev/null || true
+            -annotate +"$TEXT_X"+"$TEXT_Y" "$LOCK_TEXT" /tmp/i3lock_text.png 2>/dev/null || true
       fi
 
       if [ -f /tmp/i3lock_text.png ]; then
@@ -1135,8 +1169,8 @@ ZEOF
         --separator-color="''${color0:1}00" \
         --keyhl-color="''${color3:1}ff" \
         --bshl-color="''${color0:1}ff" \
-        --time-pos="245:270" \
-        --date-pos="220:190" \
+        --time-pos="$TIME_X:$IND_Y" \
+        --date-pos="$DATE_X:$DATE_Y" \
         --indicator \
         --radius=50 \
         --ringver-color="''${color6:1}00" \
@@ -1144,14 +1178,14 @@ ZEOF
         --verif-font="$FONT" \
         --verif-size=91 \
         --verif-color="$color3" \
-        --verif-pos="311:270" \
+        --verif-pos="$VERIF_X:$IND_Y" \
         --wrong-text="$WRONG_TEXT" \
-        --wrong-pos="920:270" \
+        --wrong-pos="$WRONG_X:$IND_Y" \
         --wrong-font="$FONT" \
         --wrong-size=91 \
         --wrong-color="$color3" \
         --noinput-text="Err: no input" \
-        --ind-pos="328:270" \
+        --ind-pos="$IND_X:$IND_Y" \
         --bar-indicator \
         --bar-step=5 \
         --bar-max-height=5 \
@@ -1194,6 +1228,25 @@ ZEOF
     WRONG_TEXT="${cfg.lockscreen.wrongText}"
     VERIFY_TEXT="${cfg.lockscreen.verifyText}"
 
+    # Detect primary monitor position for correct element placement on multi-monitor setups
+    PRIMARY_GEOM=$(${pkgs.xorg.xrandr}/bin/xrandr --query | ${pkgs.gnugrep}/bin/grep " connected primary " | ${pkgs.gnugrep}/bin/grep -oE '[0-9]+x[0-9]+\+[0-9]+\+[0-9]+' | head -1)
+    [ -z "$PRIMARY_GEOM" ] && PRIMARY_GEOM=$(${pkgs.xorg.xrandr}/bin/xrandr --query | ${pkgs.gnugrep}/bin/grep " connected " | ${pkgs.gnugrep}/bin/grep -oE '[0-9]+x[0-9]+\+[0-9]+\+[0-9]+' | head -1)
+    MON_W=1920; MON_H=1200; MON_X=0; MON_Y=0
+    if [ -n "$PRIMARY_GEOM" ]; then
+      MON_W=$(echo "$PRIMARY_GEOM" | cut -dx -f1)
+      MON_H=$(echo "$PRIMARY_GEOM" | cut -dx -f2 | cut -d+ -f1)
+      MON_X=$(echo "$PRIMARY_GEOM" | cut -d+ -f2)
+      MON_Y=$(echo "$PRIMARY_GEOM" | cut -d+ -f3)
+    fi
+    # Positions proportional to primary monitor (ratios derived from 1920x1200 originals)
+    IND_X=$((MON_X + MON_W * 171 / 1000))
+    IND_Y=$((MON_Y + MON_H * 225 / 1000))
+    TIME_X=$((MON_X + MON_W * 128 / 1000))
+    DATE_X=$((MON_X + MON_W * 115 / 1000))
+    DATE_Y=$((MON_Y + MON_H * 158 / 1000))
+    VERIF_X=$((MON_X + MON_W * 162 / 1000))
+    WRONG_X=$((MON_X + MON_W * 479 / 1000))
+
     # Use pre-cached lockscreen background (instant) or fall back to solid color
     LOCK_CACHE="$HOME/.cache/lockscreen.png"
     if [ -f "$LOCK_CACHE" ]; then
@@ -1208,7 +1261,6 @@ ZEOF
     # Run i3lock-color with wal colors and custom text
     ${pkgs.i3lock-color}/bin/i3lock \
         -i "$LOCK_IMG" \
-        --fill \
         --clock \
         --time-str="%H:%M:%S" \
         --date-str="%A, %Y-%m-%d" \
@@ -1227,8 +1279,8 @@ ZEOF
         --separator-color="''${color0:1}00" \
         --keyhl-color="''${color3:1}ff" \
         --bshl-color="''${color0:1}ff" \
-        --time-pos="245:270" \
-        --date-pos="220:190" \
+        --time-pos="$TIME_X:$IND_Y" \
+        --date-pos="$DATE_X:$DATE_Y" \
         --indicator \
         --radius=50 \
         --ringver-color="''${color6:1}00" \
@@ -1236,14 +1288,14 @@ ZEOF
         --verif-font="$FONT" \
         --verif-size=91 \
         --verif-color="$color3" \
-        --verif-pos="311:270" \
+        --verif-pos="$VERIF_X:$IND_Y" \
         --wrong-text="$WRONG_TEXT" \
-        --wrong-pos="920:270" \
+        --wrong-pos="$WRONG_X:$IND_Y" \
         --wrong-font="$FONT" \
         --wrong-size=91 \
         --wrong-color="$color3" \
         --noinput-text="Err: no input" \
-        --ind-pos="328:270" \
+        --ind-pos="$IND_X:$IND_Y" \
         --bar-indicator \
         --bar-step=5 \
         --bar-max-height=5 \
