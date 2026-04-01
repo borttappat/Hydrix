@@ -229,6 +229,15 @@ wait_for_xpra() {
 cmd_build() {
     local vm_name="$1"
 
+    # In lockdown mode, route through builder VM (skip if already inside builder flow)
+    if [[ "${_HYDRIX_BUILDER_FLOW:-}" != "1" ]] && \
+       [[ "$(detect_current_specialisation)" == "lockdown" ]] && \
+       ! is_builder "$vm_name"; then
+        log "Lockdown mode — routing build through builder VM"
+        cmd_builder_build "$vm_name"
+        return
+    fi
+
     # Builder VM: need host nix-daemon running to build the VM image
     # (different from when builder is RUNNING, when we need it stopped)
     if is_builder "$vm_name" && ! host_daemon_running; then
@@ -1374,7 +1383,7 @@ cmd_builder_build() {
         vm_name=$(get_vm_name_from_target "$target")
 
         if [[ -n "$vm_name" ]]; then
-            cmd_build "$vm_name" || return 1
+            _HYDRIX_BUILDER_FLOW=1 cmd_build "$vm_name" || return 1
         else
             # Raw flake path - just verify it exists on host
             if nix path-info "$flake_target" &>/dev/null; then
