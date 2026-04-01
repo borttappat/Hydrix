@@ -155,6 +155,7 @@ declare -A CONFIG=(
     [efiPartition]=""
     [nixosPartition]=""
     [grubExtraEntries]=""
+    [oldLuksDevs]=""
     [timezone]="Europe/Stockholm"
     [locale]="en_US.UTF-8"
     [consoleKeymap]="us"
@@ -1076,6 +1077,53 @@ select_layout() {
     fi
 }
 
+# For a LUKS2 partition that uses Argon2id KDF (which GRUB cannot decrypt),
+# offer to add a PBKDF2 keyslot with the same passphrase. GRUB can use PBKDF2,
+# so this lets the cryptomount fallback entry work if EFI-based boot ever fails.
+_try_add_pbkdf2_keyslot() {
+    local devpath="$1"
+    local dump
+    dump=$(cryptsetup luksDump "$devpath" 2>/dev/null) || return 0
+
+    # Only act when every keyslot is Argon2id (no PBKDF2 slot exists yet)
+    grep -q 'PBKDF:.*argon2' <<< "$dump" || return 0
+    grep -q 'PBKDF:.*pbkdf2' <<< "$dump" && return 0
+
+    echo ""
+    warn "$devpath uses LUKS2 Argon2id — GRUB cannot natively decrypt this."
+    echo "  Adding a PBKDF2 keyslot lets the cryptomount fallback entry unlock it."
+    echo "  The same passphrase works; this only adds a new slot with a different KDF."
+    echo ""
+    local answer
+    read -p "  Add PBKDF2 keyslot to $devpath? [Y/n] " answer </dev/tty
+    answer="${answer:-Y}"
+    [[ "${answer,,}" == "y" ]] || return 0
+
+    local tmpkey_existing tmpkey_new pass
+    tmpkey_existing=$(mktemp); chmod 600 "$tmpkey_existing"
+    tmpkey_new=$(mktemp);      chmod 600 "$tmpkey_new"
+
+    while true; do
+        read -s -p "  Passphrase for existing keyslot on $devpath: " pass </dev/tty; echo
+        printf '%s' "$pass" > "$tmpkey_existing"
+        if cryptsetup open --test-passphrase --key-file "$tmpkey_existing" "$devpath" 2>/dev/null; then
+            break
+        fi
+        warn "  Incorrect passphrase — try again"
+    done
+
+    printf '%s' "$pass" > "$tmpkey_new"
+    if cryptsetup luksAddKey --pbkdf pbkdf2 \
+            --key-file "$tmpkey_existing" "$devpath" "$tmpkey_new" 2>/dev/null; then
+        success "  PBKDF2 keyslot added to $devpath"
+    else
+        warn "  Failed to add PBKDF2 keyslot — cryptomount fallback may not work"
+    fi
+
+    shred -u "$tmpkey_existing" "$tmpkey_new" 2>/dev/null || true
+    pass=""
+}
+
 # Scan for LUKS partitions that are neither the new NixOS partition nor the EFI
 # partition, and generate GRUB cryptomount+configfile stanzas for them.
 # Works for any OS that had GRUB installed (NixOS, Ubuntu, Fedora, etc.).
@@ -1114,20 +1162,23 @@ _detect_existing_os_entries() {
 
         log "Found existing encrypted partition: $devpath ($size_gb GB, UUID $uuid)"
 
-        # Boot the old NixOS directly from its nix store inside the LUKS+btrfs container.
-        # NixOS keeps /boot on the EFI partition (outside LUKS), so configfile doesn't work.
-        # Instead: open LUKS here in the entry, set root to the btrfs device, and load
-        # kernel+initrd from the @ subvolume via the system profile symlink.
-        # Note: the old OS's initrd will re-prompt for the LUKS password (two prompts total).
-        entries+="menuentry 'Existing OS ($devpath)' {\n"
+        # Option 1: add a PBKDF2 keyslot so the cryptomount fallback can unlock this
+        # partition (GRUB cannot process Argon2id, the LUKS2 default KDF).
+        _try_add_pbkdf2_keyslot "$devpath"
+
+        # Record info for _finalize_dual_boot_entries, which runs after partition_and_mount
+        # and rewrites this entry with a proper EFI-based boot stanza.
+        local uuid_short="${uuid:0:8}"
+        CONFIG[oldLuksDevs]+="$devpath:$uuid:$uuid_nodash "
+
+        # Placeholder entry: _finalize_dual_boot_entries will replace this with an
+        # EFI-based entry (kernel/initrd on unencrypted /boot, LUKS handled by initrd)
+        # once it can read the old grub.cfg and preserve the kernel files.
+        entries+="menuentry 'Existing NixOS ($devpath)' {\n"
         entries+="  insmod part_gpt\n"
-        entries+="  insmod cryptodisk\n"
-        entries+="  insmod luks2\n"
-        entries+="  insmod btrfs\n"
-        entries+="  cryptomount -u $uuid_nodash\n"
-        entries+="  set root=(crypto0)\n"
-        entries+="  linux /@/nix/var/nix/profiles/system/kernel init=/nix/var/nix/profiles/system/init\n"
-        entries+="  initrd /@/nix/var/nix/profiles/system/initrd\n"
+        entries+="  insmod fat\n"
+        entries+="  linux /old-nixos/$uuid_short/vmlinuz init=/nix/var/nix/profiles/system/init\n"
+        entries+="  initrd /old-nixos/$uuid_short/initrd\n"
         entries+="}\n"
     done
 
@@ -1137,6 +1188,88 @@ _detect_existing_os_entries() {
         CONFIG[grubExtraEntries]="$(printf '%b' "$entries")"
         log "Generated GRUB entries for existing encrypted partitions"
     fi
+}
+
+# Called after partition_and_mount, when the old EFI content is accessible at
+# /mnt/boot. Parses the old grub.cfg for the default kernel/initrd, copies them
+# to /old-nixos/<uuid_short>/ on the EFI (outside NixOS GRUB management so
+# nixos-install won't remove them), then rewrites grub-entries.nix with proper
+# EFI-based entries. The initrd handles LUKS decryption — no GRUB-level crypto
+# needed. Falls back to the cryptomount approach if kernel files cannot be found.
+_finalize_dual_boot_entries() {
+    [[ -z "${CONFIG[oldLuksDevs]:-}" ]] && return
+
+    local grub_cfg="/mnt/boot/grub/grub.cfg"
+    local efi_uuid
+    efi_uuid=$(blkid -o value -s UUID "${CONFIG[efiPartition]}" 2>/dev/null || true)
+
+    # Parse default (first) menuentry's linux/initrd lines from the old grub.cfg
+    local kernel_rel="" initrd_rel="" kernel_cmdline=""
+    if [[ -f "$grub_cfg" ]]; then
+        local linux_line initrd_line
+        linux_line=$(grep -m1 '^\s*linux '  "$grub_cfg" | sed 's/^\s*//')
+        initrd_line=$(grep -m1 '^\s*initrd ' "$grub_cfg" | sed 's/^\s*//')
+        kernel_rel=$(awk '{print $2}' <<< "$linux_line")
+        kernel_cmdline=$(awk '{$1=$2=""; sub(/^ +/,""); print}' <<< "$linux_line")
+        initrd_rel=$(awk '{print $2}' <<< "$initrd_line")
+    else
+        warn "_finalize_dual_boot_entries: no grub.cfg at $grub_cfg — using cryptomount fallback"
+    fi
+
+    local new_entries=""
+    for entry in ${CONFIG[oldLuksDevs]}; do
+        local devpath="${entry%%:*}"
+        local rest="${entry#*:}"
+        local uuid="${rest%%:*}"
+        local uuid_nodash="${rest#*:}"
+        local uuid_short="${uuid:0:8}"
+
+        local use_efi=false
+        if [[ -n "$kernel_rel" && -n "$initrd_rel" && -n "$efi_uuid" ]]; then
+            local kernel_src="/mnt/boot${kernel_rel}"
+            local initrd_src="/mnt/boot${initrd_rel}"
+            if [[ -f "$kernel_src" && -f "$initrd_src" ]]; then
+                local dest="/mnt/boot/old-nixos/$uuid_short"
+                mkdir -p "$dest"
+                cp "$kernel_src" "$dest/vmlinuz"
+                cp "$initrd_src" "$dest/initrd"
+                use_efi=true
+                log "Preserved old NixOS kernel/initrd for $devpath → /old-nixos/$uuid_short/"
+            else
+                warn "Kernel files not found for $devpath (looked in $kernel_src) — using cryptomount fallback"
+            fi
+        fi
+
+        if $use_efi; then
+            # EFI-based entry: kernel/initrd live on the unencrypted EFI partition.
+            # The initrd handles LUKS decryption (supports Argon2id); no GRUB-level
+            # crypto needed and only one password prompt at boot.
+            new_entries+="menuentry 'Existing NixOS ($devpath)' {\n"
+            new_entries+="  insmod part_gpt\n"
+            new_entries+="  insmod fat\n"
+            new_entries+="  search --no-floppy --fs-uuid --set=root $efi_uuid\n"
+            new_entries+="  linux /old-nixos/$uuid_short/vmlinuz $kernel_cmdline\n"
+            new_entries+="  initrd /old-nixos/$uuid_short/initrd\n"
+            new_entries+="}\n"
+        else
+            # Cryptomount fallback: requires a PBKDF2 keyslot (added above by
+            # _try_add_pbkdf2_keyslot if the user accepted). Two password prompts.
+            new_entries+="menuentry 'Existing NixOS ($devpath)' {\n"
+            new_entries+="  insmod part_gpt\n"
+            new_entries+="  insmod cryptodisk\n"
+            new_entries+="  insmod luks2\n"
+            new_entries+="  insmod btrfs\n"
+            new_entries+="  cryptomount -u $uuid_nodash\n"
+            new_entries+="  set root=(crypto0)\n"
+            new_entries+="  linux /@/nix/var/nix/profiles/system/kernel init=/nix/var/nix/profiles/system/init\n"
+            new_entries+="  initrd /@/nix/var/nix/profiles/system/initrd\n"
+            new_entries+="}\n"
+        fi
+    done
+
+    CONFIG[grubExtraEntries]="$(printf '%b' "$new_entries")"
+    generate_grub_entries_nix "$TEMP_CONFIG"
+    log "Finalized dual-boot GRUB entries in temp config"
 }
 
 # ========== CONFIGURATION GATHERING ==========
@@ -2568,6 +2701,7 @@ access-tokens = github.com=$gh_token"
     echo ""
 
     partition_and_mount
+    _finalize_dual_boot_entries
     install_nixos
 
     # Cleanup temp directories
@@ -2605,16 +2739,6 @@ access-tokens = github.com=$gh_token"
     echo "    rebuild administrative     (admin mode)"
     echo "    rebuild fallback           (fallback mode)"
     echo "  Or select at boot from GRUB menu"
-    echo "=========================================="
-    echo ""
-
-    echo "=========================================="
-    echo "              FIRST BOOT                "
-    echo "=========================================="
-    echo "  Set your wallpaper and colorscheme:"
-    echo "    walrgb ~/wallpapers/WindowRain.png"
-    echo "  Or pick a random wallpaper from the directory:"
-    echo "    randomwalrgb ~/wallpapers"
     echo "=========================================="
     echo ""
 
