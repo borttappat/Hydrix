@@ -94,9 +94,6 @@ in {
       # MicroVM host support
       microvm.nixosModules.host
 
-      # Sops secrets
-      sops-nix.nixosModules.sops
-
       # Disko partitioning
       disko.nixosModules.disko
 

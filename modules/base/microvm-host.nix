@@ -364,8 +364,9 @@ in {
           description = "Provision secrets for microVM ${name}";
           wantedBy = [ "microvm@${name}.service" ];
           before = [ "microvm@${name}.service" ];
-          # sops-nix decrypts via activation script, secrets exist by local-fs.target
-          after = [ "local-fs.target" ];
+          # Wait for hydrix-github-secrets to decrypt (or gracefully fail) before copying
+          wants = [ "hydrix-github-secrets.service" ];
+          after = [ "local-fs.target" "hydrix-github-secrets.service" ];
 
           serviceConfig = {
             Type = "oneshot";
