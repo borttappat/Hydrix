@@ -52,7 +52,7 @@ let
 
     # Corners
     corner-radius = ${toString sc.cornerRadius};
-    round-borders = 1;
+    round-borders = 0;
     detect-rounded-corners = true;
 
     # Opacity
@@ -293,7 +293,7 @@ in {
 
           # Corners
           corner-radius = sc.cornerRadius;
-          round-borders = 1;
+          round-borders = sc.cornerRadius;
           rounded-corners-exclude = [
             "window_type = 'dock'"
             "window_type = 'desktop'"
