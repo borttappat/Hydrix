@@ -37,6 +37,6 @@
   # users.users.${config.hydrix.username}.extraGroups = [ "libvirtd" "kvm" ];
 
   # ─── Services on every machine ────────────────────────────────────────
-  # services.tailscale.enable = true;
-  # services.openssh.enable = true;
+   services.tailscale.enable = true;
+   services.openssh.enable = true;
 }
