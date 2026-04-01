@@ -52,7 +52,7 @@ let
 
     # Corners
     corner-radius = ${toString sc.cornerRadius};
-    round-borders = 2;
+    round-borders = 1;
     detect-rounded-corners = true;
 
     # Opacity
