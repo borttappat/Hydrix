@@ -238,6 +238,8 @@ in {
       serviceConfig.ExecStartPre = [
         "${pkgs.coreutils}/bin/mkdir -p /run/hydrix-secrets/%i/ssh"
         "${pkgs.coreutils}/bin/chmod 700 /run/hydrix-secrets/%i/ssh"
+        "${pkgs.coreutils}/bin/mkdir -p /run/secrets/github"
+        "${pkgs.coreutils}/bin/chmod 700 /run/secrets/github"
       ];
     };
 
