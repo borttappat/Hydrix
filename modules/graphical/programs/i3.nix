@@ -330,7 +330,7 @@ in {
           tiling_drag modifier
 
           # Hide borders when fullscreen or only one container visible
-          hide_edge_borders smart
+          # hide_edge_borders smart
         '';
       };
     };

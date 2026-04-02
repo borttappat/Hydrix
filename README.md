@@ -930,7 +930,7 @@ microvm purge <name>                   # Delete all data (fresh start)
 
 ```bash
 hydrix-tui              # Interactive TUI for VM management
-# Or press Mod+v for rofi launcher
+# Or press Mod+m for rofi launcher
 ```
 
 The TUI's MicroVM menu includes task pentest slots. Task slots display their active engagement name and offer a **Snapshots** sub-menu when stopped.
@@ -1029,7 +1029,7 @@ The `vm-sync pull` command automatically:
 
 ### Live Switch (microvm update)
 
-`microvm update` builds a new VM config and applies it without restart. This is faster than restart (~10s vs ~30s) and preserves running applications.
+`microvm update` builds a new VM config and applies it without restart. 
 
 **How it works:**
 
