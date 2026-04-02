@@ -230,6 +230,17 @@ in {
       updateFlake = "path:${config.hydrix.paths.configDir}";
     }) filteredVMs;
 
+    # Hook into the microvm@ template unit to ensure the secrets source
+    # directory always exists before virtiofsd starts, regardless of whether
+    # the VM is listed in cfg.vms or sops is configured.
+    # %i expands to the instance name (e.g. microvm-dev).
+    systemd.services."microvm@" = {
+      serviceConfig.ExecStartPre = [
+        "${pkgs.coreutils}/bin/mkdir -p /run/hydrix-secrets/%i/ssh"
+        "${pkgs.coreutils}/bin/chmod 700 /run/hydrix-secrets/%i/ssh"
+      ];
+    };
+
     # ===== Systemd Services =====
     # Combines router TAP setup and secrets provisioning
     systemd.services = lib.mkMerge [
