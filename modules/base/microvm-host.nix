@@ -230,22 +230,20 @@ in {
       updateFlake = "path:${config.hydrix.paths.configDir}";
     }) filteredVMs;
 
-    # Hook into the microvm@ template unit to ensure the secrets source
-    # directory always exists before virtiofsd starts, regardless of whether
-    # the VM is listed in cfg.vms or sops is configured.
-    # %i expands to the instance name (e.g. microvm-dev).
-    systemd.services."microvm@" = {
-      serviceConfig.ExecStartPre = [
-        "${pkgs.coreutils}/bin/mkdir -p /run/hydrix-secrets/%i/ssh"
-        "${pkgs.coreutils}/bin/chmod 700 /run/hydrix-secrets/%i/ssh"
-        "${pkgs.coreutils}/bin/mkdir -p /run/secrets/github"
-        "${pkgs.coreutils}/bin/chmod 700 /run/secrets/github"
-      ];
-    };
-
     # ===== Systemd Services =====
     # Combines router TAP setup and secrets provisioning
     systemd.services = lib.mkMerge [
+      # Hook into the microvm@ template unit to ensure both secrets source
+      # directories exist before virtiofsd starts, regardless of whether
+      # the VM is listed in cfg.vms or sops is configured.
+      # %i expands to the instance name (e.g. microvm-dev).
+      { "microvm@".serviceConfig.ExecStartPre = [
+          "${pkgs.coreutils}/bin/mkdir -p /run/hydrix-secrets/%i/ssh"
+          "${pkgs.coreutils}/bin/chmod 700 /run/hydrix-secrets/%i/ssh"
+          "${pkgs.coreutils}/bin/mkdir -p /run/secrets/github"
+          "${pkgs.coreutils}/bin/chmod 700 /run/secrets/github"
+        ];
+      }
       # Create config directories for microVMs after install-microvm-* has run.
       # Cannot use tmpfiles because creating /var/lib/microvms/<name>/config
       # would implicitly create the parent directory, which blocks the upstream
