@@ -206,7 +206,13 @@ in {
     # virtiofs share), but the host can't see VM-side options at eval time.
     # Virtiofsd crashes if the source path is missing, so pre-create for all.
     ++ (lib.mapAttrsToList (name: _: "d /run/hydrix-secrets/${name}/ssh 0700 root root -")
-      (lib.filterAttrs (_: v: v.enable) cfg.vms));
+      (lib.filterAttrs (_: v: v.enable) cfg.vms))
+    # Create /run/secrets/github so the provisioning service always has a valid
+    # source directory to check, even when sops is not configured. Without this,
+    # fresh installs without sops never get the dir and virtiofsd may fail.
+    ++ lib.optionals (vmsWithGithubSecrets != {}) [
+      "d /run/secrets/github 0700 root root -"
+    ];
 
     # Declare microVMs from hydrix.microvmHost.vms
     # VM names must match nixosConfigurations in the Hydrix flake
@@ -358,8 +364,10 @@ in {
 
       # Secrets Provisioning for MicroVMs
       # For each VM with secrets.github = true, create a service to copy
-      # decrypted keys from /run/secrets/github/
-      (lib.mkIf (secretsCfg.enable && secretsCfg.github.enable) (
+      # decrypted keys from /run/secrets/github/ (which always exists via tmpfiles).
+      # Runs unconditionally — handles missing keys gracefully so VMs start even
+      # on fresh installs before sops is configured.
+      (lib.mkIf (vmsWithGithubSecrets != {}) (
         lib.mapAttrs' (name: _: lib.nameValuePair "hydrix-secrets-${name}" {
           description = "Provision secrets for microVM ${name}";
           wantedBy = [ "microvm@${name}.service" ];
