@@ -272,7 +272,7 @@ in {
         tmux.enable = true;
         xresources.enable = true;
         zathura.enable = true;
-        vim.enable = false;
+        vim.enable = true;
       };
     };
   };
