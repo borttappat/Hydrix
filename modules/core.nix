@@ -42,7 +42,7 @@ in
 
     # Auto-login (moved to new location in NixOS 25.05)
     services.displayManager.autoLogin = {
-      enable = true;
+      enable = false;
       user = username;
     };
   };

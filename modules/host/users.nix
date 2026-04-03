@@ -44,7 +44,7 @@ in {
     # Auto-login
     services.getty.autologinUser = cfg.username;
     services.displayManager.autoLogin = {
-      enable = true;
+      enable = false;
       user = cfg.username;
     };
   };
