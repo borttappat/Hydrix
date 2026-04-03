@@ -256,7 +256,7 @@ in {
       targets = {
         # Alacritty: disabled when vmColors enabled — colors come from
         # colors-runtime.toml (written by write-alacritty-colors on vsock push)
-        alacritty.enable = !vmColorsEnabled;
+        alacritty.enable = false;
         bat.enable = true;
         cava.enable = true;
         feh.enable = true;
@@ -272,7 +272,7 @@ in {
         tmux.enable = true;
         xresources.enable = true;
         zathura.enable = true;
-        vim.enable = !vmColorsEnabled;
+        vim.enable = false;
       };
     };
   };

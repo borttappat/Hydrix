@@ -147,10 +147,9 @@ in {
           general = {
             live_config_reload = true;
             ipc_socket = true;
-          } // lib.optionalAttrs vmColorsEnabled {
-            # Single import: colors-runtime.toml is the sole color source for VMs.
-            # Written by init-wal-cache (VM colorscheme default) or vsock handler
-            # (host bg + VM text colors). No /etc/ import — avoids priority conflicts.
+            # colors-runtime.toml is the sole color source for all alacritty instances.
+            # Host: written by write-alacritty-colors on every walrgb run.
+            # VMs: written by init-wal-cache or vsock handler (host bg + VM text colors).
             import = [
               "~/.config/alacritty/colors-runtime.toml"
             ];
