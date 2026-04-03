@@ -231,7 +231,7 @@ in {
     };
 
     # Disable auto-enable so Stylix doesn't theme every DE/app it knows about.
-    # Hydrix uses i3 — we whitelist only the targets we actually use.
+    # Hydrix uses i3. We whitelist only the targets we actually use.
     # Runtime theming (walrgb/pywal) is unaffected — it operates independently.
     stylix.autoEnable = false;
 
@@ -272,6 +272,7 @@ in {
         tmux.enable = true;
         xresources.enable = true;
         zathura.enable = true;
+        vim.enable = false;
       };
     };
   };
