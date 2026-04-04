@@ -17,6 +17,9 @@
   # VM identity
   hydrix.vmType = "browsing";
 
+  # Static IP on br-browse (files VM uses this to reach browsing VMs)
+  hydrix.microvm.staticIp = "192.168.103.10";
+
   # Sound (needed for xpra audio forwarding)
   services.pipewire = {
     enable = true;

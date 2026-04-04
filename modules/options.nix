@@ -595,7 +595,7 @@ in {
     networking = {
       bridges = lib.mkOption {
         type = lib.types.listOf lib.types.str;
-        default = [ "br-mgmt" "br-pentest" "br-comms" "br-browse" "br-dev" "br-shared" "br-builder" "br-lurking" ];
+        default = [ "br-mgmt" "br-pentest" "br-comms" "br-browse" "br-dev" "br-shared" "br-builder" "br-lurking" "br-files" ];
         description = "Network bridges to create";
       };
 
@@ -622,8 +622,29 @@ in {
           dev = "192.168.104";
           shared = "192.168.105";
           builder = "192.168.106";
+          files = "192.168.108";
         };
         description = "Subnet prefixes per bridge (without last octet)";
+      };
+    };
+
+    # =========================================================================
+    # FILES VM
+    # =========================================================================
+
+    microvmFiles = {
+      enable = lib.mkEnableOption "file sharing microVM";
+
+      accessFrom = lib.mkOption {
+        type = lib.types.listOf (lib.types.enum
+          [ "mgmt" "pentest" "comms" "browse" "dev" "shared" "lurking" ]);
+        default = [];
+        description = ''
+          Bridges the files VM gets direct TAP interfaces on.
+          Each entry gives the files VM L2 access to that bridge,
+          allowing it to reach VMs on that segment.
+          Default empty — no access granted.
+        '';
       };
     };
 

@@ -49,6 +49,9 @@ in {
 
     # Auto-import packages from profiles/<vmType>/packages/
     ../packages/auto-include.nix
+
+    # Files transfer agent (vsock 14506) for host-orchestrated encrypted file ops
+    ../vm/files-agent.nix
   ];
 
   options.hydrix.microvm = {
@@ -140,16 +143,8 @@ in {
         description = "Size in MB for persistent store overlay (for in-VM rebuilds). Thin-provisioned.";
       };
 
-      hostPersist = lib.mkOption {
-        type = lib.types.bool;
-        default = true;
-        description = ''
-          Enable host-mapped persist directory via 9p.
-          Maps ~/persist/<vmType>/ on host to ~/persist/ in VM.
-          Allows bidirectional file sharing between host and VM.
-        '';
-      };
     };
+
 
     # Secrets provisioning options
     secrets = {
@@ -177,6 +172,14 @@ in {
           Recommended for pentest VMs to protect sensitive data.
         '';
       };
+    };
+
+    # Static IP for this VM on its primary bridge (null = DHCP)
+    # Used by the files VM to know where to reach each VM for file transfers.
+    staticIp = lib.mkOption {
+      type = lib.types.nullOr lib.types.str;
+      default = null;
+      description = "Static IP for this VM on its primary bridge. Null = DHCP.";
     };
   };
 
@@ -257,18 +260,6 @@ in {
           source = "/home/${config.hydrix.username}/.config/hydrix";
           mountPoint = "/mnt/hydrix-config";
           proto = "virtiofs";
-          readOnly = true;
-        }
-      ] ++ lib.optionals (config.hydrix.microvm.persistence.hostPersist && config.hydrix.vmType != "") [
-        # Host persist directory (read-only access)
-        # Maps ~/persist/<vmType>/ on host to /mnt/vm-persist in VM
-        # Note: VMs now use local ~/dev/ and ~/staging/ for development
-        # This share is kept for backward compatibility and read-only access
-        {
-          tag = "vm-persist";
-          source = "/home/${config.hydrix.username}/persist/${config.hydrix.vmType}";
-          mountPoint = "/mnt/vm-persist";
-          proto = "9p";
           readOnly = true;
         }
       ] ++ lib.optionals config.hydrix.microvm.shareStore [
@@ -754,8 +745,23 @@ in {
     ];
 
     # ===== Networking =====
-    networking.useDHCP = lib.mkDefault true;
+    networking.useDHCP = lib.mkDefault (config.hydrix.microvm.staticIp == null);
     networking.networkmanager.enable = lib.mkForce false;
+
+    # Static IP configuration (when staticIp is set)
+    systemd.network = lib.mkIf (config.hydrix.microvm.staticIp != null) (let
+      ip = config.hydrix.microvm.staticIp;
+      gw = "${lib.concatStringsSep "." (lib.take 3 (lib.splitString "." ip))}.253";
+    in {
+      enable = true;
+      networks."10-primary" = {
+        matchConfig.MACAddress = (lib.head config.microvm.interfaces).mac;
+        address = [ "${ip}/24" ];
+        gateway = [ gw ];
+        dns = [ gw ];
+        linkConfig.RequiredForOnline = "routable";
+      };
+    });
     nixpkgs.hostPlatform = lib.mkDefault "x86_64-linux";
 
     # ===== Nix Store Overlay (for shareStore) =====
@@ -827,48 +833,6 @@ in {
         fi
 
         chown -h ${config.hydrix.username}:users "$CONFIG_DIR"
-      '';
-    };
-
-    # ===== Host persist directory symlink (read-only) =====
-    # Note: persist is now read-only from VM perspective
-    # VMs use local ~/dev/ and ~/staging/ for development
-    # persist is kept for backward compatibility and read-only access to host files
-    systemd.services.hydrix-persist-link = lib.mkIf (config.hydrix.microvm.persistence.hostPersist && config.hydrix.vmType != "") {
-      description = "Create Hydrix persist symlink for host-mapped storage (read-only)";
-      wantedBy = [ "multi-user.target" ];
-      after = [ "local-fs.target" ] ++ lib.optionals config.hydrix.microvm.persistence.enable [ "home.mount" ];
-      serviceConfig = {
-        Type = "oneshot";
-        RemainAfterExit = true;
-      };
-      path = [ pkgs.util-linux pkgs.coreutils ];
-      script = ''
-        USER_HOME="/home/${config.hydrix.username}"
-        PERSIST_LINK="$USER_HOME/persist"
-
-        # Skip if mount doesn't exist
-        if ! mountpoint -q /mnt/vm-persist 2>/dev/null; then
-          echo "Persist mount not present, skipping symlink"
-          exit 0
-        fi
-
-        # Create or update symlink
-        if [ -L "$PERSIST_LINK" ]; then
-          current=$(readlink "$PERSIST_LINK")
-          if [ "$current" != "/mnt/vm-persist" ]; then
-            rm "$PERSIST_LINK"
-            ln -s /mnt/vm-persist "$PERSIST_LINK"
-          fi
-        elif [ -d "$PERSIST_LINK" ]; then
-          # Backup existing directory
-          mv "$PERSIST_LINK" "$PERSIST_LINK.bak"
-          ln -s /mnt/vm-persist "$PERSIST_LINK"
-        else
-          ln -s /mnt/vm-persist "$PERSIST_LINK"
-        fi
-
-        chown -h ${config.hydrix.username}:users "$PERSIST_LINK"
       '';
     };
 

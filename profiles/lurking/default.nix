@@ -16,6 +16,9 @@
   # VM identity
   hydrix.vmType = "lurking";
 
+  # Static IP on br-lurking (files VM uses this to reach lurking VMs)
+  hydrix.microvm.staticIp = "192.168.107.10";
+
   # Sound (for xpra audio forwarding)
   services.pipewire = {
     enable = true;

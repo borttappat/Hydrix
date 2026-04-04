@@ -17,6 +17,9 @@
   # VM identity
   hydrix.vmType = "comms";
 
+  # Static IP on br-comms (files VM uses this to reach comms VMs)
+  hydrix.microvm.staticIp = "192.168.102.10";
+
   # Sound (required for calls)
   services.pipewire = {
     enable = true;

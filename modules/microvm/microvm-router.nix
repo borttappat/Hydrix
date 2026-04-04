@@ -177,6 +177,9 @@ in {
 
         "-netdev" "tap,id=net-lurking,ifname=mv-router-lurk,script=no,downscript=no"
         "-device" "virtio-net-pci,netdev=net-lurking,mac=02:00:00:01:07:01"
+
+        "-netdev" "tap,id=net-files,ifname=mv-router-file,script=no,downscript=no"
+        "-device" "virtio-net-pci,netdev=net-files,mac=02:00:00:01:08:01"
       ];
 
       # ===== Shared Filesystems =====
@@ -449,6 +452,7 @@ in {
         IFACE_SHAR=$(find_iface_by_mac "02:00:00:01:05:01")    # mv-router-shar
         IFACE_BLDR=$(find_iface_by_mac "02:00:00:01:06:01")    # mv-router-bldr
         IFACE_LURK=$(find_iface_by_mac "02:00:00:01:07:01")    # mv-router-lurk
+        IFACE_FILE=$(find_iface_by_mac "02:00:00:01:08:01")    # mv-router-file
 
         echo "Detected LAN interfaces:"
         echo "  MGMT: $IFACE_MGMT"
@@ -459,6 +463,7 @@ in {
         echo "  SHAR: $IFACE_SHAR"
         echo "  BLDR: $IFACE_BLDR"
         echo "  LURK: $IFACE_LURK"
+        echo "  FILE: $IFACE_FILE"
 
         # Save interface mapping for dnsmasq and firewall
         echo "IFACE_MGMT=$IFACE_MGMT" > "$STATE_DIR/interfaces"
@@ -469,6 +474,7 @@ in {
         echo "IFACE_SHAR=$IFACE_SHAR" >> "$STATE_DIR/interfaces"
         echo "IFACE_BLDR=$IFACE_BLDR" >> "$STATE_DIR/interfaces"
         echo "IFACE_LURK=$IFACE_LURK" >> "$STATE_DIR/interfaces"
+        echo "IFACE_FILE=$IFACE_FILE" >> "$STATE_DIR/interfaces"
 
         # Configure each LAN interface
         configure_lan() {
@@ -493,6 +499,7 @@ in {
         configure_lan "$IFACE_SHAR" "192.168.105.253" "shared"
         configure_lan "$IFACE_BLDR" "192.168.106.253" "builder"
         configure_lan "$IFACE_LURK" "192.168.107.253" "lurking"
+        configure_lan "$IFACE_FILE" "192.168.108.253" "files"
 
         echo "=== Network Setup Complete ==="
         echo "WAN: $WAN_IFACE"
@@ -518,7 +525,7 @@ in {
 
         echo "Generating dnsmasq config with interfaces:"
         echo "  MGMT=$IFACE_MGMT PENT=$IFACE_PENT COMM=$IFACE_COMM"
-        echo "  BROW=$IFACE_BROW DEV=$IFACE_DEV SHAR=$IFACE_SHAR LURK=$IFACE_LURK"
+        echo "  BROW=$IFACE_BROW DEV=$IFACE_DEV SHAR=$IFACE_SHAR LURK=$IFACE_LURK FILE=$IFACE_FILE"
 
         # Generate config only for interfaces that exist
         echo "bind-interfaces" > /etc/dnsmasq.d/hydrix.conf
@@ -550,6 +557,7 @@ in {
         add_iface "$IFACE_SHAR" "192.168.105" "192.168.105.253"
         add_iface "$IFACE_BLDR" "192.168.106" "192.168.106.253"
         add_iface "$IFACE_LURK" "192.168.107" "192.168.107.253"
+        add_iface "$IFACE_FILE" "192.168.108" "192.168.108.253"
 
         echo "Generated dnsmasq config:"
         cat /etc/dnsmasq.d/hydrix.conf
@@ -585,7 +593,7 @@ in {
         ${pkgs.nftables}/bin/nft flush ruleset 2>/dev/null || true
 
         # Define VM network ranges for clarity
-        VM_NETWORKS="{ 192.168.100.0/24, 192.168.101.0/24, 192.168.102.0/24, 192.168.103.0/24, 192.168.104.0/24, 192.168.105.0/24, 192.168.106.0/24, 192.168.107.0/24 }"
+        VM_NETWORKS="{ 192.168.100.0/24, 192.168.101.0/24, 192.168.102.0/24, 192.168.103.0/24, 192.168.104.0/24, 192.168.105.0/24, 192.168.106.0/24, 192.168.107.0/24, 192.168.108.0/24 }"
 
         ${pkgs.nftables}/bin/nft -f - << EOF
         table inet router {
@@ -635,19 +643,21 @@ in {
 
             # Isolated bridges: block inter-bridge traffic
             # mgmt -> other isolated bridges
-            ip saddr 192.168.100.0/24 ip daddr { 192.168.101.0/24, 192.168.102.0/24, 192.168.103.0/24, 192.168.104.0/24, 192.168.106.0/24, 192.168.107.0/24 } drop
+            ip saddr 192.168.100.0/24 ip daddr { 192.168.101.0/24, 192.168.102.0/24, 192.168.103.0/24, 192.168.104.0/24, 192.168.106.0/24, 192.168.107.0/24, 192.168.108.0/24 } drop
             # pentest -> other isolated bridges
-            ip saddr 192.168.101.0/24 ip daddr { 192.168.100.0/24, 192.168.102.0/24, 192.168.103.0/24, 192.168.104.0/24, 192.168.106.0/24, 192.168.107.0/24 } drop
+            ip saddr 192.168.101.0/24 ip daddr { 192.168.100.0/24, 192.168.102.0/24, 192.168.103.0/24, 192.168.104.0/24, 192.168.106.0/24, 192.168.107.0/24, 192.168.108.0/24 } drop
             # comms -> other isolated bridges
-            ip saddr 192.168.102.0/24 ip daddr { 192.168.100.0/24, 192.168.101.0/24, 192.168.103.0/24, 192.168.104.0/24, 192.168.106.0/24, 192.168.107.0/24 } drop
+            ip saddr 192.168.102.0/24 ip daddr { 192.168.100.0/24, 192.168.101.0/24, 192.168.103.0/24, 192.168.104.0/24, 192.168.106.0/24, 192.168.107.0/24, 192.168.108.0/24 } drop
             # browse -> other isolated bridges
-            ip saddr 192.168.103.0/24 ip daddr { 192.168.100.0/24, 192.168.101.0/24, 192.168.102.0/24, 192.168.104.0/24, 192.168.106.0/24, 192.168.107.0/24 } drop
+            ip saddr 192.168.103.0/24 ip daddr { 192.168.100.0/24, 192.168.101.0/24, 192.168.102.0/24, 192.168.104.0/24, 192.168.106.0/24, 192.168.107.0/24, 192.168.108.0/24 } drop
             # dev -> other isolated bridges
-            ip saddr 192.168.104.0/24 ip daddr { 192.168.100.0/24, 192.168.101.0/24, 192.168.102.0/24, 192.168.103.0/24, 192.168.106.0/24, 192.168.107.0/24 } drop
+            ip saddr 192.168.104.0/24 ip daddr { 192.168.100.0/24, 192.168.101.0/24, 192.168.102.0/24, 192.168.103.0/24, 192.168.106.0/24, 192.168.107.0/24, 192.168.108.0/24 } drop
             # Builder is FULLY isolated - cannot reach any other VM network
-            ip saddr 192.168.106.0/24 ip daddr { 192.168.100.0/24, 192.168.101.0/24, 192.168.102.0/24, 192.168.103.0/24, 192.168.104.0/24, 192.168.105.0/24, 192.168.107.0/24 } drop
+            ip saddr 192.168.106.0/24 ip daddr { 192.168.100.0/24, 192.168.101.0/24, 192.168.102.0/24, 192.168.103.0/24, 192.168.104.0/24, 192.168.105.0/24, 192.168.107.0/24, 192.168.108.0/24 } drop
             # Lurking is FULLY isolated - maximum privacy, cannot reach any other VM network
-            ip saddr 192.168.107.0/24 ip daddr { 192.168.100.0/24, 192.168.101.0/24, 192.168.102.0/24, 192.168.103.0/24, 192.168.104.0/24, 192.168.105.0/24, 192.168.106.0/24 } drop
+            ip saddr 192.168.107.0/24 ip daddr { 192.168.100.0/24, 192.168.101.0/24, 192.168.102.0/24, 192.168.103.0/24, 192.168.104.0/24, 192.168.105.0/24, 192.168.106.0/24, 192.168.108.0/24 } drop
+            # Files VM is FULLY isolated via router - it communicates directly via TAP interfaces
+            ip saddr 192.168.108.0/24 ip daddr { 192.168.100.0/24, 192.168.101.0/24, 192.168.102.0/24, 192.168.103.0/24, 192.168.104.0/24, 192.168.105.0/24, 192.168.106.0/24, 192.168.107.0/24 } drop
 
             # Allow forwarding to WAN (external internet)
             oifname "$WAN" accept
@@ -759,7 +769,7 @@ in {
         echo "╔══════════════════════════════════════════════════════════╗"
         echo "║           HYDRIX MICROVM ROUTER                          ║"
         echo "╠══════════════════════════════════════════════════════════╣"
-        echo "║  Networks: 192.168.100-107.x                             ║"
+        echo "║  Networks: 192.168.100-108.x                             ║"
         echo "╚══════════════════════════════════════════════════════════╝"
         echo ""
       '';

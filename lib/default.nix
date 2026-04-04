@@ -194,6 +194,37 @@ in {
   };
 
   # =========================================================================
+  # mkMicrovmFiles - Create the MicroVM files transfer hub
+  # =========================================================================
+  # The files VM acts as an encrypted jump host for inter-VM file transfers.
+  # It sits on br-files (192.168.108.x) plus direct TAPs on each bridge
+  # listed in accessFrom.
+  #
+  # accessFrom: List of bridge names the files VM gets direct TAP access to.
+  #             e.g., [ "pentest" "browse" "dev" "comms" ]
+  #             Default [] — no bridge access.
+  # modules:    Optional extra NixOS modules.
+  mkMicrovmFiles = {
+    system ? "x86_64-linux",
+    accessFrom ? [],
+    modules ? [],
+  }: nixpkgs.lib.nixosSystem {
+    inherit system;
+    modules = [
+      { nixpkgs.config.allowUnfree = true; }
+      { nixpkgs.overlays = [ overlay-unstable ]; }
+      ../modules/options.nix
+      microvm.nixosModules.microvm
+      ../modules/microvm/microvm-files.nix
+      {
+        networking.hostName = "microvm-files";
+        # Enable the files VM module and pass bridge access list
+        hydrix.microvmFiles = { enable = true; inherit accessFrom; };
+      }
+    ] ++ modules;
+  };
+
+  # =========================================================================
   # mkMicrovmGitSync - Create the MicroVM git-sync for lockdown mode
   # =========================================================================
   # hostUsername: Username on the host machine (for repo paths)

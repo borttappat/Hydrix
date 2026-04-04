@@ -38,6 +38,7 @@ let
     "mv-router-dev" = "br-dev";
     "mv-router-shar" = "br-shared";
     "mv-router-bldr" = "br-builder";
+    "mv-router-file" = "br-files";
   };
 
   # Helper script for attaching TAP interfaces to bridges with retry
@@ -119,6 +120,15 @@ in {
       ACTION=="add", SUBSYSTEM=="net", KERNEL=="mv-comms*",   RUN+="${attachTapScript} %k br-comms"
       ACTION=="add", SUBSYSTEM=="net", KERNEL=="mv-build*",   RUN+="${attachTapScript} %k br-builder"
 
+      # Files VM TAP interfaces — home bridge + per-bridge access TAPs
+      ACTION=="add", SUBSYSTEM=="net", KERNEL=="mv-files",      RUN+="${attachTapScript} %k br-files"
+      ACTION=="add", SUBSYSTEM=="net", KERNEL=="mv-files-pent", RUN+="${attachTapScript} %k br-pentest"
+      ACTION=="add", SUBSYSTEM=="net", KERNEL=="mv-files-brow", RUN+="${attachTapScript} %k br-browse"
+      ACTION=="add", SUBSYSTEM=="net", KERNEL=="mv-files-dev",  RUN+="${attachTapScript} %k br-dev"
+      ACTION=="add", SUBSYSTEM=="net", KERNEL=="mv-files-comm", RUN+="${attachTapScript} %k br-comms"
+      ACTION=="add", SUBSYSTEM=="net", KERNEL=="mv-files-lurk", RUN+="${attachTapScript} %k br-lurking"
+      ACTION=="add", SUBSYSTEM=="net", KERNEL=="mv-files-shar", RUN+="${attachTapScript} %k br-shared"
+
       # VFIO device permissions for microvm user (needed for PCI passthrough)
       # This allows the microvm user to access VFIO IOMMU group devices
       SUBSYSTEM=="vfio", MODE="0666"
@@ -145,49 +155,14 @@ in {
     # tmpfiles only runs at boot, so we need an activation script too
     system.activationScripts.microvmPermissions = lib.stringAfter [ "users" ] ''
       chmod 711 /home/${username}
-
-      # Set default ACLs on persist directories so files created via 9p are world-writable
-      # This fixes the issue where files created by QEMU (microvm:kvm) aren't writable by VM user
-      for dir in /home/${username}/persist/*/dev /home/${username}/persist/*/staging; do
-        if [ -d "$dir" ]; then
-          # Set default ACL: new files/dirs get rwx for everyone
-          ${pkgs.acl}/bin/setfacl -d -m o::rwx "$dir" 2>/dev/null || true
-          ${pkgs.acl}/bin/setfacl -d -m g::rwx "$dir" 2>/dev/null || true
-          ${pkgs.acl}/bin/setfacl -d -m u::rwx "$dir" 2>/dev/null || true
-          # Also fix existing files
-          ${pkgs.acl}/bin/setfacl -R -m o::rwx "$dir" 2>/dev/null || true
-          chmod -R a+rw "$dir" 2>/dev/null || true
-        fi
-      done
     '';
 
     # Create config directories for microVMs
-    # Also ensure user's home directory is traversable (o+x) for 9p mounts
+    # tmpfiles handles home directory mode declaratively (no activation script needed)
     systemd.tmpfiles.rules = [
       "d /var/lib/microvms 0755 root root -"
-      # Allow microvm user to traverse into user's home for 9p shares
-      # Mode 0711 = rwx--x--x (owner full, others can traverse)
+      # Mode 0711 = rwx--x--x: owner full access, others can traverse (needed for 9p mounts)
       "z /home/${username} 0711 ${username} users -"
-
-      # Create persist directories for host-mapped VM storage
-      # ~/persist/<vmType>/ is shared to VMs as ~/persist/ via 9p
-      # Mode 0777 because 9p is served by QEMU (microvm user) which needs write access
-      # Security: acceptable since ~/persist is inside user home which requires traversal (0711)
-      # IMPORTANT: Pre-create subdirectories (dev/, staging/) because mkdir via 9p
-      # creates them owned by microvm:kvm, making them unwritable by VM user
-      "d /home/${username}/persist 0755 ${username} users -"
-      "d /home/${username}/persist/browsing 0777 ${username} users -"
-      "d /home/${username}/persist/browsing/dev 0777 ${username} users -"
-      "d /home/${username}/persist/browsing/staging 0777 ${username} users -"
-      "d /home/${username}/persist/pentest 0777 ${username} users -"
-      "d /home/${username}/persist/pentest/dev 0777 ${username} users -"
-      "d /home/${username}/persist/pentest/staging 0777 ${username} users -"
-      "d /home/${username}/persist/dev 0777 ${username} users -"
-      "d /home/${username}/persist/dev/dev 0777 ${username} users -"
-      "d /home/${username}/persist/dev/staging 0777 ${username} users -"
-      "d /home/${username}/persist/comms 0777 ${username} users -"
-      "d /home/${username}/persist/comms/dev 0777 ${username} users -"
-      "d /home/${username}/persist/comms/staging 0777 ${username} users -"
 
       # Hydrix config directory (for scaling.json shared with VMs via 9p)
       # Must exist before microVMs start, otherwise QEMU fails to mount
@@ -350,6 +325,13 @@ in {
                 mv-build*)   bridge="br-builder" ;;
                 mv-gitsyn*)  bridge="br-builder" ;;
                 mv-task-*)   bridge="br-pentest" ;;
+                mv-files)         bridge="br-files" ;;
+                mv-files-pent)    bridge="br-pentest" ;;
+                mv-files-brow)    bridge="br-browse" ;;
+                mv-files-dev)     bridge="br-dev" ;;
+                mv-files-comm)    bridge="br-comms" ;;
+                mv-files-lurk)    bridge="br-lurking" ;;
+                mv-files-shar)    bridge="br-shared" ;;
               esac
               if ip link show "$bridge" &>/dev/null; then
                 ip link set "$tap" master "$bridge" 2>/dev/null || true
