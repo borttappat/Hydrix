@@ -15,6 +15,7 @@ Hydrix is an options-driven NixOS framework that provides complete network isola
 - [Font System](#font-system)
 - [MicroVM Management](#microvm-management)
   - [Task Pentest VMs](#task-pentest-vms-per-engagement)
+  - [Files VM (Encrypted Inter-VM Transfer)](#files-vm-encrypted-inter-vm-transfer)
 - [Vsock Communication](#vsock-communication)
 - [VM Store Sharing](#vm-store-sharing)
 - [Build System](#build-system)
@@ -61,13 +62,14 @@ After installation, your configuration lives at `~/hydrix-config/`.
          +---- br-shared (192.168.105.0/24) ------+
          +---- br-builder (192.168.106.0/24) -----+
          +---- br-lurking (192.168.107.0/24) -----+
+         +---- br-files (192.168.108.0/24) -------+
                             |
      +-----------+----------+------------+-----------+-----------+
      |           |          |            |           |           |
 +--------+  +--------+  +--------+  +---------+  +--------+  +--------+
-|Browsing|  |Pentest |  |  Dev   |  | Builder |  |Builder |  |Gitsync |
+|Browsing|  |Pentest |  |  Dev   |  | Builder |  |Gitsync |  | Files  |
 |  VM    |  |   VM   |  |   VM   |  |   VM    |  |  VM    |  |  VM    |
-|CID:101 |  |CID:102 |  |CID:103 |  |CID:210  |  |CID:XXX |  |CID:XXX |
+|CID:101 |  |CID:102 |  |CID:103 |  |CID:210  |  |CID:211 |  |CID:106 |
 +--------+  +--------+  +--------+  +---------+  +--------+  +--------+
 ```
 
@@ -918,13 +920,14 @@ microvm purge <name>                   # Delete all data (fresh start)
 
 | Name | Profile | vsock CID | Bridge | Persistence |
 |------|---------|-----------|--------|-------------|
-| `microbrowse` | browsing | 101 | br-browse | 10GB home |
-| `microhack` | pentest | 102 | br-pentest | 20GB home |
-| `microdev` | dev | 103 | br-dev | 50GB + 20GB docker |
-| `microcomms` | comms | 104 | br-comms | Ephemeral |
-| `microlurk` | lurking | 105 | br-lurking | Ephemeral |
-| `microrouter` | router | 200 | all bridges | 512MB /var/lib |
-| `microbuild` | builder | 210 | br-builder | Ephemeral |
+| `microvm-browsing` | browsing | 101 | br-browse | 10GB home |
+| `microvm-pentest` | pentest | 102 | br-pentest | 20GB home |
+| `microvm-dev` | dev | 103 | br-dev | 50GB + 20GB docker |
+| `microvm-comms` | comms | 104 | br-comms | Ephemeral |
+| `microvm-lurking` | lurking | 105 | br-lurking | Ephemeral |
+| `microvm-files` | files | 106 | br-files + per-bridge | 50GB /storage |
+| `microvm-router` | router | 200 | all bridges | 512MB /var/lib |
+| `microvm-builder` | builder | 210 | br-builder | Ephemeral |
 
 ### TUI Launcher
 
@@ -998,6 +1001,131 @@ microvm pentest list
 - Lab environment (Windows, Active Directory, multi-machine networks)
 - RAM snapshots (suspended mid-session state)
 
+### Files VM (Encrypted Inter-VM Transfer)
+
+The files VM (`microvm-files`, CID 106) is an encrypted jump host for moving files between VMs. It has direct L2 TAP connections to each bridge you grant it access to, so it can reach VMs without going through the router.
+
+**Security model:**
+
+- File content is **always encrypted** (AES-256-CBC via openssl) before it leaves the source VM
+- A random passphrase is generated fresh per transfer on the host and held only in host memory
+- The passphrase travels **exclusively via vsock** — it never touches a bridge network
+- SHA-256 is verified at every hop; the passphrase is only released to the destination after all checksums match
+- Source files are never modified or moved — the original path is always preserved
+- The files VM receives only ciphertext during transfer operations (it sees plaintext only during `store`, where it decrypts into its own `/storage`)
+- Port 8888 on each VM only accepts connections from the files VM's IP (`.2` on that bridge) — enforced by iptables on each VM
+
+**Transfer flow** (`microvm files transfer pentest/projects/report comms/pentest/`):
+
+```
+1. Host generates PASSPHRASE (openssl rand -base64 32) — stays in host memory
+
+2. Host → pentest VM (vsock 14506): ENCRYPT <passphrase> projects/report
+   Pentest VM: tar czf - | openssl enc -aes-256-cbc → ~/shared/xfer.enc
+   Returns: SHA256=<hash>
+
+3. Host → pentest VM (vsock 14506): SERVE
+   Pentest VM starts ephemeral HTTP server on port 8888
+
+4. Host → files VM (vsock 14505): FETCH 192.168.101.10 xfer.enc
+   Files VM downloads ciphertext via HTTP
+   Returns: SHA256=<hash>  ← host verifies both hashes match
+
+5. Host → pentest VM (vsock 14506): SERVE_STOP
+
+6. Host → comms VM (vsock 14506): RECEIVE_PREPARE pentest/
+   Comms VM creates dir, starts one-shot HTTP upload server on port 8888
+
+7. Host → files VM (vsock 14505): DELIVER 192.168.102.10 xfer.enc
+   Files VM HTTP PUTs ciphertext to comms VM
+   Returns: SHA256=<hash>  ← host verifies three-way match
+
+8. Host → comms VM (vsock 14506): DECRYPT <passphrase> pentest/xfer.enc pentest/
+   Comms VM decrypts + unpacks → ~/pentest/report/, deletes xfer.enc
+   Returns: OK
+
+9. Host → pentest VM (vsock 14506): CLEANUP  (deletes ~/shared/xfer.enc)
+   Host discards passphrase from memory
+```
+
+**Store flow** (`microvm files store pentest/projects/report`):
+
+Steps 1–4 are identical. After the files VM has the ciphertext, the host sends the passphrase via vsock and the files VM decrypts in-place into `/storage/pentest/`. Ciphertext is deleted after successful decryption.
+
+**Setup** in `flake.nix`:
+
+```nix
+"microvm-files" = hydrix.lib.mkMicrovmFiles {
+  # Bridges the files VM gets direct TAP access to.
+  # Only listed VMs can exchange files with each other via this VM.
+  accessFrom = [ "pentest" "browse" "dev" "comms" ];
+};
+```
+
+Enable in your machine config:
+
+```nix
+hydrix.microvmHost.vms."microvm-files".enable = true;
+hydrix.microvmFiles.enable = true;
+```
+
+**Commands:**
+
+```bash
+# Move files between VMs (source files untouched)
+microvm files transfer pentest/projects/report comms/pentest/
+microvm files transfer dev/src/tool pentest/tools/
+
+# Archive to files VM /storage/ (encrypted, then decrypted in-place)
+microvm files store pentest/projects/report
+
+# List stored files
+microvm files list
+microvm files list pentest
+```
+
+**Network layout:**
+
+```
+Host (passphrase, orchestration)
+ │  vsock 14505 → files VM (CID 106)
+ │  vsock 14506 → any regular VM (ENCRYPT/DECRYPT/SERVE/CLEANUP)
+ │
+Files VM (192.168.108.10 on br-files)
+ ├── mv-files-pent → br-pentest  (192.168.101.2)  [if "pentest" in accessFrom]
+ ├── mv-files-brow → br-browse   (192.168.103.2)  [if "browse" in accessFrom]
+ ├── mv-files-dev  → br-dev      (192.168.104.2)  [if "dev" in accessFrom]
+ ├── mv-files-comm → br-comms    (192.168.102.2)  [if "comms" in accessFrom]
+ └── mv-files      → br-files    (192.168.108.10) [always]
+
+Regular VMs: static .10 IPs on their bridge
+ port 8888: ephemeral HTTP (SERVE or RECEIVE_PREPARE), files VM IP only
+ vsock 14506: vm-files-agent (receives host commands)
+```
+
+**What the files VM stores** (`/storage/` persistent qcow2, 50GB default):
+
+```
+/storage/
+├── pentest/    # Files stored from pentest VM
+├── comms/      # Files stored from comms VM
+├── dev/        # Files stored from dev VM
+└── tmp/        # In-transit blobs (cleaned after each operation)
+```
+
+**TAP/subnet/CID assignments:**
+
+| Item | Value |
+|------|-------|
+| Bridge | `br-files` |
+| Subnet | `192.168.108.0/24` |
+| Files VM IP | `192.168.108.10` |
+| Files VM per-bridge IP | `192.168.1xx.2` |
+| Router leg | `192.168.108.253` |
+| vsock CID | `106` |
+| Home TAP | `mv-files` → `br-files` |
+| Router TAP | `mv-router-file` → `br-files` |
+
 ### In-VM Development (vm-dev workflow)
 
 Test packages without nixos-rebuild using per-package flakes:
@@ -1060,6 +1188,8 @@ All host-VM communication uses virtio-vsock. No SSH or network access to VMs. Ea
 | 14502 | vm-staging | Host → VM | List/pull staged packages (vm-sync) |
 | 14503 | vm-colorscheme | Host → VM | Push colorscheme updates (REFRESH) |
 | 14504 | vm-switch | Host → VM | Live NixOS config switch (SWITCH/TEST/STATUS/PING) |
+| 14505 | files-agent | Host → Files VM | File transfer ops (FETCH/DELIVER/STORE/LIST) |
+| 14506 | vm-files-agent | Host → any VM | Per-VM file ops (ENCRYPT/DECRYPT/SERVE/CLEANUP) |
 | 14510 | builder-build | Host → Builder | Send build commands |
 | 14511 | builder-status | Host → Builder | Query builder status |
 
@@ -1109,7 +1239,6 @@ VM /nix/.rw-store (qcow2) ──┘
 | `nix-store` | `/nix/store` | `/nix/.ro-store` | virtiofs | Shared nix store (read-only base) |
 | `vm-config` | `/var/lib/microvms/<vm>/config` | `/mnt/vm-config` | 9p | VM config, live switch registration |
 | `hydrix-config` | `~/.config/hydrix` | `/mnt/hydrix-config` | 9p | Host config (scaling.json for DPI) |
-| `vm-persist` | `~/persist/<vmType>/` | `/mnt/vm-persist` | 9p | Host persist directory (optional) |
 | `vm-secrets` | `/run/hydrix-secrets/<vm>` | `/mnt/vm-secrets` | virtiofs | GitHub SSH keys |
 
 ### Nix DB Registration
