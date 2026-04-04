@@ -41,10 +41,10 @@ let
   enabledIfaces = lib.filterAttrs (n: _: builtins.elem n cfg.accessFrom) ifaceMap;
 
   # QEMU args for all enabled bridge TAPs
-  extraTapArgs = lib.concatMapAttrsToList (_: i: [
+  extraTapArgs = lib.concatLists (lib.mapAttrsToList (_: i: [
     "-netdev" "tap,id=net-${i.tap},ifname=${i.tap},script=no,downscript=no"
     "-device" "virtio-net-pci,netdev=net-${i.tap},mac=${i.mac}"
-  ]) enabledIfaces;
+  ]) enabledIfaces);
 
   # Files VM vsock handler script (port 14505)
   filesAgentScript = pkgs.writeShellScript "microvm-files-agent" ''
