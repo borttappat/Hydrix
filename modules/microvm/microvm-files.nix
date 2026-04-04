@@ -143,6 +143,10 @@ let
         echo "END"
         ;;
 
+      PING)
+        echo "PONG"
+        ;;
+
       SHUTDOWN)
         # Graceful exit (host is done with this session)
         echo "OK"

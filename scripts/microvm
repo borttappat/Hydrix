@@ -2165,15 +2165,22 @@ cmd_files_transfer() {
     local passphrase
     passphrase=$(openssl rand -base64 32)
 
-    # Ensure files VM is running
+    # Ensure files VM is running and its vsock agent is ready
     if ! systemctl is-active --quiet "microvm@${FILES_VM_NAME}.service" 2>/dev/null; then
         log "Starting ${FILES_VM_NAME}..."
         systemctl start "microvm@${FILES_VM_NAME}.service" || {
             log_error "Failed to start ${FILES_VM_NAME}"
             exit 1
         }
-        sleep 2
     fi
+    local deadline=$(( $(date +%s) + 30 ))
+    while ! echo "PING" | vsock-cmd "$FILES_VM_CID" "$FILES_VSOCK_PORT" 2>/dev/null | grep -q "PONG"; do
+        if (( $(date +%s) >= deadline )); then
+            log_error "Timeout waiting for ${FILES_VM_NAME} vsock agent"
+            exit 1
+        fi
+        sleep 1
+    done
 
     local cleanup_needed=true
     local src_hash files_hash dst_hash
