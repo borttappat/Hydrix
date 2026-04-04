@@ -143,6 +143,37 @@ in {
       pkgs.virtiofsd
       pkgs.socat    # For microvm-router console access
       pkgs.openssl  # For microvm files passphrase generation
+      # vsock-cmd: reliable AF_VSOCK client with proper SHUT_WR half-close.
+      # socat closes the whole connection on stdin EOF, racing slow handlers.
+      # Usage: echo "CMD args" | vsock-cmd <cid> <port> [timeout_secs]
+      (pkgs.writeScriptBin "vsock-cmd" ''
+        #!${pkgs.python3}/bin/python3
+        import socket, sys
+
+        cid     = int(sys.argv[1])
+        port    = int(sys.argv[2])
+        timeout = float(sys.argv[3]) if len(sys.argv) > 3 else 30.0
+
+        msg = sys.stdin.buffer.read()
+        if not msg.endswith(b"\n"):
+            msg += b"\n"
+
+        sock = socket.socket(socket.AF_VSOCK, socket.SOCK_STREAM)
+        sock.settimeout(timeout)
+        sock.connect((cid, port))
+        sock.sendall(msg)
+        sock.shutdown(socket.SHUT_WR)
+        while True:
+            try:
+                chunk = sock.recv(4096)
+            except socket.timeout:
+                break
+            if not chunk:
+                break
+            sys.stdout.buffer.write(chunk)
+            sys.stdout.buffer.flush()
+        sock.close()
+      '')
       # The microvm script has built-in flake detection that checks:
       # 1. HYDRIX_FLAKE_DIR env var
       # 2. ~/hydrix-config/flake.nix
