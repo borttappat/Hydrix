@@ -184,6 +184,17 @@ in {
       ))
     ];
 
+    # Allow wheel users to start/stop/restart microvm@ units without a password
+    security.polkit.extraConfig = ''
+      polkit.addRule(function(action, subject) {
+        if (action.id === "org.freedesktop.systemd1.manage-units" &&
+            action.lookup("unit").startsWith("microvm@") &&
+            subject.isInGroup("wheel")) {
+          return polkit.Result.YES;
+        }
+      });
+    '';
+
     # Ensure home directory is traversable after every activation
     # tmpfiles only runs at boot, so we need an activation script too
     system.activationScripts.microvmPermissions = lib.stringAfter [ "users" ] ''
