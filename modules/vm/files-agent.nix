@@ -147,7 +147,7 @@ PYEOF
         rm -f "$XFER_FILE"
 
         if [ -d "$SOURCE_FULL" ] || [ -f "$SOURCE_FULL" ]; then
-          ${pkgs.gnutar}/bin/tar czf - -C "$(${pkgs.coreutils}/bin/dirname "$SOURCE_FULL")" "$(${pkgs.coreutils}/bin/basename "$SOURCE_FULL")" \
+          ${pkgs.gnutar}/bin/tar --use-compress-program=${pkgs.gzip}/bin/gzip -cf - -C "$(${pkgs.coreutils}/bin/dirname "$SOURCE_FULL")" "$(${pkgs.coreutils}/bin/basename "$SOURCE_FULL")" \
             | ${pkgs.openssl}/bin/openssl enc -aes-256-cbc -pbkdf2 \
                 -pass pass:"$PASSPHRASE" -out "$XFER_FILE"
         else
@@ -170,7 +170,7 @@ PYEOF
         mkdir -p "$TARGET_FULL"
         ${pkgs.openssl}/bin/openssl enc -d -aes-256-cbc -pbkdf2 \
           -pass pass:"$PASSPHRASE" -in "$ARCHIVE_FULL" \
-          | ${pkgs.gnutar}/bin/tar xzf - -C "$TARGET_FULL"
+          | ${pkgs.gnutar}/bin/tar --use-compress-program=${pkgs.gzip}/bin/gzip -xf - -C "$TARGET_FULL"
         rm -f "$ARCHIVE_FULL"
         echo "OK"
         ;;
@@ -283,6 +283,7 @@ in {
       python3
       coreutils
       gnutar
+      gzip
     ];
   };
 }
