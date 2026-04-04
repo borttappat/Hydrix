@@ -150,24 +150,22 @@ in {
         #!${pkgs.python3}/bin/python3
         import socket, sys
 
-        cid     = int(sys.argv[1])
-        port    = int(sys.argv[2])
-        timeout = float(sys.argv[3]) if len(sys.argv) > 3 else 30.0
+        cid          = int(sys.argv[1])
+        port         = int(sys.argv[2])
+        connect_timeout = float(sys.argv[3]) if len(sys.argv) > 3 else 10.0
 
         msg = sys.stdin.buffer.read()
         if not msg.endswith(b"\n"):
             msg += b"\n"
 
         sock = socket.socket(socket.AF_VSOCK, socket.SOCK_STREAM)
-        sock.settimeout(timeout)
+        sock.settimeout(connect_timeout)
         sock.connect((cid, port))
+        sock.settimeout(None)   # block until handler closes its end
         sock.sendall(msg)
         sock.shutdown(socket.SHUT_WR)
         while True:
-            try:
-                chunk = sock.recv(4096)
-            except socket.timeout:
-                break
+            chunk = sock.recv(4096)
             if not chunk:
                 break
             sys.stdout.buffer.write(chunk)

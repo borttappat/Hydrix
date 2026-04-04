@@ -2110,21 +2110,19 @@ FILES_VSOCK_PORT=14505
 VM_AGENT_PORT=14506
 
 # Send a command to a VM via vsock, return the response.
-# vsock-cmd uses AF_VSOCK with SHUT_WR so slow handlers (tar, openssl) can
-# finish before the connection closes — socat races on stdin EOF.
+# vsock-cmd uses AF_VSOCK with SHUT_WR: sends the command, half-closes the
+# write side, then blocks until the handler exits and closes its end.
 vsock_send() {
     local cid="$1"
     local port="$2"
     local msg="$3"
-    local timeout="${4:-30}"
-    echo "$msg" | vsock-cmd "$cid" "$port" "$timeout"
+    echo "$msg" | vsock-cmd "$cid" "$port"
 }
 
 # Send a command to files VM via vsock 14505
 files_vm_send() {
     local msg="$1"
-    local timeout="${2:-60}"
-    vsock_send "$FILES_VM_CID" "$FILES_VSOCK_PORT" "$msg" "$timeout"
+    vsock_send "$FILES_VM_CID" "$FILES_VSOCK_PORT" "$msg"
 }
 
 # Look up vsock CID for a given VM name
