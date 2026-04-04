@@ -129,7 +129,7 @@ PYEOF
 
     SHARED_DIR="${userHome}/shared"
     XFER_FILE="$SHARED_DIR/xfer.enc"
-    SERVE_PID_FILE="/run/vm-files-serve.pid"
+    SERVE_PID_FILE="$SHARED_DIR/.serve.pid"
 
     mkdir -p "$SHARED_DIR"
 
@@ -204,14 +204,14 @@ PYEOF
         # Start receive server in background, return READY immediately
         ${receiveScript} "$DEST_FULL" &
         RECV_PID=$!
-        echo "$RECV_PID" > /run/vm-files-recv.pid
+        echo "$RECV_PID" > "$SHARED_DIR/.recv.pid"
         echo "READY"
         ;;
 
       RECEIVE_STOP)
-        if [ -f /run/vm-files-recv.pid ]; then
-          kill "$(cat /run/vm-files-recv.pid)" 2>/dev/null || true
-          rm -f /run/vm-files-recv.pid
+        if [ -f "$SHARED_DIR/.recv.pid" ]; then
+          kill "$(cat "$SHARED_DIR/.recv.pid")" 2>/dev/null || true
+          rm -f "$SHARED_DIR/.recv.pid"
         fi
         echo "OK"
         ;;
@@ -222,9 +222,9 @@ PYEOF
           kill "$(cat "$SERVE_PID_FILE")" 2>/dev/null || true
           rm -f "$SERVE_PID_FILE"
         fi
-        if [ -f /run/vm-files-recv.pid ]; then
-          kill "$(cat /run/vm-files-recv.pid)" 2>/dev/null || true
-          rm -f /run/vm-files-recv.pid
+        if [ -f "$SHARED_DIR/.recv.pid" ]; then
+          kill "$(cat "$SHARED_DIR/.recv.pid")" 2>/dev/null || true
+          rm -f "$SHARED_DIR/.recv.pid"
         fi
         echo "OK"
         ;;
