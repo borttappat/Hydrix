@@ -2201,11 +2201,12 @@ cmd_files_transfer() {
 
     # Determine source IP (static .10 on its bridge)
     local src_ip
+    # IPs must match hydrix.microvm.staticIp set in each profile
     case "$src_vm" in
-        microvm-pentest)  src_ip="192.168.101.10" ;;
-        microvm-comms)    src_ip="192.168.102.10" ;;
         microvm-browsing) src_ip="192.168.103.10" ;;
+        microvm-pentest)  src_ip="192.168.101.10" ;;
         microvm-dev)      src_ip="192.168.104.10" ;;
+        microvm-comms)    src_ip="192.168.102.10" ;;
         microvm-lurking)  src_ip="192.168.107.10" ;;
         *) log_error "Unknown source VM IP for $src_vm"; exit 1 ;;
     esac

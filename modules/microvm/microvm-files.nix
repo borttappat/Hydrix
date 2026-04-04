@@ -31,7 +31,7 @@ let
     mgmt    = { tap = "mv-files-mgmt"; mac = "02:00:00:02:07:01"; subnet = "192.168.100"; };
     pentest = { tap = "mv-files-pent"; mac = "02:00:00:02:01:01"; subnet = "192.168.101"; };
     comms   = { tap = "mv-files-comm"; mac = "02:00:00:02:04:01"; subnet = "192.168.102"; };
-    browse  = { tap = "mv-files-brow"; mac = "02:00:00:02:02:01"; subnet = "192.168.103"; };
+    browsing = { tap = "mv-files-brow"; mac = "02:00:00:02:02:01"; subnet = "192.168.103"; };
     dev     = { tap = "mv-files-dev";  mac = "02:00:00:02:03:01"; subnet = "192.168.104"; };
     shared  = { tap = "mv-files-shar"; mac = "02:00:00:02:06:01"; subnet = "192.168.105"; };
     lurking = { tap = "mv-files-lurk"; mac = "02:00:00:02:05:01"; subnet = "192.168.107"; };
