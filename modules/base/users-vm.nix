@@ -48,8 +48,9 @@ in {
     initialPassword = lib.mkIf (vmHashedPassword == null) "";
   };
 
-  # Auto-login for VMs (convenience - VMs are already isolated)
-  services.getty.autologinUser = vmUser;
+  # Auto-login for VMs (convenience - VMs are already isolated); can be disabled per-VM
+  hydrix.user.autologin = lib.mkDefault true;
+  services.getty.autologinUser = lib.mkIf cfg.user.autologin vmUser;
 
   # First-login password prompt service - DISABLED
   # TODO: Implement proper password prompting for Phase 15 (Profile Hardening)

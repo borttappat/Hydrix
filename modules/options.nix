@@ -91,6 +91,12 @@ in {
         description = "Additional groups for the user (beyond defaults)";
         example = [ "libvirtd" "kvm" ];
       };
+
+      autologin = lib.mkOption {
+        type = lib.types.bool;
+        default = false;
+        description = "Enable automatic console login for the primary user";
+      };
     };
 
     vmType = lib.mkOption {

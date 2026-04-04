@@ -41,8 +41,8 @@ in {
     # Allow wheel group to sudo without password
     security.sudo.wheelNeedsPassword = false;
 
-    # Auto-login
-    services.getty.autologinUser = cfg.username;
+    # Auto-login (disabled by default on host)
+    services.getty.autologinUser = lib.mkIf cfg.user.autologin cfg.username;
     services.displayManager.autoLogin = {
       enable = false;
       user = cfg.username;

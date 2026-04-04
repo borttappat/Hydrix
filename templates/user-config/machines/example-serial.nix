@@ -75,6 +75,9 @@
   #
   # hydrix.user.hashedPassword = "$6$...";  # Generate with: mkpasswd -m sha-512
 
+  # Auto-login on console (default: false on host, true in VMs)
+  # hydrix.user.autologin = true;
+
   # SSH public keys for authorized_keys (optional)
   # hydrix.user.sshPublicKeys = [
   #   "ssh-ed25519 AAAA... user@host"
