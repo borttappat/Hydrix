@@ -80,7 +80,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         raise SystemExit(0)
     def log_message(self, *_): pass
 
-httpd = http.server.HTTPServer(('', 8888), Handler)
+httpd = http.server.HTTPServer(("", 8888), Handler)
 httpd.handle_request()
 PYEOF
   '';
@@ -118,7 +118,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         raise SystemExit(0)
     def log_message(self, *_): pass
 
-httpd = http.server.HTTPServer(('', 8888), Handler)
+httpd = http.server.HTTPServer(("", 8888), Handler)
 httpd.handle_request()
 PYEOF
   '';
