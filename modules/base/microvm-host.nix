@@ -141,7 +141,8 @@ in {
     # Install custom microvm script with high priority to override upstream
     environment.systemPackages = [
       pkgs.virtiofsd
-      pkgs.socat  # For microvm-router console access
+      pkgs.socat    # For microvm-router console access
+      pkgs.openssl  # For microvm files passphrase generation
       # The microvm script has built-in flake detection that checks:
       # 1. HYDRIX_FLAKE_DIR env var
       # 2. ~/hydrix-config/flake.nix
