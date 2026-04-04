@@ -183,7 +183,11 @@ in {
         enable = true;
         device = "nodev";
         efiSupport = true;
-        useOSProber = lib.hasPrefix "dual-boot" diskoCfg.layout;
+        # useOSProber disabled: the installer's EFI directory scan already
+        # generates chainload entries for all other OSes (Ubuntu, Windows, etc.)
+        # via grubExtraEntries. Enabling osProber alongside that produces
+        # duplicate entries for the same OSes.
+        useOSProber = false;
         # Chain-boot entries use insmod cryptodisk + cryptomount -u <UUID>
         # directly, so no global LUKS scan at GRUB startup is needed.
         # (enableCryptodisk = true would prompt for all LUKS devices before
@@ -195,6 +199,7 @@ in {
         canTouchEfiVariables = true;
         efiSysMountPoint = "/boot";
       };
+      timeout = 10;
     };
   };
 }
