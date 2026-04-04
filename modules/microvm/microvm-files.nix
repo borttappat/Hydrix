@@ -40,11 +40,14 @@ let
   # Only the bridges explicitly granted access
   enabledIfaces = lib.filterAttrs (n: _: builtins.elem n cfg.accessFrom) ifaceMap;
 
-  # QEMU args for all enabled bridge TAPs
-  extraTapArgs = lib.concatLists (lib.mapAttrsToList (_: i: [
-    "-netdev" "tap,id=net-${i.tap},ifname=${i.tap},script=no,downscript=no"
-    "-device" "virtio-net-pci,netdev=net-${i.tap},mac=${i.mac}"
-  ]) enabledIfaces);
+  # microvm.interfaces entries for all enabled bridge TAPs.
+  # Declaring them here (rather than extraArgs) lets the microvm.nix host module
+  # create the TAP devices via ExecStartPre and attach them to bridges via udev.
+  extraInterfaces = lib.mapAttrsToList (_: i: {
+    type = "tap";
+    id   = i.tap;
+    mac  = i.mac;
+  }) enabledIfaces;
 
   # Files VM vsock handler script (port 14505)
   filesAgentScript = pkgs.writeShellScript "microvm-files-agent" ''
@@ -172,20 +175,19 @@ in {
       writableStoreOverlay = "/nix/.rw-store";
       graphics.enable = false;
 
-      # Primary TAP on br-files (home network)
+      # Primary TAP on br-files + one TAP per allowed bridge
       interfaces = [{
         type = "tap";
         id = "mv-files";
         mac = "02:00:00:02:00:01";
-      }];
+      }] ++ extraInterfaces;
 
-      # Additional TAPs for each allowed bridge
       qemu.extraArgs = [
         "-vga" "none"
         "-display" "none"
         "-chardev" "socket,id=console,path=/var/lib/microvms/${vmName}/console.sock,server=on,wait=off"
         "-serial" "chardev:console"
-      ] ++ extraTapArgs;
+      ];
 
       vsock.cid = 106;
 
