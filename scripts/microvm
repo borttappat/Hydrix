@@ -181,7 +181,7 @@ is_headless() {
     local vm_name="$1"
     [[ "$vm_name" == "microvm-router" || "$vm_name" == "microvm-builder" || \
        "$vm_name" == "microrouter" || "$vm_name" == "microbuild" || \
-       "$vm_name" == "microvm-files" ]]
+       "$vm_name" == "microvm-files" || "$vm_name" == "microvm-gitsync" ]]
 }
 
 # Check if VM is the builder
