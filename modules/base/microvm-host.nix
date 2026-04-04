@@ -163,7 +163,10 @@ in {
         sock.connect((cid, port))
         sock.settimeout(None)   # block until handler closes its end
         sock.sendall(msg)
-        sock.shutdown(socket.SHUT_WR)
+        # No SHUT_WR: the handler uses `read` which stops at newline, not EOF.
+        # Sending SHUT_WR causes socat on the VM to close the whole vsock
+        # connection before the handler can write back.
+        # We just read until the handler exits and socat closes its side.
         while True:
             chunk = sock.recv(4096)
             if not chunk:
