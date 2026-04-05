@@ -83,7 +83,7 @@ let
         fi
         RESULT=$(${pkgs.curl}/bin/curl -sf -X PUT \
           "http://$DEST_IP:8888/xfer.enc" \
-          --data-binary @"$SRC" -w '%{http_code}')
+          --data-binary @"$SRC" -o /dev/null -w '%{http_code}')
         if [ "$RESULT" = "200" ]; then
           # Ask dest VM for checksum of what it received
           HASH=$(${pkgs.coreutils}/bin/sha256sum "$SRC" | cut -d' ' -f1)
