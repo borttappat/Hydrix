@@ -102,11 +102,21 @@ let
         FILENAME=$(echo "$REST" | cut -d' ' -f3)
         SRC="$STORAGE_DIR/tmp/$FILENAME"
         DEST_DIR="$STORAGE_DIR/$VM_TYPE"
+        if [ ! -f "$SRC" ]; then
+          echo "ERROR: source not found: $SRC"
+          exit 0
+        fi
         mkdir -p "$DEST_DIR"
-        ${pkgs.openssl}/bin/openssl enc -d -aes-256-cbc -pbkdf2 \
-          -pass pass:"$PASSPHRASE" -in "$SRC" \
-          | tar xzf - -C "$DEST_DIR"
-        rm -f "$SRC"
+        ERRFILE=$(${pkgs.coreutils}/bin/mktemp)
+        if ! ${pkgs.openssl}/bin/openssl enc -d -aes-256-cbc -pbkdf2 \
+              -pass pass:"$PASSPHRASE" -in "$SRC" 2>"$ERRFILE" \
+              | ${pkgs.gnutar}/bin/tar --use-compress-program=${pkgs.gzip}/bin/gzip \
+                  -xf - -C "$DEST_DIR" 2>>"$ERRFILE"; then
+          echo "ERROR: $(cat "$ERRFILE")"
+          rm -f "$ERRFILE"
+          exit 0
+        fi
+        rm -f "$ERRFILE" "$SRC"
         echo "OK"
         ;;
 
@@ -305,6 +315,8 @@ in {
       openssl
       socat
       coreutils
+      gnutar
+      gzip
       iproute2
       htop
       ncdu

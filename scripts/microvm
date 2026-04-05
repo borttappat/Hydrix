@@ -2132,11 +2132,14 @@ get_vm_cid() {
     # Extract vsockCid from microvm config in the nix store
     # Fall back to known defaults
     case "$vm" in
-        microvm-browsing) echo 101 ;;
-        microvm-pentest)  echo 102 ;;
-        microvm-dev)      echo 103 ;;
-        microvm-comms)    echo 104 ;;
-        microvm-lurking)  echo 105 ;;
+        microvm-browsing)       echo 101 ;;
+        microvm-pentest)        echo 102 ;;
+        microvm-dev)            echo 103 ;;
+        microvm-comms)          echo 104 ;;
+        microvm-lurking)        echo 105 ;;
+        microvm-pentest-task1)  echo 115 ;;
+        microvm-pentest-task2)  echo 116 ;;
+        microvm-pentest-task3)  echo 117 ;;
         *) log_error "Unknown VM: $vm (cannot determine vsock CID)"; return 1 ;;
     esac
 }
@@ -2203,11 +2206,12 @@ cmd_files_transfer() {
     local src_ip
     # IPs must match hydrix.microvm.staticIp set in each profile
     case "$src_vm" in
-        microvm-browsing) src_ip="192.168.103.10" ;;
-        microvm-pentest)  src_ip="192.168.101.10" ;;
-        microvm-dev)      src_ip="192.168.104.10" ;;
-        microvm-comms)    src_ip="192.168.102.10" ;;
-        microvm-lurking)  src_ip="192.168.107.10" ;;
+        microvm-browsing)       src_ip="192.168.103.10" ;;
+        microvm-pentest)        src_ip="192.168.101.10" ;;
+        microvm-dev)            src_ip="192.168.104.10" ;;
+        microvm-comms)          src_ip="192.168.102.10" ;;
+        microvm-lurking)        src_ip="192.168.107.10" ;;
+        microvm-pentest-task*)  src_ip="192.168.101.10" ;;
         *) log_error "Unknown source VM IP for $src_vm"; exit 1 ;;
     esac
 
@@ -2245,11 +2249,12 @@ cmd_files_transfer() {
     # Determine destination IP
     local dst_ip
     case "$dst_vm" in
-        microvm-pentest)  dst_ip="192.168.101.10" ;;
-        microvm-comms)    dst_ip="192.168.102.10" ;;
-        microvm-browsing) dst_ip="192.168.103.10" ;;
-        microvm-dev)      dst_ip="192.168.104.10" ;;
-        microvm-lurking)  dst_ip="192.168.107.10" ;;
+        microvm-pentest)        dst_ip="192.168.101.10" ;;
+        microvm-comms)          dst_ip="192.168.102.10" ;;
+        microvm-browsing)       dst_ip="192.168.103.10" ;;
+        microvm-dev)            dst_ip="192.168.104.10" ;;
+        microvm-lurking)        dst_ip="192.168.107.10" ;;
+        microvm-pentest-task*)  dst_ip="192.168.101.10" ;;
         *) log_error "Unknown destination VM IP for $dst_vm"; exit 1 ;;
     esac
 
@@ -2326,11 +2331,19 @@ cmd_files_store() {
     local passphrase
     passphrase=$(openssl rand -base64 32)
 
-    # Ensure files VM running
+    # Ensure files VM is running and its vsock agent is ready
     if ! systemctl is-active --quiet "microvm@${FILES_VM_NAME}.service" 2>/dev/null; then
-        systemctl start "microvm@${FILES_VM_NAME}.service" || exit 1
-        sleep 2
+        log "Starting ${FILES_VM_NAME}..."
+        systemctl start "microvm@${FILES_VM_NAME}.service" || { log_error "Failed to start ${FILES_VM_NAME}"; exit 1; }
     fi
+    local deadline=$(( $(date +%s) + 30 ))
+    while ! echo "PING" | vsock-cmd "$FILES_VM_CID" "$FILES_VSOCK_PORT" 2>/dev/null | grep -q "PONG"; do
+        if (( $(date +%s) >= deadline )); then
+            log_error "Timeout waiting for ${FILES_VM_NAME} vsock agent"
+            exit 1
+        fi
+        sleep 1
+    done
 
     # Encrypt on source VM
     log "Encrypting on ${src_vm}..."
@@ -2346,11 +2359,12 @@ cmd_files_store() {
 
     local src_ip
     case "$src_vm" in
-        microvm-pentest)  src_ip="192.168.101.10" ;;
-        microvm-comms)    src_ip="192.168.102.10" ;;
-        microvm-browsing) src_ip="192.168.103.10" ;;
-        microvm-dev)      src_ip="192.168.104.10" ;;
-        microvm-lurking)  src_ip="192.168.107.10" ;;
+        microvm-pentest)        src_ip="192.168.101.10" ;;
+        microvm-comms)          src_ip="192.168.102.10" ;;
+        microvm-browsing)       src_ip="192.168.103.10" ;;
+        microvm-dev)            src_ip="192.168.104.10" ;;
+        microvm-lurking)        src_ip="192.168.107.10" ;;
+        microvm-pentest-task*)  src_ip="192.168.101.10" ;;
         *) log_error "Unknown source VM IP"; exit 1 ;;
     esac
 

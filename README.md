@@ -1033,15 +1033,15 @@ The files VM (`microvm-files`, CID 106) is an encrypted jump host for moving fil
 
 5. Host → pentest VM (vsock 14506): SERVE_STOP
 
-6. Host → comms VM (vsock 14506): RECEIVE_PREPARE pentest/
-   Comms VM creates dir, starts one-shot HTTP upload server on port 8888
+6. Host → comms VM (vsock 14506): RECEIVE_PREPARE
+   Comms VM starts one-shot HTTP upload server on port 8888 (always receives to ~/shared/)
 
 7. Host → files VM (vsock 14505): DELIVER 192.168.102.10 xfer.enc
    Files VM HTTP PUTs ciphertext to comms VM
    Returns: SHA256=<hash>  ← host verifies three-way match
 
-8. Host → comms VM (vsock 14506): DECRYPT <passphrase> pentest/xfer.enc pentest/
-   Comms VM decrypts + unpacks → ~/pentest/report/, deletes xfer.enc
+8. Host → comms VM (vsock 14506): DECRYPT <passphrase> shared/xfer.enc pentest/
+   Comms VM decrypts + unpacks → ~/pentest/report/, deletes shared/xfer.enc
    Returns: OK
 
 9. Host → pentest VM (vsock 14506): CLEANUP  (deletes ~/shared/xfer.enc)
@@ -1058,7 +1058,7 @@ Steps 1–4 are identical. After the files VM has the ciphertext, the host sends
 "microvm-files" = hydrix.lib.mkMicrovmFiles {
   # Bridges the files VM gets direct TAP access to.
   # Only listed VMs can exchange files with each other via this VM.
-  accessFrom = [ "pentest" "browse" "dev" "comms" ];
+  accessFrom = [ "pentest" "browsing" "dev" "comms" ];
 };
 ```
 
@@ -1093,9 +1093,10 @@ Host (passphrase, orchestration)
  │
 Files VM (192.168.108.10 on br-files)
  ├── mv-files-pent → br-pentest  (192.168.101.2)  [if "pentest" in accessFrom]
- ├── mv-files-brow → br-browse   (192.168.103.2)  [if "browse" in accessFrom]
+ ├── mv-files-brow → br-browse   (192.168.103.2)  [if "browsing" in accessFrom]
  ├── mv-files-dev  → br-dev      (192.168.104.2)  [if "dev" in accessFrom]
  ├── mv-files-comm → br-comms    (192.168.102.2)  [if "comms" in accessFrom]
+ ├── mv-files-lurk → br-lurking  (192.168.107.2)  [if "lurking" in accessFrom]
  └── mv-files      → br-files    (192.168.108.10) [always]
 
 Regular VMs: static .10 IPs on their bridge
@@ -1195,21 +1196,26 @@ All host-VM communication uses virtio-vsock. No SSH or network access to VMs. Ea
 
 ### Protocol
 
-All services use raw TCP-like streams over vsock via socat. Messages are line-oriented text:
+All services use raw TCP-like streams over vsock. Messages are line-oriented text. The host uses `vsock-cmd` (a small Python helper installed by the framework) for reliable communication:
 
 ```bash
+# vsock-cmd <cid> <port> [connect-timeout-seconds]
+# Reads command from stdin, writes response to stdout.
+
 # Query VM metrics
-echo "cpu" | socat - VSOCK-CONNECT:<CID>:14501
+echo "cpu" | vsock-cmd 101 14501
 
 # Trigger color refresh
-echo "REFRESH" | socat - VSOCK-CONNECT:<CID>:14503
+echo "REFRESH" | vsock-cmd 101 14503
 
-# Live switch
-echo "SWITCH /nix/store/..." | socat -t60 - VSOCK-CONNECT:<CID>:14504
+# Live switch (longer connect timeout for slow VMs)
+echo "SWITCH /nix/store/..." | vsock-cmd 101 14504 30
 
 # Query switch status
-echo "STATUS" | socat -t5 - VSOCK-CONNECT:<CID>:14504
+echo "STATUS" | vsock-cmd 101 14504
 ```
+
+`vsock-cmd` uses `AF_VSOCK` sockets directly (no socat). It sends one newline-terminated command, then reads until the connection closes — which happens naturally when the per-connection handler exits on the VM side.
 
 ---
 
