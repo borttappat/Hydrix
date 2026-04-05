@@ -127,46 +127,23 @@ in {
 
           ${lib.optionalString (!isVM) ''
           # Lockdown-aware git wrapper (host only)
-          # Intercepts push/pull/fetch in lockdown mode and offers to use git-sync VM
+          # Intercepts push/pull/fetch in lockdown mode and delegates to git-sync VM
           function git --wraps git
             if contains -- $argv[1] push pull fetch
               if test -f /etc/HYDRIX_MODE
                 and grep -q "MODE=lockdown" /etc/HYDRIX_MODE
-                # Detect repo name from git toplevel
                 set -l toplevel (command git rev-parse --show-toplevel 2>/dev/null)
                 if test -n "$toplevel"
                   set -l repo_name (basename $toplevel)
-
-                  # Check if git-sync VM is running and authenticated
-                  if not systemctl is-active --quiet microvm@microvm-gitsync.service 2>/dev/null
-                    echo -e "\033[33m::\033[0m Lockdown mode — no host internet."
-                    read -P "Start git-sync VM for $argv[1]? [Y/n] " confirm
-                    if test -z "$confirm" -o "$confirm" = Y -o "$confirm" = y
-                      microvm start microvm-gitsync
-                      # Check if gh is authenticated
-                      set -l auth_check (echo "PING" | socat -T5 - VSOCK-CONNECT:211:14512 2>/dev/null)
-                      if test $status -ne 0
-                        echo -e "\033[33m::\033[0m Git-sync VM not ready yet. Try again in a moment."
-                        return 1
-                      end
-                    else
-                      echo "Cancelled."
-                      return 1
-                    end
-                  end
-
-                  # Check if gh auth is set up in the VM
-                  set -l repos_check (echo "REPOS" | socat -T5 - VSOCK-CONNECT:211:14512 2>/dev/null)
-                  if echo "$repos_check" | grep -q "ERROR.*auth\|ERROR.*token"
-                    echo -e "\033[33m::\033[0m Git-sync VM needs GitHub authentication."
-                    echo -e "\033[33m::\033[0m Run: \033[1mmicrovm git auth\033[0m"
-                    echo -e "\033[33m::\033[0m Then inside the VM console: \033[1mgh auth login -h github.com -p https -w\033[0m"
+                  echo -e "\033[33m::\033[0m Lockdown mode — routing through git-sync VM."
+                  read -P "Use git-sync VM for $argv[1] $repo_name? [Y/n] " confirm
+                  if test -z "$confirm" -o "$confirm" = Y -o "$confirm" = y
+                    microvm git $argv[1] $repo_name
+                    return $status
+                  else
+                    echo "Cancelled."
                     return 1
                   end
-
-                  echo -e "\033[33m::\033[0m Lockdown mode — using git-sync VM for $argv[1]."
-                  microvm git $argv[1] $repo_name
-                  return $status
                 end
               end
             end

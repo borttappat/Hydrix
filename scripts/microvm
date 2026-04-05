@@ -1975,10 +1975,12 @@ restore_network() {
 gitsync_vsock_cmd() {
     local cmd="$1"
 
-    # Start git-sync if not running
+    # Track if we started the VM so we can stop it when done
+    local we_started=false
     if ! is_running "$GITSYNC_NAME"; then
         log "Starting git-sync VM..."
         cmd_start "$GITSYNC_NAME" || return 1
+        we_started=true
     fi
 
     local output
@@ -2002,9 +2004,17 @@ gitsync_vsock_cmd() {
         esac
     done <<< "$output"
 
+    local rc=0
     if echo "$output" | grep -q "^ERROR"; then
-        return 1
+        rc=1
     fi
+
+    if [[ "$we_started" == "true" ]]; then
+        log "Stopping git-sync VM..."
+        cmd_stop "$GITSYNC_NAME" 2>/dev/null || true
+    fi
+
+    return $rc
 }
 
 cmd_git_push() {
