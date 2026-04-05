@@ -2278,12 +2278,17 @@ cmd_files_transfer() {
     # Step 7: NOW release passphrase to dest VM for decryption
     # extract_parent: dir to extract INTO (archive recreates the top-level name)
     # empty string = home dir, so "wallpapers" extracts to ~/wallpapers not ~/wallpapers/wallpapers
-    local extract_parent
+    local extract_parent decrypt_cmd
     extract_parent=$(dirname "$dst_path")
     [[ "$extract_parent" == "." ]] && extract_parent=""
+    if [[ -n "$extract_parent" ]]; then
+        decrypt_cmd="DECRYPT $passphrase shared/xfer.enc $extract_parent"
+    else
+        decrypt_cmd="DECRYPT $passphrase shared/xfer.enc"
+    fi
     log "Decrypting on ${dst_vm}..."
     local decrypt_result
-    decrypt_result=$(vsock_send "$dst_cid" "$VM_AGENT_PORT" "DECRYPT $passphrase shared/xfer.enc $extract_parent")
+    decrypt_result=$(vsock_send "$dst_cid" "$VM_AGENT_PORT" "$decrypt_cmd")
     [[ "$decrypt_result" != "OK" ]] && {
         log_error "Decrypt failed: $decrypt_result"
         vsock_send "$src_cid" "$VM_AGENT_PORT" "CLEANUP" >/dev/null 2>&1
