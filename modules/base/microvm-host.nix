@@ -137,6 +137,14 @@ in {
     # Trust microVM TAP interfaces in firewall
     networking.firewall.trustedInterfaces = [ "mv-+" ];
 
+    # VM registry: written at activation, read by scripts/polybar at runtime
+    # Populated by flake.nix from discovered profile meta.nix files
+    environment.etc."hydrix/vm-registry.json" = lib.mkIf
+      (config.hydrix.networking.vmRegistry != {}) {
+        text = builtins.toJSON config.hydrix.networking.vmRegistry;
+        mode = "0644";
+      };
+
     # Ensure virtiofsd is available
     # Install custom microvm script with high priority to override upstream
     environment.systemPackages = [
