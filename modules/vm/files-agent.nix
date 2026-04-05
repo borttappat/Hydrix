@@ -160,17 +160,23 @@ PYEOF
         ;;
 
       DECRYPT)
-        # DECRYPT <passphrase> <archive-path> <target-dir>
+        # DECRYPT <passphrase> <archive-path> <extract-parent>
+        # extract-parent: directory to extract INTO (the archive recreates the
+        # top-level name). Empty string means extract directly into $HOME.
         PASSPHRASE=$(echo "$REST" | cut -d' ' -f1)
         ARCHIVE=$(echo "$REST" | cut -d' ' -f2)
-        TARGET_DIR=$(echo "$REST" | cut -d' ' -f3-)
+        EXTRACT_PARENT=$(echo "$REST" | cut -d' ' -f3-)
         ARCHIVE_FULL="${userHome}/$ARCHIVE"
-        TARGET_FULL="${userHome}/$TARGET_DIR"
+        if [ -z "$EXTRACT_PARENT" ]; then
+          EXTRACT_FULL="${userHome}"
+        else
+          EXTRACT_FULL="${userHome}/$EXTRACT_PARENT"
+        fi
 
-        mkdir -p "$TARGET_FULL"
+        mkdir -p "$EXTRACT_FULL"
         ${pkgs.openssl}/bin/openssl enc -d -aes-256-cbc -pbkdf2 \
           -pass pass:"$PASSPHRASE" -in "$ARCHIVE_FULL" \
-          | ${pkgs.gnutar}/bin/tar --use-compress-program=${pkgs.gzip}/bin/gzip -xf - -C "$TARGET_FULL"
+          | ${pkgs.gnutar}/bin/tar --use-compress-program=${pkgs.gzip}/bin/gzip -xf - -C "$EXTRACT_FULL"
         rm -f "$ARCHIVE_FULL"
         echo "OK"
         ;;
@@ -197,12 +203,9 @@ PYEOF
         ;;
 
       RECEIVE_PREPARE)
-        # RECEIVE_PREPARE <dest-dir>
-        DEST_DIR=$(echo "$REST" | cut -d' ' -f1-)
-        DEST_FULL="${userHome}/$DEST_DIR"
-        mkdir -p "$DEST_FULL"
+        # Always receive into ~/shared/ — DECRYPT places files at the right path
         # Start receive server in background, return READY immediately
-        ${receiveScript} "$DEST_FULL" &
+        ${receiveScript} "$SHARED_DIR" &
         RECV_PID=$!
         echo "$RECV_PID" > "$SHARED_DIR/.recv.pid"
         echo "READY"

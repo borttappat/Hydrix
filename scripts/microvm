@@ -2235,7 +2235,7 @@ cmd_files_transfer() {
 
     # Step 5: dest VM prepares to receive
     log "Preparing destination ${dst_vm}..."
-    vsock_send "$dst_cid" "$VM_AGENT_PORT" "RECEIVE_PREPARE $dst_path" | grep -q "READY" || {
+    vsock_send "$dst_cid" "$VM_AGENT_PORT" "RECEIVE_PREPARE" | grep -q "READY" || {
         log_error "Destination VM failed to prepare"
         vsock_send "$src_cid" "$VM_AGENT_PORT" "CLEANUP" >/dev/null 2>&1
         files_vm_send "CLEANUP_TMP xfer.enc" >/dev/null 2>&1
@@ -2276,9 +2276,14 @@ cmd_files_transfer() {
     log "Three-way checksum verified: ${src_hash:0:16}..."
 
     # Step 7: NOW release passphrase to dest VM for decryption
+    # extract_parent: dir to extract INTO (archive recreates the top-level name)
+    # empty string = home dir, so "wallpapers" extracts to ~/wallpapers not ~/wallpapers/wallpapers
+    local extract_parent
+    extract_parent=$(dirname "$dst_path")
+    [[ "$extract_parent" == "." ]] && extract_parent=""
     log "Decrypting on ${dst_vm}..."
     local decrypt_result
-    decrypt_result=$(vsock_send "$dst_cid" "$VM_AGENT_PORT" "DECRYPT $passphrase $dst_path/xfer.enc $dst_path")
+    decrypt_result=$(vsock_send "$dst_cid" "$VM_AGENT_PORT" "DECRYPT $passphrase shared/xfer.enc $extract_parent")
     [[ "$decrypt_result" != "OK" ]] && {
         log_error "Decrypt failed: $decrypt_result"
         vsock_send "$src_cid" "$VM_AGENT_PORT" "CLEANUP" >/dev/null 2>&1
