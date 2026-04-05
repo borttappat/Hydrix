@@ -63,7 +63,7 @@ in {
 
     mem = lib.mkOption {
       type = lib.types.int;
-      default = 2048;
+      default = 2304;  # Avoid QEMU hang at exactly 2GB (microvm-nix#171)
       description = "Memory in MB (balloon reclaims idle memory from guest)";
     };
 

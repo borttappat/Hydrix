@@ -30,7 +30,7 @@
   # MicroVM resources
   hydrix.microvm = {
     vcpu = 2;
-    mem = 2048;  # 2GB (balloon reclaims idle)
+    mem = 2304;  # 2.25GB (avoid QEMU 2GB-exact hang bug)
     vsockCid = 104;  # Unique for comms VM
     bridge = "br-comms";
     tapId = "mv-comms";
