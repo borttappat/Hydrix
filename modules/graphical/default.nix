@@ -35,8 +35,9 @@ in {
     ./xsession.nix         # X session startup
     ./home.nix             # Home Manager programs
     ./scripts.nix          # Colorscheme management scripts
-    ./programs/blugon.nix  # Blue light filter
-    ./fonts                # Per-font profiles (sizes, overrides, UI adjustments)
+    ./programs/blugon.nix       # Blue light filter
+    ./programs/file-finder.nix  # Fuzzy file search (file-finder command)
+    ./fonts                     # Per-font profiles (sizes, overrides, UI adjustments)
     ../wm/focus-mode.nix   # Focus mode (lock keybindings to single VM type)
   ];
 
