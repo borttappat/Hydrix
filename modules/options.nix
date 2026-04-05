@@ -626,6 +626,51 @@ in {
         };
         description = "Subnet prefixes per bridge (without last octet)";
       };
+
+      extraNetworks = lib.mkOption {
+        type = lib.types.listOf (lib.types.submodule {
+          options = {
+            name = lib.mkOption {
+              type = lib.types.str;
+              description = "Network name, e.g. \"office\". Bridge becomes br-<name>.";
+            };
+            subnet = lib.mkOption {
+              type = lib.types.str;
+              description = "Subnet prefix without last octet, e.g. \"192.168.109\".";
+            };
+            routerTap = lib.mkOption {
+              type = lib.types.str;
+              description = "Router-side TAP interface name (max 15 chars), e.g. \"mv-router-offi\".";
+            };
+          };
+        });
+        default = [];
+        description = ''
+          Extra VM networks beyond the built-in set. Each entry creates:
+          a host bridge (br-<name>), udev TAP attachment rules, and a
+          router subnet with DHCP. Declare once in flake.nix; injected
+          into host and router VM configs automatically.
+        '';
+      };
+
+      vmRegistry = lib.mkOption {
+        type = lib.types.attrsOf (lib.types.submodule {
+          options = {
+            vmName   = lib.mkOption { type = lib.types.str; };
+            cid      = lib.mkOption { type = lib.types.int; };
+            bridge   = lib.mkOption { type = lib.types.str; };
+            subnet   = lib.mkOption { type = lib.types.str; };
+            workspace = lib.mkOption { type = lib.types.int; };
+          };
+        });
+        default = {};
+        description = ''
+          Build-time VM registry, keyed by profile name. Written to
+          /etc/hydrix/vm-registry.json at activation. All runtime
+          tooling (scripts, polybar) reads from there instead of
+          hardcoded CID maps.
+        '';
+      };
     };
 
     # =========================================================================
