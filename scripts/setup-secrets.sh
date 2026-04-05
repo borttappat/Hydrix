@@ -51,7 +51,7 @@ check_prereqs() {
     if [[ ${#missing[@]} -gt 0 ]]; then
         error "Missing required tools: ${missing[*]}"
         echo ""
-        echo "Make sure you have enabled secrets in local/machines/host.nix:"
+        echo "Make sure you have enabled secrets in machines/<serial>.nix:"
         echo "  hydrix.secrets.enable = true;"
         echo ""
         echo "Then rebuild: rebuild"
@@ -197,7 +197,7 @@ print_next_steps() {
     echo ""
     echo "Next steps:"
     echo ""
-    echo "  1. Enable secrets in local/machines/host.nix:"
+    echo "  1. Enable secrets in machines/<serial>.nix:"
     echo "     ${BLUE}hydrix.secrets = {"
     echo "       enable = true;"
     echo "       github.enable = true;"

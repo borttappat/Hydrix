@@ -955,7 +955,7 @@ in {
           description = ''
             Per-app font size multipliers for standalone mode (no external monitor).
             Apps not listed here fall back to the regular 'relations' values.
-            Set in local/machines/host.nix for machine-specific tuning.
+            Set in machines/<serial>.nix for machine-specific tuning.
           '';
         };
 

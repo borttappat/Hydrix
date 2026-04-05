@@ -591,7 +591,6 @@ build_base_image() {
 
     cd "$FLAKE_DIR"
     git add -A 2>/dev/null || true
-    git add -f local/*.nix local/machines/*.nix 2>/dev/null || true
 
     local name="base-${t}"
     if command -v nom &>/dev/null; then

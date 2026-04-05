@@ -41,7 +41,7 @@ in {
   ]);
 
   # Configure bootloader with GRUB - only for legacy installs
-  # For disko installs, boot.loader is configured in local/machines/host.nix
+  # For disko installs, boot.loader is configured in machines/<serial>.nix
   boot.loader = lib.mkIf (!isDisko) (lib.mkForce {
     grub = {
       enable = true;

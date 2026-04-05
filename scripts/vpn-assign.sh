@@ -335,7 +335,7 @@ list_mullvad() {
 
     if [ "$found" = false ]; then
         echo -e "${YELLOW}No Mullvad configs found.${NC}"
-        echo "Copy local/mullvad.nix.example to local/mullvad.nix and rebuild."
+        echo "Copy vpn/mullvad.nix.example to vpn/mullvad.nix and rebuild."
     fi
 
     echo ""

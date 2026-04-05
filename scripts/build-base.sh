@@ -107,9 +107,7 @@ build_base_image() {
 
     cd "$PROJECT_DIR"
 
-    # Stage files for nix (including gitignored local/ directory)
     git add -A 2>/dev/null || true
-    git add -f local/*.nix local/machines/*.nix 2>/dev/null || true
 
     # Build the image
     local start_time=$(date +%s)
