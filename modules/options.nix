@@ -637,7 +637,7 @@ in {
 
       accessFrom = lib.mkOption {
         type = lib.types.listOf (lib.types.enum
-          [ "mgmt" "pentest" "comms" "browse" "dev" "shared" "lurking" ]);
+          [ "mgmt" "pentest" "comms" "browsing" "dev" "shared" "lurking" ]);
         default = [];
         description = ''
           Bridges the files VM gets direct TAP interfaces on.
