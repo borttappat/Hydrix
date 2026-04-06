@@ -139,9 +139,10 @@ let
     echo "%{F$color_prefix}GIT %{F-}%{u$uc}%{+u}$count%{-u}"
   '';
 
-  # VMs: alert when > 4 running
+  # VMs: hide when none running, alert when > 4
   vmsDynamicScript = pkgs.writeShellScript "polybar-vms-dynamic" ''
     count=$(${virsh} --connect qemu:///system list --state-running --name 2>/dev/null | ${grep} -c .) || count=0
+    [ "$count" -eq 0 ] && echo "" && exit 0
     ${getColorHelper}
     if [ "$count" -gt 4 ]; then
       uc="$color_alert"
@@ -151,9 +152,10 @@ let
     echo "%{F$color_prefix}VMS %{F-}%{u$uc}%{+u}$count%{-u}"
   '';
 
-  # MicroVMs: alert when > 4 running
+  # MicroVMs: hide when none running, alert when > 4
   mvmsDynamicScript = pkgs.writeShellScript "polybar-mvms-dynamic" ''
     count=$(systemctl list-units --type=service --state=running 2>/dev/null | ${grep} -c "microvm@") || count=0
+    [ "$count" -eq 0 ] && echo "" && exit 0
     ${getColorHelper}
     if [ "$count" -gt 4 ]; then
       uc="$color_alert"
@@ -163,27 +165,29 @@ let
     echo "%{F$color_prefix}MVMS %{F-}%{u$uc}%{+u}$count%{-u}"
   '';
 
-  # SYNC: Count staged packages from running VMs (via vsock)
-  # Shows total staged packages across all running VMs
+  # SYNC: Count staged packages from running VMs (direct vsock query)
+  # Hides when no packages are staged; alerts when any are found
   syncDynamicScript = pkgs.writeShellScript "polybar-sync-dynamic" ''
-    # Query vm-sync for staged package count (new vsock-based approach)
-    # vm-sync list output format:
-    #   microvm-dev (dev):
-    #     cpond
-    # Count lines that start with 4+ spaces and contain a package name
+    VM_REGISTRY="/etc/hydrix/vm-registry.json"
+    STAGING_PORT=14502
     count=0
-    output=$(vm-sync list 2>/dev/null)
-    if [ -n "$output" ]; then
-      # Count indented package lines (4 spaces + alphanumeric)
-      count=$(echo "$output" | ${grep} -cE "^    [a-zA-Z]" 2>/dev/null) || count=0
+
+    if [ -f "$VM_REGISTRY" ]; then
+      while IFS= read -r profile; do
+        vm_name="microvm-$profile"
+        systemctl is-active --quiet "microvm@$vm_name.service" 2>/dev/null || continue
+        cid=$(${jq} -r --arg p "$profile" '.[$p].cid // empty' "$VM_REGISTRY" 2>/dev/null)
+        [ -z "$cid" ] && continue
+        response=$(echo "list" | ${timeout} 2 ${socat} - "VSOCK-CONNECT:$cid:$STAGING_PORT" 2>/dev/null)
+        [ -z "$response" ] && continue
+        n=$(echo "$response" | ${jq} -r '.packages | length' 2>/dev/null) || n=0
+        count=$((count + n))
+      done < <(${jq} -r 'keys[]' "$VM_REGISTRY" 2>/dev/null)
     fi
+
+    [ "$count" -eq 0 ] && echo "" && exit 0
     ${getColorHelper}
-    if [ "$count" -gt 0 ]; then
-      uc="$color_alert"
-    else
-      uc="$color_normal"
-    fi
-    echo "%{F$color_prefix}SYNC %{F-}%{u$uc}%{+u}$count%{-u}"
+    echo "%{F$color_prefix}SYNC %{F-}%{u$color_alert}%{+u}$count%{-u}"
   '';
 
   # FOCUS MODE: show focused VM type (empty when inactive)
@@ -397,7 +401,7 @@ let
     ${getColorHelper}
 
     if [ ! -f "$STATE_FILE" ]; then
-      echo "%{F$color_prefix}POMO %{F-}%{u$color_normal}%{+u}OFF%{-u}"
+      echo ""
       exit 0
     fi
 
