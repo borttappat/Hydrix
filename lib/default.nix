@@ -128,7 +128,9 @@ in {
       { hydrix.userColorschemesDir = userColorschemesDir; }
       microvm.nixosModules.microvm
       ../modules/microvm/microvm-base.nix  # User setup, vsock, shares, etc.
-      ../profiles/${profile}               # Hydrix base profile (always included)
+    ] ++ nixpkgs.lib.optionals (builtins.pathExists ../profiles/${profile}) [
+      ../profiles/${profile}               # Hydrix base profile (only if it exists)
+    ] ++ [
       {
         networking.hostName = hostname;
       }
