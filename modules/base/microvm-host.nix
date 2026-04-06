@@ -132,7 +132,11 @@ in {
       # VFIO device permissions for microvm user (needed for PCI passthrough)
       # This allows the microvm user to access VFIO IOMMU group devices
       SUBSYSTEM=="vfio", MODE="0666"
-    '';
+    '' + lib.concatMapStrings (n: ''
+      # Extra network: ${n.name} (br-${n.name}, subnet ${n.subnet}.0/24)
+      ACTION=="add", SUBSYSTEM=="net", KERNEL=="${n.routerTap}", RUN+="${attachTapScript} %k br-${n.name}"
+      ACTION=="add", SUBSYSTEM=="net", KERNEL=="mv-${n.name}*",  RUN+="${attachTapScript} %k br-${n.name}"
+    '') config.hydrix.networking.extraNetworks;
 
     # Trust microVM TAP interfaces in firewall
     networking.firewall.trustedInterfaces = [ "mv-+" ];

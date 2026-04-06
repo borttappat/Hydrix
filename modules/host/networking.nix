@@ -7,8 +7,13 @@ let
   cfg = config.hydrix;
   netCfg = cfg.networking;
 
-  # Generate bridge config from list
+  # Generate bridge config from built-in list
   bridgeConfigs = lib.genAttrs netCfg.bridges (br: { interfaces = []; });
+
+  # Extra bridges from user-defined profiles
+  extraBridgeConfigs = lib.genAttrs
+    (map (n: "br-${n.name}") netCfg.extraNetworks)
+    (_: { interfaces = []; });
 
   # Management and shared bridges get host IPs
   mgmtSubnet = netCfg.subnets.mgmt or "192.168.100";
@@ -19,8 +24,8 @@ in {
     networking.networkmanager.enable = lib.mkForce false;
     networking.useDHCP = lib.mkForce false;
 
-    # Create bridges
-    networking.bridges = bridgeConfigs;
+    # Create bridges (built-in + user-defined extra networks)
+    networking.bridges = bridgeConfigs // extraBridgeConfigs;
 
     # Host IPs on management and shared bridges
     networking.interfaces = {
@@ -39,16 +44,20 @@ in {
       br-browse.useDHCP = false;
       br-dev.useDHCP = false;
       br-builder.useDHCP = false;
-    };
+    } // lib.listToAttrs (map (n: {
+      name  = "br-${n.name}";
+      value = { useDHCP = false; };
+    }) netCfg.extraNetworks);
 
     # NOTE: No default gateway in base config.
     # Base config = lockdown mode (host has no internet access).
     # The 'administrative' specialisation adds the default gateway.
 
-    # Trust all bridges
+    # Trust all bridges (built-in + extra)
     networking.firewall = {
       enable = true;
-      trustedInterfaces = netCfg.bridges;
+      trustedInterfaces = netCfg.bridges
+        ++ map (n: "br-${n.name}") netCfg.extraNetworks;
     };
   };
 }
