@@ -120,15 +120,11 @@ detect_current_specialisation() {
     echo "lockdown"
 }
 
-# Known VM CIDs (avoids nix eval when nix-daemon is stopped for builder)
-# New short names + legacy names for backwards compatibility
-declare -A KNOWN_CIDS=(
-    # Primary names
-    ["microvm-browsing"]=101
-    ["microvm-pentest"]=102
-    ["microvm-dev"]=103
-    ["microvm-comms"]=104
-    ["microvm-lurking"]=105
+# Static CIDs for infrastructure VMs (not profile-driven, not in registry)
+# These are fixed for all Hydrix installations and work when nix-daemon is stopped.
+# Profile-based VMs (browsing, pentest, dev, etc.) are looked up from the registry.
+declare -A INFRA_CIDS=(
+    # Infrastructure VMs
     ["microvm-router"]=200
     ["microvm-builder"]=210
     ["microvm-gitsync"]=211
@@ -136,32 +132,37 @@ declare -A KNOWN_CIDS=(
     ["microvm-pentest-task1"]=115
     ["microvm-pentest-task2"]=116
     ["microvm-pentest-task3"]=117
-    # Legacy names (backwards compatibility)
-    ["microbrowse"]=101
-    ["microhack"]=102
-    ["microdev"]=103
-    ["microcomms"]=104
-    ["microlurk"]=105
+    # Legacy short names (backwards compatibility)
     ["microrouter"]=200
     ["microbuild"]=210
-    ["microvm-browsing-test"]=101
-    ["microvm-pentest-test"]=102
-    ["microvm-dev-test"]=103
-    ["microvm-comms-test"]=104
-    ["microvm-lurking-test"]=105
 )
 
-# Get vsock CID - uses cached values first, falls back to nix eval
+# Registry file: generated at activation from profile meta.nix files
+VM_REGISTRY="/etc/hydrix/vm-registry.json"
+
+# Get vsock CID
+# Priority: infrastructure table → registry file → nix eval
 get_cid() {
     local vm_name="$1"
 
-    # Fast path: use known CIDs (works even when nix-daemon is stopped)
-    if [[ -v "KNOWN_CIDS[$vm_name]" ]]; then
-        echo "${KNOWN_CIDS[$vm_name]}"
+    # Fast path 1: infrastructure VMs (fixed CIDs, works when nix-daemon is stopped)
+    if [[ -v "INFRA_CIDS[$vm_name]" ]]; then
+        echo "${INFRA_CIDS[$vm_name]}"
         return
     fi
 
-    # Fallback: try nix eval (requires nix-daemon)
+    # Fast path 2: registry file (profile-based VMs, written at NixOS activation)
+    if [[ -f "$VM_REGISTRY" ]]; then
+        local profile="${vm_name#microvm-}"
+        local cid
+        cid=$(jq -r --arg p "$profile" '.[$p].cid // empty' "$VM_REGISTRY" 2>/dev/null || echo "")
+        if [[ -n "$cid" ]]; then
+            echo "$cid"
+            return
+        fi
+    fi
+
+    # Fallback: nix eval (requires nix-daemon, slow — used before first activation)
     local cid
     cid=$(nix eval --json "$FLAKE_DIR#nixosConfigurations.${vm_name}.config.hydrix.microvm.vsockCid" 2>/dev/null || echo "")
     if [[ -z "$cid" || "$cid" == "null" ]]; then

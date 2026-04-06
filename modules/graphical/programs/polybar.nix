@@ -67,18 +67,15 @@ let
   # Maps workspace to VM CID and queries via vsock
   # ============================================================
 
-  # Workspace to VM CID mapping
-  # WS2=pentest(102), WS3=browsing(101), WS4=comms(104), WS5=dev(103)
+  # Workspace to VM CID mapping (registry-driven)
   getVmCidScript = pkgs.writeShellScript "polybar-get-vm-cid" ''
     ws=$(${i3msg} -t get_workspaces 2>/dev/null | ${jq} -r '.[] | select(.focused==true) | .name' | ${head} -1)
-    case "$ws" in
-      2) echo "102" ;;  # pentest
-      3) echo "101" ;;  # browsing
-      4) echo "104" ;;  # comms
-      5) echo "103" ;;  # dev
-      6) echo "105" ;;  # lurking
-      *) echo "" ;;     # not a VM workspace
-    esac
+    VM_REGISTRY="/etc/hydrix/vm-registry.json"
+    if [[ -f "$VM_REGISTRY" && -n "$ws" ]]; then
+      ${jq} -r --argjson w "$ws" \
+        'to_entries[] | select(.value.workspace == $w) | .value.cid' \
+        "$VM_REGISTRY" 2>/dev/null | ${head} -1
+    fi
   '';
 
   # Query VM metric via vsock (using xpra's metrics port or socat)
@@ -716,14 +713,15 @@ ${workspaceDescCases}
 
     ws=$(${i3msg} -t get_workspaces 2>/dev/null | ${jq} -r '.[] | select(.focused==true) | .name' | ${head} -1)
 
-    # Map workspace to VM type
-    case "$ws" in
-      2) vm_type="pentest" ;;
-      3) vm_type="browsing" ;;
-      4) vm_type="comms" ;;
-      5) vm_type="dev" ;;
-      *) echo ""; exit 0 ;;
-    esac
+    # Map workspace to VM type via registry
+    VM_REGISTRY="/etc/hydrix/vm-registry.json"
+    vm_type=""
+    if [[ -f "$VM_REGISTRY" && -n "$ws" ]]; then
+      vm_type=$(${jq} -r --argjson w "$ws" \
+        'to_entries[] | select(.value.workspace == $w) | .key' \
+        "$VM_REGISTRY" 2>/dev/null | ${head} -1)
+    fi
+    [[ -z "$vm_type" ]] && echo "" && exit 0
 
     # Try to get active VM from cache
     vm_name=""
@@ -733,12 +731,7 @@ ${workspaceDescCases}
 
     # Fall back to default microVM if no active VM set
     if [ -z "$vm_name" ]; then
-      case "$vm_type" in
-        pentest) vm_name="microvm-pentest" ;;
-        browsing) vm_name="microvm-browsing" ;;
-        comms) vm_name="microvm-comms" ;;
-        dev) vm_name="microvm-dev" ;;
-      esac
+      vm_name=$(${jq} -r --arg t "$vm_type" '.[$t].vmName // empty' "$VM_REGISTRY" 2>/dev/null)
     fi
 
     # Get CID from VM name

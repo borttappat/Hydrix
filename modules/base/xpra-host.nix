@@ -229,16 +229,15 @@ USAGE
         fi
     }
 
-    # Known microVM CIDs (avoids nix eval when nix-daemon is stopped for builder)
-    declare -A KNOWN_MICROVM_CIDS=(
-        ["microvm-browsing"]=101
-        ["microvm-pentest"]=102
-        ["microvm-dev"]=103
-        ["microvm-comms"]=104
-        ["microvm-lurking"]=105
+    # Static CIDs for infrastructure VMs (not profile-driven, not in registry)
+    declare -A INFRA_MICROVM_CIDS=(
         ["microvm-router"]=200
         ["microvm-builder"]=210
+        ["microvm-gitsync"]=211
     )
+
+    # Registry file: generated at activation from profile meta.nix files
+    VM_REGISTRY="/etc/hydrix/vm-registry.json"
 
     get_cid() {
         local vm_name="$1"
@@ -253,10 +252,21 @@ USAGE
 Start with: sudo systemctl start $service"
             fi
 
-            # Fast path: use known CIDs (works even when nix-daemon is stopped)
-            if [[ -v "KNOWN_MICROVM_CIDS[$vm_name]" ]]; then
-                echo "''${KNOWN_MICROVM_CIDS[$vm_name]}"
+            # Fast path 1: infrastructure VMs (fixed CIDs)
+            if [[ -v "INFRA_MICROVM_CIDS[$vm_name]" ]]; then
+                echo "''${INFRA_MICROVM_CIDS[$vm_name]}"
                 return
+            fi
+
+            # Fast path 2: registry file (profile-based VMs)
+            if [[ -f "$VM_REGISTRY" ]]; then
+                local profile="''${vm_name#microvm-}"
+                local cid
+                cid=$(${pkgs.jq}/bin/jq -r --arg p "$profile" '.[$p].cid // empty' "$VM_REGISTRY" 2>/dev/null || echo "")
+                if [[ -n "$cid" ]]; then
+                    echo "$cid"
+                    return
+                fi
             fi
 
             # Fallback: Get CID from the flake configuration (requires nix-daemon)
@@ -1373,16 +1383,8 @@ EOF
     XPRA_PORT=14500
     LOG="/tmp/xpra-preattach.log"
 
-    # Known microVM CIDs (avoids nix eval when nix-daemon is stopped)
-    declare -A KNOWN_MICROVM_CIDS=(
-        ["microvm-browsing"]=101
-        ["microvm-pentest"]=102
-        ["microvm-dev"]=103
-        ["microvm-comms"]=104
-        ["microvm-lurking"]=105
-        ["microvm-router"]=200
-        ["microvm-builder"]=210
-    )
+    # Registry file: generated at activation from profile meta.nix files
+    VM_REGISTRY="/etc/hydrix/vm-registry.json"
 
     log() { echo "$(date '+%H:%M:%S') $*" >> "$LOG"; }
 
@@ -1392,12 +1394,18 @@ EOF
         ${pkgs.procps}/bin/pgrep -f "xpra.*attach.*vsock://$cid:$XPRA_PORT" >/dev/null 2>&1
     }
 
-    # Get CID for microVM (cached or fallback to nix eval)
+    # Get CID for microVM (registry lookup, fallback to nix eval)
     get_microvm_cid() {
         local vm_name="$1"
-        if [[ -v "KNOWN_MICROVM_CIDS[$vm_name]" ]]; then
-            echo "''${KNOWN_MICROVM_CIDS[$vm_name]}"
-            return
+        # Registry lookup (profile-based VMs)
+        if [[ -f "$VM_REGISTRY" ]]; then
+            local profile="''${vm_name#microvm-}"
+            local cid
+            cid=$(${pkgs.jq}/bin/jq -r --arg p "$profile" '.[$p].cid // empty' "$VM_REGISTRY" 2>/dev/null || echo "")
+            if [[ -n "$cid" ]]; then
+                echo "$cid"
+                return
+            fi
         fi
         # Fallback to nix eval
         nix eval --json ".#nixosConfigurations.''${vm_name}.config.hydrix.microvm.vsockCid" 2>/dev/null || true
@@ -1499,16 +1507,8 @@ EOF
   vmStatus = pkgs.writeShellScriptBin "vm-status" ''
     set -euo pipefail
 
-    # Known microVM CIDs (avoids nix eval when nix-daemon is stopped)
-    declare -A KNOWN_MICROVM_CIDS=(
-        ["microvm-browsing"]=101
-        ["microvm-pentest"]=102
-        ["microvm-dev"]=103
-        ["microvm-comms"]=104
-        ["microvm-lurking"]=105
-        ["microvm-router"]=200
-        ["microvm-builder"]=210
-    )
+    # Registry file: generated at activation from profile meta.nix files
+    VM_REGISTRY="/etc/hydrix/vm-registry.json"
 
     # Directories for layered lookup (user config first, then framework)
     CONFIG_DIR="${config.hydrix.paths.configDir}"
@@ -1586,10 +1586,15 @@ EOF
     get_cid() {
         local vm_name="$1"
         if is_microvm "$vm_name"; then
-            # Fast path: use known CIDs
-            if [[ -v "KNOWN_MICROVM_CIDS[$vm_name]" ]]; then
-                echo "''${KNOWN_MICROVM_CIDS[$vm_name]}"
-                return
+            # Registry lookup (profile-based VMs)
+            if [[ -f "$VM_REGISTRY" ]]; then
+                local profile="''${vm_name#microvm-}"
+                local cid
+                cid=$(${pkgs.jq}/bin/jq -r --arg p "$profile" '.[$p].cid // empty' "$VM_REGISTRY" 2>/dev/null || echo "")
+                if [[ -n "$cid" ]]; then
+                    echo "$cid"
+                    return
+                fi
             fi
             # Fallback: MicroVM get from flake (use --json since vsockCid is an integer)
             nix eval --json ".#nixosConfigurations.''${vm_name}.config.hydrix.microvm.vsockCid" 2>/dev/null || true

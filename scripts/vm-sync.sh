@@ -27,8 +27,14 @@ fi
 readonly PROFILES_DIR="$PROJECT_DIR/profiles"
 readonly STAGING_PORT=14502
 
-# VM types
-readonly VM_TYPES=("browsing" "pentest" "dev" "comms" "lurking")
+# VM types: read from registry if available, otherwise fall back to defaults
+VM_REGISTRY="/etc/hydrix/vm-registry.json"
+if [[ -f "$VM_REGISTRY" ]]; then
+    readarray -t VM_TYPES < <(jq -r 'keys[]' "$VM_REGISTRY" 2>/dev/null)
+else
+    VM_TYPES=("browsing" "pentest" "dev" "comms" "lurking")
+fi
+readonly VM_TYPES
 
 # Colors
 readonly RED=$'\e[31m'
@@ -44,9 +50,15 @@ log() { echo -e "$*"; }
 error() { echo -e "${RED}Error: $*${NC}" >&2; exit 1; }
 success() { echo -e "${GREEN}$*${NC}"; }
 
-# Get vsock CID from flake
+# Get vsock CID - registry lookup, fallback to nix eval
 get_cid() {
     local vm_name="$1"
+    if [[ -f "$VM_REGISTRY" ]]; then
+        local profile="${vm_name#microvm-}"
+        local cid
+        cid=$(jq -r --arg p "$profile" '.[$p].cid // empty' "$VM_REGISTRY" 2>/dev/null || echo "")
+        [[ -n "$cid" ]] && echo "$cid" && return
+    fi
     nix eval --json "$PROJECT_DIR#nixosConfigurations.${vm_name}.config.hydrix.microvm.vsockCid" 2>/dev/null || echo ""
 }
 

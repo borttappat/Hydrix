@@ -1429,21 +1429,19 @@ ZEOF
       exit 0
     fi
 
-    declare -A KNOWN_CIDS=(
-      ["microvm-browsing"]=101
-      ["microvm-pentest"]=102
-      ["microvm-dev"]=103
-      ["microvm-comms"]=104
-      ["microvm-lurking"]=105
-    )
+    VM_REGISTRY="/etc/hydrix/vm-registry.json"
+    if [[ ! -f "$VM_REGISTRY" ]]; then
+      log "No VM registry found at $VM_REGISTRY, skipping VM color push"
+      exit 0
+    fi
 
-    for vm in "''${!KNOWN_CIDS[@]}"; do
+    while IFS=$'\t' read -r vm cid; do
+      [[ -z "$vm" || -z "$cid" ]] && continue
       if systemctl is-active --quiet "microvm@''${vm}.service" 2>/dev/null; then
-        cid="''${KNOWN_CIDS[$vm]}"
         result=$(echo "$BG_HEX" | ${pkgs.socat}/bin/socat -t1 - "VSOCK-CONNECT:''${cid}:''${PORT}" 2>/dev/null || echo "FAIL")
         log "$vm (cid=$cid): $result"
       fi
-    done
+    done < <(${jq} -r 'to_entries[] | [.value.vmName, (.value.cid | tostring)] | @tsv' "$VM_REGISTRY" 2>/dev/null)
   '';
 
 in {
