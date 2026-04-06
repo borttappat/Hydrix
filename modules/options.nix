@@ -656,11 +656,12 @@ in {
       vmRegistry = lib.mkOption {
         type = lib.types.attrsOf (lib.types.submodule {
           options = {
-            vmName   = lib.mkOption { type = lib.types.str; };
-            cid      = lib.mkOption { type = lib.types.int; };
-            bridge   = lib.mkOption { type = lib.types.str; };
-            subnet   = lib.mkOption { type = lib.types.str; };
+            vmName    = lib.mkOption { type = lib.types.str; };
+            cid       = lib.mkOption { type = lib.types.int; };
+            bridge    = lib.mkOption { type = lib.types.str; };
+            subnet    = lib.mkOption { type = lib.types.str; };
             workspace = lib.mkOption { type = lib.types.int; };
+            label     = lib.mkOption { type = lib.types.str; default = ""; description = "Short display label (e.g. OFFICE) used in polybar workspace-desc"; };
           };
         });
         default = {};

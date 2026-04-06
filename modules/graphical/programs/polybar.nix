@@ -22,7 +22,9 @@ let
   isModular = polybarStyle == "modular";
   workspaceLabels = config.hydrix.graphical.ui.workspaceLabels;
   workspaceDescriptions = config.hydrix.graphical.ui.workspaceDescriptions;
-  hasWorkspaceDescriptions = workspaceDescriptions != {};
+  vmRegistry = config.hydrix.networking.vmRegistry;
+  # Show workspace-desc module if user set descriptions OR there are VMs with workspaces
+  hasWorkspaceDescriptions = workspaceDescriptions != {} || vmRegistry != {};
 
   # Generate ws-icon-N = name;label lines for workspace mapping (i3 module format)
   # Format: ws-icon-0 = 1;I (index = name;display)
@@ -577,11 +579,21 @@ let
     # Get current workspace number
     ws=$(${pkgs.i3}/bin/i3-msg -t get_workspaces 2>/dev/null | ${pkgs.jq}/bin/jq -r '.[] | select(.focused==true) | .name' | head -1)
 
-    # Look up description
+    # Look up description from user-configured workspaceDescriptions
     case "$ws" in
 ${workspaceDescCases}
     *) desc="" ;;
     esac
+
+    # Fallback: look up label from VM registry (covers auto-discovered VM types)
+    if [ -z "$desc" ]; then
+      VM_REGISTRY="/etc/hydrix/vm-registry.json"
+      if [[ -f "$VM_REGISTRY" ]]; then
+        desc=$(${jq} -r --argjson w "$ws" \
+          'to_entries[] | select(.value.workspace == $w) | .value.label // ""' \
+          "$VM_REGISTRY" 2>/dev/null | head -1)
+      fi
+    fi
 
     if [ -n "$desc" ]; then
       ${getColorHelper}

@@ -320,11 +320,10 @@ in {
 
           # VM xpra windows - i3 handles borders (colored by vm-focus-daemon)
           # Title format: [type] app_title (set by vm-app --title='[type] @title@')
-          for_window [title="^\[browsing\]"] border pixel ${toString sc.border}
-          for_window [title="^\[pentest\]"] border pixel ${toString sc.border}
-          for_window [title="^\[comms\]"] border pixel ${toString sc.border}
-          for_window [title="^\[dev\]"] border pixel ${toString sc.border}
-          for_window [title="^\[lurking\]"] border pixel ${toString sc.border}
+          # Auto-generated from vmRegistry so any user-defined profile type works.
+          ${lib.concatMapStrings (name: ''
+          for_window [title="^\[${name}\]"] border pixel ${toString sc.border}
+          '') (builtins.attrNames config.hydrix.networking.vmRegistry)}
 
           # Tiling drag
           tiling_drag modifier
