@@ -20,6 +20,12 @@
 # - Java/Maven (pom.xml)
 # - Java/Gradle (build.gradle, build.gradle.kts)
 # - .NET (*.csproj)
+# - Nim (*.nimble)
+# - Zig (build.zig)
+# - OCaml/Dune (dune-project, *.opam)
+# - Perl (Makefile.PL, Build.PL)
+# - PHP/Composer (composer.json)
+# - Crystal (shard.yml)
 #
 # Imported by both vm-base.nix (libvirt VMs) and microvm-base.nix (microVMs)
 #
@@ -493,6 +499,163 @@ EOF
         installPhase = '''
           mkdir -p $out/bin
           cp @NAME@ $out/bin/ || cp *@NAME@* $out/bin/ || find . -maxdepth 1 -type f -executable -exec cp {} $out/bin/ \;
+        ''';
+      };
+    };
+}
+EOF
+
+    cat > $out/nim.nix << 'EOF'
+{
+  description = "@NAME@ - tested in VM";
+  inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+  outputs = { self, nixpkgs }:
+    let
+      system = "@SYSTEM@";
+      pkgs = nixpkgs.legacyPackages.''${system};
+    in {
+      packages.''${system}.default = pkgs.buildNimPackage {
+        pname = "@NAME@";
+        version = "unstable";
+        src = pkgs.fetchFromGitHub {
+          owner = "@OWNER@";
+          repo = "@REPO@";
+          rev = "@BRANCH@";
+          hash = "@HASH@";
+        };
+        # Nim dependencies are auto-resolved via nimble lock
+        # If build fails, add nimble deps: nimbleDeps = with pkgs.nimPackages; [ ... ];
+      };
+    };
+}
+EOF
+
+    cat > $out/zig.nix << 'EOF'
+{
+  description = "@NAME@ - tested in VM";
+  inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+  outputs = { self, nixpkgs }:
+    let
+      system = "@SYSTEM@";
+      pkgs = nixpkgs.legacyPackages.''${system};
+    in {
+      packages.''${system}.default = pkgs.stdenv.mkDerivation {
+        pname = "@NAME@";
+        version = "unstable";
+        src = pkgs.fetchFromGitHub {
+          owner = "@OWNER@";
+          repo = "@REPO@";
+          rev = "@BRANCH@";
+          hash = "@HASH@";
+        };
+        nativeBuildInputs = [ pkgs.zig.hook ];
+        zigBuildFlags = [ "-Doptimize=ReleaseSafe" ];
+      };
+    };
+}
+EOF
+
+    cat > $out/ocaml.nix << 'EOF'
+{
+  description = "@NAME@ - tested in VM";
+  inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+  outputs = { self, nixpkgs }:
+    let
+      system = "@SYSTEM@";
+      pkgs = nixpkgs.legacyPackages.''${system};
+    in {
+      packages.''${system}.default = pkgs.ocamlPackages.buildDunePackage {
+        pname = "@NAME@";
+        version = "unstable";
+        src = pkgs.fetchFromGitHub {
+          owner = "@OWNER@";
+          repo = "@REPO@";
+          rev = "@BRANCH@";
+          hash = "@HASH@";
+        };
+        buildInputs = with pkgs.ocamlPackages; [
+          # add OCaml deps here (e.g. lwt cmdliner yojson)
+        ];
+      };
+    };
+}
+EOF
+
+    cat > $out/perl.nix << 'EOF'
+{
+  description = "@NAME@ - tested in VM";
+  inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+  outputs = { self, nixpkgs }:
+    let
+      system = "@SYSTEM@";
+      pkgs = nixpkgs.legacyPackages.''${system};
+    in {
+      packages.''${system}.default = pkgs.perlPackages.buildPerlPackage {
+        pname = "@NAME@";
+        version = "unstable";
+        src = pkgs.fetchFromGitHub {
+          owner = "@OWNER@";
+          repo = "@REPO@";
+          rev = "@BRANCH@";
+          hash = "@HASH@";
+        };
+        buildInputs = with pkgs.perlPackages; [
+          # add CPAN deps here
+        ];
+      };
+    };
+}
+EOF
+
+    cat > $out/php.nix << 'EOF'
+{
+  description = "@NAME@ - tested in VM";
+  inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+  outputs = { self, nixpkgs }:
+    let
+      system = "@SYSTEM@";
+      pkgs = nixpkgs.legacyPackages.''${system};
+    in {
+      packages.''${system}.default = pkgs.php.buildComposerProject {
+        pname = "@NAME@";
+        version = "unstable";
+        src = pkgs.fetchFromGitHub {
+          owner = "@OWNER@";
+          repo = "@REPO@";
+          rev = "@BRANCH@";
+          hash = "@HASH@";
+        };
+        vendorHash = "@PLACEHOLDER@";
+      };
+    };
+}
+EOF
+
+    cat > $out/crystal.nix << 'EOF'
+{
+  description = "@NAME@ - tested in VM";
+  inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+  outputs = { self, nixpkgs }:
+    let
+      system = "@SYSTEM@";
+      pkgs = nixpkgs.legacyPackages.''${system};
+    in {
+      packages.''${system}.default = pkgs.stdenv.mkDerivation {
+        pname = "@NAME@";
+        version = "unstable";
+        src = pkgs.fetchFromGitHub {
+          owner = "@OWNER@";
+          repo = "@REPO@";
+          rev = "@BRANCH@";
+          hash = "@HASH@";
+        };
+        nativeBuildInputs = with pkgs; [ crystal shards ];
+        buildPhase = '''
+          shards build --release --no-debug
+        ''';
+        installPhase = '''
+          mkdir -p $out/bin
+          cp bin/* $out/bin/
         ''';
       };
     };
@@ -1186,6 +1349,12 @@ in {
           echo "  - Java/Maven (pom.xml)"
           echo "  - Java/Gradle (build.gradle)"
           echo "  - .NET (*.csproj)"
+          echo "  - Nim (*.nimble)"
+          echo "  - Zig (build.zig)"
+          echo "  - OCaml/Dune (dune-project, *.opam)"
+          echo "  - Perl (Makefile.PL, Build.PL)"
+          echo "  - PHP/Composer (composer.json)"
+          echo "  - Crystal (shard.yml)"
           echo ""
           echo "Creates: ~/dev/packages/<name>/flake.nix"
           echo ""
@@ -1300,6 +1469,18 @@ in {
           PROJECT_TYPE="gradle"
         elif ls "$TEMP_DIR"/*.csproj 1>/dev/null 2>&1; then
           PROJECT_TYPE="dotnet"
+        elif ls "$TEMP_DIR"/*.nimble 1>/dev/null 2>&1; then
+          PROJECT_TYPE="nim"
+        elif [ -f "$TEMP_DIR/build.zig" ]; then
+          PROJECT_TYPE="zig"
+        elif [ -f "$TEMP_DIR/dune-project" ] || ls "$TEMP_DIR"/*.opam 1>/dev/null 2>&1; then
+          PROJECT_TYPE="ocaml"
+        elif [ -f "$TEMP_DIR/Makefile.PL" ] || [ -f "$TEMP_DIR/Build.PL" ]; then
+          PROJECT_TYPE="perl"
+        elif [ -f "$TEMP_DIR/composer.json" ]; then
+          PROJECT_TYPE="php"
+        elif [ -f "$TEMP_DIR/shard.yml" ]; then
+          PROJECT_TYPE="crystal"
         elif [ -f "$TEMP_DIR/Makefile" ]; then
           PROJECT_TYPE="makefile"
         elif ls "$TEMP_DIR"/*.py 1>/dev/null 2>&1; then
@@ -1575,6 +1756,27 @@ in {
             echo "NOTE: .NET packages require deps.nix - run:"
             echo "  cd $PKG_DIR && nix build '.#default.fetch-deps'"
             echo "  ./result $PKG_DIR/deps.nix"
+            ;;
+          nim)
+            generate_flake "${templateDir}/nim.nix"
+            ;;
+          zig)
+            generate_flake "${templateDir}/zig.nix"
+            ;;
+          ocaml)
+            generate_flake "${templateDir}/ocaml.nix"
+            ;;
+          perl)
+            generate_flake "${templateDir}/perl.nix"
+            ;;
+          php)
+            generate_flake "${templateDir}/php.nix"
+            echo ""
+            echo "NOTE: PHP/Composer vendor hash needs updating - run:"
+            echo "  cd $PKG_DIR && nix build 2>&1 | grep 'got:' | awk '{print \$2}'"
+            ;;
+          crystal)
+            generate_flake "${templateDir}/crystal.nix"
             ;;
           makefile)
             echo "Detected Makefile project."
