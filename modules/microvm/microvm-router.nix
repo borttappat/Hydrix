@@ -72,6 +72,7 @@ let
   '';
 
   vmName = config.networking.hostName;
+  extraNetworks = cfg.networking.extraNetworks;
 
 in {
   imports = [
@@ -180,7 +181,11 @@ in {
 
         "-netdev" "tap,id=net-files,ifname=mv-router-file,script=no,downscript=no"
         "-device" "virtio-net-pci,netdev=net-files,mac=02:00:00:01:08:01"
-      ];
+      ] ++ lib.concatLists (lib.imap0 (i: n: [
+        # Extra network: ${n.name} (${n.routerTap})
+        "-netdev" "tap,id=net-${n.name},ifname=${n.routerTap},script=no,downscript=no"
+        "-device" "virtio-net-pci,netdev=net-${n.name},mac=02:00:00:02:${lib.fixedWidthString 2 "0" (builtins.toString i)}:01"
+      ]) extraNetworks);
 
       # ===== Shared Filesystems =====
       shares = [
@@ -453,6 +458,10 @@ in {
         IFACE_BLDR=$(find_iface_by_mac "02:00:00:01:06:01")    # mv-router-bldr
         IFACE_LURK=$(find_iface_by_mac "02:00:00:01:07:01")    # mv-router-lurk
         IFACE_FILE=$(find_iface_by_mac "02:00:00:01:08:01")    # mv-router-file
+        ${lib.concatStringsSep "\n        " (lib.imap0 (i: n: let
+          varName = builtins.replaceStrings ["-"] ["_"] n.name;
+          macIndex = lib.fixedWidthString 2 "0" (builtins.toString i);
+        in "IFACE_${varName}=$(find_iface_by_mac \"02:00:00:02:${macIndex}:01\")    # ${n.routerTap}") extraNetworks)}
 
         echo "Detected LAN interfaces:"
         echo "  MGMT: $IFACE_MGMT"
@@ -464,6 +473,9 @@ in {
         echo "  BLDR: $IFACE_BLDR"
         echo "  LURK: $IFACE_LURK"
         echo "  FILE: $IFACE_FILE"
+        ${lib.concatStringsSep "\n        " (map (n: let
+          varName = builtins.replaceStrings ["-"] ["_"] n.name;
+        in "echo \"  ${n.name}: $IFACE_${varName}\"") extraNetworks)}
 
         # Save interface mapping for dnsmasq and firewall
         echo "IFACE_MGMT=$IFACE_MGMT" > "$STATE_DIR/interfaces"
@@ -475,6 +487,9 @@ in {
         echo "IFACE_BLDR=$IFACE_BLDR" >> "$STATE_DIR/interfaces"
         echo "IFACE_LURK=$IFACE_LURK" >> "$STATE_DIR/interfaces"
         echo "IFACE_FILE=$IFACE_FILE" >> "$STATE_DIR/interfaces"
+        ${lib.concatStringsSep "\n        " (map (n: let
+          varName = builtins.replaceStrings ["-"] ["_"] n.name;
+        in "echo \"IFACE_${varName}=$IFACE_${varName}\" >> \"$STATE_DIR/interfaces\"") extraNetworks)}
 
         # Configure each LAN interface
         configure_lan() {
@@ -500,6 +515,9 @@ in {
         configure_lan "$IFACE_BLDR" "192.168.106.253" "builder"
         configure_lan "$IFACE_LURK" "192.168.107.253" "lurking"
         configure_lan "$IFACE_FILE" "192.168.108.253" "files"
+        ${lib.concatStringsSep "\n        " (map (n: let
+          varName = builtins.replaceStrings ["-"] ["_"] n.name;
+        in "configure_lan \"$IFACE_${varName}\" \"${n.subnet}.253\" \"${n.name}\"") extraNetworks)}
 
         echo "=== Network Setup Complete ==="
         echo "WAN: $WAN_IFACE"
@@ -558,6 +576,9 @@ in {
         add_iface "$IFACE_BLDR" "192.168.106" "192.168.106.253"
         add_iface "$IFACE_LURK" "192.168.107" "192.168.107.253"
         add_iface "$IFACE_FILE" "192.168.108" "192.168.108.253"
+        ${lib.concatStringsSep "\n        " (map (n: let
+          varName = builtins.replaceStrings ["-"] ["_"] n.name;
+        in "add_iface \"$IFACE_${varName}\" \"${n.subnet}\" \"${n.subnet}.253\"") extraNetworks)}
 
         echo "Generated dnsmasq config:"
         cat /etc/dnsmasq.d/hydrix.conf

@@ -39,7 +39,10 @@ let
     "mv-router-shar" = "br-shared";
     "mv-router-bldr" = "br-builder";
     "mv-router-file" = "br-files";
-  };
+  } // lib.listToAttrs (map (n: {
+    name  = n.routerTap;
+    value = "br-${n.name}";
+  }) config.hydrix.networking.extraNetworks);
 
   # Helper script for attaching TAP interfaces to bridges with retry
   # Handles race condition where bridge may not exist yet during early boot
