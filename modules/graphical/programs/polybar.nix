@@ -749,7 +749,7 @@ ${workspaceDescCases}
     # Get CID from VM name via registry
     VM_REGISTRY="/etc/hydrix/vm-registry.json"
     if [[ -f "$VM_REGISTRY" ]]; then
-      local profile="${vm_name#microvm-}"
+      local profile="''${vm_name#microvm-}"
       cid=$(${jq} -r --arg p "$profile" '.[$p].cid // empty' "$VM_REGISTRY" 2>/dev/null)
     fi
     if [ -z "$cid" ]; then
