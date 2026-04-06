@@ -5,7 +5,7 @@
 # This profile adds: packages, Docker, development tools
 #
 { config, lib, pkgs, ... }:
-
+let meta = import ./meta.nix; in
 {
   imports = [
     # Core VM packages (editors, shell, utils)
@@ -31,9 +31,7 @@
   hydrix.microvm = {
     vcpu = 4;
     mem = 8192;  # 8GB (balloon reclaims idle)
-    vsockCid = 103;  # Unique for dev VM
-    bridge = "br-dev";
-    tapId = "mv-dev";
+    inherit (meta) vsockCid bridge tapId;
     persistence = {
       enable = true;
       homeSize = 51200;  # 50GB

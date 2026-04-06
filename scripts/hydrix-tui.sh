@@ -34,7 +34,14 @@ readonly BASE_IMAGE_DIR="/var/lib/libvirt/base-images"
 readonly XPRA_PORT=14500
 readonly PERSIST_BASE="$HOME/persist"
 readonly PROFILES_DIR="$FLAKE_DIR/profiles"
-readonly VM_TYPES=("browsing" "pentest" "dev")
+readonly VM_REGISTRY="/etc/hydrix/vm-registry.json"
+
+# Populate VM_TYPES from registry if available; fall back to built-in list
+if [[ -f "$VM_REGISTRY" ]]; then
+    readarray -t VM_TYPES < <(jq -r 'keys[]' "$VM_REGISTRY" 2>/dev/null)
+else
+    VM_TYPES=("browsing" "pentest" "dev" "comms" "lurking")
+fi
 
 # Command log file for detailed output
 readonly CMD_LOG="/tmp/hydrix-tui-$$.log"
@@ -168,10 +175,21 @@ run_in_terminal() {
 # ========== MICROVM ==========
 
 get_microvms() {
-    # Match microvm-* names (excluding router/builder/gitsync)
-    # Includes pentest-task* slots (microvm-pentest-task1, etc.)
-    nix eval "$FLAKE_DIR#nixosConfigurations" --apply 'builtins.attrNames' --json 2>/dev/null | \
-        jq -r '.[]' | grep -E '^microvm-(browsing|pentest|dev|comms|lurking)' || true
+    # Match microvm-* names (excluding infra VMs: router/builder/gitsync)
+    # Includes pentest-task* slots and any user-defined profile types.
+    # Filter: either in vm-registry OR matches microvm-pentest-task* pattern.
+    local all_vms
+    all_vms=$(nix eval "$FLAKE_DIR#nixosConfigurations" --apply 'builtins.attrNames' --json 2>/dev/null | \
+        jq -r '.[]' | grep '^microvm-' || true)
+
+    if [[ -f "$VM_REGISTRY" ]]; then
+        # Accept any VM whose profile is in the registry, plus task slots
+        local known_pattern
+        known_pattern=$(jq -r 'keys[] | "microvm-" + .' "$VM_REGISTRY" 2>/dev/null | paste -sd '|')
+        echo "$all_vms" | grep -E "^(${known_pattern}|microvm-pentest-task[0-9]+)$" || true
+    else
+        echo "$all_vms" | grep -E '^microvm-(browsing|pentest|dev|comms|lurking)' || true
+    fi
 }
 
 # Get engagement name for a pentest task slot (empty if unassigned)
@@ -942,8 +960,16 @@ devshells_query_vm() {
 devshells_get_running_vms() {
     # Get all declared microVMs (both new short names and legacy)
     local declared
-    declared=$(nix eval "$FLAKE_DIR#nixosConfigurations" --apply 'builtins.attrNames' --json 2>/dev/null | jq -r '.[]' | \
-        grep -E '^microvm-(browsing|pentest|dev|comms|lurking)' || true)
+    local all_vms
+    all_vms=$(nix eval "$FLAKE_DIR#nixosConfigurations" --apply 'builtins.attrNames' --json 2>/dev/null | jq -r '.[]' | \
+        grep '^microvm-' || true)
+    if [[ -f "$VM_REGISTRY" ]]; then
+        local known_pattern
+        known_pattern=$(jq -r 'keys[] | "microvm-" + .' "$VM_REGISTRY" 2>/dev/null | paste -sd '|')
+        declared=$(echo "$all_vms" | grep -E "^(${known_pattern}|microvm-pentest-task[0-9]+)$" || true)
+    else
+        declared=$(echo "$all_vms" | grep -E '^microvm-(browsing|pentest|dev|comms|lurking)' || true)
+    fi
 
     while IFS= read -r vm; do
         [[ -z "$vm" ]] && continue

@@ -132,71 +132,70 @@
           ./shared/fonts.nix        # Font packages and profiles
           ./shared/i3.nix           # i3 keybindings (user-customizable)
           vmThemeSyncModule         # VM theme sync (host-side)
-          { hydrix.vmThemeSync.enable = true; }
+          { hydrix.vmThemeSync.enable = true;
+            hydrix.networking.vmRegistry   = vmRegistry;
+            hydrix.networking.extraNetworks = extraNetworks; }
           ./shared/common.nix       # Locale + shared settings (all machines)
         ];
       };
     }) machineFiles);
+
+    # =========================================================================
+    # PROFILE AUTO-DISCOVERY
+    # =========================================================================
+    # Reads meta.nix from every profiles/<name>/ directory.
+    # Each meta.nix drives: vmRegistry, bridge setup, router subnets, polybar, i3.
+    # To add a new VM type: create profiles/<name>/meta.nix + profiles/<name>/default.nix
+    # and rebuild — everything else auto-wires.
+    discoveredMetas = let
+      profileNames = builtins.attrNames (builtins.readDir userProfiles);
+      hasMeta = p: builtins.pathExists (userProfiles + "/${p}/meta.nix");
+    in map (p: import (userProfiles + "/${p}/meta.nix") // { _profileName = p; })
+         (builtins.filter hasMeta profileNames);
+
+    # Built-in framework profiles (already have bridges/subnets in Hydrix)
+    frameworkProfiles = [ "browsing" "pentest" "dev" "comms" "lurking" ];
+
+    # Extra networks: user-defined profiles that need new bridges + router subnets
+    extraNetworks = map (m: { name = m._profileName; inherit (m) subnet routerTap; })
+      (builtins.filter (m: !(builtins.elem m._profileName frameworkProfiles))
+        discoveredMetas);
+
+    # Registry written to /etc/hydrix/vm-registry.json at activation
+    vmRegistry = builtins.listToAttrs (map (m: {
+      name  = m._profileName;
+      value = {
+        vmName    = "microvm-${m._profileName}";
+        cid       = m.vsockCid;
+        bridge    = m.bridge;
+        subnet    = m.subnet;
+        workspace = m.workspace;
+        label     = m.label or m._profileName;
+      };
+    }) discoveredMetas);
+
+    # One nixosConfiguration per discovered profile
+    autoVMConfigs = builtins.listToAttrs (map (m: {
+      name  = "microvm-${m._profileName}";
+      value = hydrix.lib.mkMicroVM {
+        profile  = m._profileName;
+        hostname = "microvm-${m._profileName}";
+        modules  = [ vmThemeSyncModule { hydrix.vmThemeSync.enable = true; } ];
+        inherit userProfiles hostConfig userColorschemesDir;
+      };
+    }) discoveredMetas);
 
   in {
     # =========================================================================
     # HOST CONFIGURATIONS
     # =========================================================================
     # Machines are auto-discovered from machines/*.nix
-    # Or you can define them explicitly:
-    #
-    #   nixosConfigurations.laptop = hydrix.lib.mkHost {
-    #     modules = [ ./machines/laptop.nix ];
-    #   };
-    #
-    nixosConfigurations = machineConfigs // {
-
-      # =========================================================================
-      # MICROVM CONFIGURATIONS
-      # =========================================================================
-      # These are shared across all machines - same VM images work everywhere
-      #
-      # Names: microvm-browsing, microvm-pentest, microvm-dev, microvm-comms, microvm-lurking
-      # Profiles: ./profiles/<type>/ - full control over each VM type
-
-      "microvm-browsing" = hydrix.lib.mkMicroVM {
-        profile = "browsing";
-        hostname = "microvm-browsing";
-        modules = [ vmThemeSyncModule { hydrix.vmThemeSync.enable = true; } ];
-        inherit userProfiles hostConfig userColorschemesDir;
-      };
-
-      "microvm-pentest" = hydrix.lib.mkMicroVM {
-        profile = "pentest";
-        hostname = "microvm-pentest";
-        modules = [ vmThemeSyncModule { hydrix.vmThemeSync.enable = true; } ];
-        inherit userProfiles hostConfig userColorschemesDir;
-      };
-
-      "microvm-dev" = hydrix.lib.mkMicroVM {
-        profile = "dev";
-        hostname = "microvm-dev";
-        modules = [ vmThemeSyncModule { hydrix.vmThemeSync.enable = true; } ];
-        inherit userProfiles hostConfig userColorschemesDir;
-      };
-
-      "microvm-comms" = hydrix.lib.mkMicroVM {
-        profile = "comms";
-        hostname = "microvm-comms";
-        modules = [ vmThemeSyncModule { hydrix.vmThemeSync.enable = true; } ];
-        inherit userProfiles hostConfig userColorschemesDir;
-      };
-
-      "microvm-lurking" = hydrix.lib.mkMicroVM {
-        profile = "lurking";
-        hostname = "microvm-lurking";
-        modules = [ vmThemeSyncModule { hydrix.vmThemeSync.enable = true; } ];
-        inherit userProfiles hostConfig userColorschemesDir;
-      };
+    nixosConfigurations = machineConfigs // autoVMConfigs // {
 
       # MicroVM Router (WiFi PCI address auto-detected from machine configs)
+      # extraNetworks flows from profile meta.nix files automatically
       "microvm-router" = hydrix.lib.mkMicrovmRouter {
-        inherit wifiPciAddress;
+        inherit wifiPciAddress extraNetworks;
         modules = [ ./shared/wifi.nix ];
       };
 

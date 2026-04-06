@@ -17,9 +17,14 @@ readonly SELF_PATH="$(realpath "${BASH_SOURCE[0]}")"
 readonly PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 readonly PROFILES_DIR="$PROJECT_DIR/profiles"
 readonly PERSIST_BASE="$HOME/persist"
+readonly VM_REGISTRY="/etc/hydrix/vm-registry.json"
 
-# VM types that support package development
-readonly VM_TYPES=("browsing" "pentest" "dev")
+# VM types that support package development — read from registry if available
+if [[ -f "$VM_REGISTRY" ]]; then
+    readarray -t VM_TYPES < <(jq -r 'keys[]' "$VM_REGISTRY" 2>/dev/null)
+else
+    VM_TYPES=("browsing" "pentest" "dev" "comms" "lurking")
+fi
 
 # Colors
 readonly RED=$'\e[31m'

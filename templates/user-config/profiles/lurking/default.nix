@@ -7,7 +7,7 @@
 # EPHEMERAL by design - all data lost on restart for maximum privacy.
 #
 { config, lib, pkgs, ... }:
-
+let meta = import ./meta.nix; in
 {
   imports = [
     # Core VM packages (editors, shell, utils)
@@ -33,9 +33,7 @@
   hydrix.microvm = {
     vcpu = 2;
     mem = 2304;  # 2.25GB (avoid QEMU 2GB-exact hang bug)
-    vsockCid = 105;  # Unique for lurking VM
-    bridge = "br-lurking";
-    tapId = "mv-lurking";
+    inherit (meta) vsockCid bridge tapId;
     persistence.enable = false;
   };
 

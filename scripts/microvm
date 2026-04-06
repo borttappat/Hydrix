@@ -171,6 +171,30 @@ get_cid() {
     echo "$cid"
 }
 
+# Get static IP for a VM (.10 on its bridge subnet)
+# Derived from vm-registry.json subnet field (e.g. "192.168.103" → "192.168.103.10")
+# pentest-task* slots share the pentest subnet.
+get_vm_ip() {
+    local vm_name="$1"
+    local profile="${vm_name#microvm-}"
+
+    # pentest task slots share the pentest subnet
+    if [[ "$vm_name" == microvm-pentest-task* ]]; then
+        profile="pentest"
+    fi
+
+    if [[ -f "$VM_REGISTRY" ]]; then
+        local subnet
+        subnet=$(jq -r --arg p "$profile" '.[$p].subnet // empty' "$VM_REGISTRY" 2>/dev/null || echo "")
+        if [[ -n "$subnet" ]]; then
+            echo "${subnet}.10"
+            return
+        fi
+    fi
+
+    echo ""
+}
+
 # Check if VM is running
 is_running() {
     local vm_name="$1"
@@ -2213,18 +2237,10 @@ cmd_files_transfer() {
         exit 1
     }
 
-    # Determine source IP (static .10 on its bridge)
+    # Determine source IP (static .10 on its bridge, derived from registry subnet)
     local src_ip
-    # IPs must match hydrix.microvm.staticIp set in each profile
-    case "$src_vm" in
-        microvm-browsing)       src_ip="192.168.103.10" ;;
-        microvm-pentest)        src_ip="192.168.101.10" ;;
-        microvm-dev)            src_ip="192.168.104.10" ;;
-        microvm-comms)          src_ip="192.168.102.10" ;;
-        microvm-lurking)        src_ip="192.168.107.10" ;;
-        microvm-pentest-task*)  src_ip="192.168.101.10" ;;
-        *) log_error "Unknown source VM IP for $src_vm"; exit 1 ;;
-    esac
+    src_ip=$(get_vm_ip "$src_vm")
+    [[ -z "$src_ip" ]] && { log_error "Unknown source VM IP for $src_vm (not in registry)"; exit 1; }
 
     # Step 3: files VM fetches encrypted blob
     log "Files VM fetching from ${src_vm}..."
@@ -2257,17 +2273,10 @@ cmd_files_transfer() {
         exit 1
     }
 
-    # Determine destination IP
+    # Determine destination IP (static .10 on its bridge, derived from registry subnet)
     local dst_ip
-    case "$dst_vm" in
-        microvm-pentest)        dst_ip="192.168.101.10" ;;
-        microvm-comms)          dst_ip="192.168.102.10" ;;
-        microvm-browsing)       dst_ip="192.168.103.10" ;;
-        microvm-dev)            dst_ip="192.168.104.10" ;;
-        microvm-lurking)        dst_ip="192.168.107.10" ;;
-        microvm-pentest-task*)  dst_ip="192.168.101.10" ;;
-        *) log_error "Unknown destination VM IP for $dst_vm"; exit 1 ;;
-    esac
+    dst_ip=$(get_vm_ip "$dst_vm")
+    [[ -z "$dst_ip" ]] && { log_error "Unknown destination VM IP for $dst_vm (not in registry)"; exit 1; }
 
     # Step 6: files VM delivers encrypted blob to destination
     log "Files VM delivering to ${dst_vm}..."
@@ -2369,15 +2378,8 @@ cmd_files_store() {
     }
 
     local src_ip
-    case "$src_vm" in
-        microvm-pentest)        src_ip="192.168.101.10" ;;
-        microvm-comms)          src_ip="192.168.102.10" ;;
-        microvm-browsing)       src_ip="192.168.103.10" ;;
-        microvm-dev)            src_ip="192.168.104.10" ;;
-        microvm-lurking)        src_ip="192.168.107.10" ;;
-        microvm-pentest-task*)  src_ip="192.168.101.10" ;;
-        *) log_error "Unknown source VM IP"; exit 1 ;;
-    esac
+    src_ip=$(get_vm_ip "$src_vm")
+    [[ -z "$src_ip" ]] && { log_error "Unknown source VM IP for $src_vm (not in registry)"; exit 1; }
 
     log "Files VM fetching..."
     local files_hash

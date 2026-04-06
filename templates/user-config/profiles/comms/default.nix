@@ -5,7 +5,7 @@
 # This profile adds: packages (Signal, Firefox)
 #
 { config, lib, pkgs, ... }:
-
+let meta = import ./meta.nix; in
 {
   imports = [
     # Core VM packages (editors, shell, utils)
@@ -31,9 +31,7 @@
   hydrix.microvm = {
     vcpu = 2;
     mem = 2304;  # 2.25GB (avoid QEMU 2GB-exact hang bug)
-    vsockCid = 104;  # Unique for comms VM
-    bridge = "br-comms";
-    tapId = "mv-comms";
+    inherit (meta) vsockCid bridge tapId;
     persistence = {
       enable = true;
       homeSize = 10240;  # 10GB - accounts, chat history, credentials

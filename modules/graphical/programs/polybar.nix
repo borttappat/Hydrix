@@ -746,24 +746,19 @@ ${workspaceDescCases}
       vm_name=$(${jq} -r --arg t "$vm_type" '.[$t].vmName // empty' "$VM_REGISTRY" 2>/dev/null)
     fi
 
-    # Get CID from VM name
-    # Fast path: default VM names with known CIDs
-    case "$vm_name" in
-      microvm-pentest) cid="102" ;;
-      microvm-browsing) cid="101" ;;
-      microvm-comms) cid="104" ;;
-      microvm-lurking) cid="105" ;;
-      microvm-dev) cid="103" ;;
-      *)
-        # Dynamic resolve: read CID from the microVM's qemu launch script
-        run_script="/var/lib/microvms/$vm_name/current/bin/microvm-run"
-        if [ -f "$run_script" ]; then
-          cid=$(${grep} -oP 'guest-cid=\K[0-9]+' "$run_script" 2>/dev/null)
-        else
-          cid=""
-        fi
-        ;;
-    esac
+    # Get CID from VM name via registry
+    VM_REGISTRY="/etc/hydrix/vm-registry.json"
+    if [[ -f "$VM_REGISTRY" ]]; then
+      local profile="${vm_name#microvm-}"
+      cid=$(${jq} -r --arg p "$profile" '.[$p].cid // empty' "$VM_REGISTRY" 2>/dev/null)
+    fi
+    if [ -z "$cid" ]; then
+      # Fallback: read CID from the microVM's qemu launch script
+      run_script="/var/lib/microvms/$vm_name/current/bin/microvm-run"
+      if [ -f "$run_script" ]; then
+        cid=$(${grep} -oP 'guest-cid=\K[0-9]+' "$run_script" 2>/dev/null)
+      fi
+    fi
 
     if [ -n "$cid" ]; then
       echo "$cid $vm_type $vm_name"

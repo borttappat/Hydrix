@@ -5,7 +5,7 @@
 # This profile adds: packages, colorscheme, styling preferences
 #
 { config, lib, pkgs, ... }:
-
+let meta = import ./meta.nix; in
 {
   imports = [
     # Core VM packages (editors, shell, utils)
@@ -30,9 +30,7 @@
   hydrix.microvm = {
     vcpu = 2;
     mem = 2304;  # 2.25GB (avoid QEMU 2GB-exact hang bug)
-    vsockCid = 101;  # Unique for browsing VM
-    bridge = "br-browse";
-    tapId = "mv-browse";
+    inherit (meta) vsockCid bridge tapId;
     persistence = {
       enable = true;
       homeSize = 10240;  # 10GB
