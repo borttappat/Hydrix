@@ -152,6 +152,7 @@ in {
   mkMicrovmRouter = {
     system ? "x86_64-linux",
     wifiPciAddress ? "",
+    extraNetworks ? [],  # List of { name, subnet, routerTap } from user profile discovery
     modules ? [],
   }: nixpkgs.lib.nixosSystem {
     inherit system;
@@ -164,6 +165,8 @@ in {
       { networking.hostName = "microvm-router"; }
     ] ++ nixpkgs.lib.optional (wifiPciAddress != "") {
       hydrix.hardware.vfio.wifiPciAddress = wifiPciAddress;
+    } ++ nixpkgs.lib.optional (extraNetworks != []) {
+      hydrix.networking.extraNetworks = extraNetworks;
     } ++ modules;
   };
 
@@ -289,8 +292,12 @@ in {
   # =========================================================================
   # mkLibvirtRouter - Create the libvirt router VM (fallback)
   # =========================================================================
+  # extraNetworks: same param as mkMicrovmRouter — accepts user-defined profile
+  # networks, but libvirt-router.nix does not yet process them dynamically.
+  # Pass them via modules = [ { hydrix.networking.extraNetworks = ...; } ] for now.
   mkLibvirtRouter = {
     system ? "x86_64-linux",
+    extraNetworks ? [],
     modules ? [],
   }: nixpkgs.lib.nixosSystem {
     inherit system;
@@ -300,6 +307,8 @@ in {
       ../modules/vm/libvirt-router.nix
       "${nixpkgs}/nixos/modules/virtualisation/disk-image.nix"
       { image.efiSupport = false; }
-    ] ++ modules;
+    ] ++ nixpkgs.lib.optional (extraNetworks != []) {
+      hydrix.networking.extraNetworks = extraNetworks;
+    } ++ modules;
   };
 }
