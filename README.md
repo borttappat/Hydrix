@@ -73,6 +73,22 @@ After installation, your configuration lives at `~/hydrix-config/`.
 +--------+  +--------+  +--------+  +---------+  +--------+  +--------+
 ```
 
+> **CIDs and subnets are user-configurable.** Built-in profiles (browsing, pentest, dev, comms, lurking) ship with default CIDs/subnets but these are declared in each profile's `meta.nix` in your `hydrix-config/profiles/<name>/meta.nix`. The host module writes all profile metadata to `/etc/hydrix/vm-registry.json` at activation — all scripts, polybar, and i3 read from there at runtime, never from hardcoded maps. Adding a new VM type requires only `profiles/<name>/meta.nix` + `profiles/<name>/default.nix` in your config.
+
+### VM Registry (`/etc/hydrix/vm-registry.json`)
+
+Generated at NixOS activation from all profile `meta.nix` files. Every runtime tool reads from here — no hardcoded CID or workspace maps anywhere in scripts or modules.
+
+```json
+{
+  "browsing": { "vmName": "microvm-browsing", "cid": 101, "bridge": "br-browse",   "subnet": "192.168.101", "workspace": 3, "label": "BROWSING" },
+  "pentest":  { "vmName": "microvm-pentest",  "cid": 102, "bridge": "br-pentest",  "subnet": "192.168.102", "workspace": 2, "label": "PENTEST"  },
+  "office":   { "vmName": "microvm-office",   "cid": 109, "bridge": "br-office",   "subnet": "192.168.109", "workspace": 7, "label": "OFFICE"   }
+}
+```
+
+Each entry drives: i3 `for_window` border rules, polybar workspace-desc label, `ws-app`/`ws-rofi` workspace→VM routing, `focus-rofi` menu, `vm-sync` profile targeting, and file transfer IP resolution.
+
 ### Boot Modes (Specialisations)
 
 | Mode | Purpose | Internet Access |
@@ -918,16 +934,24 @@ microvm purge <name>                   # Delete all data (fresh start)
 
 ### VM Types
 
-| Name | Profile | vsock CID | Bridge | Persistence |
-|------|---------|-----------|--------|-------------|
+Profile-driven VMs (browsing, pentest, dev, comms, lurking) and any user-defined profiles have their CIDs, bridges, subnets, and workspaces declared in `hydrix-config/profiles/<name>/meta.nix` and tracked in `/etc/hydrix/vm-registry.json`. Default values for built-in profiles:
+
+| Name | Profile | vsock CID (default) | Bridge | Persistence |
+|------|---------|---------------------|--------|-------------|
 | `microvm-browsing` | browsing | 101 | br-browse | 10GB home |
 | `microvm-pentest` | pentest | 102 | br-pentest | 20GB home |
 | `microvm-dev` | dev | 103 | br-dev | 50GB + 20GB docker |
 | `microvm-comms` | comms | 104 | br-comms | Ephemeral |
 | `microvm-lurking` | lurking | 105 | br-lurking | Ephemeral |
-| `microvm-files` | files | 106 | br-files + per-bridge | 50GB /storage |
-| `microvm-router` | router | 200 | all bridges | 512MB /var/lib |
-| `microvm-builder` | builder | 210 | br-builder | Ephemeral |
+
+Infrastructure VMs have fixed CIDs (not in registry, not user-configurable):
+
+| Name | vsock CID | Purpose |
+|------|-----------|---------|
+| `microvm-files` | 106 | Encrypted inter-VM file transfer |
+| `microvm-router` | 200 | WiFi VFIO passthrough |
+| `microvm-builder` | 210 | Lockdown-mode nix builds |
+| `microvm-gitsync` | 211 | Lockdown-mode git push/pull |
 
 ### TUI Launcher
 
@@ -1003,7 +1027,7 @@ microvm pentest list
 
 ### Files VM (Encrypted Inter-VM Transfer)
 
-The files VM (`microvm-files`, CID 106) is an encrypted jump host for moving files between VMs. It has direct L2 TAP connections to each bridge you grant it access to, so it can reach VMs without going through the router.
+The files VM (`microvm-files`, CID 106, fixed infra) is an encrypted jump host for moving files between VMs. It has direct L2 TAP connections to each bridge you grant it access to, so it can reach VMs without going through the router. Source and destination IPs are derived at runtime from the VM registry (`subnet + .10`).
 
 **Security model:**
 
@@ -1027,8 +1051,8 @@ The files VM (`microvm-files`, CID 106) is an encrypted jump host for moving fil
 3. Host → pentest VM (vsock 14506): SERVE
    Pentest VM starts ephemeral HTTP server on port 8888
 
-4. Host → files VM (vsock 14505): FETCH 192.168.101.10 xfer.enc
-   Files VM downloads ciphertext via HTTP
+4. Host → files VM (vsock 14505): FETCH <pentest-subnet>.10 xfer.enc
+   Files VM downloads ciphertext via HTTP  (IP from vm-registry.json)
    Returns: SHA256=<hash>  ← host verifies both hashes match
 
 5. Host → pentest VM (vsock 14506): SERVE_STOP
@@ -1036,8 +1060,8 @@ The files VM (`microvm-files`, CID 106) is an encrypted jump host for moving fil
 6. Host → comms VM (vsock 14506): RECEIVE_PREPARE
    Comms VM starts one-shot HTTP upload server on port 8888 (always receives to ~/shared/)
 
-7. Host → files VM (vsock 14505): DELIVER 192.168.102.10 xfer.enc
-   Files VM HTTP PUTs ciphertext to comms VM
+7. Host → files VM (vsock 14505): DELIVER <comms-subnet>.10 xfer.enc
+   Files VM HTTP PUTs ciphertext to comms VM  (IP from vm-registry.json)
    Returns: SHA256=<hash>  ← host verifies three-way match
 
 8. Host → comms VM (vsock 14506): DECRYPT <passphrase> shared/xfer.enc pentest/

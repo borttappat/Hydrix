@@ -124,10 +124,11 @@ detect_current_specialisation() {
 # These are fixed for all Hydrix installations and work when nix-daemon is stopped.
 # Profile-based VMs (browsing, pentest, dev, etc.) are looked up from the registry.
 declare -A INFRA_CIDS=(
-    # Infrastructure VMs
+    # Infrastructure VMs (fixed CIDs, not profile-driven, not in registry)
     ["microvm-router"]=200
     ["microvm-builder"]=210
     ["microvm-gitsync"]=211
+    ["microvm-files"]=106
     # Task pentest slots (pre-declared, permanent)
     ["microvm-pentest-task1"]=115
     ["microvm-pentest-task2"]=116
