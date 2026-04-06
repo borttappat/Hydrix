@@ -477,6 +477,17 @@ in {
                   exit 1
                 fi
                 ;;
+              unstage)
+                # Remove package from staging area after host has pulled it
+                pkg="$arg"
+                pkg_dir="$STAGING_DIR/$pkg"
+                if [ -d "$pkg_dir" ]; then
+                  ${pkgs.coreutils}/bin/rm -rf "$pkg_dir"
+                  echo "{\"ok\":true,\"unstaged\":\"$pkg\"}"
+                else
+                  echo "{\"error\":\"not found\"}"
+                fi
+                ;;
               info)
                 # Return info about a specific package
                 pkg="$arg"

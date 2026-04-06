@@ -354,6 +354,9 @@ cmd_pull() {
 
     rm -rf "$temp_dir"
 
+    # Tell the VM to remove the package from its staging area
+    query_vm "$cid" "unstage $pkg_name" >/dev/null
+
     success "Pulled $pkg_name to: ${targets[*]}"
     log ""
     log "Rebuild to apply:"
