@@ -5,11 +5,21 @@
 #
 { pkgs, ... }:
 let
-  validTypes = "browsing pentest dev comms lurking";
+  VM_REGISTRY = "/etc/hydrix/vm-registry.json";
+
+  # Read valid VM types from registry at runtime; fall back to built-in list
+  getValidTypes = ''
+    VM_REGISTRY="${VM_REGISTRY}"
+    if [[ -f "$VM_REGISTRY" ]]; then
+      VALID_TYPES=$(${pkgs.jq}/bin/jq -r 'keys[]' "$VM_REGISTRY" 2>/dev/null | tr '\n' ' ')
+    else
+      VALID_TYPES="browsing pentest dev comms lurking"
+    fi
+  '';
 
   focus = pkgs.writeShellScriptBin "focus" ''
     FOCUS_FILE="$HOME/.cache/hydrix/focus-mode"
-    VALID_TYPES="${validTypes}"
+    ${getValidTypes}
 
     case "''${1:-status}" in
         off)
@@ -48,10 +58,11 @@ let
     FOCUS_FILE="$HOME/.cache/hydrix/focus-mode"
     current=""
     [[ -f "$FOCUS_FILE" ]] && current=$(cat "$FOCUS_FILE")
+    ${getValidTypes}
 
     # Build menu with marker for active
     options=""
-    for t in ${validTypes} off; do
+    for t in $VALID_TYPES off; do
         if [[ "$t" == "$current" ]] || { [[ "$t" == "off" ]] && [[ -z "$current" ]]; }; then
             options="''${options}★ $t\n"
         else

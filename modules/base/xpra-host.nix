@@ -963,29 +963,39 @@ EOF
     }
 
     # Get VM config for workspace
-    # Returns: "type:select" or "type:fixed_vm" or "host" or "router"
+    # Returns: "type:select" or "host" or "router"
     ws_to_vm_config() {
+        local ws="$1"
         # Focus mode override
         local focus_file="$HOME/.cache/hydrix/focus-mode"
         if [[ -f "$focus_file" ]]; then
             local focus_type
             focus_type=$(cat "$focus_file")
             if [[ -n "$focus_type" ]]; then
-                case "$1" in
+                case "$ws" in
                     1|10) ;;  # Host and router workspaces never overridden
                     *)    echo "$focus_type:select"; return ;;
                 esac
             fi
         fi
-        case "$1" in
-            2)   echo "pentest:select" ;;              # Pentest workspace
-            3)   echo "browsing:select" ;;             # Browsing workspace
-            4)   echo "comms:microvm-comms" ;;    # Fixed comms VM
-            5)   echo "dev:select" ;;                  # Dev workspace
-            6)   echo "lurking:microvm-lurking" ;;     # Lurking workspace
-            10)  echo "router" ;;                      # Router terminal
-            *)   echo "host" ;;                        # Host workspaces
+        # Fixed infrastructure workspaces
+        case "$ws" in
+            1)  echo "host"; return ;;
+            10) echo "router"; return ;;
         esac
+        # Registry lookup: find the profile assigned to this workspace number
+        local VM_REGISTRY="/etc/hydrix/vm-registry.json"
+        if [[ -f "$VM_REGISTRY" ]]; then
+            local profile
+            profile=$(${pkgs.jq}/bin/jq -r --argjson w "$ws" \
+                'to_entries[] | select(.value.workspace == $w) | .key' \
+                "$VM_REGISTRY" 2>/dev/null | head -1)
+            if [[ -n "$profile" ]]; then
+                echo "$profile:select"
+                return
+            fi
+        fi
+        echo "host"
     }
 
     # Run command on host (use alacritty-dpi for alacritty)
@@ -1309,27 +1319,37 @@ EOF
 
     # Get VM config for workspace (matches ws-app)
     ws_to_vm_config() {
+        local ws="$1"
         # Focus mode override
         local focus_file="$HOME/.cache/hydrix/focus-mode"
         if [[ -f "$focus_file" ]]; then
             local focus_type
             focus_type=$(cat "$focus_file")
             if [[ -n "$focus_type" ]]; then
-                case "$1" in
+                case "$ws" in
                     1|10) ;;  # Host and router workspaces never overridden
                     *)    echo "$focus_type:select"; return ;;
                 esac
             fi
         fi
-        case "$1" in
-            2)   echo "pentest:select" ;;
-            3)   echo "browsing:select" ;;
-            4)   echo "comms:microvm-comms" ;;
-            5)   echo "dev:select" ;;
-            6)   echo "lurking:microvm-lurking" ;;
-            10)  echo "router" ;;
-            *)   echo "host" ;;
+        # Fixed infrastructure workspaces
+        case "$ws" in
+            1)  echo "host"; return ;;
+            10) echo "router"; return ;;
         esac
+        # Registry lookup: find the profile assigned to this workspace number
+        local VM_REGISTRY="/etc/hydrix/vm-registry.json"
+        if [[ -f "$VM_REGISTRY" ]]; then
+            local profile
+            profile=$(${pkgs.jq}/bin/jq -r --argjson w "$ws" \
+                'to_entries[] | select(.value.workspace == $w) | .key' \
+                "$VM_REGISTRY" 2>/dev/null | head -1)
+            if [[ -n "$profile" ]]; then
+                echo "$profile:select"
+                return
+            fi
+        fi
+        echo "host"
     }
 
     main() {
