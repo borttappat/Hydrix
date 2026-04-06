@@ -276,7 +276,7 @@ in {
 
     # Firewall: open port 8888 exclusively for the files VM (.2 on this bridge).
     # The files VM reaches this VM's HTTP server (port 8888) during transfers.
-    networking.firewall.extraCommands = lib.mkIf (subnets ? ${vmType}) ''
+    networking.firewall.extraCommands = lib.mkIf (vmType != null && subnets ? ${vmType}) ''
       iptables -A nixos-fw -p tcp --dport 8888 -s ${subnets.${vmType}}.2 -j ACCEPT
     '';
 

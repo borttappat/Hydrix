@@ -100,9 +100,9 @@ in {
     };
 
     vmType = lib.mkOption {
-      type = lib.types.nullOr (lib.types.enum [ "pentest" "comms" "browsing" "dev" "lurking" "host" ]);
+      type = lib.types.nullOr lib.types.str;
       default = null;
-      description = "System type: host or VM profile type";
+      description = "System type: host or VM profile type (e.g. browsing, pentest, dev, or any user-defined profile name)";
     };
 
     # =========================================================================
