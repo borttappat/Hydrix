@@ -1,0 +1,200 @@
+#!/usr/bin/env bash
+# new-profile — scaffold a new Hydrix VM profile
+#
+# Usage: new-profile [<name>]
+#
+# Copies ~/hydrix-config/templates/profiles/_template/ into
+# profiles/<name>/, substitutes all placeholders, stages with git add,
+# and optionally triggers rebuild.
+#
+# CID / subnet / workspace convention: all three use the same number.
+# Reserved CIDs (never auto-assign): 200 (router), 210 (builder), 211 (gitsync).
+# Custom user profiles start at 107+.
+
+set -euo pipefail
+
+# ---------------------------------------------------------------------------
+# Resolve flake directory (HYDRIX_FLAKE_DIR injected by mkHydrixScript wrapper)
+# ---------------------------------------------------------------------------
+if [[ -z "${HYDRIX_FLAKE_DIR:-}" ]]; then
+    if [[ -f "$HOME/hydrix-config/flake.nix" ]]; then
+        HYDRIX_FLAKE_DIR="$HOME/hydrix-config"
+    elif [[ -f "$HOME/Hydrix/flake.nix" ]]; then
+        HYDRIX_FLAKE_DIR="$HOME/Hydrix"
+    else
+        echo "Error: no Hydrix config found at ~/hydrix-config or ~/Hydrix" >&2
+        exit 1
+    fi
+fi
+
+PROFILES_DIR="$HYDRIX_FLAKE_DIR/profiles"
+TEMPLATE_DIR="$HYDRIX_FLAKE_DIR/templates/profiles/_template"
+
+log()  { printf ":: %s\n" "$*"; }
+info() { printf "   %s\n" "$*"; }
+err()  { printf "!! %s\n" "$*" >&2; }
+
+# ---------------------------------------------------------------------------
+# Profile name
+# ---------------------------------------------------------------------------
+PROFILE_NAME="${1:-}"
+if [[ -z "$PROFILE_NAME" ]]; then
+    printf "Profile name: "
+    read -r PROFILE_NAME
+fi
+
+if [[ ! "$PROFILE_NAME" =~ ^[a-z][a-z0-9-]*$ ]]; then
+    err "Invalid name '$PROFILE_NAME' — use lowercase letters, digits, hyphens; must start with a letter."
+    exit 1
+fi
+
+PROFILE_DIR="$PROFILES_DIR/$PROFILE_NAME"
+if [[ -d "$PROFILE_DIR" ]]; then
+    err "Profile '$PROFILE_NAME' already exists at $PROFILE_DIR"
+    exit 1
+fi
+
+# ---------------------------------------------------------------------------
+# Scan existing profiles to find used CIDs / workspaces / subnets
+# ---------------------------------------------------------------------------
+# Inline-comment-safe parser: strip everything from ; or # onward, then trim quotes/spaces.
+nix_attr() {
+    local file="$1" key="$2"
+    grep -E "^\s+${key}\s*=" "$file" 2>/dev/null \
+        | head -1 \
+        | sed -E 's/^[^=]+=\s*//; s/[;#].*//; s/"//g; s/[[:space:]]//g'
+}
+
+RESERVED_CIDS=(200 210 211)
+declare -a USED_CIDS=() USED_WORKSPACES=()
+
+for meta in "$PROFILES_DIR"/*/meta.nix; do
+    [[ -f "$meta" ]] || continue
+    cid=$(nix_attr "$meta" vsockCid)
+    ws=$(nix_attr  "$meta" workspace)
+    [[ -n "$cid" ]] && USED_CIDS+=("$cid")
+    [[ -n "$ws"  ]] && USED_WORKSPACES+=("$ws")
+done
+
+# Find next free integer starting from $1 that is not in the remaining args
+next_free() {
+    local candidate="$1"; shift
+    local used=("$@")
+    while true; do
+        local taken=false
+        for v in "${used[@]:-}"; do
+            [[ "$v" == "$candidate" ]] && { taken=true; break; }
+        done
+        $taken || break
+        ((candidate++))
+    done
+    echo "$candidate"
+}
+
+SUGGESTED_CID=$(next_free 107 "${USED_CIDS[@]:-}" "${RESERVED_CIDS[@]}")
+SUGGESTED_WORKSPACE=$SUGGESTED_CID          # CID = WS by convention
+SUGGESTED_SUBNET="192.168.${SUGGESTED_CID}" # CID = subnet last octet by convention
+
+# Derive interface names from profile name (max 15 chars each)
+clean="${PROFILE_NAME//-/}"                          # strip hyphens for abbreviation
+SUGGESTED_BRIDGE="${PROFILE_NAME:0:12}"              # br- + up to 12 chars = 15
+SUGGESTED_BRIDGE="br-${SUGGESTED_BRIDGE}"
+SUGGESTED_TAP="mv-${PROFILE_NAME:0:12}"
+SUGGESTED_ROUTER_TAP="mv-router-${clean:0:5}"        # mv-router- = 10, + 5 = 15
+SUGGESTED_LABEL="${PROFILE_NAME//-/ }"
+SUGGESTED_LABEL="${SUGGESTED_LABEL^^}"
+SUGGESTED_COLORSCHEME="punk"
+
+# ---------------------------------------------------------------------------
+# Prompt for confirmation / override
+# ---------------------------------------------------------------------------
+echo ""
+echo "New profile: $PROFILE_NAME"
+echo "========================================"
+echo "Press Enter to accept each suggestion, or type a replacement."
+echo ""
+
+ask() {
+    local label="$1" default="$2" hint="${3:-}"
+    local result
+    printf "  %-16s [%s]%s: " "$label" "$default" "${hint:+ ($hint)}"
+    read -r result
+    echo "${result:-$default}"
+}
+
+CID=$(ask         vsockCid    "$SUGGESTED_CID"          "integer, unique")
+WORKSPACE=$(ask   workspace   "$SUGGESTED_CID"          "i3 workspace")
+SUBNET=$(ask      subnet      "192.168.${CID}"          "no trailing octet")
+BRIDGE=$(ask      bridge      "br-${PROFILE_NAME:0:12}" "max 15 chars")
+TAP_ID=$(ask      tapId       "mv-${PROFILE_NAME:0:12}" "max 15 chars")
+ROUTER_TAP=$(ask  routerTap   "$SUGGESTED_ROUTER_TAP"   "max 15 chars")
+LABEL=$(ask       label       "$SUGGESTED_LABEL"        "display name")
+COLORSCHEME=$(ask colorscheme "$SUGGESTED_COLORSCHEME"  "hydrix colorscheme name")
+
+# Validate interface name lengths
+for iface in "$BRIDGE" "$TAP_ID" "$ROUTER_TAP"; do
+    if (( ${#iface} > 15 )); then
+        err "Interface name too long (max 15 chars): '$iface'"
+        exit 1
+    fi
+done
+
+NAME_CAP="${PROFILE_NAME^}"  # capitalise first letter only (for comments)
+
+# ---------------------------------------------------------------------------
+# Create directory from template
+# ---------------------------------------------------------------------------
+log "Creating profile at $PROFILE_DIR"
+
+if [[ ! -d "$TEMPLATE_DIR" ]]; then
+    err "Template not found at $TEMPLATE_DIR"
+    err "Run: setup-hydrix.sh  (or install-hydrix.sh) to provision templates/"
+    exit 1
+fi
+
+cp -r "$TEMPLATE_DIR" "$PROFILE_DIR"
+
+# Substitute all placeholders in every copied file
+find "$PROFILE_DIR" -type f | while read -r f; do
+    sed -i \
+        -e "s/__NAME__/${PROFILE_NAME}/g"       \
+        -e "s/__NAME_CAP__/${NAME_CAP}/g"       \
+        -e "s/__CID__/${CID}/g"                 \
+        -e "s/__BRIDGE__/${BRIDGE}/g"           \
+        -e "s/__TAP_ID__/${TAP_ID}/g"           \
+        -e "s/__ROUTER_TAP__/${ROUTER_TAP}/g"   \
+        -e "s/__SUBNET__/${SUBNET}/g"           \
+        -e "s/__WORKSPACE__/${WORKSPACE}/g"     \
+        -e "s/__LABEL__/${LABEL}/g"             \
+        -e "s/__COLORSCHEME__/${COLORSCHEME}/g" \
+        "$f"
+done
+
+# ---------------------------------------------------------------------------
+# Git add
+# ---------------------------------------------------------------------------
+log "Staging files..."
+git -C "$HYDRIX_FLAKE_DIR" add "$PROFILE_DIR"
+
+echo ""
+log "Done. Profile '$PROFILE_NAME' created."
+info "CID:        $CID"
+info "Bridge:     $BRIDGE"
+info "Subnet:     ${SUBNET}.0/24"
+info "Workspace:  $WORKSPACE"
+info "Label:      $LABEL"
+echo ""
+echo "Next: edit $PROFILE_DIR/default.nix (resources, colorscheme)"
+echo "      edit $PROFILE_DIR/packages.nix (profile packages)"
+echo ""
+
+# ---------------------------------------------------------------------------
+# Rebuild prompt
+# ---------------------------------------------------------------------------
+printf "Trigger rebuild now? [Y/n]: "
+read -r do_rebuild
+if [[ "${do_rebuild:-Y}" =~ ^[Yy]$ ]]; then
+    rebuild
+else
+    info "Skipping rebuild. Run 'rebuild' when ready."
+fi

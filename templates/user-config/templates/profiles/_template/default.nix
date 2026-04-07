@@ -1,0 +1,63 @@
+# __NAME_CAP__ Profile - User Customizations
+#
+# This is layered ON TOP of Hydrix's base profile (if one exists for this type),
+# or stands alone as a new VM type discovered by the flake.
+# Hydrix base provides: xpra forwarding, sound, graphical stack.
+# This profile adds: packages, colorscheme, resource sizing.
+#
+{ config, lib, pkgs, ... }:
+let meta = import ./meta.nix; in
+{
+  imports = [
+    # Core VM packages (editors, shell, utils) — shared across all VMs
+    ../../shared/vm-packages.nix
+    # Profile-specific packages
+    ./packages.nix
+    # Custom packages (added via vm-sync pull — do not edit manually)
+    ./packages
+  ];
+
+  # =========================================================================
+  # VM IDENTITY & COLORS
+  # =========================================================================
+
+  # Colorscheme for this VM (see colorschemes/ for options)
+  hydrix.colorscheme = "__COLORSCHEME__";
+
+  # Per-VM focus border override — pick a color from your colorscheme palette.
+  # To find palette values: cat ~/.cache/wal/colors.json
+  # hydrix.vmThemeSync.focusOverrideColor = "#AABBCC";
+
+  # MicroVM resources
+  hydrix.microvm = {
+    vcpu = 2;
+    mem = 2304;  # 2.25GB (avoid QEMU 2GB-exact hang bug)
+    inherit (meta) vsockCid bridge tapId;
+    persistence = {
+      enable = true;
+      homeSize = 10240;  # 10GB — adjust as needed
+    };
+    secrets.github = true;
+  };
+
+  # Inherit host colors for consistent look
+  # full = use all host colors | dynamic = host bg + vm text | none = ignore host
+  hydrix.vmColors.enable = true;
+
+  # =========================================================================
+  # VPN ROUTING (optional)
+  # =========================================================================
+  # VPN exit node assignment happens at runtime via the host.
+  # Requires: router.vpn.mullvad = import ../vpn/mullvad.nix; in machine config.
+  #
+  #   vpn-assign __NAME__ mullvad-se     # Route via Sweden
+  #   vpn-assign __NAME__ none           # Direct (no VPN)
+
+  # =========================================================================
+  # EXTRA PACKAGES (optional — prefer packages.nix for larger sets)
+  # =========================================================================
+
+  # environment.systemPackages = with pkgs; [
+  #   your-package
+  # ];
+}

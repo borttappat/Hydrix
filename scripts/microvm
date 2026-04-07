@@ -128,7 +128,7 @@ declare -A INFRA_CIDS=(
     ["microvm-router"]=200
     ["microvm-builder"]=210
     ["microvm-gitsync"]=211
-    ["microvm-files"]=106
+    ["microvm-files"]=212
     # Task pentest slots (pre-declared, permanent)
     ["microvm-pentest-task1"]=115
     ["microvm-pentest-task2"]=116
@@ -2142,7 +2142,7 @@ cmd_git() {
 # ============================================================================
 
 FILES_VM_NAME="microvm-files"
-FILES_VM_CID=106
+FILES_VM_CID=212
 FILES_VSOCK_PORT=14505
 VM_AGENT_PORT=14506
 

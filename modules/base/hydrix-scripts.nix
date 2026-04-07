@@ -14,6 +14,9 @@
 #                             No args = rebuild current mode
 #                             In lockdown: auto-uses builder VM (no host network)
 #   rebuild-libvirt-router    Rebuild libvirt router (if libvirt router enabled)
+#   new-profile [name]        Scaffold new VM profile from ~/hydrix-config/templates/
+#                             Auto-discovers next free CID/workspace (CID=subnet=WS)
+#                             Copies _template/, substitutes values, git-adds, rebuilds
 #
 # MICROVM MANAGEMENT
 # ------------------
@@ -133,6 +136,7 @@ let
   hydrixScripts = {
     # ===== BUILD & SYSTEM =====
     rebuild = "rebuild";
+    new-profile = "new-profile";
     # Note: rebuild-libvirt-router is provided by modules/host/libvirt-router-host.nix
 
     # ===== MICROVM MANAGEMENT =====

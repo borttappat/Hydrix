@@ -492,8 +492,9 @@ migrate_legacy_config() {
         copy_template_profiles
     fi
 
-    # Ensure modules, colorschemes directories exist
-    [[ ! -d "$CONFIG_DIR/modules" ]] && copy_template_modules
+    # Ensure modules, colorschemes, templates directories exist
+    [[ ! -d "$CONFIG_DIR/modules" ]]    && copy_template_modules
+    [[ ! -d "$CONFIG_DIR/templates" ]]  && copy_template_templates
     [[ ! -d "$CONFIG_DIR/colorschemes" ]] && create_colorschemes_dir
 
     # Update flake.nix to use auto-discovery
@@ -877,6 +878,23 @@ copy_template_modules() {
 
     cp -r "$template_dir"/* "$CONFIG_DIR/modules/"
     log "  Copied from template"
+}
+
+copy_template_templates() {
+    log "Creating templates from template..."
+
+    mkdir -p "$CONFIG_DIR/templates"
+
+    local template_dir=""
+
+    if [[ -d "$HOME/Hydrix/templates/user-config/templates" ]]; then
+        template_dir="$HOME/Hydrix/templates/user-config/templates"
+    elif [[ -d "$SCRIPT_DIR/../templates/user-config/templates" ]]; then
+        template_dir="$SCRIPT_DIR/../templates/user-config/templates"
+    fi
+
+    cp -r "$template_dir"/* "$CONFIG_DIR/templates/"
+    log "  Copied from template (new-profile reads these)"
 }
 
 create_colorschemes_dir() {
@@ -1451,6 +1469,7 @@ generate_full_config() {
     copy_template_shared
     substitute_shared_locale
     copy_template_modules
+    copy_template_templates
     create_colorschemes_dir
     copy_wallpapers
     copy_template_readme

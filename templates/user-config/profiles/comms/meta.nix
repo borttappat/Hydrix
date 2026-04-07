@@ -5,7 +5,7 @@
   bridge    = "br-comms";
   tapId     = "mv-comms";
   routerTap = "mv-router-comm";  # ≤15 chars (Linux iface limit)
-  subnet    = "192.168.102";     # /24 prefix, no trailing octet
+  subnet    = "192.168.104";     # /24 prefix — matches CID last octet
   workspace = 4;
   label     = "COMMS";
   icon      = "";

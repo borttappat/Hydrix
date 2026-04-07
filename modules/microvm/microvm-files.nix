@@ -203,7 +203,7 @@ in {
         "-serial" "chardev:console"
       ];
 
-      vsock.cid = 106;
+      vsock.cid = 212;
 
       shares = [{
         tag = "nix-store";

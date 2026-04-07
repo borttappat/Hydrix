@@ -1730,6 +1730,15 @@ copy_template_modules() {
     log "  Copied from template"
 }
 
+copy_template_templates() {
+    local config_dir="$1"
+    log "Creating templates..."
+    mkdir -p "$config_dir/templates"
+    local template_dir="$SCRIPT_DIR/../templates/user-config/templates"
+    cp -r "$template_dir"/* "$config_dir/templates/"
+    log "  Copied from template (new-profile reads these)"
+}
+
 copy_template_fonts() {
     local config_dir="$1"
     log "Creating font profiles..."
@@ -1811,6 +1820,7 @@ generate_config_to_temp() {
         copy_template_profiles "$TEMP_CONFIG"
         copy_template_shared "$TEMP_CONFIG"
         copy_template_modules "$TEMP_CONFIG"
+        copy_template_templates "$TEMP_CONFIG"
         copy_template_fonts "$TEMP_CONFIG"
         copy_template_colorschemes "$TEMP_CONFIG"
         copy_template_readme "$TEMP_CONFIG"
