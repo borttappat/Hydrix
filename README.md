@@ -69,7 +69,7 @@ After installation, your configuration lives at `~/hydrix-config/`.
 +--------+  +--------+  +--------+  +---------+  +--------+  +--------+
 |Browsing|  |Pentest |  |  Dev   |  | Builder |  |Gitsync |  | Files  |
 |  VM    |  |   VM   |  |   VM   |  |   VM    |  |  VM    |  |  VM    |
-|CID:101 |  |CID:102 |  |CID:103 |  |CID:210  |  |CID:211 |  |CID:106 |
+|CID:103 |  |CID:102 |  |CID:105 |  |CID:210  |  |CID:211 |  |CID:212 |
 +--------+  +--------+  +--------+  +---------+  +--------+  +--------+
 ```
 
@@ -81,11 +81,14 @@ Generated at NixOS activation from all profile `meta.nix` files. Every runtime t
 
 ```json
 {
-  "browsing": { "vmName": "microvm-browsing", "cid": 101, "bridge": "br-browse",   "subnet": "192.168.101", "workspace": 3, "label": "BROWSING" },
   "pentest":  { "vmName": "microvm-pentest",  "cid": 102, "bridge": "br-pentest",  "subnet": "192.168.102", "workspace": 2, "label": "PENTEST"  },
-  "office":   { "vmName": "microvm-office",   "cid": 109, "bridge": "br-office",   "subnet": "192.168.109", "workspace": 7, "label": "OFFICE"   }
+  "browsing": { "vmName": "microvm-browsing", "cid": 103, "bridge": "br-browse",   "subnet": "192.168.103", "workspace": 3, "label": "BROWSING" },
+  "comms":    { "vmName": "microvm-comms",    "cid": 104, "bridge": "br-comms",    "subnet": "192.168.104", "workspace": 4, "label": "COMMS"    },
+  "office":   { "vmName": "microvm-office",   "cid": 107, "bridge": "br-office",   "subnet": "192.168.107", "workspace": 7, "label": "OFFICE"   }
 }
 ```
+
+**Convention: `vsockCid` = subnet last octet = i3 workspace.** All three use the same number. Custom profiles start at CID 107+. Reserved: 200 (router), 210 (builder), 211 (gitsync).
 
 Each entry drives: i3 `for_window` border rules, polybar workspace-desc label, `ws-app`/`ws-rofi` workspace→VM routing, `focus-rofi` menu, `vm-sync` profile targeting, and file transfer IP resolution.
 
@@ -932,23 +935,29 @@ microvm snapshot revert <name> <snap>  # Revert to snapshot
 microvm purge <name>                   # Delete all data (fresh start)
 ```
 
-### VM Types
+### Profile VMs
 
-Profile-driven VMs (browsing, pentest, dev, comms, lurking) and any user-defined profiles have their CIDs, bridges, subnets, and workspaces declared in `hydrix-config/profiles/<name>/meta.nix` and tracked in `/etc/hydrix/vm-registry.json`. Default values for built-in profiles:
+Declared in `hydrix-config/profiles/<name>/meta.nix`, auto-discovered by the flake, tracked in `/etc/hydrix/vm-registry.json`. All values are user-configurable.
 
-| Name | Profile | vsock CID (default) | Bridge | Persistence |
-|------|---------|---------------------|--------|-------------|
-| `microvm-browsing` | browsing | 101 | br-browse | 10GB home |
-| `microvm-pentest` | pentest | 102 | br-pentest | 20GB home |
-| `microvm-dev` | dev | 103 | br-dev | 50GB + 20GB docker |
-| `microvm-comms` | comms | 104 | br-comms | Ephemeral |
-| `microvm-lurking` | lurking | 105 | br-lurking | Ephemeral |
+**Convention: CID = subnet last octet = workspace.**
 
-Infrastructure VMs have fixed CIDs (not in registry, not user-configurable):
+| Name | CID | WS | Bridge | Subnet | Persistence |
+|------|-----|----|--------|--------|-------------|
+| `microvm-pentest` | 102 | 2 | br-pentest | 192.168.102 | persistent |
+| `microvm-browsing` | 103 | 3 | br-browse | 192.168.103 | 10GB home |
+| `microvm-comms` | 104 | 4 | br-comms | 192.168.104 | Ephemeral |
+| `microvm-dev` | 105 | 5 | br-dev | 192.168.105 | 50GB + 20GB docker |
+| `microvm-lurking` | 106 | 6 | br-lurking | 192.168.106 | Ephemeral |
 
-| Name | vsock CID | Purpose |
-|------|-----------|---------|
-| `microvm-files` | 106 | Encrypted inter-VM file transfer |
+Custom profiles start at CID 107+. Use `new-profile <name>` to scaffold one.
+
+### Infrastructure VMs
+
+Fixed CIDs defined in Hydrix framework modules. **Not user-configurable**, not in `profiles/`, not in the vm-registry. Do not assign these CIDs to profile VMs.
+
+| Name | CID | Purpose |
+|------|-----|---------|
+| `microvm-files` | 212 | Encrypted inter-VM file transfer |
 | `microvm-router` | 200 | WiFi VFIO passthrough |
 | `microvm-builder` | 210 | Lockdown-mode nix builds |
 | `microvm-gitsync` | 211 | Lockdown-mode git push/pull |
@@ -1147,7 +1156,7 @@ Regular VMs: static .10 IPs on their bridge
 | Files VM IP | `192.168.108.10` |
 | Files VM per-bridge IP | `192.168.1xx.2` |
 | Router leg | `192.168.108.253` |
-| vsock CID | `106` |
+| vsock CID | `212` |
 | Home TAP | `mv-files` → `br-files` |
 | Router TAP | `mv-router-file` → `br-files` |
 
