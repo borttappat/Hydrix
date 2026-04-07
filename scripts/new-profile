@@ -65,7 +65,7 @@ nix_attr() {
         | sed -E 's/^[^=]+=\s*//; s/[;#].*//; s/"//g; s/[[:space:]]//g'
 }
 
-RESERVED_CIDS=(200 210 211)
+RESERVED_CIDS=(200 210 211 212)
 declare -a USED_CIDS=() USED_WORKSPACES=()
 
 for meta in "$PROFILES_DIR"/*/meta.nix; do
@@ -117,8 +117,9 @@ echo ""
 ask() {
     local label="$1" default="$2" hint="${3:-}"
     local result
-    printf "  %-16s [%s]%s: " "$label" "$default" "${hint:+ ($hint)}"
-    read -r result
+    # printf and read both go to /dev/tty so they work inside $() substitutions
+    printf "  %-16s [%s]%s: " "$label" "$default" "${hint:+ ($hint)}" >/dev/tty
+    read -r result </dev/tty
     echo "${result:-$default}"
 }
 
