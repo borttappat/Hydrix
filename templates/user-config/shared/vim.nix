@@ -10,7 +10,7 @@
 
 {
   # Deploy .vimrc from configs/vim/.vimrc
-  hydrix.programs.vim.configFile = lib.mkDefault ./configs/vim/.vimrc;
+  hydrix.programs.vim.configFile = lib.mkDefault ../configs/vim/.vimrc;
 
   # -------------------------------------------------------------------
   # Vim plugin management (optional)

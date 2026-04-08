@@ -11,7 +11,7 @@
 
 {
   # Deploy starship.toml from configs/starship/starship.toml
-  hydrix.programs.starship.configFile = lib.mkDefault ./configs/starship/starship.toml;
+  hydrix.programs.starship.configFile = lib.mkDefault ../configs/starship/starship.toml;
 
   # -------------------------------------------------------------------
   # Starship environment variables (optional)
