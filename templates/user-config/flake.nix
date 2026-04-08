@@ -137,6 +137,14 @@
             hydrix.networking.extraNetworks = extraNetworks; }
           ./shared/common.nix       # Locale + shared settings (all machines)
           ./shared/graphical.nix    # UI preferences (bar layout, opacity, bluelight, etc.)
+          ./shared/fish.nix         # Shell abbreviations + functions (user additions)
+          ./shared/alacritty.nix    # Terminal cursor, keyboard overrides
+          ./shared/dunst.nix        # Notification sound + size preferences
+          ./shared/ranger.nix       # File manager mappings + rifle rules
+          ./shared/rofi.nix         # Launcher keybindings + extraConfig
+          ./shared/zathura.nix      # PDF viewer settings
+          ./shared/starship.nix     # Prompt env vars (config is in configs/starship/)
+          ./shared/vim.nix          # Vim plugins (config is in configs/vim/)
         ];
       };
     }) machineFiles);
