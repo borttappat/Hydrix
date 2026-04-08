@@ -1,13 +1,14 @@
 # Vim Configuration
 #
 # Installs vim and symlinks the config from configs/vim/.vimrc
+# in the user's hydrix-config directory.
 # Does NOT use Home Manager's programs.vim to keep it simple.
 
 { config, lib, pkgs, ... }:
 
 let
   username = config.hydrix.username;
-  vimrcSource = ../../../configs/vim/.vimrc;
+  vimrcSource = "${config.hydrix.paths.configDir}/configs/vim/.vimrc";
 in {
   config = lib.mkIf config.hydrix.graphical.enable {
     # Install vim system-wide

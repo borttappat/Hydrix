@@ -1773,6 +1773,15 @@ copy_wallpapers() {
     fi
 }
 
+copy_template_configs() {
+    local config_dir="$1"
+    log "Creating configs directory..."
+    mkdir -p "$config_dir/configs"
+    local template_dir="$SCRIPT_DIR/../templates/user-config/configs"
+    cp -r "$template_dir"/. "$config_dir/configs/"
+    log "  Copied program configs from template"
+}
+
 copy_template_readme() {
     local config_dir="$1"
     local template_dir="$SCRIPT_DIR/../templates/user-config"
@@ -1823,6 +1832,7 @@ generate_config_to_temp() {
         copy_template_templates "$TEMP_CONFIG"
         copy_template_fonts "$TEMP_CONFIG"
         copy_template_colorschemes "$TEMP_CONFIG"
+        copy_template_configs "$TEMP_CONFIG"
         copy_template_readme "$TEMP_CONFIG"
         generate_machine_nix "$TEMP_CONFIG"
         generate_hardware_config "$TEMP_CONFIG"

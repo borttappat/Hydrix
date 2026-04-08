@@ -1,13 +1,13 @@
 # Starship Prompt Configuration
 #
 # Installs starship and symlinks the config from configs/starship/starship.toml
-# Fish sources starship on shell init.
+# in the user's hydrix-config directory. Fish sources starship on shell init.
 
 { config, lib, pkgs, ... }:
 
 let
   username = config.hydrix.username;
-  starshipConfig = ../../../configs/starship/starship.toml;
+  starshipConfig = "${config.hydrix.paths.configDir}/configs/starship/starship.toml";
 in {
   config = lib.mkIf config.hydrix.graphical.enable {
     # Install starship system-wide
