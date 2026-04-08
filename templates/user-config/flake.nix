@@ -146,7 +146,8 @@
             hydrix.networking.vmRegistry   = vmRegistry;
             hydrix.networking.extraNetworks = extraNetworks; }
           ./shared/common.nix       # Locale + shared settings (all machines)
-          ./shared/graphical.nix    # UI preferences (bar layout, opacity, bluelight, etc.)
+          ./shared/graphical.nix    # UI preferences (opacity, bluelight, etc.)
+          ./shared/polybar.nix      # Polybar style, workspace labels, module layout
           ./shared/fish.nix         # Shell abbreviations + functions (user additions)
           ./shared/alacritty.nix    # Terminal cursor, keyboard overrides
           ./shared/dunst.nix        # Notification sound + size preferences
