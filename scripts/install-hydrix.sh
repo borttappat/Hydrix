@@ -1238,38 +1238,102 @@ _finalize_dual_boot_entries() {
         done
     fi
 
-    # --- Plain / new-installer LUKS: configfile from preserved grub.cfg ---
-    # If the old grub.cfg has bare /kernels/-based linux lines, copy the kernel
-    # files and save a rewritten grub.cfg — this covers first-time plain and
-    # new-installer-LUKS installs.
-    # If the old grub.cfg already references /old-nixos/ paths (i.e. this is a
-    # third-or-later install and the previous install was itself a dual-boot),
-    # the files are already in place; just chain to the existing grub.cfg.
-    if [[ -f "$grub_cfg" ]] && grep -qE '^\s*linux\s+(/kernels/|/old-nixos/)' "$grub_cfg"; then
-        local _old_nixos_ready=false
-        if [[ -d "/mnt/boot/kernels" ]] && grep -qE '^\s*linux\s+/kernels/' "$grub_cfg"; then
-            # Guard both writes: EFI partition may be full or temporarily read-only
-            if mkdir -p "/mnt/boot/old-nixos/kernels" 2>/dev/null \
-            && sed 's| /kernels/| /old-nixos/kernels/|g' \
-                   "$grub_cfg" > "/mnt/boot/old-nixos/grub.cfg" 2>/dev/null; then
-                cp /mnt/boot/kernels/* /mnt/boot/old-nixos/kernels/ 2>/dev/null || true
-                log "Preserved previous install GRUB menu → /old-nixos/grub.cfg"
-                _old_nixos_ready=true
-            else
-                warn "EFI partition appears full or read-only — old NixOS boot entry not preserved"
-            fi
-        elif [[ -f "/mnt/boot/old-nixos/grub.cfg" ]]; then
-            log "Previous install already used /old-nixos/ paths — chaining existing grub.cfg"
-            _old_nixos_ready=true
-        fi
+    # --- Previous Hydrix/NixOS install: kernels are already on the EFI partition ---
+    #
+    # Strategy (two-tier):
+    #
+    #  Tier 1 — direct entry (zero EFI writes, always possible):
+    #    Parse the old grub.cfg for the first linux/initrd pair and create a
+    #    direct GRUB entry.  The kernel files are already at /kernels/ on the
+    #    EFI; no copying needed.  Risk: NixOS's bootloader activation step
+    #    removes kernel files it doesn't recognise, so these paths may vanish
+    #    after the first `rebuild` of this new install.
+    #
+    #  Tier 2 — configfile (EFI writes, survives GC):
+    #    If the EFI has enough free space, copy all kernel files to
+    #    /old-nixos/kernels/ (which NixOS's GC never touches) and write a
+    #    path-rewritten grub.cfg there.  If this succeeds, upgrade the entry
+    #    to a configfile that exposes the full old menu (all generations,
+    #    all specialisations).
+    #
+    #  Third-or-later install: /old-nixos/ already exists from the previous
+    #    dual-boot install — just chain the existing grub.cfg.
 
-        if [[ "$_old_nixos_ready" == true ]]; then
-            new_entries+="menuentry 'Previous NixOS Install (full menu \xe2\x86\x92)' {\n"
-            new_entries+="  insmod part_gpt\n"
-            new_entries+="  insmod fat\n"
-            new_entries+="  search --no-floppy --fs-uuid --set=root $efi_uuid\n"
-            new_entries+="  configfile /old-nixos/grub.cfg\n"
-            new_entries+="}\n"
+    if [[ -f "$grub_cfg" ]]; then
+        # Detect whether this is a NixOS EFI-kernel install
+        local _has_kernels_path _has_old_nixos_path
+        grep -qE '^\s*linux\s+/kernels/'     "$grub_cfg" 2>/dev/null && _has_kernels_path=true  || _has_kernels_path=false
+        grep -qE '^\s*linux\s+/old-nixos/'   "$grub_cfg" 2>/dev/null && _has_old_nixos_path=true || _has_old_nixos_path=false
+
+        if [[ "$_has_kernels_path" == true || "$_has_old_nixos_path" == true ]]; then
+            log "Found previous Hydrix/NixOS install on EFI — generating boot entries"
+
+            # --- Tier 1: direct entry (no copies needed) ---
+            local _linux_line _initrd_line
+            _linux_line=$(grep  -m1 -E '^\s*linux\s+/(kernels|old-nixos)/' "$grub_cfg" 2>/dev/null || true)
+            _initrd_line=$(grep -m1 -E '^\s*initrd\s+/(kernels|old-nixos)/' "$grub_cfg" 2>/dev/null || true)
+
+            local _direct_entry=""
+            if [[ -n "$_linux_line" && -n "$_initrd_line" ]]; then
+                local _kpath _kcmd _ipath
+                _kpath=$(awk '{print $2}' <<< "$_linux_line")
+                _kcmd=$(awk '{$1=$2=""; sub(/^[[:space:]]+/,""); print}' <<< "$_linux_line")
+                _ipath=$(awk '{print $2}' <<< "$_initrd_line")
+                log "  Default kernel: $_kpath"
+                _direct_entry="menuentry 'Previous Hydrix/NixOS Install' {\n"
+                _direct_entry+="  insmod part_gpt\n"
+                _direct_entry+="  insmod fat\n"
+                _direct_entry+="  search --no-floppy --fs-uuid --set=root $efi_uuid\n"
+                _direct_entry+="  linux $_kpath $_kcmd\n"
+                _direct_entry+="  initrd $_ipath\n"
+                _direct_entry+="}\n"
+            fi
+
+            # --- Tier 2: configfile (full menu, GC-safe) ---
+            local _configfile_entry=""
+            if [[ "$_has_old_nixos_path" == true && -f "/mnt/boot/old-nixos/grub.cfg" ]]; then
+                # Third-or-later install: /old-nixos/ already set up
+                log "  Third-or-later install — chaining existing /old-nixos/grub.cfg"
+                _configfile_entry="menuentry 'Previous Hydrix/NixOS Install (full menu \xe2\x86\x92)' {\n"
+                _configfile_entry+="  insmod part_gpt\n"
+                _configfile_entry+="  insmod fat\n"
+                _configfile_entry+="  search --no-floppy --fs-uuid --set=root $efi_uuid\n"
+                _configfile_entry+="  configfile /old-nixos/grub.cfg\n"
+                _configfile_entry+="}\n"
+
+            elif [[ "$_has_kernels_path" == true ]]; then
+                # First dual-boot: try to copy kernels + write rewritten grub.cfg
+                if mkdir -p "/mnt/boot/old-nixos/kernels" 2>/dev/null \
+                && sed 's| /kernels/| /old-nixos/kernels/|g' \
+                       "$grub_cfg" > "/mnt/boot/old-nixos/grub.cfg" 2>/dev/null; then
+                    # Copy each referenced kernel file individually (ignore failures)
+                    local _kf _kname
+                    while IFS= read -r _kf; do
+                        _kname="${_kf##*/}"
+                        [[ -f "/mnt/boot/kernels/$_kname" ]] && \
+                            cp "/mnt/boot/kernels/$_kname" "/mnt/boot/old-nixos/kernels/$_kname" 2>/dev/null || true
+                    done < <(grep -oE '/kernels/[^[:space:]]+' "$grub_cfg" | sort -u)
+                    log "  Kernels preserved to /old-nixos/kernels/ (GC-safe)"
+                    _configfile_entry="menuentry 'Previous Hydrix/NixOS Install (full menu \xe2\x86\x92)' {\n"
+                    _configfile_entry+="  insmod part_gpt\n"
+                    _configfile_entry+="  insmod fat\n"
+                    _configfile_entry+="  search --no-floppy --fs-uuid --set=root $efi_uuid\n"
+                    _configfile_entry+="  configfile /old-nixos/grub.cfg\n"
+                    _configfile_entry+="}\n"
+                else
+                    warn "  EFI write failed (full or read-only) — using direct entry"
+                    warn "  Note: this entry references /kernels/ which may be cleaned up on first rebuild"
+                fi
+            fi
+
+            # Prefer configfile (full menu) over direct entry; fall back to direct
+            if [[ -n "$_configfile_entry" ]]; then
+                new_entries+="$_configfile_entry"
+            elif [[ -n "$_direct_entry" ]]; then
+                new_entries+="$_direct_entry"
+            else
+                warn "  Could not generate any entry for previous NixOS install"
+            fi
         fi
     fi
 
