@@ -7,25 +7,17 @@
 # Edit configs/starship/starship.toml to customise your prompt.
 # Reference: https://starship.rs/config/
 
-{ config, lib, pkgs, ... }:
+{ lib, ... }:
 
-let
-  username = config.hydrix.username;
-in {
-
+{
   # Deploy starship.toml from configs/starship/starship.toml
   hydrix.programs.starship.configFile = lib.mkDefault ./configs/starship/starship.toml;
 
-  config = lib.mkIf config.hydrix.graphical.enable {
-    home-manager.users.${username} = { pkgs, ... }: {
-
-      # -------------------------------------------------------------------
-      # Starship environment variables (optional)
-      # -------------------------------------------------------------------
-      # home.sessionVariables = {
-      #   STARSHIP_LOG = "error";
-      # };
-
-    };
-  };
+  # -------------------------------------------------------------------
+  # Starship environment variables (optional)
+  # Uncomment and add to home-manager session vars if needed.
+  # -------------------------------------------------------------------
+  # home-manager.users.<name>.home.sessionVariables = {
+  #   STARSHIP_LOG = "error";
+  # };
 }
