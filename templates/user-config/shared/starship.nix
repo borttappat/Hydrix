@@ -1,23 +1,24 @@
 # Starship Prompt — User Configuration
 #
-# Set configFile to deploy your starship.toml from configs/starship/starship.toml.
-# The Nix path is resolved relative to this file at evaluation time —
-# no absolute paths, works in pure evaluation mode.
-#
+# Symlinks configs/starship/starship.toml to ~/.config/starship.toml at build time.
 # Edit configs/starship/starship.toml to customise your prompt.
 # Reference: https://starship.rs/config/
 
-{ lib, ... }:
+{ config, lib, ... }:
 
-{
-  # Deploy starship.toml from configs/starship/starship.toml
-  hydrix.programs.starship.configFile = lib.mkDefault ../configs/starship/starship.toml;
+let
+  username = config.hydrix.username;
+in {
+  config = lib.mkIf config.hydrix.graphical.enable {
+    home-manager.users.${username} = { ... }: {
+      xdg.configFile."starship.toml".source = ../configs/starship/starship.toml;
 
-  # -------------------------------------------------------------------
-  # Starship environment variables (optional)
-  # Uncomment and add to home-manager session vars if needed.
-  # -------------------------------------------------------------------
-  # home-manager.users.<name>.home.sessionVariables = {
-  #   STARSHIP_LOG = "error";
-  # };
+      # -------------------------------------------------------------------
+      # Starship environment variables (optional)
+      # -------------------------------------------------------------------
+      # home.sessionVariables = {
+      #   STARSHIP_LOG = "error";
+      # };
+    };
+  };
 }

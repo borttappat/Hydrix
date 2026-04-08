@@ -211,40 +211,6 @@ in {
     };
 
     # =========================================================================
-    # PROGRAM CONFIG FILES
-    # Set these to Nix paths (e.g. ./configs/vim/.vimrc) so the file is
-    # copied to the Nix store at evaluation time. Runtime string paths
-    # are not supported here (pure evaluation mode).
-    # =========================================================================
-
-    programs = {
-      vim = {
-        configFile = lib.mkOption {
-          type = lib.types.nullOr lib.types.path;
-          default = null;
-          description = ''
-            Path to .vimrc. Set to a Nix path (e.g. ./configs/vim/.vimrc
-            from your shared/vim.nix). null = no .vimrc is deployed.
-          '';
-          example = "./configs/vim/.vimrc";
-        };
-      };
-
-      starship = {
-        configFile = lib.mkOption {
-          type = lib.types.nullOr lib.types.path;
-          default = null;
-          description = ''
-            Path to starship.toml. Set to a Nix path (e.g.
-            ./configs/starship/starship.toml from your shared/starship.nix).
-            null = no starship.toml is deployed.
-          '';
-          example = "./configs/starship/starship.toml";
-        };
-      };
-    };
-
-    # =========================================================================
     # LOCALE
     # =========================================================================
 
