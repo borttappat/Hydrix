@@ -11,7 +11,7 @@ let
 in {
   config = lib.mkIf config.hydrix.graphical.enable {
     home-manager.users.${username} = { ... }: {
-      xdg.configFile."starship.toml".source = ../configs/starship/starship.toml;
+      xdg.configFile."starship.toml".source = lib.mkForce ../configs/starship/starship.toml;
 
       # -------------------------------------------------------------------
       # Starship environment variables (optional)

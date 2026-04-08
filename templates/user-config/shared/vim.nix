@@ -10,7 +10,7 @@ let
 in {
   config = lib.mkIf config.hydrix.graphical.enable {
     home-manager.users.${username} = { ... }: {
-      home.file.".vimrc".source = ../configs/vim/.vimrc;
+      home.file.".vimrc".source = lib.mkForce ../configs/vim/.vimrc;
 
       # -------------------------------------------------------------------
       # Vim plugin management (optional)
