@@ -1246,23 +1246,31 @@ _finalize_dual_boot_entries() {
     # third-or-later install and the previous install was itself a dual-boot),
     # the files are already in place; just chain to the existing grub.cfg.
     if [[ -f "$grub_cfg" ]] && grep -qE '^\s*linux\s+(/kernels/|/old-nixos/)' "$grub_cfg"; then
+        local _old_nixos_ready=false
         if [[ -d "/mnt/boot/kernels" ]] && grep -qE '^\s*linux\s+/kernels/' "$grub_cfg"; then
-            mkdir -p "/mnt/boot/old-nixos/kernels"
-            cp /mnt/boot/kernels/* /mnt/boot/old-nixos/kernels/ 2>/dev/null || true
-            # Rewrite only bare /kernels/ paths (not already-prefixed /old-nixos/kernels/)
-            sed 's| /kernels/| /old-nixos/kernels/|g' \
-                "$grub_cfg" > "/mnt/boot/old-nixos/grub.cfg"
-            log "Preserved previous install GRUB menu → /old-nixos/grub.cfg"
+            # Guard both writes: EFI partition may be full or temporarily read-only
+            if mkdir -p "/mnt/boot/old-nixos/kernels" 2>/dev/null \
+            && sed 's| /kernels/| /old-nixos/kernels/|g' \
+                   "$grub_cfg" > "/mnt/boot/old-nixos/grub.cfg" 2>/dev/null; then
+                cp /mnt/boot/kernels/* /mnt/boot/old-nixos/kernels/ 2>/dev/null || true
+                log "Preserved previous install GRUB menu → /old-nixos/grub.cfg"
+                _old_nixos_ready=true
+            else
+                warn "EFI partition appears full or read-only — old NixOS boot entry not preserved"
+            fi
         elif [[ -f "/mnt/boot/old-nixos/grub.cfg" ]]; then
             log "Previous install already used /old-nixos/ paths — chaining existing grub.cfg"
+            _old_nixos_ready=true
         fi
 
-        new_entries+="menuentry 'Previous NixOS Install (full menu \xe2\x86\x92)' {\n"
-        new_entries+="  insmod part_gpt\n"
-        new_entries+="  insmod fat\n"
-        new_entries+="  search --no-floppy --fs-uuid --set=root $efi_uuid\n"
-        new_entries+="  configfile /old-nixos/grub.cfg\n"
-        new_entries+="}\n"
+        if [[ "$_old_nixos_ready" == true ]]; then
+            new_entries+="menuentry 'Previous NixOS Install (full menu \xe2\x86\x92)' {\n"
+            new_entries+="  insmod part_gpt\n"
+            new_entries+="  insmod fat\n"
+            new_entries+="  search --no-floppy --fs-uuid --set=root $efi_uuid\n"
+            new_entries+="  configfile /old-nixos/grub.cfg\n"
+            new_entries+="}\n"
+        fi
     fi
 
     # --- EFI chainload entries for non-NixOS OSes (Ubuntu, Windows, etc.) ---
@@ -2511,7 +2519,9 @@ install_nixos() {
     # Create user home
     mkdir -p "/mnt/home/${CONFIG[username]}"
 
-    log "Running nixos-install..."
+    echo ""
+    log "=== Running nixos-install (this takes 20-60 min depending on network) ==="
+    echo ""
     local mem_gb
     mem_gb=$(awk '/MemTotal/ {printf "%d", $2/1024/1024}' /proc/meminfo)
     local max_jobs=1 cores=2
@@ -2781,7 +2791,7 @@ access-tokens = github.com=$gh_token"
     echo ""
 
     partition_and_mount
-    _finalize_dual_boot_entries
+    _finalize_dual_boot_entries || warn "Dual-boot GRUB entry generation encountered errors — other OS entries may be absent from the GRUB menu"
     install_nixos
 
     # Cleanup temp directories
