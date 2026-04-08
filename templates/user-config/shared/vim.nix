@@ -1,16 +1,20 @@
 # Vim — User Configuration
 #
-# Edit configs/vim/.vimrc directly to customise vim.
-# The framework symlinks that file to ~/.vimrc at build time.
+# Set configFile to deploy your .vimrc from configs/vim/.vimrc.
+# The Nix path is resolved relative to this file at evaluation time —
+# no absolute paths, works in pure evaluation mode.
 #
-# This file exists only to document the approach. Use it if you need
-# NixOS-level vim settings (plugins via home-manager programs.vim, etc.).
+# Edit configs/vim/.vimrc directly to customise vim behaviour.
 
 { config, lib, pkgs, ... }:
 
 let
   username = config.hydrix.username;
 in {
+
+  # Deploy .vimrc from configs/vim/.vimrc
+  hydrix.programs.vim.configFile = lib.mkDefault ./configs/vim/.vimrc;
+
   config = lib.mkIf config.hydrix.graphical.enable {
     home-manager.users.${username} = { pkgs, ... }: {
 

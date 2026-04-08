@@ -1,14 +1,15 @@
 # Vim Configuration
 #
-# Installs vim and symlinks the config from configs/vim/.vimrc
-# in the user's hydrix-config directory.
-# Does NOT use Home Manager's programs.vim to keep it simple.
+# Installs vim and symlinks .vimrc from hydrix.programs.vim.configFile.
+# Set that option in shared/vim.nix:
+#   hydrix.programs.vim.configFile = ./configs/vim/.vimrc;
+# The Nix path is resolved relative to the module file at evaluation time.
 
 { config, lib, pkgs, ... }:
 
 let
   username = config.hydrix.username;
-  vimrcSource = "${config.hydrix.paths.configDir}/configs/vim/.vimrc";
+  configFile = config.hydrix.programs.vim.configFile;
 in {
   config = lib.mkIf config.hydrix.graphical.enable {
     # Install vim system-wide
@@ -17,9 +18,11 @@ in {
     # Set vim as default editor
     environment.variables.EDITOR = "vim";
 
-    # Symlink .vimrc to user's home
+    # Symlink .vimrc to user's home (only when configFile is set)
     home-manager.users.${username} = { pkgs, ... }: {
-      home.file.".vimrc".source = vimrcSource;
+      home.file.".vimrc" = lib.mkIf (configFile != null) {
+        source = configFile;
+      };
     };
   };
 }
