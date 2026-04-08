@@ -404,15 +404,17 @@ in {
       })
 
       # Secrets Provisioning for MicroVMs
-      # For each VM with secrets.github = true, create a service to copy
-      # decrypted keys from /run/secrets/github/ (which always exists via tmpfiles).
+      # For each VM with secrets.github = true, create a service to:
+      #   1. Ensure /run/hydrix-secrets/<name>/ssh exists before virtiofsd starts
+      #      (virtiofsd crashes if its source path is missing — tmpfiles races it)
+      #   2. Copy decrypted keys from /run/secrets/github/ before the VM boots
       # Runs unconditionally — handles missing keys gracefully so VMs start even
       # on fresh installs before sops is configured.
       (lib.mkIf (vmsWithGithubSecrets != {}) (
         lib.mapAttrs' (name: _: lib.nameValuePair "hydrix-secrets-${name}" {
           description = "Provision secrets for microVM ${name}";
-          wantedBy = [ "microvm@${name}.service" ];
-          before = [ "microvm@${name}.service" ];
+          wantedBy = [ "microvm-virtiofsd@${name}.service" "microvm@${name}.service" ];
+          before = [ "microvm-virtiofsd@${name}.service" "microvm@${name}.service" ];
           # Wait for hydrix-github-secrets to decrypt (or gracefully fail) before copying
           wants = [ "hydrix-github-secrets.service" ];
           after = [ "local-fs.target" "hydrix-github-secrets.service" ];
