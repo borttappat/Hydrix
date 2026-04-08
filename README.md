@@ -1,5 +1,4 @@
 # Hydrix
-
 **Secure VM- and isolation-based workstation framework**
 
 Hydrix is an options-driven NixOS framework that provides complete network isolation through VM compartmentalization. Your WiFi hardware is passed directly to a router VM via VFIO, giving you granular control over network traffic while maintaining a hardened host.
@@ -74,7 +73,7 @@ After installation, your configuration lives at `~/hydrix-config/`.
 +--------+  +--------+  +--------+  +---------+  +--------+  +--------+
 ```
 
-> **CIDs and subnets are user-configurable.** Built-in profiles (browsing, pentest, dev, comms, lurking) ship with default CIDs/subnets but these are declared in each profile's `meta.nix` in your `hydrix-config/profiles/<name>/meta.nix`. The host module writes all profile metadata to `/etc/hydrix/vm-registry.json` at activation — all scripts, polybar, and i3 read from there at runtime, never from hardcoded maps. Adding a new VM type requires only `profiles/<name>/meta.nix` + `profiles/<name>/default.nix` in your config.
+> **CIDs and subnets are user-configurable.** Built-in profiles (browsing, pentest, dev, comms, lurking) ship with default CIDs/subnets but these are declared in each profile's `meta.nix` in your `hydrix-config/profiles/<name>/meta.nix`. The host module writes all profile metadata to `/etc/hydrix/vm-registry.json` at activation, all scripts, polybar, and i3 read from there at runtime, never from hardcoded maps. Adding a new VM type requires only `profiles/<name>/meta.nix` + `profiles/<name>/default.nix` in your config.
 
 ### VM Registry (`/etc/hydrix/vm-registry.json`)
 
@@ -127,15 +126,15 @@ hydrix-mode                     # Show current mode
 
 ### Router VM Trust Boundary
 
-The router VM is **untrusted infrastructure** — it handles WiFi and NAT but has no privileged access to anything on the host or in other VMs. Its security properties:
+The router VM is **untrusted infrastructure** it handles WiFi and NAT but has no privileged access to anything on the host or in other VMs. Its security properties:
 
 | Property | Detail |
 |----------|--------|
 | SSH | Disabled (`services.openssh.enable = false`) |
-| Console access | vsock (CID 200) + unix socket — host-only, not reachable from any VM or LAN |
+| Console access | vsock (CID 200) + unix socket, host-only, not reachable from any VM or LAN |
 | Default firewall policy | `input: DROP`, `forward: DROP` |
-| What VMs can reach on the router | DNS (53), DHCP (67), ICMP (rate-limited) — nothing else |
-| Autologin | Safe — getty console is local-only, no network auth surface exists |
+| What VMs can reach on the router | DNS (53), DHCP (67), ICMP (rate-limited)  |
+| Autologin | Safe, getty console is local-only, no network auth surface exists |
 
 The `router.hashedPassword` option exists only to lock down vsock console access from the host side (e.g., shared-host scenarios). It is not a network security control — VMs cannot reach the router console regardless.
 
@@ -147,11 +146,11 @@ Each VM subnet is isolated from all others at the router's `forward` chain. A co
 pentest  → browse:  BLOCKED
 pentest  → comms:   BLOCKED
 browse   → dev:     BLOCKED
-any VM   → shared:  ALLOWED  (intentional — shared services subnet)
+any VM   → shared:  ALLOWED  (intentional shared services subnet)
 any VM   → WAN:     ALLOWED  (via NAT through router)
 ```
 
-The files VM (`microvm-files`) bypasses this intentionally by connecting directly to bridges via dedicated TAP interfaces — explicitly granted per-bridge via `microvmFiles.accessFrom`. Passphrases for encrypted file transfer travel exclusively over vsock, never over bridge networks.
+The files VM (`microvm-files`) bypasses this intentionally by connecting directly to bridges via dedicated TAP interfaces explicitly granted per-bridge via `microvmFiles.accessFrom`. Passphrases for encrypted file transfer travel exclusively over vsock, never over bridge networks.
 
 ### Host Isolation
 
@@ -802,11 +801,11 @@ walrgb <image>
 
 Without theme sync, VMs would show Nord default colors for ~500ms while pywal runs. The module prevents this through:
 
-1. **wal-cache-link service** — creates the symlink to host cache before xpra starts, so colors exist from the first shell
-2. **Pre-generated colors-runtime.toml** — built at boot from the shared `colors.json` via jq, available before any terminal launches
-3. **Stylix fish target disabled** — the system-level base16 fish theme applied OSC escape sequences on every shell start, overriding config colors. Disabled with `stylix.targets.fish.enable = mkForce false`
-4. **xpra-vsock ordering** — xpra only accepts connections after `wal-cache-link` completes, preventing terminals from launching before colors are ready
-5. **Conflicting services disabled** — `vm-colorscheme`, `wal-sync` timer, and `init-wal-cache` are all disabled to prevent overwriting the shared cache
+1. **wal-cache-link service** creates the symlink to host cache before xpra starts, so colors exist from the first shell
+2. **Pre-generated colors-runtime.toml** built at boot from the shared `colors.json` via jq, available before any terminal launches
+3. **Stylix fish target disabled** the system-level base16 fish theme applied OSC escape sequences on every shell start, overriding config colors. Disabled with `stylix.targets.fish.enable = mkForce false`
+4. **xpra-vsock ordering** xpra only accepts connections after `wal-cache-link` completes, preventing terminals from launching before colors are ready
+5. **Conflicting services disabled** `vm-colorscheme`, `wal-sync` timer, and `init-wal-cache` are all disabled to prevent overwriting the shared cache
 
 ### Dynamic Focus Daemon
 
@@ -875,7 +874,7 @@ hydrix.vmThemeSync.focusOverrideColor = "#FF5555";
 
 When override mode is active (`hydrix-focus on`), the focus daemon reads `focusOverrideColor` from each VM's profile file instead of using the static/dynamic color pipeline. This gives you fixed, hand-picked colors per VM type regardless of wallpaper or colorscheme.
 
-**Marker file:** `~/.cache/hydrix/focus-override-active` — the daemon watches for this via SIGUSR1.
+**Marker file:** `~/.cache/hydrix/focus-override-active` the daemon watches for this via SIGUSR1.
 
 ### Wal Cache Pre-population
 
@@ -1099,33 +1098,33 @@ The files VM (`microvm-files`, CID 106, fixed infra) is an encrypted jump host f
 **Transfer flow** (`microvm files transfer pentest/projects/report comms/pentest/`):
 
 ```
-1. Host generates PASSPHRASE (openssl rand -base64 32) — stays in host memory
+1. Host generates PASSPHRASE (openssl rand -base64 32), stays in host memory
 
-2. Host → pentest VM (vsock 14506): ENCRYPT <passphrase> projects/report
-   Pentest VM: tar czf - | openssl enc -aes-256-cbc → ~/shared/xfer.enc
+2. Host -> pentest VM (vsock 14506): ENCRYPT <passphrase> projects/report
+   Pentest VM: tar czf -> | openssl enc -aes-256-cbc -> ~/shared/xfer.enc
    Returns: SHA256=<hash>
 
-3. Host → pentest VM (vsock 14506): SERVE
+3. Host -> pentest VM (vsock 14506): SERVE
    Pentest VM starts ephemeral HTTP server on port 8888
 
-4. Host → files VM (vsock 14505): FETCH <pentest-subnet>.10 xfer.enc
+4. Host -> files VM (vsock 14505): FETCH <pentest-subnet>.10 xfer.enc
    Files VM downloads ciphertext via HTTP  (IP from vm-registry.json)
-   Returns: SHA256=<hash>  ← host verifies both hashes match
+   Returns: SHA256=<hash>  <- host verifies both hashes match
 
-5. Host → pentest VM (vsock 14506): SERVE_STOP
+5. Host -> pentest VM (vsock 14506): SERVE_STOP
 
-6. Host → comms VM (vsock 14506): RECEIVE_PREPARE
+6. Host -> comms VM (vsock 14506): RECEIVE_PREPARE
    Comms VM starts one-shot HTTP upload server on port 8888 (always receives to ~/shared/)
 
-7. Host → files VM (vsock 14505): DELIVER <comms-subnet>.10 xfer.enc
+7. Host -> files VM (vsock 14505): DELIVER <comms-subnet>.10 xfer.enc
    Files VM HTTP PUTs ciphertext to comms VM  (IP from vm-registry.json)
-   Returns: SHA256=<hash>  ← host verifies three-way match
+   Returns: SHA256=<hash>  <- host verifies three-way match
 
-8. Host → comms VM (vsock 14506): DECRYPT <passphrase> shared/xfer.enc pentest/
-   Comms VM decrypts + unpacks → ~/pentest/report/, deletes shared/xfer.enc
+8. Host -> comms VM (vsock 14506): DECRYPT <passphrase> shared/xfer.enc pentest/
+   Comms VM decrypts + unpacks -> ~/pentest/report/, deletes shared/xfer.enc
    Returns: OK
 
-9. Host → pentest VM (vsock 14506): CLEANUP  (deletes ~/shared/xfer.enc)
+9. Host -> pentest VM (vsock 14506): CLEANUP  (deletes ~/shared/xfer.enc)
    Host discards passphrase from memory
 ```
 
