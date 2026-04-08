@@ -93,7 +93,17 @@
     in builtins.head schemes;
 
     hostConfig = { ... }: {
-      imports = [ ./shared/fonts.nix ];
+      imports = [
+        ./shared/fonts.nix
+        ./shared/vim.nix         # Deploy .vimrc from configs/vim/.vimrc
+        ./shared/starship.nix    # Deploy starship.toml from configs/starship/
+        ./shared/fish.nix        # Shell abbreviations + functions
+        ./shared/alacritty.nix   # Cursor, keyboard overrides
+        ./shared/dunst.nix       # Notification preferences
+        ./shared/ranger.nix      # File manager mappings + rifle rules
+        ./shared/rofi.nix        # Launcher keybindings
+        ./shared/zathura.nix     # PDF viewer settings
+      ];
       hydrix.username = hostUsername;  # Required: VMs use this for virtiofs share paths
       hydrix.vmColors.enable = true;   # VMs inherit host colorscheme (reads wal cache at runtime)
       hydrix.vmColors.hostColorscheme = hostColorscheme;  # Build-time colorscheme fallback
