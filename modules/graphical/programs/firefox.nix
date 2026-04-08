@@ -314,6 +314,18 @@ let
     echo "  microvm build microvm-<profile>"
   '';
 
+  # User-agent presets — named shortcuts to realistic UA strings
+  uaPresets = {
+    edge-windows    = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 Edg/131.0.0.0";
+    chrome-windows  = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
+    chrome-mac      = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
+    safari-mac      = "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_2_1) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Safari/605.1.15";
+    firefox-windows = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:132.0) Gecko/20100101 Firefox/132.0";
+  };
+
+  uaRaw = config.hydrix.graphical.firefox.userAgent;
+  resolvedUA = if uaRaw == null then null else uaPresets.${uaRaw} or uaRaw;
+
   # On hosts, Firefox is only included when hostEnable is true.
   # VMs always get Firefox when graphical is enabled.
   isHost = vmType == "host" || vmType == null;
@@ -385,6 +397,8 @@ in {
           "browser.newtabpage.activity-stream.showSponsored" = lock-false;
           "browser.newtabpage.activity-stream.system.showSponsored" = lock-false;
           "browser.newtabpage.activity-stream.showSponsoredTopSites" = lock-false;
+        } // lib.optionalAttrs (resolvedUA != null) {
+          "general.useragent.override" = { Value = resolvedUA; Status = "locked"; };
         };
       };
     };

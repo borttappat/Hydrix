@@ -26,6 +26,11 @@ let meta = import ./meta.nix; in
   hydrix.colorscheme = "punk";
   # hydrix.vmThemeSync.focusOverrideColor = "#AABBCC";  # Per-VM focus border override (use with hydrix-focus on)
 
+  # Firefox user-agent: "firefox-windows" matches the Tor Browser UA, maximising
+  # anonymity set when browsing over Tor (all Tor Browser users look identical).
+  # Presets: "edge-windows" | "chrome-windows" | "chrome-mac" | "safari-mac" | "firefox-windows"
+  hydrix.graphical.firefox.userAgent = "firefox-windows";
+
   # Inherit host colors for consistent look
   hydrix.vmColors.enable = true;
 

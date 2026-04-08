@@ -136,6 +136,7 @@
             hydrix.networking.vmRegistry   = vmRegistry;
             hydrix.networking.extraNetworks = extraNetworks; }
           ./shared/common.nix       # Locale + shared settings (all machines)
+          ./shared/graphical.nix    # UI preferences (bar layout, opacity, bluelight, etc.)
         ];
       };
     }) machineFiles);

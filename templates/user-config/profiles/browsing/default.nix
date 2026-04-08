@@ -26,6 +26,11 @@ let meta = import ./meta.nix; in
   # To find palette values: cat ~/.cache/wal/colors.json  (or colorschemes/<scheme>.json)
   # hydrix.vmThemeSync.focusOverrideColor = "#AABBCC";
 
+  # Firefox user-agent: blend in with the dominant browser/OS fingerprint.
+  # Presets: "edge-windows" | "chrome-windows" | "chrome-mac" | "safari-mac" | "firefox-windows"
+  # Or pass a raw UA string. null = use Firefox's real UA.
+  hydrix.graphical.firefox.userAgent = "edge-windows";
+
   # MicroVM resources (must match CID in host scripts)
   hydrix.microvm = {
     vcpu = 2;

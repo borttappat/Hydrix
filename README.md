@@ -8,6 +8,7 @@ Hydrix is an options-driven NixOS framework that provides complete network isola
 
 - [Quick Start](#quick-start)
 - [Architecture Overview](#architecture-overview)
+- [Security Model](#security-model)
 - [Installation](#installation)
 - [Configuration](#configuration)
 - [Colorscheme System](#colorscheme-system)
@@ -119,6 +120,53 @@ hydrix-mode                     # Show current mode
 - Boot time: ~8-10 seconds
 - Traditional qcow2 images
 - Good for encrypted VMs
+
+---
+
+## Security Model
+
+### Router VM Trust Boundary
+
+The router VM is **untrusted infrastructure** — it handles WiFi and NAT but has no privileged access to anything on the host or in other VMs. Its security properties:
+
+| Property | Detail |
+|----------|--------|
+| SSH | Disabled (`services.openssh.enable = false`) |
+| Console access | vsock (CID 200) + unix socket — host-only, not reachable from any VM or LAN |
+| Default firewall policy | `input: DROP`, `forward: DROP` |
+| What VMs can reach on the router | DNS (53), DHCP (67), ICMP (rate-limited) — nothing else |
+| Autologin | Safe — getty console is local-only, no network auth surface exists |
+
+The `router.hashedPassword` option exists only to lock down vsock console access from the host side (e.g., shared-host scenarios). It is not a network security control — VMs cannot reach the router console regardless.
+
+### VM-to-VM Isolation
+
+Each VM subnet is isolated from all others at the router's `forward` chain. A compromised browsing VM cannot reach the pentest or dev VM's subnet, and vice versa. The only exception is `br-shared` (192.168.105.0/24), which all VMs can forward to and from.
+
+```
+pentest  → browse:  BLOCKED
+pentest  → comms:   BLOCKED
+browse   → dev:     BLOCKED
+any VM   → shared:  ALLOWED  (intentional — shared services subnet)
+any VM   → WAN:     ALLOWED  (via NAT through router)
+```
+
+The files VM (`microvm-files`) bypasses this intentionally by connecting directly to bridges via dedicated TAP interfaces — explicitly granted per-bridge via `microvmFiles.accessFrom`. Passphrases for encrypted file transfer travel exclusively over vsock, never over bridge networks.
+
+### Host Isolation
+
+In **Lockdown** mode (default boot):
+- The host has no internet access — WiFi hardware is inside the router VM via VFIO
+- Host builds happen via the builder VM, which has internet through the router
+- Git push/pull happens via the gitsync VM, which mounts repos from the host R/W
+
+In **Administrative** mode:
+- The host gains internet via the router VM as a gateway
+- All VM isolation properties remain unchanged
+
+### WiFi Credentials in Nix Store
+
+WiFi credentials (`router.wifi.ssid`/`password`) end up in `/nix/store` as plaintext inside the router VM's config closure. For stricter environments, store credentials via `sops-nix` and reference the decrypted secret path. On a single-user machine with full-disk encryption the nix store exposure is typically acceptable.
 
 ---
 

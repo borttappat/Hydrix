@@ -24,6 +24,10 @@ let meta = import ./meta.nix; in
   hydrix.colorscheme = "deeporange";
   # hydrix.vmThemeSync.focusOverrideColor = "#AABBCC";  # Per-VM focus border override (use with hydrix-focus on)
 
+  # Firefox user-agent: avoid standing out on messaging platforms.
+  # Presets: "edge-windows" | "chrome-windows" | "chrome-mac" | "safari-mac" | "firefox-windows"
+  hydrix.graphical.firefox.userAgent = "chrome-windows";
+
   # Inherit host colors for consistent look
   hydrix.vmColors.enable = true;
 

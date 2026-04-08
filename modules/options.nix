@@ -914,6 +914,18 @@ in {
         '';
       };
 
+      firefox.userAgent = lib.mkOption {
+        type = lib.types.nullOr lib.types.str;
+        default = null;
+        description = ''
+          Firefox user-agent string, set as a locked policy preference.
+          Accepts a named preset or a raw UA string. null = Firefox real UA.
+          Presets: "edge-windows", "chrome-windows", "chrome-mac",
+                   "safari-mac", "firefox-windows"
+        '';
+        example = "edge-windows";
+      };
+
       obsidian.hostEnable = lib.mkOption {
         type = lib.types.bool;
         default = false;
@@ -1302,6 +1314,46 @@ in {
               - none: Standard picom with fading only (xrender, no blur)
               - modern: Picom v12 with bouncy animations (xrender, overshoot curves)
             '';
+          };
+        };
+
+        # Bar module layout overrides
+        bar = {
+          top = {
+            left = lib.mkOption {
+              type = lib.types.nullOr lib.types.str;
+              default = null;
+              description = "Top bar left modules. null = style default (workspaces + focus).";
+              example = "xworkspaces focus-dynamic";
+            };
+            center = lib.mkOption {
+              type = lib.types.nullOr lib.types.str;
+              default = null;
+              description = "Top bar center modules. null = style default (empty).";
+            };
+            right = lib.mkOption {
+              type = lib.types.nullOr lib.types.str;
+              default = null;
+              description = "Top bar right modules. null = style default (metrics + date).";
+              example = "volume-dynamic cpu-dynamic date-dynamic";
+            };
+          };
+          bottom = {
+            left = lib.mkOption {
+              type = lib.types.nullOr lib.types.str;
+              default = null;
+              description = "Bottom bar left modules. null = style default (power + battery + host metrics).";
+            };
+            center = lib.mkOption {
+              type = lib.types.nullOr lib.types.str;
+              default = null;
+              description = "Bottom bar center modules. null = style default (empty).";
+            };
+            right = lib.mkOption {
+              type = lib.types.nullOr lib.types.str;
+              default = null;
+              description = "Bottom bar right modules. null = style default (VM metrics).";
+            };
           };
         };
       };

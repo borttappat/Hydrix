@@ -86,6 +86,9 @@
   # Extra groups beyond defaults (wheel, audio, video, etc.)
   # hydrix.user.extraGroups = [ "libvirtd" "kvm" ];
 
+  # Display name shown in finger, etc. (defaults to username)
+  # hydrix.user.description = "Jane Doe";
+
   # =========================================================================
   # HYDRIX CONFIGURATION
   # =========================================================================
@@ -98,6 +101,14 @@
     colorscheme = "puccy";       # Theme (see colorschemes/ in Hydrix repo)
     graphical.wallpaper = "${hydrix}/wallpapers/WindowRain.png";  # Default wallpaper (nix store path)
     # vmThemeSync.focusDaemon.mode = "dynamic";  # "static" or "dynamic" focus border colors
+
+    # ─────────────────────────────────────────────────────────────────────
+    # PATHS
+    # ─────────────────────────────────────────────────────────────────────
+    # Baked into scripts at build time. Only override if your repos are not
+    # in the standard locations (~/hydrix-config, ~/Hydrix).
+    # paths.configDir = "/home/user/hydrix-config";  # DEFAULT: ~/hydrix-config
+    # paths.hydrixDir = "/home/user/Hydrix";         # DEFAULT: ~/Hydrix
 
     # ─────────────────────────────────────────────────────────────────────
     # DEFAULT APPLICATIONS
@@ -172,13 +183,29 @@
       #   vpn-assign --persistent comms mullvad-de       # Persist assignment across reboots
       #   vpn-assign pentest none                        # Direct (no VPN) for engagements
 
+      # ─── Router VM user (microvm router) ─────────────────────────────
+      # username       = "user";   # DEFAULT: inherits hydrix.username
+      # hashedPassword = null;     # DEFAULT: null (inherits host password if set)
+
+      # ─── Multi-network WiFi (alternative to shared/wifi.nix) ──────────
+      # wifi.networks = [
+      #   { ssid = "HomeNetwork"; password = "secret"; priority = 100; }
+      #   { ssid = "WorkNetwork"; password = "secret2"; priority = 50; }
+      # ];
+      # (Takes precedence over wifi.ssid/password if non-empty)
+
       # ─── libvirt router (if type = "libvirt") ──────────────────────────
       # router.libvirt.vmName  = "router";        # DEFAULT: "router"
+      # router.libvirt.image   = "/var/lib/libvirt/images/router.qcow2";  # DEFAULT
       # router.libvirt.memory  = 2048;            # DEFAULT: 2048 MB
       # router.libvirt.vcpus   = 2;               # DEFAULT: 2
       # router.libvirt.wan.mode = "auto";         # DEFAULT: "auto"
       #   # Options: "auto" (detects WiFi for passthrough, falls back to macvtap)
       #   #          "pci-passthrough", "macvtap", "none"
+      # router.libvirt.wan.device = null;         # DEFAULT: null (auto-detect)
+      #   # pci-passthrough: PCI address e.g. "0000:02:00.0"
+      #   # macvtap: interface name e.g. "enp3s0"
+      # router.libvirt.wan.preferWireless = true; # DEFAULT: true - prefer WiFi over ethernet in auto mode
     };
 
     # ─────────────────────────────────────────────────────────────────────
@@ -279,6 +306,9 @@
       # vmNames.build   = "microvm-builder";   # DEFAULT
       # vmNames.router  = "microvm-router";    # DEFAULT
       # vmNames.gitsync = "microvm-gitsync";   # DEFAULT
+
+      # defaultBridge = "br-browse";  # DEFAULT: br-browse
+      #   Fallback bridge for TAP interfaces with no explicit bridge assignment.
     };
 
     # ─────────────────────────────────────────────────────────────────────
@@ -302,15 +332,26 @@
     # ─────────────────────────────────────────────────────────────────────
     # GRAPHICAL
     # ─────────────────────────────────────────────────────────────────────
-    # Defaults are set by font profiles (iosevka, tamzen, cozette).
-    # Only override what you need to customize.
+    # Shared UI preferences live in shared/graphical.nix (imported for all machines).
+    # Uncomment anything here to override the shared value for this machine only —
+    # plain assignment takes priority over lib.mkDefault in the shared module.
     graphical = {
       enable = true;
 
       # polarity = "dark";  # DEFAULT: "dark" - color scheme polarity ("dark" or "light")
 
+      # colorscheme = "nord";  # DEFAULT: inherits hydrix.colorscheme
+      #   Override the graphical colorscheme independently of the system colorscheme.
+
+      # standalone = false;  # DEFAULT: false
+      #   Enable a full i3/polybar environment inside this VM (for use with virt-manager).
+      #   Default false = headless, apps forwarded to host via xpra.
+
       # ─── Applications ────────────────────────────────────────────────
       # firefox.hostEnable  = false;  # DEFAULT: false - Firefox on host (admin mode sets this)
+      # firefox.userAgent   = null;   # DEFAULT: null (real Firefox UA)
+      #   Lock a spoofed UA via policy. Named presets: "edge-windows", "chrome-windows",
+      #   "chrome-mac", "safari-mac", "firefox-windows". Or pass a raw UA string.
       # obsidian.hostEnable = false;  # DEFAULT: false - Obsidian on host
       # obsidian.vaultPaths = [];     # e.g. [ "notes" "projects" ] — deploys CSS to each vault
 
@@ -319,11 +360,15 @@
       # font.size   = 10;             # Override base size
       # font.overrides = { alacritty = 10.5; };  # Direct per-app size override (bypasses DPI scaling)
       # font.maxSizes  = { alacritty = 10.5; polybar = 13; };  # Per-app size cap
+      # font.standaloneRelations = { alacritty = 1.05; };  # Per-app multipliers when no external monitor
+      #   Falls back to font.relations for apps not listed here.
+      # font.familyOverrides = { alacritty = "Tamzen"; };  # Per-app font family override
 
       # ─── UI layout ───────────────────────────────────────────────────
       # ui.gaps        = 15;          # DEFAULT: 15 - i3 inner gaps
       # ui.barGaps     = null;        # DEFAULT: gaps/2 - polybar float margin (null = auto)
       # ui.barHeight   = 23;          # DEFAULT: 23 - polybar height
+      # ui.barHeightRelation = 1.0;   # DEFAULT: 1.0 - bar height multiplier (applied after DPI scaling)
       # ui.barPadding  = 2;           # DEFAULT: 2  - padding inside bar
       # ui.border      = 2;           # DEFAULT: 2  - window border width
       # ui.floatingBar = true;        # DEFAULT: true  - floating polybar
@@ -355,6 +400,19 @@
       # ui.outerGapsMatchBar = false;  # DEFAULT: false - match outer i3 gaps to bar margins
       # ui.barEdgeGapsFactor = 1.0;    # DEFAULT: 1.0 - bar-to-screen-edge gap multiplier
       # ui.gapsStandaloneRelation = 1.0;  # DEFAULT: 1.0 - gap multiplier without external monitor
+
+      # ─── Bar module layout ────────────────────────────────────────────
+      # Override which modules appear in each position. null = style default.
+      # Available modules depend on polybarStyle — modular uses *-dynamic variants.
+      #
+      # ui.bar.top.left   = null;  # DEFAULT: "xworkspaces [workspace-desc] focus[-dynamic]"
+      # ui.bar.top.center = null;  # DEFAULT: "" (empty)
+      # ui.bar.top.right  = null;  # DEFAULT: metrics + date (style-dependent)
+      #   e.g. "volume-dynamic cpu-dynamic ram-dynamic date-dynamic"
+      #
+      # ui.bar.bottom.left   = null;  # DEFAULT: "power-profile-dynamic battery-dynamic ..."
+      # ui.bar.bottom.center = null;  # DEFAULT: "" (empty)
+      # ui.bar.bottom.right  = null;  # DEFAULT: VM metrics (ram, cpu, fs, tun, net)
 
       # ─── Keyboard remapping ──────────────────────────────────────────
       # keyboard.xmodmap = ''
@@ -412,16 +470,16 @@
     # ─────────────────────────────────────────────────────────────────────
     # VM COLOR INHERITANCE
     # ─────────────────────────────────────────────────────────────────────
-    # Controls how VMs inherit colors from the host colorscheme.
-    # colorschemeInheritance = "dynamic";  # DEFAULT: "dynamic"
-    #   "full"    - All colors from host
-    #   "dynamic" - Host background, VM text colors (default)
-    #   "none"    - VM uses own colorscheme independently
+    # Set in shared/graphical.nix for all machines. Uncomment to override here.
+    # colorschemeInheritance = "dynamic";  # "full", "dynamic", "none"
+
+    # vmColors.hostColorscheme = null;  # Override host colorscheme used for VM inheritance
 
     # ─────────────────────────────────────────────────────────────────────
     # NETWORKING (advanced - defaults work for most setups)
     # ─────────────────────────────────────────────────────────────────────
-    # Only change these if you have IP conflicts on your LAN or need custom subnets.
+    # Uncomment to override shared defaults for this machine only.
+    # Only needed if you have IP conflicts on your LAN or require custom subnets.
     #
     # networking = {
     #   hostIp   = "192.168.100.1";    # DEFAULT: Host IP on management bridge
@@ -437,5 +495,28 @@
     #     lurking = "192.168.107";
     #   };
     # };
+
+    # ─────────────────────────────────────────────────────────────────────
+    # EXTRA VM NETWORKS
+    # ─────────────────────────────────────────────────────────────────────
+    # Declare additional VM networks beyond the built-in set.
+    # Each entry creates: a host bridge (br-<name>), udev TAP rules, and a
+    # router subnet with DHCP. Declare in flake.nix extraNetworks (preferred)
+    # so the router VM picks them up automatically — or here for machine-specific networks.
+    #
+    # networking.extraNetworks = [
+    #   { name = "office"; subnet = "192.168.109"; routerTap = "mv-router-offi"; }
+    # ];
+
+    # ─────────────────────────────────────────────────────────────────────
+    # FILES VM
+    # ─────────────────────────────────────────────────────────────────────
+    # Encrypted inter-VM file transfer via microvm-files (CID 212).
+    # Grant it direct L2 access to specific VM bridges.
+    # See: README → Files VM (Encrypted Inter-VM Transfer)
+    #
+    # microvmFiles.enable = true;
+    # microvmFiles.accessFrom = [ "pentest" "dev" "browsing" ];
+    #   # Options: "mgmt" "pentest" "comms" "browsing" "dev" "shared" "lurking"
   };
 }

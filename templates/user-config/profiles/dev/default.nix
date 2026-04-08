@@ -24,6 +24,10 @@ let meta = import ./meta.nix; in
   hydrix.colorscheme = "puccy";
   # hydrix.vmThemeSync.focusOverrideColor = "#AABBCC";  # Per-VM focus border override (use with hydrix-focus on)
 
+  # Firefox user-agent: unset (null) keeps the real UA — useful when testing
+  # web apps where accurate browser detection matters.
+  # hydrix.graphical.firefox.userAgent = "edge-windows";
+
   # Inherit host colors for consistent look
   hydrix.vmColors.enable = true;
 

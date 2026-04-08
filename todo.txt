@@ -7,3 +7,5 @@
 [] Remove Claude mentions
 
 [] Rename `microvm` CLI command to `mvm` to avoid overriding the upstream microvm command
+
+[] microvmHost.defaultBridge — document what the actual fallback behaviour is when a TAP doesn't match a known profile bridge, and whether this option is user-useful or internal plumbing

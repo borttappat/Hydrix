@@ -26,6 +26,23 @@ let
   # Show workspace-desc module if user set descriptions OR there are VMs with workspaces
   hasWorkspaceDescriptions = workspaceDescriptions != {} || vmRegistry != {};
 
+  barCfg = config.hydrix.graphical.ui.bar;
+  wsLeft = "xworkspaces${if hasWorkspaceDescriptions then " spacer workspace-desc" else ""}";
+
+  topLeft   = if barCfg.top.left   != null then barCfg.top.left
+              else "${wsLeft} ${if isModular then "focus-dynamic" else "focus"}";
+  topCenter = if barCfg.top.center != null then barCfg.top.center else "";
+  topRight  = if barCfg.top.right  != null then barCfg.top.right
+              else if isModular
+                then "pomo-dynamic spacer sync-dynamic git-dynamic mvms-dynamic vms-dynamic spacer volume-dynamic temp-dynamic spacer ram-dynamic cpu-dynamic spacer fs-dynamic uptime-dynamic date-dynamic"
+                else "pomo git-changes vm-count vm-sync battery essid nwup nwdown ip volume temp memory cpu filesystem uptime date";
+
+  bottomLeft   = if barCfg.bottom.left   != null then barCfg.bottom.left
+                 else "power-profile-dynamic battery-dynamic battery-time-dynamic spacer rproc-dynamic cproc-dynamic";
+  bottomCenter = if barCfg.bottom.center != null then barCfg.bottom.center else "";
+  bottomRight  = if barCfg.bottom.right  != null then barCfg.bottom.right
+                 else "rproc-bottom cproc-bottom vm-ram-bottom vm-cpu-bottom spacer vm-sync-dev-bottom vm-sync-stg-bottom vm-fs-bottom spacer vm-tun-bottom vm-up-bottom";
+
   # Generate ws-icon-N = name;label lines for workspace mapping (i3 module format)
   # Format: ws-icon-0 = 1;I (index = name;display)
   workspaceIconLines = lib.concatStringsSep "\n" (
@@ -1296,9 +1313,9 @@ ${workspaceDescCases}
     separator = //
     separator-foreground = ''${colors.color2}
 
-    modules-left = xworkspaces${if hasWorkspaceDescriptions then " spacer workspace-desc" else ""} focus
-    modules-center =
-    modules-right = pomo git-changes vm-count vm-sync battery essid nwup nwdown ip volume temp memory cpu filesystem uptime date
+    modules-left = ${topLeft}
+    modules-center = ${topCenter}
+    modules-right = ${topRight}
 
     cursor-click = pointer
     cursor-scroll = ns-resize
@@ -1344,9 +1361,9 @@ ${workspaceDescCases}
     padding-left = 0
     padding-right = 0
 
-    modules-left = xworkspaces${if hasWorkspaceDescriptions then " spacer workspace-desc" else ""} focus-dynamic
-    modules-center =
-    modules-right = pomo-dynamic spacer sync-dynamic git-dynamic mvms-dynamic vms-dynamic spacer volume-dynamic temp-dynamic spacer ram-dynamic cpu-dynamic spacer fs-dynamic uptime-dynamic date-dynamic
+    modules-left = ${topLeft}
+    modules-center = ${topCenter}
+    modules-right = ${topRight}
 
     wm-restack = i3
     override-redirect = true
@@ -1408,9 +1425,9 @@ ${workspaceDescCases}
 
     ; Power profile and battery on left, Guest metrics on right
     ; Order: PWR BAT TTL gap RPROC CPROC | RAM CPU gap DEV STG FS gap TUN gap UP
-    modules-left = power-profile-dynamic battery-dynamic battery-time-dynamic spacer rproc-dynamic cproc-dynamic
-    modules-center =
-    modules-right = rproc-bottom cproc-bottom vm-ram-bottom vm-cpu-bottom spacer vm-sync-dev-bottom vm-sync-stg-bottom vm-fs-bottom spacer vm-tun-bottom vm-up-bottom
+    modules-left = ${bottomLeft}
+    modules-center = ${bottomCenter}
+    modules-right = ${bottomRight}
 
     override-redirect = ${if floatingBar then "true" else "false"}
     wm-restack = i3
