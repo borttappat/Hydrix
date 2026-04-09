@@ -156,6 +156,7 @@ declare -A CONFIG=(
     [nixosPartition]=""
     [grubExtraEntries]=""
     [oldLuksDevs]=""
+    [efiBootloaderId]=""
     [timezone]="Europe/Stockholm"
     [locale]="en_US.UTF-8"
     [consoleKeymap]="us"
@@ -1071,10 +1072,25 @@ select_layout() {
         # Show disk layout and offer to shrink an existing partition if needed
         prepare_dual_boot_space
 
-        # After partition creation, generate GRUB menu entries for any remaining
-        # encrypted partitions (other OS installs the user may want to boot into).
+        # After partition creation, record existing encrypted OS partitions so
+        # _finalize_dual_boot_entries can extract kernels from them later.
         _detect_existing_os_entries
     fi
+
+    # Derive a per-install EFI bootloader ID:
+    #   full-disk:  hydrix-<serial>     — one install per disk, stable on reinstall
+    #   dual-boot:  hydrix-<serial>-<N> — unique per NixOS partition number, so a
+    #               second install alongside gets its own UEFI entry and EFI binary
+    #               without touching the first install's entry.  Reinstalling to the
+    #               same partition reuses the same ID and updates the entry in place.
+    if [[ "${CONFIG[layout]}" == dual-boot-* && -n "${CONFIG[nixosPartition]}" ]]; then
+        local _pnum
+        _pnum=$(grep -oE '[0-9]+$' <<< "${CONFIG[nixosPartition]}")
+        CONFIG[efiBootloaderId]="hydrix-${CONFIG[serial]}-${_pnum}"
+    else
+        CONFIG[efiBootloaderId]="hydrix-${CONFIG[serial]}"
+    fi
+    log "EFI bootloader ID: ${CONFIG[efiBootloaderId]}"
 }
 
 # Scan for LUKS partitions that are neither the new NixOS partition nor the EFI
@@ -2058,6 +2074,7 @@ generate_machine_nix() {
         -e "s|@WIFI_PCI_ID@|${CONFIG[wifiPciId]}|g" \
         -e "s|@WIFI_PCI_ADDRESS@|${CONFIG[wifiPciAddress]}|g" \
         -e "s|@GRUB_GFXMODE@|${CONFIG[grubGfxmode]}|g" \
+        -e "s|@EFI_BOOTLOADER_ID@|${CONFIG[efiBootloaderId]}|g" \
         "$template_file" > "$config_dir/machines/${CONFIG[serial]}.nix"
 
     # Write GRUB extra entries as a separate Nix file to avoid quoting issues

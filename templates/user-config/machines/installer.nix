@@ -50,7 +50,7 @@
       layout = "@LAYOUT@";
       nixosPartition = "@NIXOS_PARTITION@";
       efiPartition = "@EFI_PARTITION@";
-      efiBootloaderId = "hydrix-@SERIAL@";
+      efiBootloaderId = "@EFI_BOOTLOADER_ID@";
     };
 
     router = {
