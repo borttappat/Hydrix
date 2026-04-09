@@ -69,8 +69,10 @@ in {
       firewall.enable       = false;
     };
 
+    users.groups.vault = {};
     users.users.vault = {
       isNormalUser = true;
+      group        = "vault";
       extraGroups  = [ "wheel" ];
       password     = "vault";
       home         = "/home/vault";
