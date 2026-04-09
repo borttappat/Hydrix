@@ -181,7 +181,6 @@ in {
     boot.loader = {
       grub = {
         enable = true;
-        device = "nodev";
         efiSupport = true;
         # useOSProber disabled: the installer's EFI directory scan already
         # generates chainload entries for all other OSes (Ubuntu, Windows, etc.)
@@ -194,6 +193,16 @@ in {
         # the menu is shown, and is incorrect here since Hydrix kernel/initrd
         # are on the unencrypted EFI partition.)
         extraEntries = lib.mkIf (diskoCfg.grubExtraEntries != "") diskoCfg.grubExtraEntries;
+        # Each install gets its own EFI directory and UEFI boot entry so that
+        # a second install cannot overwrite the first's EFI binary.  The ID is
+        # set per-machine in machines/<serial>.nix via hydrix.disko.efiBootloaderId.
+        mirroredBoots = [
+          {
+            devices = [ "nodev" ];
+            path = "/boot";
+            efiBootloaderId = diskoCfg.efiBootloaderId;
+          }
+        ];
       };
       efi = {
         canTouchEfiVariables = true;

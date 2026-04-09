@@ -584,6 +584,18 @@ in {
         description = "Extra GRUB menu entries for booting existing OS installs (set by installer for dual-boot)";
       };
 
+      efiBootloaderId = lib.mkOption {
+        type = lib.types.str;
+        default = "nixos";
+        description = ''
+          EFI bootloader ID — sets the directory under /boot/EFI/ and the UEFI boot
+          entry label. Use a unique value per install (e.g. "hydrix-<serial>") so that
+          multiple Hydrix installs on the same EFI partition each get their own UEFI
+          entry and EFI binary, and a second install cannot clobber the first.
+        '';
+        example = "hydrix-mb-ux5406sa";
+      };
+
       # Note: LUKS password is prompted at install time and written to /tmp/luks-password
       # It is NEVER stored in the declarative config for security reasons.
     };

@@ -1078,15 +1078,16 @@ select_layout() {
 }
 
 # Scan for LUKS partitions that are neither the new NixOS partition nor the EFI
-# partition, and generate GRUB cryptomount+configfile stanzas for them.
-# Works for any OS that had GRUB installed (NixOS, Ubuntu, Fedora, etc.).
+# partition and record them for _finalize_dual_boot_entries, which runs after
+# partition_and_mount when the EFI is mounted and can extract the actual kernel
+# files.  No GRUB entries are generated here — writing placeholder entries that
+# reference files which may not exist causes broken boot entries in GRUB.
 _detect_existing_os_entries() {
     local device="${CONFIG[device]}"
     local devname="${device##*/}"
     local sector_size
     sector_size=$(cat "/sys/class/block/$devname/queue/logical_block_size" 2>/dev/null || echo 512)
 
-    local entries=""
     for part_sys in "/sys/class/block/$devname/"/*/; do
         local part_name="${part_sys%/}"; part_name="${part_name##*/}"
         [[ "$part_name" == "${devname}"* ]] || continue
@@ -1115,28 +1116,9 @@ _detect_existing_os_entries() {
 
         log "Found existing encrypted partition: $devpath ($size_gb GB, UUID $uuid)"
 
-        # Record info for _finalize_dual_boot_entries, which runs after partition_and_mount
-        # and extracts the kernel/initrd from inside the LUKS container onto the EFI.
-        local uuid_short="${uuid:0:8}"
+        # Record for _finalize_dual_boot_entries (runs after partition_and_mount).
         CONFIG[oldLuksDevs]+="$devpath:$uuid:$uuid_nodash "
-
-        # Placeholder entry: _finalize_dual_boot_entries will replace this with an
-        # EFI-based entry (kernel/initrd on unencrypted /boot, LUKS handled by initrd)
-        # once it can read the old grub.cfg and preserve the kernel files.
-        entries+="menuentry 'Existing NixOS ($devpath)' {\n"
-        entries+="  insmod part_gpt\n"
-        entries+="  insmod fat\n"
-        entries+="  linux /old-nixos/$uuid_short/vmlinuz init=/nix/var/nix/profiles/system/init\n"
-        entries+="  initrd /old-nixos/$uuid_short/initrd\n"
-        entries+="}\n"
     done
-
-    if [[ -n "$entries" ]]; then
-        # Escape the entries for sed substitution (convert \n literals to real newlines
-        # via printf so the Nix string contains actual newlines)
-        CONFIG[grubExtraEntries]="$(printf '%b' "$entries")"
-        log "Generated GRUB entries for existing encrypted partitions"
-    fi
 }
 
 # Called after partition_and_mount, when the old EFI content is accessible at
@@ -1162,7 +1144,15 @@ _finalize_dual_boot_entries() {
     local grub_cfg="/mnt/boot/grub/grub.cfg"
     local efi_uuid
     efi_uuid=$(blkid -o value -s UUID "${CONFIG[efiPartition]}" 2>/dev/null || true)
-    [[ -n "$efi_uuid" ]] || { warn "_finalize_dual_boot_entries: cannot determine EFI UUID"; return; }
+    if [[ -z "$efi_uuid" ]]; then
+        # blkid cache may be stale immediately after mount — probe the device directly
+        efi_uuid=$(blkid --probe -o value -s UUID "${CONFIG[efiPartition]}" 2>/dev/null || true)
+    fi
+    if [[ -z "$efi_uuid" ]]; then
+        warn "_finalize_dual_boot_entries: cannot determine EFI UUID — previous install will not appear in GRUB menu"
+        generate_grub_entries_nix "$TEMP_CONFIG"
+        return
+    fi
 
     local new_entries=""
 
