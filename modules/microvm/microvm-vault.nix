@@ -21,6 +21,7 @@ in {
 
     microvm = {
       hypervisor = "qemu";
+      qemu.machine = "pc";
       vcpu = 1;
       mem  = 1024;
 
@@ -72,6 +73,7 @@ in {
       isNormalUser = true;
       extraGroups  = [ "wheel" ];
       password     = "vault";
+      home         = "/home/vault";
     };
     security.sudo.wheelNeedsPassword = false;
     services.getty.autologinUser = "vault";
