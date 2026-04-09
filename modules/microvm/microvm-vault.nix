@@ -68,6 +68,14 @@ in {
       firewall.enable       = false;
     };
 
+    users.users.vault = {
+      isNormalUser = true;
+      extraGroups  = [ "wheel" ];
+      password     = "vault";
+    };
+    security.sudo.wheelNeedsPassword = false;
+    services.getty.autologinUser = "vault";
+
     services.qemuGuest.enable = true;
     nix.enable = false;
   };
