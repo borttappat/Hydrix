@@ -29,6 +29,19 @@
 
     # Inherit nixpkgs from Hydrix for consistency
     nixpkgs.follows = "hydrix/nixpkgs";
+
+    # Optional framework inputs — user-controlled versions
+    disko.url = "github:nix-community/disko";
+    disko.inputs.nixpkgs.follows = "nixpkgs";
+
+    sops-nix.url = "github:Mic92/sops-nix";
+    sops-nix.inputs.nixpkgs.follows = "nixpkgs";
+
+    nix-index-database.url = "github:Mic92/nix-index-database";
+    nix-index-database.inputs.nixpkgs.follows = "nixpkgs";
+
+    burpsuite-nix.url = "github:Red-Flake/burpsuite-nix";
+    burpsuite-nix.inputs.nixpkgs.follows = "nixpkgs";
   };
 
   outputs = { self, hydrix, nixpkgs, ... }@inputs:
@@ -135,6 +148,7 @@
       name = builtins.replaceStrings [ ".nix" ] [ "" ] file;
       value = hydrix.lib.mkHost {
         specialArgs = { inherit self hydrix; };
+        extraInputs = { inherit (inputs) disko sops-nix nix-index-database burpsuite-nix; };
         inherit userColorschemesDir;
         modules = [
           (machinesDir + "/${file}")
@@ -202,6 +216,7 @@
       value = hydrix.lib.mkMicroVM {
         profile  = m._profileName;
         hostname = "microvm-${m._profileName}";
+        extraInputs = { inherit (inputs) nix-index-database burpsuite-nix; };
         modules  = [ vmThemeSyncModule { hydrix.vmThemeSync.enable = true; } ];
         inherit userProfiles hostConfig userColorschemesDir;
       };

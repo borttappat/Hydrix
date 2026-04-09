@@ -12,7 +12,7 @@
 { inputs }:
 
 let
-  inherit (inputs) nixpkgs home-manager stylix microvm sops-nix disko nix-index-database;
+  inherit (inputs) nixpkgs home-manager stylix microvm;
 
   # Unstable overlay
   overlay-unstable = final: prev: {
@@ -45,7 +45,6 @@ let
     ../modules/core
 
     # External modules
-    nix-index-database.nixosModules.nix-index
     home-manager.nixosModules.home-manager
     {
       home-manager.useGlobalPkgs = true;
@@ -62,47 +61,53 @@ in {
     system ? "x86_64-linux",
     modules ? [],
     specialArgs ? {},
+    extraInputs ? {},      # User-provided inputs: disko, sops-nix, nix-index-database, etc.
     userColorschemesDir ? null,
-  }: nixpkgs.lib.nixosSystem {
+  }:
+  let
+    allInputs = inputs // extraInputs;
+  in nixpkgs.lib.nixosSystem {
     inherit system;
-    specialArgs = specialArgs // { inherit inputs; };
-    modules = commonModules ++ [
-      { hydrix.userColorschemesDir = userColorschemesDir; }
-      # Base system modules (services, virtualization)
-      ../modules/base/services.nix
-      ../modules/base/virt.nix
-      ../modules/base/sops.nix
+    specialArgs = specialArgs // { inputs = allInputs; };
+    modules = commonModules
+      ++ nixpkgs.lib.optional (allInputs ? nix-index-database)
+           allInputs.nix-index-database.nixosModules.nix-index
+      ++ nixpkgs.lib.optional (allInputs ? disko)
+           allInputs.disko.nixosModules.disko
+      ++ [
+        { hydrix.userColorschemesDir = userColorschemesDir; }
+        # Base system modules (services, virtualization)
+        ../modules/base/services.nix
+        ../modules/base/virt.nix
+        ../modules/base/sops.nix
 
-      # Host scripts (rebuild, microvm CLI, hydrix-tui, etc.)
-      ../modules/base/hydrix-scripts.nix
+        # Host scripts (rebuild, microvm CLI, hydrix-tui, etc.)
+        ../modules/base/hydrix-scripts.nix
 
-      # Xpra host (VM app forwarding)
-      ../modules/base/xpra-host.nix
+        # Xpra host (VM app forwarding)
+        ../modules/base/xpra-host.nix
 
-      # MicroVM host management (virtiofsd, TAP interfaces)
-      ../modules/base/microvm-host.nix
+        # MicroVM host management (virtiofsd, TAP interfaces)
+        ../modules/base/microvm-host.nix
 
-      # Builder VM host integration
-      ../modules/base/builder-host.nix
+        # Builder VM host integration
+        ../modules/base/builder-host.nix
 
-      # Git-sync VM host integration
-      ../modules/base/gitsync-host.nix
+        # Git-sync VM host integration
+        ../modules/base/gitsync-host.nix
 
-      # Host-specific modules (networking, VFIO, specialisations, hardware)
-      ../modules/host
+        # Host-specific modules (networking, VFIO, specialisations, hardware)
+        ../modules/host
 
-      # MicroVM host support
-      microvm.nixosModules.host
+        # MicroVM host support
+        microvm.nixosModules.host
 
-      # Disko partitioning
-      disko.nixosModules.disko
+        # Graphical environment
+        ../modules/graphical
 
-      # Graphical environment
-      ../modules/graphical
-
-      # Set vmType to host
-      { hydrix.vmType = "host"; }
-    ] ++ modules;
+        # Set vmType to host
+        { hydrix.vmType = "host"; }
+      ] ++ modules;
   };
 
   # =========================================================================
@@ -119,12 +124,20 @@ in {
     profile,  # e.g., "browsing", "pentest", "dev", "comms"
     hostname,
     modules ? [],
+    extraInputs ? {},     # User-provided inputs: nix-index-database, burpsuite-nix, etc.
     userProfiles ? null,  # Path to user's profiles directory (overlays base profile)
     hostConfig ? {},      # Host settings VMs should inherit (font family, etc.)
     userColorschemesDir ? null,
-  }: nixpkgs.lib.nixosSystem {
+  }:
+  let
+    allInputs = inputs // extraInputs;
+  in nixpkgs.lib.nixosSystem {
     inherit system;
-    modules = commonModules ++ [
+    specialArgs = { inputs = allInputs; };
+    modules = commonModules
+      ++ nixpkgs.lib.optional (allInputs ? nix-index-database)
+           allInputs.nix-index-database.nixosModules.nix-index
+      ++ [
       { hydrix.userColorschemesDir = userColorschemesDir; }
       microvm.nixosModules.microvm
       ../modules/microvm/microvm-base.nix  # User setup, vsock, shares, etc.

@@ -20,25 +20,8 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
-    sops-nix = {
-      url = "github:Mic92/sops-nix";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
-
-    disko = {
-      url = "github:nix-community/disko";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
-
-    nix-index-database = {
-      url = "github:Mic92/nix-index-database";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
-
-    burpsuite-nix = {
-      url = "github:Red-Flake/burpsuite-nix";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
+    # Optional inputs (disko, sops-nix, nix-index-database, burpsuite-nix) are
+    # user-provided via extraInputs in mkHost/mkMicroVM calls. See templates/user-config/flake.nix.
   };
 
   outputs = { self, nixpkgs, ... }@inputs:
