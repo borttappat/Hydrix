@@ -39,6 +39,7 @@ let
     "mv-router-shar" = "br-shared";
     "mv-router-bldr" = "br-builder";
     "mv-router-file" = "br-files";
+    "mv-router-vaul" = "br-vault";
   } // lib.listToAttrs (map (n: {
     name  = n.routerTap;
     value = "br-${n.name}";
@@ -111,6 +112,9 @@ in {
 
       # Git-sync VM TAP → builder bridge (trusted utility VM, shares builder network)
       ACTION=="add", SUBSYSTEM=="net", KERNEL=="mv-gitsync", RUN+="${attachTapScript} %k br-builder"
+
+      # Vault VM TAP → vault bridge (headless Bitwarden credential VM)
+      ACTION=="add", SUBSYSTEM=="net", KERNEL=="mv-vault", RUN+="${attachTapScript} %k br-vault"
 
       # Task pentest slot TAP interfaces (mv-task-*) → pentest bridge
       ACTION=="add", SUBSYSTEM=="net", KERNEL=="mv-task-*", RUN+="${attachTapScript} %k br-pentest"
@@ -383,6 +387,7 @@ in {
                 mv-comms*)   bridge="br-comms" ;;
                 mv-build*)   bridge="br-builder" ;;
                 mv-gitsyn*)  bridge="br-builder" ;;
+                mv-vault)    bridge="br-vault" ;;
                 mv-task-*)   bridge="br-pentest" ;;
                 mv-files)         bridge="br-files" ;;
                 mv-files-pent)    bridge="br-pentest" ;;

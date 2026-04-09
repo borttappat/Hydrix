@@ -212,6 +212,28 @@ in {
   };
 
   # =========================================================================
+  # mkMicrovmVault - Create the MicroVM Bitwarden credential vault
+  # =========================================================================
+  # Headless VM on br-vault (192.168.213.x, CID 213).
+  # Runs the bw CLI behind a vsock service on port 14507.
+  # All Bitwarden network access is isolated here; host is never exposed.
+  #
+  mkMicrovmVault = {
+    system ? "x86_64-linux",
+    modules ? [],
+  }: nixpkgs.lib.nixosSystem {
+    inherit system;
+    modules = [
+      { nixpkgs.config.allowUnfree = true; }
+      { nixpkgs.overlays = [ overlay-unstable ]; }
+      ../modules/options.nix
+      microvm.nixosModules.microvm
+      ../modules/microvm/microvm-vault.nix
+      { hydrix.microvmVault.enable = true; }
+    ] ++ modules;
+  };
+
+  # =========================================================================
   # mkMicrovmFiles - Create the MicroVM files transfer hub
   # =========================================================================
   # The files VM acts as an encrypted jump host for inter-VM file transfers.
