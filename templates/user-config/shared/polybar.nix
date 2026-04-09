@@ -40,6 +40,14 @@
   hydrix.graphical.ui.bottomBar   = lib.mkDefault true;   # second bar with VM metrics
 
   # -------------------------------------------------------------------------
+  # Bar gaps
+  # barGaps — space between bar and screen edge in pixels (null = gaps/2)
+  # barEdgeGapsFactor — scale bar-to-edge spacing (0.0 = flush, 1.0 = full gap)
+  # -------------------------------------------------------------------------
+  # hydrix.graphical.ui.barGaps           = lib.mkDefault null;
+  # hydrix.graphical.ui.barEdgeGapsFactor = lib.mkDefault 1.0;
+
+  # -------------------------------------------------------------------------
   # Workspace labels  (number → display string)
   # -------------------------------------------------------------------------
   hydrix.graphical.ui.workspaceLabels = lib.mkDefault {
@@ -59,15 +67,24 @@
   # -------------------------------------------------------------------------
   # Module layout  (null = use style default)
   # Set to a space-separated string of module names to override.
+  # Full defaults shown below for reference — uncomment and edit to customise.
   # -------------------------------------------------------------------------
 
-  # Top bar
-  # hydrix.graphical.ui.bar.top.left   = null;  # default: xworkspaces [workspace-desc] focus[-dynamic]
-  # hydrix.graphical.ui.bar.top.center = null;  # default: (empty)
-  # hydrix.graphical.ui.bar.top.right  = null;  # default: pomo[-dynamic] git[-changes] vms battery ... date
+  # Top bar left  (default when VMs present: xworkspaces spacer workspace-desc focus-dynamic)
+  # hydrix.graphical.ui.bar.top.left = "xworkspaces spacer workspace-desc focus-dynamic";
 
-  # Bottom bar
-  # hydrix.graphical.ui.bar.bottom.left   = null;  # default: power-profile-dynamic battery[-dynamic] ...
-  # hydrix.graphical.ui.bar.bottom.center = null;  # default: (empty)
-  # hydrix.graphical.ui.bar.bottom.right  = null;  # default: VM metrics (rproc cproc vm-ram ...)
+  # Top bar center  (default: empty)
+  # hydrix.graphical.ui.bar.top.center = "";
+
+  # Top bar right  (modular default)
+  # hydrix.graphical.ui.bar.top.right = "pomo-dynamic spacer sync-dynamic git-dynamic mvms-dynamic vms-dynamic spacer volume-dynamic temp-dynamic spacer ram-dynamic cpu-dynamic spacer fs-dynamic uptime-dynamic date-dynamic";
+
+  # Bottom bar left  (modular default)
+  # hydrix.graphical.ui.bar.bottom.left = "power-profile-dynamic battery-dynamic battery-time-dynamic spacer rproc-dynamic cproc-dynamic";
+
+  # Bottom bar center  (default: empty)
+  # hydrix.graphical.ui.bar.bottom.center = "";
+
+  # Bottom bar right  (modular default)
+  # hydrix.graphical.ui.bar.bottom.right = "rproc-bottom cproc-bottom vm-ram-bottom vm-cpu-bottom spacer vm-sync-dev-bottom vm-sync-stg-bottom vm-fs-bottom spacer vm-tun-bottom vm-up-bottom";
 }

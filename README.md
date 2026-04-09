@@ -200,21 +200,39 @@ This auto-detects your current system configuration and generates a minimal Hydr
 
 ```
 ~/hydrix-config/
-├── flake.nix                    # Imports Hydrix from GitHub
+├── flake.nix                    # Imports Hydrix, defines machines and VMs
 ├── machines/
-│   └── <hostname>.nix           # Your machine config (all options here)
+│   └── <serial>.nix             # Your machine config (named by hardware serial)
 ├── profiles/                    # VM profile customizations (overlay on Hydrix base)
 │   ├── browsing/
-│   │   ├── default.nix          # Your customizations
+│   │   ├── meta.nix             # CID, bridge, subnet, workspace, label
+│   │   ├── default.nix          # NixOS config (colorscheme, resources)
+│   │   ├── packages.nix         # Profile-specific packages
 │   │   └── packages/            # Custom packages (via vm-sync)
 │   ├── pentest/
 │   ├── dev/
 │   ├── comms/
 │   └── lurking/
-├── colorschemes/                # Custom colorschemes (override framework ones)
-├── fonts/                       # Custom font configuration
-├── shared/
-│   └── common.nix               # Settings for all machines
+├── colorschemes/                # Custom colorschemes (pywal JSON format)
+├── shared/                      # Settings shared across all machines and VMs
+│   ├── common.nix               # Locale, shared packages
+│   ├── wifi.nix                 # WiFi credentials
+│   ├── fonts.nix                # Font packages and profiles
+│   ├── graphical.nix            # UI preferences (opacity, bluelight, DPI)
+│   ├── polybar.nix              # Bar style, workspace labels, module layout
+│   ├── i3.nix                   # i3 keybindings
+│   ├── fish.nix                 # Shell abbreviations and functions
+│   ├── alacritty.nix            # Terminal cursor, keyboard overrides
+│   ├── dunst.nix                # Notification preferences
+│   ├── ranger.nix               # File manager keybindings and rifle rules
+│   ├── rofi.nix                 # Launcher keybindings and extraConfig
+│   ├── zathura.nix              # PDF viewer settings
+│   ├── starship.nix             # Prompt configuration
+│   ├── vim.nix                  # Editor configuration
+│   ├── firefox.nix              # Host Firefox toggle and user-agent
+│   └── obsidian.nix             # Host Obsidian toggle and vault paths
+├── modules/                     # Local NixOS modules
+├── tasks/                       # Pentest task VM slots (task1.nix, task2.nix, ...)
 └── specialisations/
     ├── _base.nix                # Shared base packages
     ├── lockdown.nix             # Lockdown mode config
@@ -263,26 +281,26 @@ Hydrix auto-detects your config with this priority:
   let
     userProfiles = ./profiles;  # Your profile customizations
   in {
-    nixosConfigurations.myhost = hydrix.lib.mkHost {
-      modules = [ ./machines/myhost.nix ];
+    nixosConfigurations."ABC123XYZ" = hydrix.lib.mkHost {
+      modules = [ ./machines/ABC123XYZ.nix ];
     };
 
     # MicroVMs with user profiles overlaid on Hydrix base
-    nixosConfigurations.microbrowse = hydrix.lib.mkMicroVM {
+    nixosConfigurations."microvm-browsing" = hydrix.lib.mkMicroVM {
       profile = "browsing";
-      hostname = "microbrowse";
+      hostname = "microvm-browsing";
       inherit userProfiles;  # Your customizations in ./profiles/browsing/
     };
 
-    nixosConfigurations.microhack = hydrix.lib.mkMicroVM {
+    nixosConfigurations."microvm-pentest" = hydrix.lib.mkMicroVM {
       profile = "pentest";
-      hostname = "microhack";
+      hostname = "microvm-pentest";
       inherit userProfiles;
     };
 
-    # Router and builder (no user profiles needed)
-    nixosConfigurations.microrouter = hydrix.lib.mkMicrovmRouter {};
-    nixosConfigurations.microbuild = hydrix.lib.mkMicrovmBuilder {};
+    # Infrastructure VMs (not user-configurable)
+    nixosConfigurations."microvm-router"  = hydrix.lib.mkMicrovmRouter {};
+    nixosConfigurations."microvm-builder" = hydrix.lib.mkMicrovmBuilder {};
   };
 }
 ```
@@ -605,6 +623,82 @@ The `standalone` option on a VM config is the switch:
 ```nix
 hydrix.graphical.standalone = true;   # libvirt VM with own display → full WM tier
 hydrix.graphical.standalone = false;  # microVM via xpra → theming only (default)
+```
+
+### Shared Modules
+
+The `shared/` directory in your `hydrix-config` holds settings that apply to all machines. Each file is a NixOS module imported by every machine (and, where relevant, by VMs via `hostConfig`). Settings use `lib.mkDefault` so individual machine configs can override with plain assignment.
+
+| File | What it controls |
+|------|-----------------|
+| `common.nix` | Locale, shared system packages |
+| `wifi.nix` | WiFi credentials for the router VM |
+| `fonts.nix` | Font packages and per-app size relations |
+| `graphical.nix` | Opacity, bluelight filter, DPI scaling |
+| `polybar.nix` | Bar style, workspace labels, module layout |
+| `i3.nix` | i3 keybindings |
+| `fish.nix` | Shell abbreviations and functions |
+| `alacritty.nix` | Terminal cursor shape, keyboard overrides |
+| `dunst.nix` | Notification dimensions and urgency settings |
+| `ranger.nix` | File manager keybindings and rifle rules |
+| `rofi.nix` | Launcher dimensions, key bindings, fuzzy matching |
+| `zathura.nix` | PDF viewer options |
+| `starship.nix` | Full prompt configuration (TOML inlined as Nix string) |
+| `vim.nix` | Editor configuration (vimrc inlined as Nix string) |
+| `firefox.nix` | Host Firefox toggle and user-agent spoofing |
+| `obsidian.nix` | Host Obsidian toggle and vault CSS theme deployment |
+
+#### firefox.nix
+
+```nix
+# Install Firefox on the host (always enabled in VMs)
+hydrix.graphical.firefox.hostEnable = lib.mkDefault false;
+
+# User-agent preset (null = real Firefox UA):
+#   "edge-windows", "chrome-windows", "chrome-mac", "safari-mac", "firefox-windows"
+# hydrix.graphical.firefox.userAgent = lib.mkDefault "edge-windows";
+```
+
+Extensions are managed per VM profile. To add one, run inside the VM:
+```bash
+firefox-extension-add <slug>
+# slug = last part of addons.mozilla.org/en-US/firefox/addon/<slug>/
+```
+
+#### obsidian.nix
+
+```nix
+# Install Obsidian on the host
+hydrix.graphical.obsidian.hostEnable = lib.mkDefault false;
+
+# Vaults to deploy the Hydrix CSS theme snippet to (paths relative to $HOME)
+# hydrix.graphical.obsidian.vaultPaths = lib.mkDefault [ "notes" "hack_the_world" ];
+```
+
+The framework auto-generates a CSS snippet from the active colorscheme and font settings, deploying it to each vault's `.obsidian/snippets/` directory and enabling it via `appearance.json`.
+
+#### polybar.nix
+
+```nix
+hydrix.graphical.ui.polybarStyle = lib.mkDefault "modular";  # or "unibar"
+hydrix.graphical.ui.floatingBar  = lib.mkDefault true;
+hydrix.graphical.ui.bottomBar    = lib.mkDefault true;
+
+# Override module layout (null = style default)
+# hydrix.graphical.ui.bar.top.right   = "pomo-dynamic git-dynamic battery-dynamic date-dynamic";
+# hydrix.graphical.ui.bar.bottom.right = "rproc-bottom vm-ram-bottom vm-cpu-bottom";
+```
+
+Available modules for the modular style:
+```
+pomo-dynamic  sync-dynamic  git-dynamic  mvms-dynamic  vms-dynamic
+volume-dynamic  temp-dynamic  ram-dynamic  cpu-dynamic  fs-dynamic
+uptime-dynamic  date-dynamic  battery-dynamic  battery-time-dynamic
+focus-dynamic  xworkspaces  workspace-desc  spacer  power-profile-dynamic
+
+(bottom bar)
+rproc-bottom  cproc-bottom  vm-ram-bottom  vm-cpu-bottom
+vm-sync-dev-bottom  vm-sync-stg-bottom  vm-fs-bottom  vm-tun-bottom  vm-up-bottom
 ```
 
 ### Power Management
