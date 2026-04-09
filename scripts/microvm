@@ -129,6 +129,7 @@ declare -A INFRA_CIDS=(
     ["microvm-builder"]=210
     ["microvm-gitsync"]=211
     ["microvm-files"]=212
+    ["microvm-vault"]=213
     # Task pentest slots (pre-declared, permanent)
     ["microvm-pentest-task1"]=115
     ["microvm-pentest-task2"]=116
@@ -207,7 +208,8 @@ is_headless() {
     local vm_name="$1"
     [[ "$vm_name" == "microvm-router" || "$vm_name" == "microvm-builder" || \
        "$vm_name" == "microrouter" || "$vm_name" == "microbuild" || \
-       "$vm_name" == "microvm-files" || "$vm_name" == "microvm-gitsync" ]]
+       "$vm_name" == "microvm-files" || "$vm_name" == "microvm-gitsync" || \
+       "$vm_name" == "microvm-vault" ]]
 }
 
 # Check if VM is the builder
