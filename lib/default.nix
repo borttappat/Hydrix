@@ -212,14 +212,25 @@ in {
   };
 
   # =========================================================================
-  # mkMicrovmVault - Create the MicroVM Bitwarden credential vault
+  # mkInfraVm - Create a user-declared headless infrastructure VM
   # =========================================================================
-  # Headless VM on br-vault (192.168.213.x, CID 213).
-  # Runs the bw CLI behind a vsock service on port 14507.
-  # All Bitwarden network access is isolated here; host is never exposed.
+  # Provides a minimal headless base (console socket, virtiofs store, DHCP).
+  # The caller supplies CID, TAP interface, and VM-specific services via modules.
   #
-  mkMicrovmVault = {
-    system ? "x86_64-linux",
+  # Typical use in flake.nix (auto-generated from infra/<name>/meta.nix):
+  #   "microvm-vault" = hydrix.lib.mkInfraVm {
+  #     name    = "vault";
+  #     modules = [ ./infra/vault/default.nix ];
+  #   };
+  #
+  # The caller's module is expected to set:
+  #   microvm.vsock.cid     — unique vsock CID
+  #   microvm.interfaces    — TAP interface (id + mac)
+  #   (plus any VM-specific services, users, volumes)
+  #
+  mkInfraVm = {
+    name,
+    system  ? "x86_64-linux",
     modules ? [],
   }: nixpkgs.lib.nixosSystem {
     inherit system;
@@ -228,8 +239,8 @@ in {
       { nixpkgs.overlays = [ overlay-unstable ]; }
       ../modules/options.nix
       microvm.nixosModules.microvm
-      ../modules/microvm/microvm-vault.nix
-      { hydrix.microvmVault.enable = true; }
+      ../modules/microvm/microvm-infra-base.nix
+      { networking.hostName = lib.mkDefault "microvm-${name}"; }
     ] ++ modules;
   };
 

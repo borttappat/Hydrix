@@ -473,6 +473,7 @@ in {
         echo "  BLDR: $IFACE_BLDR"
         echo "  LURK: $IFACE_LURK"
         echo "  FILE: $IFACE_FILE"
+        echo "  VAUL: $IFACE_VAUL"
         ${lib.concatStringsSep "\n        " (map (n: let
           varName = builtins.replaceStrings ["-"] ["_"] n.name;
         in "echo \"  ${n.name}: $IFACE_${varName}\"") extraNetworks)}
@@ -613,8 +614,8 @@ in {
 
         ${pkgs.nftables}/bin/nft flush ruleset 2>/dev/null || true
 
-        # Define VM network ranges for clarity
-        VM_NETWORKS="{ 192.168.100.0/24, 192.168.101.0/24, 192.168.102.0/24, 192.168.103.0/24, 192.168.104.0/24, 192.168.105.0/24, 192.168.106.0/24, 192.168.107.0/24, 192.168.108.0/24 }"
+        # Define VM network ranges (built-in + user-defined extra networks)
+        VM_NETWORKS="{ 192.168.100.0/24, 192.168.101.0/24, 192.168.102.0/24, 192.168.103.0/24, 192.168.104.0/24, 192.168.105.0/24, 192.168.106.0/24, 192.168.107.0/24, 192.168.108.0/24${lib.concatMapStrings (n: ", ${n.subnet}.0/24") extraNetworks} }"
 
         ${pkgs.nftables}/bin/nft -f - << EOF
         table inet router {

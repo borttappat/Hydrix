@@ -607,7 +607,7 @@ in {
     networking = {
       bridges = lib.mkOption {
         type = lib.types.listOf lib.types.str;
-        default = [ "br-mgmt" "br-pentest" "br-comms" "br-browse" "br-dev" "br-shared" "br-builder" "br-lurking" "br-files" "br-vault" ];
+        default = [ "br-mgmt" "br-pentest" "br-comms" "br-browse" "br-dev" "br-shared" "br-builder" "br-lurking" "br-files" ];
         description = "Network bridges to create";
       };
 
@@ -684,14 +684,6 @@ in {
           hardcoded CID maps.
         '';
       };
-    };
-
-    # =========================================================================
-    # FILES VM
-    # =========================================================================
-
-    microvmVault = {
-      enable = lib.mkEnableOption "Bitwarden credential vault microVM";
     };
 
     microvmFiles = {
