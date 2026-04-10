@@ -240,7 +240,7 @@ in {
       ../modules/options.nix
       microvm.nixosModules.microvm
       ../modules/microvm/microvm-infra-base.nix
-      { networking.hostName = lib.mkDefault "microvm-${name}"; }
+      { networking.hostName = "microvm-${name}"; }
     ] ++ modules;
   };
 
