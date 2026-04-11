@@ -24,7 +24,10 @@ let meta = import ./meta.nix; in
 
   # Colorscheme for this VM
   hydrix.colorscheme = "punk";
-  # hydrix.vmThemeSync.focusOverrideColor = "#AABBCC";  # Per-VM focus border override (use with hydrix-focus on)
+  # Per-VM focus border - simple threat-level indicator for VM windows
+  # Supports named colors: red, orange, yellow, green, cyan, blue, purple, pink, magenta
+  # Or hex codes: #RRGGBB
+  # hydrix.vmThemeSync.focusBorder = "red";  # red, orange, yellow, green, etc.
 
   # Firefox user-agent: "firefox-windows" matches the Tor Browser UA, maximising
   # anonymity set when browsing over Tor (all Tor Browser users look identical).

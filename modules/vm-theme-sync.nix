@@ -199,6 +199,34 @@ in {
       description = "Hex color for i3 focus border when override mode is active";
     };
 
+    focusBorder = lib.mkOption {
+      type = lib.types.nullOr (lib.types.oneOf [
+        lib.types.str
+        (lib.types.enum [
+          "red"
+          "orange"
+          "yellow"
+          "green"
+          "cyan"
+          "blue"
+          "purple"
+          "pink"
+          "magenta"
+          "white"
+          "black"
+          "gray"
+          "grey"
+        ])
+      ]);
+      default = null;
+      description = ''
+        Focus border color for this VM profile. Supports:
+        - Named colors: red, orange, yellow, green, cyan, blue, purple, pink, magenta, white, black, gray, grey
+        - Hex codes: #RRGGBB
+        - Null: uses default focus color from colorscheme
+      '';
+    };
+
     focusDaemon = {
       mode = lib.mkOption {
         type = lib.types.enum [ "static" "dynamic" ];
@@ -409,6 +437,23 @@ CONFIG_DIR = Path("${config.hydrix.paths.configDir}")
 FRAMEWORK_DIR = Path("${config.hydrix.paths.hydrixDir}")
 SEARCH_DIRS = [CONFIG_DIR, FRAMEWORK_DIR]
 
+# Named color lookup table (X11 standard names)
+NAMED_COLORS = {
+    "red": "#ff0000",
+    "orange": "#ff8c00",
+    "yellow": "#ffff00",
+    "green": "#00ff00",
+    "cyan": "#00ffff",
+    "blue": "#0000ff",
+    "purple": "#800080",
+    "pink": "#ffc0cb",
+    "magenta": "#ff00ff",
+    "white": "#ffffff",
+    "black": "#000000",
+    "gray": "#808080",
+    "grey": "#808080",
+}
+
 
 def find_profile(vm_type):
     """Find profile file (config dir first, then framework)."""
@@ -480,13 +525,33 @@ def get_color_for_type_dynamic(vm_type):
     return get_wal_color(color_key)
 
 
+def resolve_color(color_value):
+    """Resolve a color value (named or hex) to hex format."""
+    if not color_value:
+        return None
+    # Check if it's a named color
+    if color_value.lower() in NAMED_COLORS:
+        return NAMED_COLORS[color_value.lower()]
+    # Otherwise assume it's already a hex color
+    return color_value
+
+
 def get_override_color(vm_type):
-    """Get per-VM override color from profile file."""
+    """Get per-VM override color from profile file.
+
+    Checks focusBorder first (new, simpler), then focusOverrideColor (legacy).
+    Named colors (red, orange, yellow, etc.) are resolved to hex.
+    """
     profile = find_profile(vm_type)
     if not profile:
         return None
     try:
         content = profile.read_text()
+        # Check focusBorder first (new, simpler option)
+        match = re.search(r'hydrix\.vmThemeSync\.focusBorder\s*=\s*"([^"]+)"', content)
+        if match:
+            return resolve_color(match.group(1))
+        # Fall back to focusOverrideColor (legacy, hex only)
         match = re.search(r'hydrix\.vmThemeSync\.focusOverrideColor\s*=\s*"([^"]+)"', content)
         if match:
             return match.group(1)

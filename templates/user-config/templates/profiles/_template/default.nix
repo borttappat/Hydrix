@@ -24,9 +24,10 @@ let meta = import ./meta.nix; in
   # Colorscheme for this VM (see colorschemes/ for options)
   hydrix.colorscheme = "__COLORSCHEME__";
 
-  # Per-VM focus border override — pick a color from your colorscheme palette.
-  # To find palette values: cat ~/.cache/wal/colors.json
-  # hydrix.vmThemeSync.focusOverrideColor = "#AABBCC";
+  # Per-VM focus border color - simple threat-level indicator for VM windows.
+  # Supports named colors: red, orange, yellow, green, cyan, blue, purple, pink, magenta
+  # Or hex codes: #RRGGBB
+  # hydrix.vmThemeSync.focusBorder = "orange";  # red, orange, yellow, green, etc.
 
   # Firefox user-agent: blend in or null for the real UA.
   # Presets: "edge-windows" | "chrome-windows" | "chrome-mac" | "safari-mac" | "firefox-windows"

@@ -22,7 +22,10 @@ let meta = import ./meta.nix; in
 
   # Colorscheme for this VM
   hydrix.colorscheme = "puccy";
-  # hydrix.vmThemeSync.focusOverrideColor = "#AABBCC";  # Per-VM focus border override (use with hydrix-focus on)
+  # Per-VM focus border - simple threat-level indicator for VM windows
+  # Supports named colors: red, orange, yellow, green, cyan, blue, purple, pink, magenta
+  # Or hex codes: #RRGGBB
+  # hydrix.vmThemeSync.focusBorder = "yellow";  # red, orange, yellow, green, etc.
 
   # Firefox user-agent: unset (null) keeps the real UA — useful when testing
   # web apps where accurate browser detection matters.

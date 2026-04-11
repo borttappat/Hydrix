@@ -195,6 +195,34 @@ in {
       description = "Hex color for i3 focus border when override mode is active";
     };
 
+    focusBorder = lib.mkOption {
+      type = lib.types.nullOr (lib.types.oneOf [
+        lib.types.str
+        (lib.types.enum [
+          "red"
+          "orange"
+          "yellow"
+          "green"
+          "cyan"
+          "blue"
+          "purple"
+          "pink"
+          "magenta"
+          "white"
+          "black"
+          "gray"
+          "grey"
+        ])
+      ]);
+      default = null;
+      description = ''
+        Focus border color for this VM profile. Supports:
+        - Named colors: red, orange, yellow, green, cyan, blue, purple, pink, magenta, white, black, gray, grey
+        - Hex codes: #RRGGBB
+        - Null: uses default focus color from colorscheme
+      '';
+    };
+
     focusDaemon = {
       mode = lib.mkOption {
         type = lib.types.enum [ "static" "dynamic" ];
