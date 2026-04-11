@@ -665,6 +665,17 @@ in {
         '';
       };
 
+      infraTapBridges = lib.mkOption {
+        type = lib.types.attrsOf lib.types.str;
+        default = {};
+        description = ''
+          TAP interface → bridge name mappings for infra VMs that use built-in subnets
+          (e.g. files VM with multiple bridge TAPs). Aggregated from infra meta.nix
+          tapBridges fields by flake.nix and used by microvm-host.nix to generate
+          udev rules and bridge attachment scripts.
+        '';
+      };
+
       vmRegistry = lib.mkOption {
         type = lib.types.attrsOf (lib.types.submodule {
           options = {
@@ -686,23 +697,7 @@ in {
       };
     };
 
-    microvmFiles = {
-      enable = lib.mkEnableOption "file sharing microVM";
-
-      accessFrom = lib.mkOption {
-        type = lib.types.listOf (lib.types.enum
-          [ "mgmt" "pentest" "comms" "browsing" "dev" "shared" "lurking" ]);
-        default = [];
-        description = ''
-          Bridges the files VM gets direct TAP interfaces on.
-          Each entry gives the files VM L2 access to that bridge,
-          allowing it to reach VMs on that segment.
-          Default empty — no access granted.
-        '';
-      };
-    };
-
-    # =========================================================================
+# =========================================================================
     # SECRETS
     # =========================================================================
 

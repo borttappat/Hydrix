@@ -44,6 +44,9 @@ let
     value = "br-${n.name}";
   }) config.hydrix.networking.extraNetworks);
 
+  # TAP → bridge mappings for infra VMs that use built-in subnets
+  infraTapBridges = config.hydrix.networking.infraTapBridges;
+
   # Helper script for attaching TAP interfaces to bridges with retry
   # Handles race condition where bridge may not exist yet during early boot
   attachTapScript = pkgs.writeShellScript "attach-tap-to-bridge" ''
@@ -123,23 +126,17 @@ in {
       ACTION=="add", SUBSYSTEM=="net", KERNEL=="mv-comms*",   RUN+="${attachTapScript} %k br-comms"
       ACTION=="add", SUBSYSTEM=="net", KERNEL=="mv-build*",   RUN+="${attachTapScript} %k br-builder"
 
-      # Files VM TAP interfaces — home bridge + per-bridge access TAPs
-      ACTION=="add", SUBSYSTEM=="net", KERNEL=="mv-files",      RUN+="${attachTapScript} %k br-files"
-      ACTION=="add", SUBSYSTEM=="net", KERNEL=="mv-files-pent", RUN+="${attachTapScript} %k br-pentest"
-      ACTION=="add", SUBSYSTEM=="net", KERNEL=="mv-files-brow", RUN+="${attachTapScript} %k br-browse"
-      ACTION=="add", SUBSYSTEM=="net", KERNEL=="mv-files-dev",  RUN+="${attachTapScript} %k br-dev"
-      ACTION=="add", SUBSYSTEM=="net", KERNEL=="mv-files-comm", RUN+="${attachTapScript} %k br-comms"
-      ACTION=="add", SUBSYSTEM=="net", KERNEL=="mv-files-lurk", RUN+="${attachTapScript} %k br-lurking"
-      ACTION=="add", SUBSYSTEM=="net", KERNEL=="mv-files-shar", RUN+="${attachTapScript} %k br-shared"
-
-      # VFIO device permissions for microvm user (needed for PCI passthrough)
+# VFIO device permissions for microvm user (needed for PCI passthrough)
       # This allows the microvm user to access VFIO IOMMU group devices
       SUBSYSTEM=="vfio", MODE="0666"
     '' + lib.concatMapStrings (n: ''
       # Extra network: ${n.name} (br-${n.name}, subnet ${n.subnet}.0/24)
       ACTION=="add", SUBSYSTEM=="net", KERNEL=="${n.routerTap}", RUN+="${attachTapScript} %k br-${n.name}"
       ACTION=="add", SUBSYSTEM=="net", KERNEL=="mv-${n.name}*",  RUN+="${attachTapScript} %k br-${n.name}"
-    '') config.hydrix.networking.extraNetworks;
+    '') config.hydrix.networking.extraNetworks
+    + lib.concatStringsSep "\n" (lib.mapAttrsToList (tap: bridge:
+        "      ACTION==\"add\", SUBSYSTEM==\"net\", KERNEL==\"${tap}\", RUN+=\"${attachTapScript} %k ${bridge}\""
+      ) infraTapBridges);
 
     # Trust microVM TAP interfaces in firewall
     networking.firewall.trustedInterfaces = [ "mv-+" ];
@@ -384,13 +381,10 @@ in {
                 mv-build*)   bridge="br-builder" ;;
                 mv-gitsyn*)  bridge="br-builder" ;;
                 mv-task-*)   bridge="br-pentest" ;;
-                mv-files)         bridge="br-files" ;;
-                mv-files-pent)    bridge="br-pentest" ;;
-                mv-files-brow)    bridge="br-browse" ;;
-                mv-files-dev)     bridge="br-dev" ;;
-                mv-files-comm)    bridge="br-comms" ;;
-                mv-files-lurk)    bridge="br-lurking" ;;
-                mv-files-shar)    bridge="br-shared" ;;
+                ${lib.concatStringsSep "\n                " (
+                  lib.mapAttrsToList (tap: bridge: "${tap}) bridge=\"${bridge}\" ;;") infraTapBridges
+                  ++ map (n: "mv-${n.name}*) bridge=\"br-${n.name}\" ;;") config.hydrix.networking.extraNetworks
+                )}
               esac
               if ip link show "$bridge" &>/dev/null; then
                 ip link set "$tap" master "$bridge" 2>/dev/null || true

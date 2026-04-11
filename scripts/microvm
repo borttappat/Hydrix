@@ -2164,22 +2164,43 @@ files_vm_send() {
     vsock_send "$FILES_VM_CID" "$FILES_VSOCK_PORT" "$msg"
 }
 
-# Look up vsock CID for a given VM name
+# Look up vsock CID for a given VM name.
+# Priority: infra constants → registry (/etc/hydrix/vm-registry.json) → nix eval fallback
 get_vm_cid() {
     local vm="$1"
-    # Extract vsockCid from microvm config in the nix store
-    # Fall back to known defaults
+
+    # Infrastructure VMs: fixed CIDs defined by the framework, never in the registry
     case "$vm" in
-        microvm-browsing)       echo 101 ;;
-        microvm-pentest)        echo 102 ;;
-        microvm-dev)            echo 103 ;;
-        microvm-comms)          echo 104 ;;
-        microvm-lurking)        echo 105 ;;
-        microvm-pentest-task1)  echo 115 ;;
-        microvm-pentest-task2)  echo 116 ;;
-        microvm-pentest-task3)  echo 117 ;;
-        *) log_error "Unknown VM: $vm (cannot determine vsock CID)"; return 1 ;;
+        microvm-router)  echo 200; return ;;
+        microvm-builder) echo "$BUILDER_CID"; return ;;
+        microvm-gitsync) echo "$GITSYNC_CID"; return ;;
+        microvm-files)   echo "$FILES_VM_CID"; return ;;
+        microvm-vault)   echo 213; return ;;
     esac
+
+    # Profile VMs: look up from runtime registry (written by NixOS at build time)
+    local registry="/etc/hydrix/vm-registry.json"
+    if [[ -r "$registry" ]]; then
+        local profile_name="${vm#microvm-}"
+        local cid
+        # Try by profile key first, then by vmName field
+        cid=$(jq -r --arg k "$profile_name" --arg v "$vm" \
+            '(.[$k].cid // (.[] | select(.vmName == $v) | .cid)) // empty' \
+            "$registry" 2>/dev/null | head -1)
+        if [[ -n "$cid" ]] && [[ "$cid" != "null" ]]; then
+            echo "$cid"; return
+        fi
+    fi
+
+    # Last resort: nix eval (slow, used for task VMs and anything not in registry)
+    local nix_cid
+    nix_cid=$(nix eval --json "$FLAKE_DIR#nixosConfigurations.${vm}.config.microvm.vsock.cid" 2>/dev/null || true)
+    if [[ -n "$nix_cid" ]] && [[ "$nix_cid" != "null" ]]; then
+        echo "$nix_cid"; return
+    fi
+
+    log_error "Unknown VM: $vm (not in registry, not an infra VM, nix eval failed)"
+    return 1
 }
 
 # Files: transfer <src-vm>/<path> <dest-vm>/<dest-path>
