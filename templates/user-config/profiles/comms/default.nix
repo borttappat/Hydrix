@@ -45,6 +45,7 @@ let meta = import ./meta.nix; in
     };
     # Set persistence.enable = false for ephemeral/privacy-first comms
   };
+  hydrix.networking.vmSubnet = meta.subnet;
 
   # =========================================================================
   # EXTRA PACKAGES

@@ -44,6 +44,7 @@ let meta = import ./meta.nix; in
     inherit (meta) vsockCid bridge tapId;
     persistence.enable = false;
   };
+  hydrix.networking.vmSubnet = meta.subnet;
 
   # =========================================================================
   # SERVICES

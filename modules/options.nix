@@ -625,18 +625,18 @@ in {
 
       subnets = lib.mkOption {
         type = lib.types.attrsOf lib.types.str;
-        default = {
-          mgmt = "192.168.100";
-          pentest = "192.168.101";
-          comms = "192.168.102";
-          lurking = "192.168.107";
-          browsing = "192.168.103";
-          dev = "192.168.104";
-          shared = "192.168.105";
-          builder = "192.168.106";
-          files = "192.168.108";
-        };
-        description = "Subnet prefixes per bridge (without last octet)";
+        default = {};
+        description = "Subnet prefixes per bridge (without last octet). Kept for compatibility; prefer vmSubnet.";
+      };
+
+      vmSubnet = lib.mkOption {
+        type = lib.types.str;
+        default = "";
+        description = ''
+          This VM's own subnet prefix (e.g. "192.168.102"). Set in each
+          profile's default.nix from its meta.nix. Used by files-agent to
+          open port 8888 to the files VM (.2 on this subnet).
+        '';
       };
 
       extraNetworks = lib.mkOption {

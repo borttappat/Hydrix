@@ -43,6 +43,7 @@ let meta = import ./meta.nix; in
     };
     secrets.github = true;
   };
+  hydrix.networking.vmSubnet = meta.subnet;
 
   # Inherit host colors for consistent look
   # full = use all host colors | dynamic = host bg + vm text | none = ignore host

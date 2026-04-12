@@ -39,7 +39,7 @@ let
   username = config.hydrix.username;
   userHome = "/home/${username}";
   vmType = config.hydrix.vmType;
-  subnets = config.hydrix.networking.subnets;
+  vmSubnet = config.hydrix.networking.vmSubnet;
 
   # Serve script: one-shot HTTP server serving ~/shared/xfer.enc
   serveScript = pkgs.writeShellScript "vm-files-serve" ''
@@ -276,8 +276,9 @@ in {
 
     # Firewall: open port 8888 exclusively for the files VM (.2 on this bridge).
     # The files VM reaches this VM's HTTP server (port 8888) during transfers.
-    networking.firewall.extraCommands = lib.mkIf (vmType != null && subnets ? ${vmType}) ''
-      iptables -A nixos-fw -p tcp --dport 8888 -s ${subnets.${vmType}}.2 -j ACCEPT
+    # vmSubnet is set from the profile's own meta.nix via hydrix.networking.vmSubnet.
+    networking.firewall.extraCommands = lib.mkIf (vmSubnet != "") ''
+      iptables -A nixos-fw -p tcp --dport 8888 -s ${vmSubnet}.2 -j ACCEPT
     '';
 
     environment.systemPackages = with pkgs; [

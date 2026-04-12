@@ -50,6 +50,7 @@ let meta = import ./meta.nix; in
     };
     secrets.github = true;
   };
+  hydrix.networking.vmSubnet = meta.subnet;
 
   # =========================================================================
   # SERVICES
