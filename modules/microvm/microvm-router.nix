@@ -91,6 +91,8 @@ in {
     ../options.nix
     # QEMU Guest profile for virtio modules
     (modulesPath + "/profiles/qemu-guest.nix")
+    # LAN control service (pentest VM LAN access toggle)
+    ../../router-lan-control.nix
   ];
 
   # ===== MicroVM Router Options =====
@@ -865,6 +867,9 @@ in {
       # VPN management scripts
       (writeShellScriptBin "vpn-assign" (builtins.readFile ../../scripts/vpn-assign.sh))
       (writeShellScriptBin "vpn-status" (builtins.readFile ../../scripts/vpn-status.sh))
+
+      # LAN control script (pentest VM LAN access toggle)
+      (writeShellScriptBin "lan-control" (builtins.readFile ../../modules/router-lan-control/nix))
     ];
 
     # ===== Tmpfiles =====
@@ -890,6 +895,7 @@ in {
       │  vpn-status           Network & VPN status          │
       │  vpn-assign --help    VPN routing commands          │
       │  wifi-sync            WiFi credential sync          │
+      │  lan-control          Pentest LAN toggle            │
       └─────────────────────────────────────────────────────┘
 
     '';
