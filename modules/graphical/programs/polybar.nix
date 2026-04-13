@@ -10,10 +10,12 @@
 # NOTE: This module generates a TEMPLATE config with placeholders:
 #   @@FONT_SIZE@@, @@BAR_HEIGHT@@, @@FONT_NAME@@, @@GAPS@@, @@CORNER_RADIUS@@
 # The display-setup script substitutes these at runtime based on detected DPI.
-
-{ config, lib, pkgs, ... }:
-
-let
+{
+  config,
+  lib,
+  pkgs,
+  ...
+}: let
   username = config.hydrix.username;
   vmType = config.hydrix.vmType;
   isVM = vmType != null && vmType != "host";
@@ -27,27 +29,49 @@ let
   hasWorkspaceDescriptions = workspaceDescriptions != {} || vmRegistry != {};
 
   barCfg = config.hydrix.graphical.ui.bar;
-  wsLeft = "xworkspaces${if hasWorkspaceDescriptions then " spacer workspace-desc" else ""}";
+  wsLeft = "xworkspaces${
+    if hasWorkspaceDescriptions
+    then " spacer workspace-desc"
+    else ""
+  }";
 
-  topLeft   = if barCfg.top.left   != null then barCfg.top.left
-              else "${wsLeft} ${if isModular then "focus-dynamic" else "focus"}";
-  topCenter = if barCfg.top.center != null then barCfg.top.center else "";
-  topRight  = if barCfg.top.right  != null then barCfg.top.right
-              else if isModular
-                then "pomo-dynamic spacer sync-dynamic git-dynamic mvms-dynamic vms-dynamic spacer volume-dynamic temp-dynamic spacer ram-dynamic cpu-dynamic spacer fs-dynamic uptime-dynamic date-dynamic"
-                else "pomo git-changes vm-count vm-sync battery essid nwup nwdown ip volume temp memory cpu filesystem uptime date";
+  topLeft =
+    if barCfg.top.left != null
+    then barCfg.top.left
+    else "${wsLeft} ${
+      if isModular
+      then "focus-dynamic"
+      else "focus"
+    }";
+  topCenter =
+    if barCfg.top.center != null
+    then barCfg.top.center
+    else "";
+  topRight =
+    if barCfg.top.right != null
+    then barCfg.top.right
+    else if isModular
+    then "pomo-dynamic spacer sync-dynamic git-dynamic mvms-dynamic vms-dynamic spacer volume-dynamic temp-dynamic spacer ram-dynamic cpu-dynamic spacer fs-dynamic uptime-dynamic date-dynamic"
+    else "pomo git-changes vm-count vm-sync battery essid nwup nwdown ip volume temp memory cpu filesystem uptime date";
 
-  bottomLeft   = if barCfg.bottom.left   != null then barCfg.bottom.left
-                 else "power-profile-dynamic battery-dynamic battery-time-dynamic spacer rproc-dynamic cproc-dynamic";
-  bottomCenter = if barCfg.bottom.center != null then barCfg.bottom.center else "";
-  bottomRight  = if barCfg.bottom.right  != null then barCfg.bottom.right
-                 else "rproc-bottom cproc-bottom vm-ram-bottom vm-cpu-bottom spacer vm-sync-dev-bottom vm-sync-stg-bottom vm-fs-bottom spacer vm-tun-bottom vm-up-bottom";
+  bottomLeft =
+    if barCfg.bottom.left != null
+    then barCfg.bottom.left
+    else "power-profile-dynamic battery-dynamic battery-time-dynamic spacer rproc-dynamic cproc-dynamic";
+  bottomCenter =
+    if barCfg.bottom.center != null
+    then barCfg.bottom.center
+    else "";
+  bottomRight =
+    if barCfg.bottom.right != null
+    then barCfg.bottom.right
+    else "rproc-bottom cproc-bottom vm-ram-bottom vm-cpu-bottom spacer vm-sync-dev-bottom vm-sync-stg-bottom vm-fs-bottom spacer wifi-sync-bottom spacer vm-tun-bottom vm-up-bottom";
 
   # Generate ws-icon-N = name;label lines for workspace mapping (i3 module format)
   # Format: ws-icon-0 = 1;I (index = name;display)
   workspaceIconLines = lib.concatStringsSep "\n" (
     lib.imap0 (i: pair: "ws-icon-${toString i} = ${pair.name};${pair.value}")
-      (lib.mapAttrsToList (name: value: { inherit name value; }) workspaceLabels)
+    (lib.mapAttrsToList (name: value: {inherit name value;}) workspaceLabels)
   );
 
   # Generate case statement entries for workspace descriptions
@@ -597,29 +621,29 @@ let
 
   # WORKSPACE DESC: Shows current workspace description with underline
   workspaceDescScript = pkgs.writeShellScript "polybar-workspace-desc" ''
-    # Get current workspace number
-    ws=$(${pkgs.i3}/bin/i3-msg -t get_workspaces 2>/dev/null | ${pkgs.jq}/bin/jq -r '.[] | select(.focused==true) | .name' | head -1)
+        # Get current workspace number
+        ws=$(${pkgs.i3}/bin/i3-msg -t get_workspaces 2>/dev/null | ${pkgs.jq}/bin/jq -r '.[] | select(.focused==true) | .name' | head -1)
 
-    # Look up description from user-configured workspaceDescriptions
-    case "$ws" in
-${workspaceDescCases}
-    *) desc="" ;;
-    esac
+        # Look up description from user-configured workspaceDescriptions
+        case "$ws" in
+    ${workspaceDescCases}
+        *) desc="" ;;
+        esac
 
-    # Fallback: look up label from VM registry (covers auto-discovered VM types)
-    if [ -z "$desc" ]; then
-      VM_REGISTRY="/etc/hydrix/vm-registry.json"
-      if [[ -f "$VM_REGISTRY" ]]; then
-        desc=$(${jq} -r --argjson w "$ws" \
-          'to_entries[] | select(.value.workspace == $w) | .value.label // ""' \
-          "$VM_REGISTRY" 2>/dev/null | head -1)
-      fi
-    fi
+        # Fallback: look up label from VM registry (covers auto-discovered VM types)
+        if [ -z "$desc" ]; then
+          VM_REGISTRY="/etc/hydrix/vm-registry.json"
+          if [[ -f "$VM_REGISTRY" ]]; then
+            desc=$(${jq} -r --argjson w "$ws" \
+              'to_entries[] | select(.value.workspace == $w) | .value.label // ""' \
+              "$VM_REGISTRY" 2>/dev/null | head -1)
+          fi
+        fi
 
-    if [ -n "$desc" ]; then
-      ${getColorHelper}
-      echo "%{F$color_prefix}WS %{F-}%{u$color_normal}%{+u}$desc%{-u}"
-    fi
+        if [ -n "$desc" ]; then
+          ${getColorHelper}
+          echo "%{F$color_prefix}WS %{F-}%{u$color_normal}%{+u}$desc%{-u}"
+        fi
   '';
 
   # ============================================================
@@ -1073,6 +1097,55 @@ ${workspaceDescCases}
     fi
   '';
 
+  # WIFI: WiFi sync status - Router VM only (workspace 10)
+  # Only visible when router VM is active on ws10
+  wifiSyncBottomScript = pkgs.writeShellScript "polybar-wifi-sync-bottom" ''
+    ${getColorHelper}
+
+    ROUTER_CID=200
+    ROUTER_PORT=14506
+    WIFI_NIX="$HOME/hydrix-config/shared/wifi.nix"
+
+    # Only show on router workspace (ws10)
+    current_ws=$(${pkgs.i3}/bin/i3-msg -t get_workspaces | ${jq} '.[] | select(.focused==true) | .num' 2>/dev/null)
+    if [[ "$current_ws" != "10" ]]; then
+      echo ""
+      exit 0
+    fi
+
+    # Query router
+    result=$(echo "POLL" | ${timeout} 1 ${socat} - VSOCK-CONNECT:$ROUTER_CID:$ROUTER_PORT 2>/dev/null)
+
+    if [[ -z "$result" ]]; then
+      echo ""
+      exit 0
+    fi
+
+    # Get router networks
+    router_count=$(echo "$result" | ${jq} '.networks | length' 2>/dev/null || echo "0")
+
+    # Get local SSID
+    local_ssid=""
+    if [[ -f "$WIFI_NIX" ]]; then
+      local_ssid=$(grep -oP 'ssid\s*=\s*"\K[^"]+' "$WIFI_NIX" 2>/dev/null | head -1 || echo "")
+    fi
+
+    # Get router SSID
+    router_ssid=$(echo "$result" | ${jq} -r '.networks[0].ssid // ""' 2>/dev/null)
+
+    if [[ "$router_ssid" != "$local_ssid" && -n "$router_ssid" && -n "$local_ssid" ]]; then
+      # Mismatch - pending sync needed (amber/alert color)
+      echo "%{F$color_alert}WIFI %{u$color_alert}%{+u}$router_count%{-u}"
+    elif [[ -n "$router_ssid" ]]; then
+      # In sync
+      echo "%{F$color_prefix}WIFI %{u$color_normal}%{+u}$router_count%{-u}"
+    else
+      # No networks - hide module
+      echo ""
+      exit 0
+    fi
+  '';
+
   # VM TUN: Active VPN/tun interfaces
   vmTunBottomScript = pkgs.writeShellScript "polybar-vm-tun-bottom" ''
     ${getColorHelper}
@@ -1273,23 +1346,35 @@ ${workspaceDescCases}
     [bar/main]
     monitor = ''${env:MONITOR:}
     bottom = false
-    ${if floatingBar then ''
-    ; Floating bar: BAR_EDGE_GAPS on all sides (adjustable via barEdgeGapsFactor)
-    width = 100%:-@@DOUBLE_BAR_EDGE_GAPS@@
-    offset-x = @@BAR_EDGE_GAPS@@
-    offset-y = @@BAR_EDGE_GAPS@@
-    '' else ''
-    ; Docked bar
-    width = 100%
-    offset-x = 0
-    offset-y = 0
-    ''}
+    ${
+      if floatingBar
+      then ''
+        ; Floating bar: BAR_EDGE_GAPS on all sides (adjustable via barEdgeGapsFactor)
+        width = 100%:-@@DOUBLE_BAR_EDGE_GAPS@@
+        offset-x = @@BAR_EDGE_GAPS@@
+        offset-y = @@BAR_EDGE_GAPS@@
+      ''
+      else ''
+        ; Docked bar
+        width = 100%
+        offset-x = 0
+        offset-y = 0
+      ''
+    }
     height = @@BAR_HEIGHT@@
     fixed-center = true
-    radius = ${if floatingBar then "@@CORNER_RADIUS@@" else "0.0"}
+    radius = ${
+      if floatingBar
+      then "@@CORNER_RADIUS@@"
+      else "0.0"
+    }
 
     wm-restack = i3
-    override-redirect = ${if floatingBar then "true" else "false"}
+    override-redirect = ${
+      if floatingBar
+      then "true"
+      else "false"
+    }
     enable-ipc = true
 
     background = ''${colors.color1}
@@ -1397,19 +1482,23 @@ ${workspaceDescCases}
     [bar/bottom]
     monitor = ''${env:MONITOR:}
     bottom = true
-    ${if floatingBar then ''
-    ; Floating bar: BAR_EDGE_GAPS on all sides (adjustable via barEdgeGapsFactor)
-    width = 100%:-@@DOUBLE_BAR_EDGE_GAPS@@
-    offset-x = @@BAR_EDGE_GAPS@@
-    offset-y = @@BAR_EDGE_GAPS@@
-    radius = @@CORNER_RADIUS@@
-    '' else ''
-    ; Docked bar
-    width = 100%
-    offset-x = 0
-    offset-y = 0
-    radius = 0
-    ''}
+    ${
+      if floatingBar
+      then ''
+        ; Floating bar: BAR_EDGE_GAPS on all sides (adjustable via barEdgeGapsFactor)
+        width = 100%:-@@DOUBLE_BAR_EDGE_GAPS@@
+        offset-x = @@BAR_EDGE_GAPS@@
+        offset-y = @@BAR_EDGE_GAPS@@
+        radius = @@CORNER_RADIUS@@
+      ''
+      else ''
+        ; Docked bar
+        width = 100%
+        offset-x = 0
+        offset-y = 0
+        radius = 0
+      ''
+    }
     height = @@BAR_HEIGHT@@
     fixed-center = true
 
@@ -1429,7 +1518,11 @@ ${workspaceDescCases}
     modules-center = ${bottomCenter}
     modules-right = ${bottomRight}
 
-    override-redirect = ${if floatingBar then "true" else "false"}
+    override-redirect = ${
+      if floatingBar
+      then "true"
+      else "false"
+    }
     wm-restack = i3
     enable-ipc = true
 
@@ -1445,27 +1538,47 @@ ${workspaceDescCases}
 
     ; Small gap between workspace labels
     label-separator = " "
-    ${if isModular then "label-separator-background = \${colors.transparent}" else ""}
+    ${
+      if isModular
+      then "label-separator-background = \${colors.transparent}"
+      else ""
+    }
 
     ; Workspace name to display label mapping (Roman numerals)
     ${workspaceIconLines}
 
     label-focused = %icon%
-    ${if isModular then ''
-    label-focused-background = ''${colors.module-bg}
-    label-focused-underline = ''${colors.underline}
-    '' else ''
-    label-focused-underline = ''${colors.color2}
-    ''}
+    ${
+      if isModular
+      then ''
+        label-focused-background = ''${colors.module-bg}
+        label-focused-underline = ''${colors.underline}
+      ''
+      else ''
+        label-focused-underline = ''${colors.color2}
+      ''
+    }
     label-focused-padding = 1
     label-unfocused = %icon%
-    ${if isModular then "label-unfocused-background = \${colors.module-bg}" else ""}
+    ${
+      if isModular
+      then "label-unfocused-background = \${colors.module-bg}"
+      else ""
+    }
     label-unfocused-padding = 1
     label-visible = %icon%
-    ${if isModular then "label-visible-background = \${colors.module-bg}" else ""}
+    ${
+      if isModular
+      then "label-visible-background = \${colors.module-bg}"
+      else ""
+    }
     label-visible-padding = 1
     label-urgent = %icon%
-    ${if isModular then "label-urgent-background = \${colors.module-bg}" else ""}
+    ${
+      if isModular
+      then "label-urgent-background = \${colors.module-bg}"
+      else ""
+    }
     label-urgent-padding = 1
 
     [module/xworkspaces-vm]
@@ -1583,12 +1696,16 @@ ${workspaceDescCases}
     format-disconnected-prefix-foreground = ''${colors.color3}
     format-disconnected-prefix-underline = ''${colors.color2}
     label-disconnected-underline = ''${colors.color2}
-    ${if isModular then ''
-    format-connected-background = ''${colors.module-bg}
-    format-connected-padding = 1
-    format-disconnected-background = ''${colors.module-bg}
-    format-disconnected-padding = 1
-    '' else ""}
+    ${
+      if isModular
+      then ''
+        format-connected-background = ''${colors.module-bg}
+        format-connected-padding = 1
+        format-disconnected-background = ''${colors.module-bg}
+        format-disconnected-padding = 1
+      ''
+      else ""
+    }
 
     [module/nwup]
     type = internal/network
@@ -1632,14 +1749,22 @@ ${workspaceDescCases}
     date = %d/%m/%Y
     time = %H:%M
     format-prefix = "DATE "
-    format-prefix-foreground = ''${colors.${if isModular then "prefix" else "color3"}}
-    ${if isModular then ''
-    format-background = ''${colors.module-bg}
-    format-padding = 1
-    format-underline = ''${colors.underline}
-    '' else ''
-    format-underline = ''${colors.color2}
-    ''}
+    format-prefix-foreground = ''${colors.${
+      if isModular
+      then "prefix"
+      else "color3"
+    }}
+    ${
+      if isModular
+      then ''
+        format-background = ''${colors.module-bg}
+        format-padding = 1
+        format-underline = ''${colors.underline}
+      ''
+      else ''
+        format-underline = ''${colors.color2}
+      ''
+    }
     label = %date% %time%
 
     [module/volume]
@@ -1744,23 +1869,35 @@ ${workspaceDescCases}
     type = custom/script
     exec = ${focusDynamicScript}
     interval = 2
-    ${if isModular then ''
-    format-background = ''${colors.module-bg}
-    format-padding = 1
-    '' else ""}
+    ${
+      if isModular
+      then ''
+        format-background = ''${colors.module-bg}
+        format-padding = 1
+      ''
+      else ""
+    }
     label = %output%
 
-    ${if hasWorkspaceDescriptions then ''
-    [module/workspace-desc]
-    type = custom/script
-    exec = ${workspaceDescScript}
-    interval = 0.5
-    ${if isModular then ''
-    format-background = ''${colors.module-bg}
-    format-padding = 1
-    '' else ""}
-    label = %output%
-    '' else ""}
+    ${
+      if hasWorkspaceDescriptions
+      then ''
+        [module/workspace-desc]
+        type = custom/script
+        exec = ${workspaceDescScript}
+        interval = 0.5
+        ${
+          if isModular
+          then ''
+            format-background = ''${colors.module-bg}
+            format-padding = 1
+          ''
+          else ""
+        }
+        label = %output%
+      ''
+      else ""
+    }
 
     [module/sync-dynamic]
     type = custom/script
@@ -1998,6 +2135,15 @@ ${workspaceDescCases}
     format-padding = 1
     label = %output%
 
+    [module/wifi-sync-bottom]
+    type = custom/script
+    exec = ${wifiSyncBottomScript}
+    interval = 30
+    format-background = ''${colors.module-bg}
+    format-padding = 1
+    label = %output%
+    click-left = wifi-sync poll
+
     [module/vm-tun-bottom]
     type = custom/script
     exec = ${vmTunBottomScript}
@@ -2013,17 +2159,23 @@ ${workspaceDescCases}
 
   # Generate polybar config content as a template
   polybarTemplate = pkgs.writeText "polybar-config-template.ini" ''
-    ${if isModular then modularTemplate else unibarTemplate}
+    ${
+      if isModular
+      then modularTemplate
+      else unibarTemplate
+    }
     ${commonModules}
   '';
-
 in {
   config = lib.mkIf config.hydrix.graphical.enable {
-    home-manager.users.${username} = { pkgs, ... }: {
+    home-manager.users.${username} = {pkgs, ...}: {
       # Install polybar package but DON'T use services.polybar
       # display-setup handles startup with runtime DPI scaling
       home.packages = [
-        (pkgs.polybar.override { i3Support = true; pulseSupport = true; })
+        (pkgs.polybar.override {
+          i3Support = true;
+          pulseSupport = true;
+        })
       ];
 
       # Deploy the template config

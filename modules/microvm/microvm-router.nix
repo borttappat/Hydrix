@@ -17,9 +17,13 @@
 #   - Only ONE should run at a time (both need the WiFi card)
 #   - To revert: stop microvm-router, start libvirt router
 #
-{ config, lib, pkgs, modulesPath, ... }:
-
-let
+{
+  config,
+  lib,
+  pkgs,
+  modulesPath,
+  ...
+}: let
   # Access central options
   cfg = config.hydrix;
   locale = cfg.locale;
@@ -39,16 +43,24 @@ let
   # WiFi networks for automatic connection (supports multiple networks)
   # New format: wifiNetworks = [ { ssid = "..."; password = "..."; priority = 100; } ]
   # Legacy format: wifiSSID + wifiPassword (converted to single-network list)
-  wifiNetworks =
-    let
-      newFormat = routerCfg.wifi.networks;
-      legacySSID = routerCfg.wifi.ssid;
-      legacyPassword = routerCfg.wifi.password;
-      legacyNetwork = if legacySSID != "" && legacyPassword != ""
-        then [{ ssid = legacySSID; password = legacyPassword; priority = 100; }]
-        else [];
-    in
-      if newFormat != [] then newFormat else legacyNetwork;
+  wifiNetworks = let
+    newFormat = routerCfg.wifi.networks;
+    legacySSID = routerCfg.wifi.ssid;
+    legacyPassword = routerCfg.wifi.password;
+    legacyNetwork =
+      if legacySSID != "" && legacyPassword != ""
+      then [
+        {
+          ssid = legacySSID;
+          password = legacyPassword;
+          priority = 100;
+        }
+      ]
+      else [];
+  in
+    if newFormat != []
+    then newFormat
+    else legacyNetwork;
   hasWifiCredentials = wifiNetworks != [];
 
   # WiFi PCI address from hardware options
@@ -73,7 +85,6 @@ let
 
   vmName = config.networking.hostName;
   extraNetworks = cfg.networking.extraNetworks;
-
 in {
   imports = [
     # Central options for config access
@@ -92,19 +103,21 @@ in {
   };
 
   config = {
-    assertions = [{
-      assertion = wifiPciAddress != "";
-      message = ''
-        hydrix.hardware.vfio.wifiPciAddress is empty — the router VM needs a WiFi PCI
-        address for VFIO passthrough. Pass wifiPciAddress to mkMicrovmRouter in your flake:
+    assertions = [
+      {
+        assertion = wifiPciAddress != "";
+        message = ''
+          hydrix.hardware.vfio.wifiPciAddress is empty — the router VM needs a WiFi PCI
+          address for VFIO passthrough. Pass wifiPciAddress to mkMicrovmRouter in your flake:
 
-          "microvm-router" = hydrix.lib.mkMicrovmRouter {
-            wifiPciAddress = "00:14.3";  # from: lspci -D | grep -i wireless
-          };
+            "microvm-router" = hydrix.lib.mkMicrovmRouter {
+              wifiPciAddress = "00:14.3";  # from: lspci -D | grep -i wireless
+            };
 
-        The address should be in XX:XX.X format (without the 0000: domain prefix).
-      '';
-    }];
+          The address should be in XX:XX.X format (without the 0000: domain prefix).
+        '';
+      }
+    ];
 
     # ===== Basic Identity =====
     networking.hostName = lib.mkDefault "microvm-router";
@@ -115,12 +128,12 @@ in {
     # ===== MicroVM Configuration =====
     microvm = {
       hypervisor = "qemu";
-      qemu.machine = "q35";  # Q35 chipset - better PCIe/VFIO support (matches libvirt router)
-      qemu.package = qemuNoSeccomp;  # QEMU without seccomp - disables sandbox for VFIO
+      qemu.machine = "q35"; # Q35 chipset - better PCIe/VFIO support (matches libvirt router)
+      qemu.package = qemuNoSeccomp; # QEMU without seccomp - disables sandbox for VFIO
 
       # Resources - router is lightweight
       vcpu = 2;
-      mem = 1024;  # 1GB should be plenty
+      mem = 1024; # 1GB should be plenty
 
       # No store disk - we'll use virtiofs like other microvms
       storeDiskType = "squashfs";
@@ -132,60 +145,89 @@ in {
       # ===== Network Interfaces =====
       # Primary TAP interface (br-mgmt) - defined in microvm.interfaces
       # (additional TAPs added via qemu.extraArgs below)
-      interfaces = [{
-        type = "tap";
-        id = "mv-router-mgmt";
-        mac = "02:00:00:01:00:01";  # Static MAC for router management
-      }];
+      interfaces = [
+        {
+          type = "tap";
+          id = "mv-router-mgmt";
+          mac = "02:00:00:01:00:01"; # Static MAC for router management
+        }
+      ];
 
       # ===== Additional Network Interfaces + PCI Passthrough =====
       # Added via qemu.extraArgs for proper control over device ordering
-      qemu.extraArgs = [
-        # Headless flags
-        "-vga" "none"
-        "-display" "none"
+      qemu.extraArgs =
+        [
+          # Headless flags
+          "-vga"
+          "none"
+          "-display"
+          "none"
 
-        # Additional serial console via unix socket for interactive access
-        # Connect with: socat -,rawer unix-connect:/var/lib/microvms/${config.networking.hostName}/console.sock
-        "-chardev" "socket,id=console,path=/var/lib/microvms/${config.networking.hostName}/console.sock,server=on,wait=off"
-        "-serial" "chardev:console"
+          # Additional serial console via unix socket for interactive access
+          # Connect with: socat -,rawer unix-connect:/var/lib/microvms/${config.networking.hostName}/console.sock
+          "-chardev"
+          "socket,id=console,path=/var/lib/microvms/${config.networking.hostName}/console.sock,server=on,wait=off"
+          "-serial"
+          "chardev:console"
 
-        # PCIe root port for VFIO passthrough (required for Q35)
-        "-device" "pcie-root-port,id=pcie.1,slot=1,chassis=1"
-        # WiFi PCI passthrough via VFIO - attached to PCIe root port
-        # Strip "0000:" prefix if user provided full format (handles both "00:14.3" and "0000:00:14.3")
-        "-device" "vfio-pci,host=0000:${lib.removePrefix "0000:" wifiPciAddress},bus=pcie.1"
+          # PCIe root port for VFIO passthrough (required for Q35)
+          "-device"
+          "pcie-root-port,id=pcie.1,slot=1,chassis=1"
+          # WiFi PCI passthrough via VFIO - attached to PCIe root port
+          # Strip "0000:" prefix if user provided full format (handles both "00:14.3" and "0000:00:14.3")
+          "-device"
+          "vfio-pci,host=0000:${lib.removePrefix "0000:" wifiPciAddress},bus=pcie.1"
 
-        # Additional TAP interfaces for each bridge
-        # TAP interfaces created by host-side systemd service
-        "-netdev" "tap,id=net-pentest,ifname=mv-router-pent,script=no,downscript=no"
-        "-device" "virtio-net-pci,netdev=net-pentest,mac=02:00:00:01:01:01"
+          # Additional TAP interfaces for each bridge
+          # TAP interfaces created by host-side systemd service
+          "-netdev"
+          "tap,id=net-pentest,ifname=mv-router-pent,script=no,downscript=no"
+          "-device"
+          "virtio-net-pci,netdev=net-pentest,mac=02:00:00:01:01:01"
 
-        "-netdev" "tap,id=net-comms,ifname=mv-router-comm,script=no,downscript=no"
-        "-device" "virtio-net-pci,netdev=net-comms,mac=02:00:00:01:02:01"
+          "-netdev"
+          "tap,id=net-comms,ifname=mv-router-comm,script=no,downscript=no"
+          "-device"
+          "virtio-net-pci,netdev=net-comms,mac=02:00:00:01:02:01"
 
-        "-netdev" "tap,id=net-browse,ifname=mv-router-brow,script=no,downscript=no"
-        "-device" "virtio-net-pci,netdev=net-browse,mac=02:00:00:01:03:01"
+          "-netdev"
+          "tap,id=net-browse,ifname=mv-router-brow,script=no,downscript=no"
+          "-device"
+          "virtio-net-pci,netdev=net-browse,mac=02:00:00:01:03:01"
 
-        "-netdev" "tap,id=net-dev,ifname=mv-router-dev,script=no,downscript=no"
-        "-device" "virtio-net-pci,netdev=net-dev,mac=02:00:00:01:04:01"
+          "-netdev"
+          "tap,id=net-dev,ifname=mv-router-dev,script=no,downscript=no"
+          "-device"
+          "virtio-net-pci,netdev=net-dev,mac=02:00:00:01:04:01"
 
-        "-netdev" "tap,id=net-shared,ifname=mv-router-shar,script=no,downscript=no"
-        "-device" "virtio-net-pci,netdev=net-shared,mac=02:00:00:01:05:01"
+          "-netdev"
+          "tap,id=net-shared,ifname=mv-router-shar,script=no,downscript=no"
+          "-device"
+          "virtio-net-pci,netdev=net-shared,mac=02:00:00:01:05:01"
 
-        "-netdev" "tap,id=net-builder,ifname=mv-router-bldr,script=no,downscript=no"
-        "-device" "virtio-net-pci,netdev=net-builder,mac=02:00:00:01:06:01"
+          "-netdev"
+          "tap,id=net-builder,ifname=mv-router-bldr,script=no,downscript=no"
+          "-device"
+          "virtio-net-pci,netdev=net-builder,mac=02:00:00:01:06:01"
 
-        "-netdev" "tap,id=net-lurking,ifname=mv-router-lurk,script=no,downscript=no"
-        "-device" "virtio-net-pci,netdev=net-lurking,mac=02:00:00:01:07:01"
+          "-netdev"
+          "tap,id=net-lurking,ifname=mv-router-lurk,script=no,downscript=no"
+          "-device"
+          "virtio-net-pci,netdev=net-lurking,mac=02:00:00:01:07:01"
 
-        "-netdev" "tap,id=net-files,ifname=mv-router-file,script=no,downscript=no"
-        "-device" "virtio-net-pci,netdev=net-files,mac=02:00:00:01:08:01"
-      ] ++ lib.concatLists (lib.imap0 (i: n: [
-        # Extra network: ${n.name} (${n.routerTap})
-        "-netdev" "tap,id=net-${n.name},ifname=${n.routerTap},script=no,downscript=no"
-        "-device" "virtio-net-pci,netdev=net-${n.name},mac=02:00:00:02:${lib.fixedWidthString 2 "0" (builtins.toString i)}:01"
-      ]) extraNetworks);
+          "-netdev"
+          "tap,id=net-files,ifname=mv-router-file,script=no,downscript=no"
+          "-device"
+          "virtio-net-pci,netdev=net-files,mac=02:00:00:01:08:01"
+        ]
+        ++ lib.concatLists (lib.imap0 (i: n: [
+            # Extra network: ${n.name} (${n.routerTap})
+            "-netdev"
+            "tap,id=net-${n.name},ifname=${n.routerTap},script=no,downscript=no"
+            "-device"
+            "virtio-net-pci,netdev=net-${n.name},mac=02:00:00:02:${lib.fixedWidthString 2 "0" (builtins.toString i)}:01"
+          ])
+          extraNetworks);
 
       # ===== Shared Filesystems =====
       shares = [
@@ -207,15 +249,17 @@ in {
 
       # ===== Persistent Volume for /var/lib =====
       # Stores VPN assignments, dnsmasq leases, etc.
-      volumes = [{
-        image = "/var/lib/microvms/${vmName}/var-lib.qcow2";
-        mountPoint = "/var/lib";
-        size = 512;  # 512MB for router state
-        autoCreate = true;
-      }];
+      volumes = [
+        {
+          image = "/var/lib/microvms/${vmName}/var-lib.qcow2";
+          mountPoint = "/var/lib";
+          size = 512; # 512MB for router state
+          autoCreate = true;
+        }
+      ];
 
       # ===== Vsock (not used but required by schema) =====
-      vsock.cid = 200;  # High CID to avoid conflicts with other microvms
+      vsock.cid = 200; # High CID to avoid conflicts with other microvms
     };
 
     # ===== Disable auto-optimise-store =====
@@ -223,8 +267,13 @@ in {
 
     # ===== Kernel Configuration =====
     boot.initrd.availableKernelModules = [
-      "virtio_balloon" "virtio_blk" "virtio_pci" "virtio_ring"
-      "virtio_net" "virtio_scsi" "virtio_mmio"
+      "virtio_balloon"
+      "virtio_blk"
+      "virtio_pci"
+      "virtio_ring"
+      "virtio_net"
+      "virtio_scsi"
+      "virtio_mmio"
       "squashfs"
     ];
 
@@ -263,37 +312,38 @@ in {
       # NetworkManager for WiFi management
       networkmanager = {
         enable = true;
-        wifi.powersave = false;  # Prevent missed broadcast ARP replies
+        wifi.powersave = false; # Prevent missed broadcast ARP replies
         # Store connections in /var/lib (persistent qcow2) instead of /etc (read-only squashfs)
         settings = {
           keyfile.path = "/var/lib/NetworkManager/system-connections";
         };
         ensureProfiles = lib.mkIf hasWifiCredentials {
           profiles = builtins.listToAttrs (map (network: {
-            name = network.ssid;
-            value = {
-              connection = {
-                id = network.ssid;
-                type = "wifi";
-                autoconnect = "true";
-                autoconnect-priority = toString (network.priority or 50);
+              name = network.ssid;
+              value = {
+                connection = {
+                  id = network.ssid;
+                  type = "wifi";
+                  autoconnect = "true";
+                  autoconnect-priority = toString (network.priority or 50);
+                };
+                wifi = {
+                  mode = "infrastructure";
+                  ssid = network.ssid;
+                };
+                wifi-security = {
+                  key-mgmt = "wpa-psk";
+                  psk = network.password;
+                };
+                ipv4.method = "auto";
+                ipv6.method = "disabled";
               };
-              wifi = {
-                mode = "infrastructure";
-                ssid = network.ssid;
-              };
-              wifi-security = {
-                key-mgmt = "wpa-psk";
-                psk = network.password;
-              };
-              ipv4.method = "auto";
-              ipv6.method = "disabled";
-            };
-          }) wifiNetworks);
+            })
+            wifiNetworks);
         };
       };
-      wireless.enable = false;  # NetworkManager handles WiFi
-      firewall.enable = false;  # We use nftables directly
+      wireless.enable = false; # NetworkManager handles WiFi
+      firewall.enable = false; # We use nftables directly
     };
 
     # ===== IP Forwarding and Kernel Hardening =====
@@ -301,7 +351,7 @@ in {
       # Routing (required)
       "net.ipv4.ip_forward" = 1;
       "net.ipv4.conf.all.forwarding" = 1;
-      "net.ipv4.conf.default.rp_filter" = 0;  # Required for policy routing
+      "net.ipv4.conf.default.rp_filter" = 0; # Required for policy routing
       "net.ipv4.conf.all.rp_filter" = 0;
 
       # ICMP Hardening
@@ -350,7 +400,8 @@ in {
             text = mkMullvadConfig name node;
             mode = "0600";
           };
-        }) vpnCfg.mullvad.exitNodes
+        })
+        vpnCfg.mullvad.exitNodes
       ))
     ];
 
@@ -358,10 +409,10 @@ in {
     # Configures IPs on all interfaces and detects WAN
     systemd.services.router-network-setup = {
       description = "Configure router networking";
-      after = [ "network.target" "local-fs.target" "systemd-tmpfiles-setup.service" ];
-      before = [ "dnsmasq.service" "network-online.target" ];
-      wantedBy = [ "multi-user.target" ];
-      path = [ pkgs.coreutils pkgs.gnugrep pkgs.iproute2 pkgs.networkmanager ];
+      after = ["network.target" "local-fs.target" "systemd-tmpfiles-setup.service"];
+      before = ["dnsmasq.service" "network-online.target"];
+      wantedBy = ["multi-user.target"];
+      path = [pkgs.coreutils pkgs.gnugrep pkgs.iproute2 pkgs.networkmanager];
       serviceConfig = {
         Type = "oneshot";
         RemainAfterExit = true;
@@ -461,7 +512,8 @@ in {
         ${lib.concatStringsSep "\n        " (lib.imap0 (i: n: let
           varName = builtins.replaceStrings ["-"] ["_"] n.name;
           macIndex = lib.fixedWidthString 2 "0" (builtins.toString i);
-        in "IFACE_${varName}=$(find_iface_by_mac \"02:00:00:02:${macIndex}:01\")    # ${n.routerTap}") extraNetworks)}
+        in "IFACE_${varName}=$(find_iface_by_mac \"02:00:00:02:${macIndex}:01\")    # ${n.routerTap}")
+        extraNetworks)}
 
         echo "Detected LAN interfaces:"
         echo "  MGMT: $IFACE_MGMT"
@@ -476,7 +528,8 @@ in {
         echo "  VAUL: $IFACE_VAUL"
         ${lib.concatStringsSep "\n        " (map (n: let
           varName = builtins.replaceStrings ["-"] ["_"] n.name;
-        in "echo \"  ${n.name}: $IFACE_${varName}\"") extraNetworks)}
+        in "echo \"  ${n.name}: $IFACE_${varName}\"")
+        extraNetworks)}
 
         # Save interface mapping for dnsmasq and firewall
         echo "IFACE_MGMT=$IFACE_MGMT" > "$STATE_DIR/interfaces"
@@ -490,7 +543,8 @@ in {
         echo "IFACE_FILE=$IFACE_FILE" >> "$STATE_DIR/interfaces"
         ${lib.concatStringsSep "\n        " (map (n: let
           varName = builtins.replaceStrings ["-"] ["_"] n.name;
-        in "echo \"IFACE_${varName}=$IFACE_${varName}\" >> \"$STATE_DIR/interfaces\"") extraNetworks)}
+        in "echo \"IFACE_${varName}=$IFACE_${varName}\" >> \"$STATE_DIR/interfaces\"")
+        extraNetworks)}
 
         # Configure each LAN interface
         configure_lan() {
@@ -518,7 +572,8 @@ in {
         configure_lan "$IFACE_FILE" "192.168.108.253" "files"
         ${lib.concatStringsSep "\n        " (map (n: let
           varName = builtins.replaceStrings ["-"] ["_"] n.name;
-        in "configure_lan \"$IFACE_${varName}\" \"${n.subnet}.253\" \"${n.name}\"") extraNetworks)}
+        in "configure_lan \"$IFACE_${varName}\" \"${n.subnet}.253\" \"${n.name}\"")
+        extraNetworks)}
 
         echo "=== Network Setup Complete ==="
         echo "WAN: $WAN_IFACE"
@@ -529,9 +584,9 @@ in {
     # ===== Dynamic dnsmasq Configuration =====
     systemd.services.dnsmasq-config = {
       description = "Generate dnsmasq config based on detected interfaces";
-      after = [ "router-network-setup.service" ];
-      before = [ "dnsmasq.service" ];
-      wantedBy = [ "multi-user.target" ];
+      after = ["router-network-setup.service"];
+      before = ["dnsmasq.service"];
+      wantedBy = ["multi-user.target"];
       serviceConfig = {
         Type = "oneshot";
         RemainAfterExit = true;
@@ -579,7 +634,8 @@ in {
         add_iface "$IFACE_FILE" "192.168.108" "192.168.108.253"
         ${lib.concatStringsSep "\n        " (map (n: let
           varName = builtins.replaceStrings ["-"] ["_"] n.name;
-        in "add_iface \"$IFACE_${varName}\" \"${n.subnet}\" \"${n.subnet}.253\"") extraNetworks)}
+        in "add_iface \"$IFACE_${varName}\" \"${n.subnet}\" \"${n.subnet}.253\"")
+        extraNetworks)}
 
         echo "Generated dnsmasq config:"
         cat /etc/dnsmasq.d/hydrix.conf
@@ -602,8 +658,8 @@ in {
     # - Host manages router via console only (vsock/serial)
     systemd.services.router-firewall = {
       description = "Configure router firewall";
-      after = [ "router-network-setup.service" ];
-      wantedBy = [ "multi-user.target" ];
+      after = ["router-network-setup.service"];
+      wantedBy = ["multi-user.target"];
       serviceConfig = {
         Type = "oneshot";
         RemainAfterExit = true;
@@ -706,19 +762,79 @@ in {
       '';
     };
 
+    # ===== WiFi Sync Service =====
+    # Vsock server: host polls for WiFi credentials to sync to ~/hydrix-config
+    systemd.services.wifi-sync = {
+      description = "WiFi credential sync server (vsock port 14506)";
+      wantedBy = ["multi-user.target"];
+      after = ["NetworkManager.service" "network.target"];
+
+      serviceConfig = {
+        Type = "simple";
+        ExecStart = let
+          syncHandler = pkgs.writeShellScript "wifi-sync-handler" ''
+            NM_DIR="/etc/NetworkManager/system-connections"
+
+            extract_networks() {
+              local first=true
+              echo -n '{"networks":['
+              shopt -s nullglob
+              for conn_file in "$NM_DIR"/*.nmconnection; do
+                [[ -f "$conn_file" ]] || continue
+
+                local ssid=$(grep -E '^ssid=' "$conn_file" | head -1 | cut -d= -f2-)
+                local psk=$(grep -E '^psk=' "$conn_file" | head -1 | cut -d= -f2-)
+                local conn_type=$(grep -E '^type=' "$conn_file" | head -1 | cut -d= -f2-)
+
+                if [[ "$conn_type" == "wifi" && -n "$ssid" && -n "$psk" ]]; then
+                  if [ "$first" = true ]; then
+                    first=false
+                  else
+                    echo -n ','
+                  fi
+                  ssid=$(echo "$ssid" | sed 's/"/\\"/g')
+                  psk=$(echo "$psk" | sed 's/"/\\"/g')
+                  echo -n "{\"ssid\":\"$ssid\",\"password\":\"$psk\"}"
+                fi
+              done
+              shopt -u nullglob
+              echo ']}'
+            }
+
+            read -r cmd arg
+
+            case "$cmd" in
+              POLL|STATUS)
+                extract_networks
+                ;;
+              *)
+                echo '{"error":"unknown command"}'
+                ;;
+            esac
+          '';
+        in "${pkgs.socat}/bin/socat VSOCK-LISTEN:14506,reuseaddr,fork EXEC:${syncHandler}";
+        Restart = "always";
+        RestartSec = 5;
+      };
+    };
+
     # ===== Services =====
-    services.openssh.enable = false;  # No SSH - console only
+    services.openssh.enable = false; # No SSH - console only
     services.qemuGuest.enable = true;
     services.getty.autologinUser = routerUser;
     services.haveged.enable = true;
 
     # ===== User Configuration =====
-    users.users.${routerUser} = {
-      isNormalUser = true;
-      extraGroups = [ "wheel" "networkmanager" ];
-    } // (if routerHashedPassword != null
-          then { hashedPassword = routerHashedPassword; }
-          else { password = "router"; });
+    users.users.${routerUser} =
+      {
+        isNormalUser = true;
+        extraGroups = ["wheel" "networkmanager"];
+      }
+      // (
+        if routerHashedPassword != null
+        then {hashedPassword = routerHashedPassword;}
+        else {password = "router";}
+      );
 
     security.sudo.wheelNeedsPassword = false;
 
@@ -768,20 +884,21 @@ in {
     # ===== MOTD =====
     users.motd = ''
 
-    ┌─────────────────────────────────────────────────────┐
-    │  Hydrix MicroVM Router (Serial Console Only)        │
-    ├─────────────────────────────────────────────────────┤
-    │  vpn-status           Network & VPN status          │
-    │  vpn-assign --help    VPN routing commands          │
-    └─────────────────────────────────────────────────────┘
+      ┌─────────────────────────────────────────────────────┐
+      │  Hydrix MicroVM Router (Serial Console Only)        │
+      ├─────────────────────────────────────────────────────┤
+      │  vpn-status           Network & VPN status          │
+      │  vpn-assign --help    VPN routing commands          │
+      │  wifi-sync            WiFi credential sync          │
+      └─────────────────────────────────────────────────────┘
 
     '';
 
     # ===== Banner =====
     systemd.services.router-banner = {
       description = "Display router status";
-      wantedBy = [ "multi-user.target" ];
-      after = [ "router-network-setup.service" ];
+      wantedBy = ["multi-user.target"];
+      after = ["router-network-setup.service"];
       serviceConfig = {
         Type = "oneshot";
         RemainAfterExit = true;
