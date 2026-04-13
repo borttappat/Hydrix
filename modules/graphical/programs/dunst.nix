@@ -115,7 +115,12 @@
     font = $FONT_NAME $FONT_SIZE
 
     # Display
-    monitor = 0
+    # Set monitor = -1 to disable popup display (keep daemon running for polybar)
+    monitor = ${
+      if cfg.ui.dunstEnablePopup
+      then "0"
+      else "-1"
+    }
     follow = mouse
 
     # Geometry (positioned in bar gap, height allows for title + body)

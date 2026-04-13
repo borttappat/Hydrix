@@ -1361,6 +1361,12 @@ in {
           description = "Dunst offset from screen edge";
         };
 
+        dunstEnablePopup = lib.mkOption {
+          type = lib.types.bool;
+          default = false;
+          description = "Enable dunst notification popups (set false to use polybar module only)";
+        };
+
         dunstSound = lib.mkOption {
           type = lib.types.nullOr lib.types.str;
           default = null;

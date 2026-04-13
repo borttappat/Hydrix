@@ -40,8 +40,8 @@
     then barCfg.top.left
     else "${wsLeft} ${
       if isModular
-      then "focus-dynamic"
-      else "focus"
+      then "focus-dynamic spacer dunst-dynamic"
+      else "focus dunst"
     }";
   topCenter =
     if barCfg.top.center != null
@@ -104,6 +104,7 @@
   socat = "${pkgs.socat}/bin/socat";
   timeout = "${pkgs.coreutils}/bin/timeout";
   notifySend = "${pkgs.libnotify}/bin/notify-send";
+  dunstctl = "${pkgs.dunst}/bin/dunstctl";
 
   # ============================================================
   # VM QUERY HELPER
@@ -430,6 +431,37 @@
     date_str=$(date '+%d/%m %H:%M')
     ${getColorHelper}
     echo "%{F$color_prefix}DATE %{F-}%{u$color_normal}%{+u}''${date_str}%{-u}"
+  '';
+
+  # DUNST: Notification count with history access
+  dunstDynamicScript = pkgs.writeShellScript "polybar-dunst-dynamic" ''
+    ${getColorHelper}
+
+    # Get displayed notification count
+    count=$(${dunstctl} count displayed 2>/dev/null || echo "0")
+
+    if [ "$count" -eq 0 ]; then
+      echo ""
+      exit 0
+    fi
+
+    # Alert color if > 3 notifications
+    if [ "$count" -gt 3 ]; then
+      uc="$color_alert"
+    else
+      uc="$color_normal"
+    fi
+
+    echo "%{F$color_prefix}DUNST %{F-}%{u$uc}%{+u}$count%{-u}"
+  '';
+
+  dunstClickScript = pkgs.writeShellScript "polybar-dunst-click" ''
+    # Show dunst history via rofi or open dunst control
+    if command -v rofi >/dev/null 2>&1; then
+      # Get history and display in rofi
+      ${dunstctl} history 2>/dev/null | ${jq} -r '.history[] | "\(.appname): \(.summary)"' | \
+        rofi -dmenu -p "Notifications" -i
+    fi
   '';
 
   # POMO: Pomodoro timer with blinking underline when expired
@@ -1962,6 +1994,15 @@
     format-background = ''${colors.module-bg}
     format-padding = 1
     label = %output%
+
+    [module/dunst-dynamic]
+    type = custom/script
+    exec = ${dunstDynamicScript}
+    interval = 2
+    format-background = ''${colors.module-bg}
+    format-padding = 1
+    label = %output%
+    click-left = ${dunstClickScript}
 
     [module/pomo-dynamic]
     type = custom/script
