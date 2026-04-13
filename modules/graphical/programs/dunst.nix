@@ -7,10 +7,12 @@
 # - Disables home-manager's dunst service (we manage it ourselves)
 # - Provides a dunstrc generation script with all settings + xrdb colors
 # - Creates a systemd user service that generates config then runs dunst
-
-{ config, lib, pkgs, ... }:
-
-let
+{
+  config,
+  lib,
+  pkgs,
+  ...
+}: let
   username = config.hydrix.username;
   cfg = config.hydrix.graphical;
 
@@ -24,188 +26,196 @@ let
   # Build the dunstrc generation script
   # This is called by the systemd service and by refresh-colors
   generateDunstrc = pkgs.writeShellScript "generate-dunstrc" ''
-    #!/usr/bin/env bash
-    # Generate dunstrc with xrdb colors and dynamic sizing from scaling.json
+        #!/usr/bin/env bash
+        # Generate dunstrc with xrdb colors and dynamic sizing from scaling.json
 
-    SCALING_JSON="$HOME/.config/hydrix/scaling.json"
-    SCALING_JSON_VM="/mnt/hydrix-config/scaling.json"
-    DUNST_DIR="$HOME/.config/dunst"
-    DUNSTRC="$DUNST_DIR/dunstrc"
+        SCALING_JSON="$HOME/.config/hydrix/scaling.json"
+        SCALING_JSON_VM="/mnt/hydrix-config/scaling.json"
+        DUNST_DIR="$HOME/.config/dunst"
+        DUNSTRC="$DUNST_DIR/dunstrc"
 
-    ${pkgs.coreutils}/bin/mkdir -p "$DUNST_DIR"
+        ${pkgs.coreutils}/bin/mkdir -p "$DUNST_DIR"
 
-    # Read scaling values from scaling.json (or use defaults)
-    if [ -f "$SCALING_JSON" ]; then
-      SCALE_FILE="$SCALING_JSON"
-    elif [ -f "$SCALING_JSON_VM" ]; then
-      SCALE_FILE="$SCALING_JSON_VM"
-    else
-      SCALE_FILE=""
-    fi
+        # Read scaling values from scaling.json (or use defaults)
+        if [ -f "$SCALING_JSON" ]; then
+          SCALE_FILE="$SCALING_JSON"
+        elif [ -f "$SCALING_JSON_VM" ]; then
+          SCALE_FILE="$SCALING_JSON_VM"
+        else
+          SCALE_FILE=""
+        fi
 
-    if [ -n "$SCALE_FILE" ]; then
-      GAPS=$(${pkgs.jq}/bin/jq -r '.sizes.gaps // ${toString cfg.ui.gaps}' "$SCALE_FILE")
-      BAR_GAPS=$(${pkgs.jq}/bin/jq -r '.sizes.bar_gaps // .sizes.gaps // ${toString cfg.ui.gaps}' "$SCALE_FILE")
-      BAR_HEIGHT=$(${pkgs.jq}/bin/jq -r '.sizes.bar_height // ${toString cfg.ui.barHeight}' "$SCALE_FILE")
-      BORDER=$(${pkgs.jq}/bin/jq -r '.sizes.border // ${toString cfg.ui.border}' "$SCALE_FILE")
-      CORNER_RADIUS=$(${pkgs.jq}/bin/jq -r '.sizes.corner_radius // ${toString cfg.ui.cornerRadius}' "$SCALE_FILE")
-      FONT_NAME=$(${pkgs.jq}/bin/jq -r '.font_names.dunst // .font_name // "${fontName}"' "$SCALE_FILE")
-      FONT_SIZE=$(${pkgs.jq}/bin/jq -r '.fonts.dunst // ${toString fontSize}' "$SCALE_FILE")
-      OVERLAY_ALPHA=$(${pkgs.jq}/bin/jq -r '.sizes.overlay_alpha_hex // "D9"' "$SCALE_FILE")
-      DUNST_WIDTH=180
-    else
-      GAPS=${toString cfg.ui.gaps}
-      BAR_GAPS=${toString cfg.ui.gaps}
-      BAR_HEIGHT=${toString cfg.ui.barHeight}
-      BORDER=${toString cfg.ui.border}
-      CORNER_RADIUS=${toString cfg.ui.cornerRadius}
-      FONT_NAME="${fontName}"
-      FONT_SIZE=${toString fontSize}
-      OVERLAY_ALPHA="D9"
-      DUNST_WIDTH=180
-    fi
+        if [ -n "$SCALE_FILE" ]; then
+          GAPS=$(${pkgs.jq}/bin/jq -r '.sizes.gaps // ${toString cfg.ui.gaps}' "$SCALE_FILE")
+          BAR_GAPS=$(${pkgs.jq}/bin/jq -r '.sizes.bar_gaps // .sizes.gaps // ${toString cfg.ui.gaps}' "$SCALE_FILE")
+          BAR_HEIGHT=$(${pkgs.jq}/bin/jq -r '.sizes.bar_height // ${toString cfg.ui.barHeight}' "$SCALE_FILE")
+          BORDER=$(${pkgs.jq}/bin/jq -r '.sizes.border // ${toString cfg.ui.border}' "$SCALE_FILE")
+          CORNER_RADIUS=$(${pkgs.jq}/bin/jq -r '.sizes.corner_radius // ${toString cfg.ui.cornerRadius}' "$SCALE_FILE")
+          FONT_NAME=$(${pkgs.jq}/bin/jq -r '.font_names.dunst // .font_name // "${fontName}"' "$SCALE_FILE")
+          FONT_SIZE=$(${pkgs.jq}/bin/jq -r '.fonts.dunst // ${toString fontSize}' "$SCALE_FILE")
+          OVERLAY_ALPHA=$(${pkgs.jq}/bin/jq -r '.sizes.overlay_alpha_hex // "D9"' "$SCALE_FILE")
+          DUNST_WIDTH=${toString cfg.ui.dunstWidth}
+        else
+          GAPS=${toString cfg.ui.gaps}
+          BAR_GAPS=${toString cfg.ui.gaps}
+          BAR_HEIGHT=${toString cfg.ui.barHeight}
+          BORDER=${toString cfg.ui.border}
+          CORNER_RADIUS=${toString cfg.ui.cornerRadius}
+          FONT_NAME="${fontName}"
+          FONT_SIZE=${toString fontSize}
+          OVERLAY_ALPHA="D9"
+          DUNST_WIDTH=${toString cfg.ui.dunstWidth}
+        fi
 
-    # Calculate offset - dunst at 12% from left
-    # Get screen width from xrandr
-    SCREEN_WIDTH=$(${pkgs.xorg.xrandr}/bin/xrandr 2>/dev/null | ${pkgs.gnugrep}/bin/grep -oP '\d+x\d+\+0\+0' | ${pkgs.coreutils}/bin/head -1 | ${pkgs.coreutils}/bin/cut -dx -f1)
-    [ -z "$SCREEN_WIDTH" ] && SCREEN_WIDTH=1920
+        # Calculate offset - dunst positioned from left edge
+        # Get screen width from xrandr
+        SCREEN_WIDTH=$(${pkgs.xorg.xrandr}/bin/xrandr 2>/dev/null | ${pkgs.gnugrep}/bin/grep -oP '\d+x\d+\+0\+0' | ${pkgs.coreutils}/bin/head -1 | ${pkgs.coreutils}/bin/cut -dx -f1)
+        [ -z "$SCREEN_WIDTH" ] && SCREEN_WIDTH=1920
 
-    # Position dunst's left edge at 12% from left
-    OFFSET_X=$(( SCREEN_WIDTH * 14 / 100 ))
-    OFFSET_Y=$BAR_GAPS
+        # Position dunst's left edge using dunstOffset setting
+        OFFSET_X=${toString cfg.ui.dunstOffset}
+        OFFSET_Y=$BAR_GAPS
 
-    # Padding scaled from bar height
-    PADDING=$((BAR_HEIGHT / 4))
-    [ "$PADDING" -lt 4 ] && PADDING=4
-    [ "$PADDING" -gt 8 ] && PADDING=8
-    H_PADDING=$((PADDING + 4))
+        # Padding scaled from bar height
+        PADDING=$((BAR_HEIGHT / 4))
+        [ "$PADDING" -lt 4 ] && PADDING=4
+        [ "$PADDING" -gt 8 ] && PADDING=8
+        H_PADDING=$((PADDING + 4))
 
-    # Extract colors from xrdb (same method as rofi and polybar)
-    get_color() {
-      local name="$1"
-      local fallback="$2"
-      local color
-      color=$(${pkgs.xorg.xrdb}/bin/xrdb -query 2>/dev/null | ${pkgs.gnugrep}/bin/grep -E "^\*\.?$name:" | ${pkgs.coreutils}/bin/head -1 | ${pkgs.gawk}/bin/awk '{print $2}')
-      echo "''${color:-$fallback}"
+        # Extract colors from xrdb (same method as rofi and polybar)
+        get_color() {
+          local name="$1"
+          local fallback="$2"
+          local color
+          color=$(${pkgs.xorg.xrdb}/bin/xrdb -query 2>/dev/null | ${pkgs.gnugrep}/bin/grep -E "^\*\.?$name:" | ${pkgs.coreutils}/bin/head -1 | ${pkgs.gawk}/bin/awk '{print $2}')
+          echo "''${color:-$fallback}"
+        }
+
+        BG_RAW=$(get_color "color0" "#101116")
+        FG=$(get_color "color7" "#c0caf5")
+        PREFIX=$(get_color "color3" "#e0af68")
+        FRAME=$(get_color "color4" "#7aa2f7")
+        FRAME_LOW=$(get_color "color2" "#98971a")
+        FRAME_CRIT=$(get_color "color1" "#cc241d")
+        BG_LOW_RAW="$BG_RAW"
+
+        # Convert to RGBA format with overlay alpha from scaling.json (matches polybar/rofi)
+        # Dunst uses #RRGGBBAA format (alpha at end)
+        BG="''${BG_RAW}''${OVERLAY_ALPHA}"
+        BG_LOW="''${BG_LOW_RAW}''${OVERLAY_ALPHA}"
+
+        # Generate the full dunstrc
+        ${pkgs.coreutils}/bin/cat > "$DUNSTRC" << DUNSTRC_EOF
+    # Generated by Hydrix - DO NOT EDIT
+    # This file is regenerated when colors change (walrgb, randomwalrgb, etc.)
+    # Settings are defined in modules/graphical/programs/dunst.nix
+
+    [global]
+    # Font (from scaling.json)
+    font = $FONT_NAME $FONT_SIZE
+
+    # Display
+    monitor = 0
+    follow = mouse
+
+    # Geometry (positioned in bar gap, height allows for title + body)
+    width = $DUNST_WIDTH
+    height = 100
+    origin = top-left
+    offset = ''${OFFSET_X}x''${OFFSET_Y}
+    scale = 0
+
+    # Progress bar
+    progress_bar = true
+    progress_bar_height = 10
+    progress_bar_frame_width = 1
+    progress_bar_min_width = 150
+    progress_bar_max_width = 300
+
+    # Appearance (ARGB colors for transparency, no compositor transparency)
+    notification_limit = 5
+    indicate_hidden = true
+    transparency = 0
+    separator_height = 0
+    padding = $PADDING
+    horizontal_padding = $H_PADDING
+    text_icon_padding = 0
+    frame_width = 0
+    gap_size = 0
+    separator_color = frame
+    sort = true
+
+    # Text
+    line_height = 0
+    markup = full
+    format = "<b><span foreground='$PREFIX'>%s</span></b>\\n<span foreground='$FG'>%b</span>"
+    alignment = left
+    vertical_alignment = center
+    show_age_threshold = 60
+    ellipsize = middle
+    ignore_newline = false
+    stack_duplicates = true
+    hide_duplicate_count = false
+    show_indicators = true
+
+    # Icons
+    enable_recursive_icon_lookup = true
+    icon_position = left
+    min_icon_size = 32
+    max_icon_size = 64
+
+    # History
+    sticky_history = true
+    history_length = 20
+
+    # Misc
+    browser = firefox
+    always_run_script = true
+    title = Dunst
+    class = Dunst
+    corner_radius = $CORNER_RADIUS
+    ignore_dbusclose = false
+    sound = ${
+      if cfg.ui.dunstSound != ""
+      then "true"
+      else "false"
+    }
+    sound_command = ${
+      if cfg.ui.dunstSound != ""
+      then "canberra-gtk-play -f ${cfg.ui.dunstSound}"
+      else ""
     }
 
-    BG_RAW=$(get_color "color0" "#101116")
-    FG=$(get_color "color7" "#c0caf5")
-    PREFIX=$(get_color "color3" "#e0af68")
-    FRAME=$(get_color "color4" "#7aa2f7")
-    FRAME_LOW=$(get_color "color2" "#98971a")
-    FRAME_CRIT=$(get_color "color1" "#cc241d")
-    BG_LOW_RAW="$BG_RAW"
+    # Mouse actions
+    mouse_left_click = close_current
+    mouse_middle_click = do_action, close_current
+    mouse_right_click = close_all
 
-    # Convert to RGBA format with overlay alpha from scaling.json (matches polybar/rofi)
-    # Dunst uses #RRGGBBAA format (alpha at end)
-    BG="''${BG_RAW}''${OVERLAY_ALPHA}"
-    BG_LOW="''${BG_LOW_RAW}''${OVERLAY_ALPHA}"
+    [urgency_low]
+    background = "$BG_LOW"
+    foreground = "$FG"
+    frame_color = "$FRAME_LOW"
+    timeout = 5
 
-    # Generate the full dunstrc
-    ${pkgs.coreutils}/bin/cat > "$DUNSTRC" << DUNSTRC_EOF
-# Generated by Hydrix - DO NOT EDIT
-# This file is regenerated when colors change (walrgb, randomwalrgb, etc.)
-# Settings are defined in modules/graphical/programs/dunst.nix
+    [urgency_normal]
+    background = "$BG"
+    foreground = "$FG"
+    frame_color = "$FRAME"
+    timeout = 10
 
-[global]
-# Font (from scaling.json)
-font = $FONT_NAME $FONT_SIZE
-
-# Display
-monitor = 0
-follow = mouse
-
-# Geometry (positioned in bar gap, height allows for title + body)
-width = $DUNST_WIDTH
-height = 100
-origin = top-left
-offset = ''${OFFSET_X}x''${OFFSET_Y}
-scale = 0
-
-# Progress bar
-progress_bar = true
-progress_bar_height = 10
-progress_bar_frame_width = 1
-progress_bar_min_width = 150
-progress_bar_max_width = 300
-
-# Appearance (ARGB colors for transparency, no compositor transparency)
-notification_limit = 5
-indicate_hidden = true
-transparency = 0
-separator_height = 0
-padding = $PADDING
-horizontal_padding = $H_PADDING
-text_icon_padding = 0
-frame_width = 0
-gap_size = 0
-separator_color = frame
-sort = true
-
-# Text
-line_height = 0
-markup = full
-format = "<b><span foreground='$PREFIX'>%s</span></b>\\n<span foreground='$FG'>%b</span>"
-alignment = left
-vertical_alignment = center
-show_age_threshold = 60
-ellipsize = middle
-ignore_newline = false
-stack_duplicates = true
-hide_duplicate_count = false
-show_indicators = true
-
-# Icons
-enable_recursive_icon_lookup = true
-icon_position = left
-min_icon_size = 32
-max_icon_size = 64
-
-# History
-sticky_history = true
-history_length = 20
-
-# Misc
-browser = firefox
-always_run_script = true
-title = Dunst
-class = Dunst
-corner_radius = $CORNER_RADIUS
-ignore_dbusclose = false
-sound = ${if cfg.ui.dunstSound then "true" else "false"}
-
-# Mouse actions
-mouse_left_click = close_current
-mouse_middle_click = do_action, close_current
-mouse_right_click = close_all
-
-[urgency_low]
-background = "$BG_LOW"
-foreground = "$FG"
-frame_color = "$FRAME_LOW"
-timeout = 5
-
-[urgency_normal]
-background = "$BG"
-foreground = "$FG"
-frame_color = "$FRAME"
-timeout = 10
-
-[urgency_critical]
-background = "$BG"
-foreground = "$FG"
-frame_color = "$FRAME_CRIT"
-timeout = 0
-DUNSTRC_EOF
+    [urgency_critical]
+    background = "$BG"
+    foreground = "$FG"
+    frame_color = "$FRAME_CRIT"
+    timeout = 0
+    DUNSTRC_EOF
   '';
-
 in {
   config = lib.mkIf cfg.enable {
     # Add dunst and generation script to system packages
     environment.systemPackages = [
       pkgs.dunst
-      pkgs.libnotify  # For notify-send
+      pkgs.libnotify # For notify-send
       (pkgs.runCommand "generate-dunstrc" {} ''
         mkdir -p $out/bin
         cp ${generateDunstrc} $out/bin/generate-dunstrc
@@ -213,7 +223,7 @@ in {
       '')
     ];
 
-    home-manager.users.${username} = { pkgs, ... }: {
+    home-manager.users.${username} = {pkgs, ...}: {
       # Disable home-manager's dunst service - we manage it ourselves
       # This prevents the symlink to Nix store that we can't modify at runtime
       services.dunst.enable = false;
@@ -223,8 +233,8 @@ in {
         Unit = {
           Description = "Dunst notification daemon (Hydrix)";
           Documentation = "man:dunst(1)";
-          PartOf = [ "graphical-session.target" ];
-          After = [ "graphical-session-pre.target" "init-wal-cache.service" ];
+          PartOf = ["graphical-session.target"];
+          After = ["graphical-session-pre.target" "init-wal-cache.service"];
         };
         Service = {
           Type = "dbus";
@@ -238,7 +248,7 @@ in {
           ExecReload = "${pkgs.coreutils}/bin/kill -HUP $MAINPID";
         };
         Install = {
-          WantedBy = [ "graphical-session.target" ];
+          WantedBy = ["graphical-session.target"];
         };
       };
     };
