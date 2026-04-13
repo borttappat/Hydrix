@@ -438,6 +438,38 @@ in {
         description = "ASUS system (enables asus-linux tools)";
       };
 
+      asus = {
+        acProfile = lib.mkOption {
+          type = lib.types.enum [ "Quiet" "Balanced" "Performance" ];
+          default = "Balanced";
+          description = ''
+            ASUS platform profile when on AC power. Controls fan curves and TDP limits.
+
+            - Quiet: Conservative fan curves, lower performance, quietest operation
+            - Balanced: Normal operation (default)
+            - Performance: Aggressive cooling, highest performance, loudest fans
+
+            Applied at boot and persisted in asusd configuration.
+          '';
+          example = "Balanced";
+        };
+
+        batteryProfile = lib.mkOption {
+          type = lib.types.enum [ "Quiet" "Balanced" "Performance" ];
+          default = "Quiet";
+          description = ''
+            ASUS platform profile when on battery power. Controls fan curves and TDP limits.
+
+            - Quiet: Conservative fan curves, maximum battery life (default)
+            - Balanced: Normal operation
+            - Performance: Aggressive cooling, highest performance drain
+
+            Applied at boot and persisted in asusd configuration.
+          '';
+          example = "Quiet";
+        };
+      };
+
       vfio = {
         enable = lib.mkOption {
           type = lib.types.bool;

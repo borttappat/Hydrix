@@ -97,6 +97,28 @@ in {
       enableUserService = true;
     };
 
+    # Apply ASUS AC/battery profiles at boot from hydrix.hardware.asus options
+    systemd.services.asus-profile-setup = {
+      description = "Apply ASUS platform profiles";
+      wantedBy = [ "multi-user.target" ];
+      serviceConfig = {
+        Type = "oneshot";
+        RemainAfterExit = true;
+      };
+      script = let
+        acProfile = cfg.hardware.asus.acProfile;
+        batProfile = cfg.hardware.asus.batteryProfile;
+      in ''
+        # Set profiles via asusctl if available
+        if command -v asusctl >/dev/null 2>&1; then
+          echo "Setting ASUS AC profile to: ${acProfile}"
+          asusctl profile -a "${acProfile}" 2>/dev/null || true
+          echo "Setting ASUS battery profile to: ${batProfile}"
+          asusctl profile -b "${batProfile}" 2>/dev/null || true
+        fi
+      '';
+    };
+
     # Disable thermald - asusd handles thermal management better
     # with hardware-specific fan curves
     services.thermald.enable = lib.mkForce false;
