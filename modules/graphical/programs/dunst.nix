@@ -176,12 +176,12 @@
     corner_radius = $CORNER_RADIUS
     ignore_dbusclose = false
     sound = ${
-      if cfg.ui.dunstSound != ""
+      if cfg.ui.dunstSound != null && cfg.ui.dunstSound != ""
       then "true"
       else "false"
     }
     sound_command = ${
-      if cfg.ui.dunstSound != ""
+      if cfg.ui.dunstSound != null && cfg.ui.dunstSound != ""
       then "canberra-gtk-play -f ${cfg.ui.dunstSound}"
       else ""
     }

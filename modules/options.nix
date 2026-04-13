@@ -16,10 +16,12 @@
 #       # ... etc
 #     };
 #   }
-
-{ config, lib, pkgs, ... }:
-
-let
+{
+  config,
+  lib,
+  pkgs,
+  ...
+}: let
   cfg = config.hydrix;
 
   # Check if we're in a VM context
@@ -28,19 +30,19 @@ let
   # Resolve a colorscheme name to its JSON path
   # Checks user colorschemes dir first, falls back to framework colorschemes
   frameworkColorschemesDir = ../colorschemes;
-  resolveColorscheme = name:
-    let
-      userPath = if cfg.userColorschemesDir != null
-        then cfg.userColorschemesDir + "/${name}.json"
-        else null;
-      frameworkPath = frameworkColorschemesDir + "/${name}.json";
-    in
-      if userPath != null && builtins.pathExists userPath then userPath
-      else frameworkPath;
+  resolveColorscheme = name: let
+    userPath =
+      if cfg.userColorschemesDir != null
+      then cfg.userColorschemesDir + "/${name}.json"
+      else null;
+    frameworkPath = frameworkColorschemesDir + "/${name}.json";
+  in
+    if userPath != null && builtins.pathExists userPath
+    then userPath
+    else frameworkPath;
 
   colorschemeExists = name:
     builtins.pathExists (resolveColorscheme name);
-
 in {
   options.hydrix = {
     # =========================================================================
@@ -82,14 +84,14 @@ in {
         type = lib.types.listOf lib.types.str;
         default = [];
         description = "SSH public keys for authorized_keys";
-        example = [ "ssh-rsa AAAA... user@host" ];
+        example = ["ssh-rsa AAAA... user@host"];
       };
 
       extraGroups = lib.mkOption {
         type = lib.types.listOf lib.types.str;
         default = [];
         description = "Additional groups for the user (beyond defaults)";
-        example = [ "libvirtd" "kvm" ];
+        example = ["libvirtd" "kvm"];
       };
 
       autologin = lib.mkOption {
@@ -169,7 +171,7 @@ in {
     };
 
     shell = lib.mkOption {
-      type = lib.types.enum [ "fish" "bash" "zsh" ];
+      type = lib.types.enum ["fish" "bash" "zsh"];
       default = "fish";
       description = "Default user shell";
     };
@@ -255,7 +257,7 @@ in {
 
     router = {
       type = lib.mkOption {
-        type = lib.types.enum [ "microvm" "libvirt" "none" ];
+        type = lib.types.enum ["microvm" "libvirt" "none"];
         default = "microvm";
         description = ''
           Router VM implementation:
@@ -320,8 +322,16 @@ in {
             Takes precedence over ssid/password if non-empty.
           '';
           example = [
-            { ssid = "HomeNetwork"; password = "secret"; priority = 100; }
-            { ssid = "WorkNetwork"; password = "secret2"; priority = 50; }
+            {
+              ssid = "HomeNetwork";
+              password = "secret";
+              priority = 100;
+            }
+            {
+              ssid = "WorkNetwork";
+              password = "secret2";
+              priority = 50;
+            }
           ];
         };
       };
@@ -353,7 +363,7 @@ in {
 
         wan = {
           mode = lib.mkOption {
-            type = lib.types.enum [ "auto" "pci-passthrough" "macvtap" "none" ];
+            type = lib.types.enum ["auto" "pci-passthrough" "macvtap" "none"];
             default = "auto";
             description = ''
               How to provide WAN to router VM:
@@ -414,7 +424,10 @@ in {
             default = {};
             description = "Mullvad exit nodes configuration";
             example = {
-              se-sto = { server = "se-sto-wg-001.relays.mullvad.net"; publicKey = "..."; };
+              se-sto = {
+                server = "se-sto-wg-001.relays.mullvad.net";
+                publicKey = "...";
+              };
             };
           };
         };
@@ -427,7 +440,7 @@ in {
 
     hardware = {
       platform = lib.mkOption {
-        type = lib.types.enum [ "intel" "amd" "generic" ];
+        type = lib.types.enum ["intel" "amd" "generic"];
         default = "intel";
         description = "CPU platform (affects microcode, iommu settings)";
       };
@@ -440,7 +453,7 @@ in {
 
       asus = {
         acProfile = lib.mkOption {
-          type = lib.types.enum [ "Quiet" "Balanced" "Performance" ];
+          type = lib.types.enum ["Quiet" "Balanced" "Performance"];
           default = "Balanced";
           description = ''
             ASUS platform profile when on AC power. Controls fan curves and TDP limits.
@@ -455,7 +468,7 @@ in {
         };
 
         batteryProfile = lib.mkOption {
-          type = lib.types.enum [ "Quiet" "Balanced" "Performance" ];
+          type = lib.types.enum ["Quiet" "Balanced" "Performance"];
           default = "Quiet";
           description = ''
             ASUS platform profile when on battery power. Controls fan curves and TDP limits.
@@ -481,7 +494,7 @@ in {
           type = lib.types.listOf lib.types.str;
           default = [];
           description = "PCI vendor:device IDs to bind to vfio-pci";
-          example = [ "8086:a840" "10de:1b80" ];
+          example = ["8086:a840" "10de:1b80"];
         };
 
         wifiPciAddress = lib.mkOption {
@@ -585,7 +598,7 @@ in {
       };
 
       layout = lib.mkOption {
-        type = lib.types.enum [ "full-disk-plain" "full-disk-luks" "dual-boot-luks" "dual-boot-plain" ];
+        type = lib.types.enum ["full-disk-plain" "full-disk-luks" "dual-boot-luks" "dual-boot-plain"];
         default = "full-disk-plain";
         description = ''
           Disk layout:
@@ -639,7 +652,7 @@ in {
     networking = {
       bridges = lib.mkOption {
         type = lib.types.listOf lib.types.str;
-        default = [ "br-mgmt" "br-pentest" "br-comms" "br-browse" "br-dev" "br-shared" "br-builder" "br-lurking" "br-files" ];
+        default = ["br-mgmt" "br-pentest" "br-comms" "br-browse" "br-dev" "br-shared" "br-builder" "br-lurking" "br-files"];
         description = "Network bridges to create";
       };
 
@@ -711,12 +724,16 @@ in {
       vmRegistry = lib.mkOption {
         type = lib.types.attrsOf (lib.types.submodule {
           options = {
-            vmName    = lib.mkOption { type = lib.types.str; };
-            cid       = lib.mkOption { type = lib.types.int; };
-            bridge    = lib.mkOption { type = lib.types.str; };
-            subnet    = lib.mkOption { type = lib.types.str; };
-            workspace = lib.mkOption { type = lib.types.int; };
-            label     = lib.mkOption { type = lib.types.str; default = ""; description = "Short display label (e.g. OFFICE) used in polybar workspace-desc"; };
+            vmName = lib.mkOption {type = lib.types.str;};
+            cid = lib.mkOption {type = lib.types.int;};
+            bridge = lib.mkOption {type = lib.types.str;};
+            subnet = lib.mkOption {type = lib.types.str;};
+            workspace = lib.mkOption {type = lib.types.int;};
+            label = lib.mkOption {
+              type = lib.types.str;
+              default = "";
+              description = "Short display label (e.g. OFFICE) used in polybar workspace-desc";
+            };
           };
         });
         default = {};
@@ -729,7 +746,7 @@ in {
       };
     };
 
-# =========================================================================
+    # =========================================================================
     # SECRETS
     # =========================================================================
 
@@ -746,7 +763,7 @@ in {
     # =========================================================================
 
     colorschemeInheritance = lib.mkOption {
-      type = lib.types.enum [ "full" "dynamic" "none" ];
+      type = lib.types.enum ["full" "dynamic" "none"];
       default = "dynamic";
       description = ''
         VM color inheritance mode:
@@ -789,7 +806,7 @@ in {
 
     power = {
       defaultProfile = lib.mkOption {
-        type = lib.types.enum [ "powersave" "balanced" "performance" ];
+        type = lib.types.enum ["powersave" "balanced" "performance"];
         default = "balanced";
         description = ''
           Default power profile applied at boot.
@@ -977,7 +994,7 @@ in {
           Paths to Obsidian vault directories (relative to home, e.g. "hack_the_world").
           CSS snippets and appearance settings are deployed to each vault's .obsidian/ dir.
         '';
-        example = [ "hack_the_world" "notes" ];
+        example = ["hack_the_world" "notes"];
       };
 
       standalone = lib.mkOption {
@@ -1005,7 +1022,7 @@ in {
       };
 
       polarity = lib.mkOption {
-        type = lib.types.enum [ "dark" "light" ];
+        type = lib.types.enum ["dark" "light"];
         default = "dark";
         description = "Color scheme polarity";
       };
@@ -1044,7 +1061,7 @@ in {
         standaloneRelations = lib.mkOption {
           type = lib.types.attrsOf lib.types.float;
           default = {};
-          example = { alacritty = 1.05; };
+          example = {alacritty = 1.05;};
           description = ''
             Per-app font size multipliers for standalone mode (no external monitor).
             Apps not listed here fall back to the regular 'relations' values.
@@ -1061,7 +1078,7 @@ in {
         overrides = lib.mkOption {
           type = lib.types.attrsOf lib.types.number;
           default = {};
-          example = { alacritty = 10.5; };
+          example = {alacritty = 10.5;};
           description = ''
             Direct font size overrides per app. Bypasses DPI scaling and relations.
             Supports decimals for apps like alacritty that use 0.5 increments.
@@ -1071,7 +1088,10 @@ in {
         maxSizes = lib.mkOption {
           type = lib.types.attrsOf lib.types.number;
           default = {};
-          example = { alacritty = 10.5; polybar = 13; };
+          example = {
+            alacritty = 10.5;
+            polybar = 13;
+          };
           description = ''
             Per-app maximum font size caps. Calculated sizes are clamped
             to these values after DPI scaling. Useful for bitmap fonts
@@ -1215,7 +1235,7 @@ in {
         };
 
         polybarStyle = lib.mkOption {
-          type = lib.types.enum [ "unibar" "modular" "pills" ];
+          type = lib.types.enum ["unibar" "modular" "pills"];
           default = "modular";
           description = "Polybar visual style";
         };
@@ -1241,8 +1261,16 @@ in {
         workspaceLabels = lib.mkOption {
           type = lib.types.attrsOf lib.types.str;
           default = {
-            "1" = "I"; "2" = "II"; "3" = "III"; "4" = "IV"; "5" = "V";
-            "6" = "VI"; "7" = "VII"; "8" = "VIII"; "9" = "IX"; "10" = "X";
+            "1" = "I";
+            "2" = "II";
+            "3" = "III";
+            "4" = "IV";
+            "5" = "V";
+            "6" = "VI";
+            "7" = "VII";
+            "8" = "VIII";
+            "9" = "IX";
+            "10" = "X";
           };
           description = "Workspace display labels";
         };
@@ -1280,7 +1308,7 @@ in {
 
           exclude = lib.mkOption {
             type = lib.types.listOf lib.types.str;
-            default = [ "Alacritty" "feh" "Feh" "firefox" "Firefox" "mpv" "vlc" ];
+            default = ["Alacritty" "feh" "Feh" "firefox" "Firefox" "mpv" "vlc"];
             description = "Windows excluded from opacity rules";
           };
 
@@ -1298,13 +1326,13 @@ in {
 
           overlayOverrides = lib.mkOption {
             type = lib.types.attrsOf lib.types.float;
-            default = { alacritty = 0.95; };
+            default = {alacritty = 0.95;};
             description = "Per-app overrides for overlay opacity";
           };
 
           rules = lib.mkOption {
             type = lib.types.attrsOf lib.types.int;
-            default = { "Polybar" = 95; };
+            default = {"Polybar" = 95;};
             description = "Custom opacity rules per window class";
           };
         };
@@ -1334,15 +1362,19 @@ in {
         };
 
         dunstSound = lib.mkOption {
-          type = lib.types.bool;
-          default = true;
-          description = "Enable notification sounds in dunst";
+          type = lib.types.nullOr lib.types.str;
+          default = null;
+          description = ''
+            Notification sound for dunst. Set to a sound file path (e.g., "bell.wav") to enable.
+            Empty string or null disables sound.
+          '';
+          example = "bell.wav";
         };
 
         # Compositor settings
         compositor = {
           animations = lib.mkOption {
-            type = lib.types.enum [ "none" "modern" ];
+            type = lib.types.enum ["none" "modern"];
             default = "modern";
             description = ''
               Picom animation mode:
@@ -1506,7 +1538,7 @@ in {
         };
 
         position = lib.mkOption {
-          type = lib.types.enum [ "bottom" ];
+          type = lib.types.enum ["bottom"];
           default = "bottom";
           description = "Position of the VM resource bar";
         };
@@ -1630,8 +1662,10 @@ in {
 
         # WiFi PCI address format (XX:XX.X)
         {
-          assertion = cfg.hardware.vfio.wifiPciAddress == "" ||
-                      builtins.match "[0-9a-fA-F]{2}:[0-9a-fA-F]{2}\\.[0-9a-fA-F]" cfg.hardware.vfio.wifiPciAddress != null;
+          assertion =
+            cfg.hardware.vfio.wifiPciAddress
+            == ""
+            || builtins.match "[0-9a-fA-F]{2}:[0-9a-fA-F]{2}\\.[0-9a-fA-F]" cfg.hardware.vfio.wifiPciAddress != null;
           message = "hydrix.hardware.vfio.wifiPciAddress '${cfg.hardware.vfio.wifiPciAddress}' is invalid: must be in format XX:XX.X (e.g., 00:14.3)";
         }
 
