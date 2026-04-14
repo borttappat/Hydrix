@@ -539,7 +539,8 @@ in {
           for profile in browsing comms dev lurking pentest shared; do
             subnet=$(${pkgs.jq}/bin/jq -r ".[\"$profile\"].subnet // empty" /var/lib/hydrix/vm-registry.json 2>/dev/null)
             if [[ -n "$subnet" ]]; then
-              eval "IFACE_${profile^^}_SUBNET=$subnet"
+              profileUpper=$(echo "$profile" | tr '[:lower:]' '[:upper:]')
+              eval "IFACE_${profileUpper}_SUBNET=$subnet"
             fi
           done
         fi
@@ -569,7 +570,10 @@ in {
         if [[ -f "/var/lib/hydrix/vm-registry.json" ]]; then
           for profile in browsing comms dev lurking pentest shared; do
             subnet=$(${pkgs.jq}/bin/jq -r ".[\"$profile\"].subnet // empty" /var/lib/hydrix/vm-registry.json 2>/dev/null)
-            echo "IFACE_${profile^^}_SUBNET=$subnet" >> "$STATE_DIR/interfaces"
+            if [[ -n "$subnet" ]]; then
+              profileUpper=$(echo "$profile" | tr '[:lower:]' '[:upper:]')
+              echo "IFACE_${profileUpper}_SUBNET=$subnet" >> "$STATE_DIR/interfaces"
+            fi
           done
         fi
 
