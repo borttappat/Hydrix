@@ -471,8 +471,8 @@ cmd_stop() {
     if is_builder "$vm_name" && is_running "$vm_name"; then
         log "Syncing builder SQLite state to host..."
         local sync_result
-        sync_result=$(vsock-cmd "${BUILDER_CID}" "${BUILDER_STATUS_PORT}" 30 "SYNC" 2>/dev/null)
-        log "${sync_result:-SYNC command sent}"
+        sync_result=$(vsock-cmd "${BUILDER_CID}" "${BUILDER_BUILD_PORT}" 60 "SYNC" 2>/dev/null)
+        log "${sync_result:-SYNC completed}"
     fi
 
     sudo systemctl stop "microvm@${vm_name}.service"
