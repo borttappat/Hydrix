@@ -2680,25 +2680,50 @@ main() {
     shift
 
     case "$cmd" in
-        build)
-            [[ $# -lt 1 ]] && { log_error "Usage: microvm build <name>"; exit 1; }
-            cmd_build "$1"
+        rebuild|build)
+            [[ $# -lt 1 ]] && { log_error "Usage: microvm build <name1> [name2] ..."; exit 1; }
+            for vm in "$@"; do
+                vm="$(get_vm_name_from_target "$vm")"
+                log "Building ${BOLD}${vm}${NC}..."
+                cmd_build "$vm"
+                echo ""
+            done
             ;;
         start)
-            [[ $# -lt 1 ]] && { log_error "Usage: microvm start <name>"; exit 1; }
-            cmd_start "$1"
+            [[ $# -lt 1 ]] && { log_error "Usage: microvm start <name1> [name2] ..."; exit 1; }
+            for vm in "$@"; do
+                vm="$(get_vm_name_from_target "$vm")"
+                log "Starting ${BOLD}${vm}${NC}..."
+                cmd_start "$vm"
+                echo ""
+            done
             ;;
         stop)
-            [[ $# -lt 1 ]] && { log_error "Usage: microvm stop <name>"; exit 1; }
-            cmd_stop "$1"
+            [[ $# -lt 1 ]] && { log_error "Usage: microvm stop <name1> [name2] ..."; exit 1; }
+            for vm in "$@"; do
+                vm="$(get_vm_name_from_target "$vm")"
+                log "Stopping ${BOLD}${vm}${NC}..."
+                cmd_stop "$vm"
+                echo ""
+            done
             ;;
         restart)
-            [[ $# -lt 1 ]] && { log_error "Usage: microvm restart <name>"; exit 1; }
-            cmd_restart "$1"
+            [[ $# -lt 1 ]] && { log_error "Usage: microvm restart <name1> [name2] ..."; exit 1; }
+            for vm in "$@"; do
+                vm="$(get_vm_name_from_target "$vm")"
+                log "Restarting ${BOLD}${vm}${NC}..."
+                cmd_restart "$vm"
+                echo ""
+            done
             ;;
         update)
-            [[ $# -lt 1 ]] && { log_error "Usage: microvm update <name>"; exit 1; }
-            cmd_update "$1"
+            [[ $# -lt 1 ]] && { log_error "Usage: microvm update <name1> [name2] ..."; exit 1; }
+            for vm in "$@"; do
+                vm="$(get_vm_name_from_target "$vm")"
+                log "Updating ${BOLD}${vm}${NC}..."
+                cmd_update "$vm"
+                echo ""
+            done
             ;;
         switch)
             [[ $# -lt 1 ]] && { log_error "Usage: microvm switch <name> [path]"; exit 1; }
@@ -2751,58 +2776,20 @@ main() {
             [[ $# -lt 1 ]] && { log_error "Usage: microvm builder-exec <flake>"; exit 1; }
             cmd_builder_exec "$1"
             ;;
-        mvm)
-            # Multi-VM: run command on multiple VMs
-            # Usage: microvm mvm <command> <vm1> [vm2] ...
-            # The fish shell provides 'mvm' as an abbreviation for 'microvm'
-            # which auto-expands to allow multi-VM commands directly.
-            [[ $# -lt 1 ]] && { cmd_mvm_help; exit 0; }
-            local mvm_cmd="$1"
-            shift
-            # Handle the 'help' subcommand
-            case "$mvm_cmd" in
-                help|-h|--help)
-                    cmd_mvm_help
-                    exit 0
-                    ;;
-            esac
-            # Process each VM
-            if [[ $# -lt 1 ]]; then
-                log_error "Usage: microvm mvm <command> <vm1> [vm2] ..."
-                cmd_mvm_help
-                exit 1
-            fi
-            for vm in "$@"; do
-                # Resolve short names to full VM names
-                vm="$(get_vm_name_from_target "$vm")"
-                case "$mvm_cmd" in
-                    build)   log "Processing ${BOLD}${vm}${NC}..."; cmd_build "$vm" ;;
-                    start)   log "Processing ${BOLD}${vm}${NC}..."; cmd_start "$vm" ;;
-                    stop)    log "Processing ${BOLD}${vm}${NC}..."; cmd_stop "$vm" ;;
-                    restart) log "Processing ${BOLD}${vm}${NC}..."; cmd_restart "$vm" ;;
-                    update)  log "Processing ${BOLD}${vm}${NC}..."; cmd_update "$vm" ;;
-                    purge)   log "Processing ${BOLD}${vm}${NC}..."; cmd_purge "$vm" ;;
-                    rebuild)
-                        # rebuild = build + restart
-                        log "Processing ${BOLD}${vm}${NC}..."
-                        cmd_build "$vm" && cmd_restart "$vm"
-                        ;;
-                    *)
-                        log_error "Unknown mvm command: $mvm_cmd"
-                        cmd_mvm_help
-                        exit 1
-                        ;;
-                esac
-                echo ""
-            done
-            ;;
         test)
             [[ $# -lt 1 ]] && { log_error "Usage: microvm test <name>"; exit 1; }
             cmd_test "$1"
             ;;
         purge)
-            [[ $# -lt 1 ]] && { log_error "Usage: microvm purge <name> [-f|--force]"; exit 1; }
-            cmd_purge "$@"
+            [[ $# -lt 1 ]] && { log_error "Usage: microvm purge <name1> [name2] ... [-f|--force]"; exit 1; }
+            local force=""
+            [[ "${!#}" == "-f" || "${!#}" == "--force" ]] && { force="${!#}"; set -- "${@:1:$(($#-1))}"; }
+            for vm in "$@"; do
+                vm="$(get_vm_name_from_target "$vm")"
+                log "Purging ${BOLD}${vm}${NC}..."
+                cmd_purge "$vm" "$force"
+                echo ""
+            done
             ;;
         snapshot|snap)
             [[ $# -lt 1 ]] && { cmd_snapshot help; exit 0; }
