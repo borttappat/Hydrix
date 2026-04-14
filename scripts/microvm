@@ -1311,6 +1311,15 @@ get_vm_name_from_target() {
         gitsync)
             echo "microvm-gitsync"
             ;;
+        files)
+            echo "microvm-files"
+            ;;
+        vault)
+            echo "microvm-vault"
+            ;;
+        task*)
+            echo "microvm-$target"
+            ;;
         micro*)
             # Direct microVM name
             echo "$target"
@@ -2797,6 +2806,8 @@ main() {
                 exit 1
             fi
             for vm in "$@"; do
+                # Resolve short names to full VM names
+                vm="$(get_vm_name_from_target "$vm")"
                 case "$mvm_cmd" in
                     build)   log "Processing ${BOLD}${vm}${NC}..."; cmd_build "$vm" ;;
                     start)   log "Processing ${BOLD}${vm}${NC}..."; cmd_start "$vm" ;;
