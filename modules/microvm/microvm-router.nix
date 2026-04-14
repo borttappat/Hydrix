@@ -867,9 +867,6 @@ in {
       # VPN management scripts
       (writeShellScriptBin "vpn-assign" (builtins.readFile ../../scripts/vpn-assign.sh))
       (writeShellScriptBin "vpn-status" (builtins.readFile ../../scripts/vpn-status.sh))
-
-      # LAN control script (pentest VM LAN access toggle)
-      (writeShellScriptBin "lan-control" (builtins.readFile ../../../modules/router-lan-control.nix))
     ];
 
     # ===== Tmpfiles =====
