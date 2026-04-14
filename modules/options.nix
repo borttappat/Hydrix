@@ -336,6 +336,41 @@ in {
         };
       };
 
+      # WAN config for both microvm and libvirt router types
+      wan = {
+        mode = lib.mkOption {
+          type = lib.types.enum ["auto" "pci-passthrough" "macvtap" "none"];
+          default = "auto";
+          description = ''
+            How to provide WAN to router VM:
+            - auto: Detect WiFi card for passthrough, fall back to macvtap on ethernet
+            - pci-passthrough: Force PCI passthrough (fails if no suitable device)
+            - macvtap: Use macvtap on physical ethernet (for desktops/VMs)
+            - none: No WAN interface (router will have no internet uplink)
+          '';
+        };
+
+        device = lib.mkOption {
+          type = lib.types.nullOr lib.types.str;
+          default = null;
+          description = ''
+            Specific device to use. If null, auto-detect.
+            For pci-passthrough: PCI address like "00:14.3"
+            For macvtap: interface name like "enp3s0"
+          '';
+        };
+
+        preferWireless = lib.mkOption {
+          type = lib.types.bool;
+          default = true;
+          description = "In auto mode, prefer wireless over ethernet";
+        };
+      };
+
+      microvm = {
+        # Placeholder for microvm-specific router options (for future expansion)
+      };
+
       libvirt = {
         vmName = lib.mkOption {
           type = lib.types.str;
@@ -707,6 +742,31 @@ in {
           a host bridge (br-<name>), udev TAP attachment rules, and a
           router subnet with DHCP. Declare once in flake.nix; injected
           into host and router VM configs automatically.
+        '';
+      };
+
+      profileNetworks = lib.mkOption {
+        type = lib.types.listOf (lib.types.submodule {
+          options = {
+            name = lib.mkOption {
+              type = lib.types.str;
+              description = "Profile name (e.g. \"browsing\"). Used to derive the bash variable name IFACE_<NAME>.";
+            };
+            subnet = lib.mkOption {
+              type = lib.types.str;
+              description = "Subnet prefix without last octet, e.g. \"192.168.103\".";
+            };
+            routerTap = lib.mkOption {
+              type = lib.types.str;
+              description = "Router-side TAP interface name (max 15 chars), e.g. \"mv-router-brow\".";
+            };
+          };
+        });
+        default = [];
+        description = ''
+          All discovered profile networks, injected into the router VM at build time.
+          Each entry configures an IP, DHCP range, and firewall subnet on the router.
+          Populated automatically by flake.nix from profiles/*/meta.nix; do not set manually.
         '';
       };
 

@@ -91,6 +91,9 @@
 
   vmName = config.networking.hostName;
   extraNetworks = cfg.networking.extraNetworks;
+  profileNetworks = cfg.networking.profileNetworks;
+  # All networks the router serves: declared profiles + user-defined extra networks
+  allNetworks = profileNetworks ++ extraNetworks;
 in {
   imports = [
     # Central options for config access
@@ -523,59 +526,34 @@ in {
           return 1
         }
 
-        # Detect interfaces by name pattern
+        # Detect framework infra interfaces (fixed TAP names, not profile-driven)
         IFACE_MGMT=$(find_iface_by_name "mv-router-mgmt")
-        IFACE_PENT=$(find_iface_by_name "mv-router-pent")
-        IFACE_COMM=$(find_iface_by_name "mv-router-comm")
-        IFACE_BROW=$(find_iface_by_name "mv-router-brow")
-        IFACE_DEV=$(find_iface_by_name "mv-router-dev")
         IFACE_SHAR=$(find_iface_by_name "mv-router-shar")
         IFACE_BLDR=$(find_iface_by_name "mv-router-bldr")
-        IFACE_LURK=$(find_iface_by_name "mv-router-lurk")
         IFACE_FILE=$(find_iface_by_name "mv-router-file")
 
-        # Load subnets from vm-registry.json for dynamic profile support
-        if [[ -f "/var/lib/hydrix/vm-registry.json" ]]; then
-          for profile in browsing comms dev lurking pentest shared; do
-            subnet=$(${pkgs.jq}/bin/jq -r ".[\"$profile\"].subnet // empty" /var/lib/hydrix/vm-registry.json 2>/dev/null)
-            if [[ -n "$subnet" ]]; then
-              profileUpper=$(echo "$profile" | tr '[:lower:]' '[:upper:]')
-              eval "IFACE_\${profileUpper}_SUBNET=\$subnet"
-            fi
-          done
-        fi
+        # Detect profile + extra network interfaces (generated from meta.nix at build time)
+        ${lib.concatStringsSep "\n        " (map (n: let
+          varName = lib.toUpper (builtins.replaceStrings ["-"] ["_"] n.name);
+        in "IFACE_${varName}=$(find_iface_by_name \"${n.routerTap}\")") allNetworks)}
 
         echo "Detected LAN interfaces:"
         echo "  MGMT: $IFACE_MGMT"
-        echo "  PENT: $IFACE_PENT"
-        echo "  COMM: $IFACE_COMM"
-        echo "  BROW: $IFACE_BROW"
-        echo "  DEV:  $IFACE_DEV"
+        ${lib.concatStringsSep "\n        " (map (n: let
+          varName = lib.toUpper (builtins.replaceStrings ["-"] ["_"] n.name);
+        in "echo \"  ${varName}: $IFACE_${varName}\"") allNetworks)}
         echo "  SHAR: $IFACE_SHAR"
         echo "  BLDR: $IFACE_BLDR"
-        echo "  LURK: $IFACE_LURK"
         echo "  FILE: $IFACE_FILE"
 
         # Save interface mapping for dnsmasq and firewall
         echo "IFACE_MGMT=$IFACE_MGMT" > "$STATE_DIR/interfaces"
-        echo "IFACE_PENT=$IFACE_PENT" >> "$STATE_DIR/interfaces"
-        echo "IFACE_COMM=$IFACE_COMM" >> "$STATE_DIR/interfaces"
-        echo "IFACE_BROW=$IFACE_BROW" >> "$STATE_DIR/interfaces"
-        echo "IFACE_DEV=$IFACE_DEV" >> "$STATE_DIR/interfaces"
+        ${lib.concatStringsSep "\n        " (map (n: let
+          varName = lib.toUpper (builtins.replaceStrings ["-"] ["_"] n.name);
+        in "echo \"IFACE_${varName}=$IFACE_${varName}\" >> \"$STATE_DIR/interfaces\"") allNetworks)}
         echo "IFACE_SHAR=$IFACE_SHAR" >> "$STATE_DIR/interfaces"
         echo "IFACE_BLDR=$IFACE_BLDR" >> "$STATE_DIR/interfaces"
-        echo "IFACE_LURK=$IFACE_LURK" >> "$STATE_DIR/interfaces"
         echo "IFACE_FILE=$IFACE_FILE" >> "$STATE_DIR/interfaces"
-        # Save profile subnets
-        if [[ -f "/var/lib/hydrix/vm-registry.json" ]]; then
-          for profile in browsing comms dev lurking pentest shared; do
-            subnet=$(${pkgs.jq}/bin/jq -r ".[\"$profile\"].subnet // empty" /var/lib/hydrix/vm-registry.json 2>/dev/null)
-            if [[ -n "$subnet" ]]; then
-              profileUpper=$(echo "$profile" | tr '[:lower:]' '[:upper:]')
-              echo "IFACE_\${profileUpper}_SUBNET=\$subnet" >> "$STATE_DIR/interfaces"
-            fi
-          done
-        fi
 
         # Configure each LAN interface
         configure_lan() {
@@ -593,18 +571,12 @@ in {
         }
 
         configure_lan "$IFACE_MGMT" "192.168.100.253" "mgmt"
-        configure_lan "$IFACE_PENT" "${IFACE_PENT_SUBNET:-192.168.102}.253" "pentest"
-        configure_lan "$IFACE_COMM" "${IFACE_COMM_SUBNET:-192.168.104}.253" "comms"
-        configure_lan "$IFACE_BROW" "${IFACE_BROW_SUBNET:-192.168.103}.253" "browse"
-        configure_lan "$IFACE_DEV"  "${IFACE_DEV_SUBNET:-192.168.105}.253" "dev"
-        configure_lan "$IFACE_SHAR" "${IFACE_SHAR_SUBNET:-192.168.106}.253" "shared"
-        configure_lan "$IFACE_BLDR" "${IFACE_BLDR_SUBNET:-192.168.107}.253" "builder"
-        configure_lan "$IFACE_LURK" "${IFACE_LURK_SUBNET:-192.168.108}.253" "lurking"
-        configure_lan "$IFACE_FILE" "${IFACE_FILE_SUBNET:-192.168.108}.253" "files"
         ${lib.concatStringsSep "\n        " (map (n: let
-          varName = builtins.replaceStrings ["-"] ["_"] n.name;
-        in "configure_lan \"$IFACE_${varName}\" \"${n.subnet}.253\" \"${n.name}\"")
-        extraNetworks)}
+          varName = lib.toUpper (builtins.replaceStrings ["-"] ["_"] n.name);
+        in "configure_lan \"$IFACE_${varName}\" \"${n.subnet}.253\" \"${n.name}\"") allNetworks)}
+        configure_lan "$IFACE_SHAR" "192.168.105.253" "shared"
+        configure_lan "$IFACE_BLDR" "192.168.106.253" "builder"
+        configure_lan "$IFACE_FILE" "192.168.108.253" "files"
 
         echo "=== Network Setup Complete ==="
         echo "WAN: $WAN_IFACE"
@@ -629,8 +601,7 @@ in {
         source /var/lib/hydrix-router/interfaces 2>/dev/null || true
 
         echo "Generating dnsmasq config with interfaces:"
-        echo "  MGMT=$IFACE_MGMT PENT=$IFACE_PENT COMM=$IFACE_COMM"
-        echo "  BROW=$IFACE_BROW DEV=$IFACE_DEV SHAR=$IFACE_SHAR LURK=$IFACE_LURK FILE=$IFACE_FILE"
+        echo "  MGMT=$IFACE_MGMT SHAR=$IFACE_SHAR BLDR=$IFACE_BLDR FILE=$IFACE_FILE"
 
         # Generate config only for interfaces that exist
         echo "bind-interfaces" > /etc/dnsmasq.d/hydrix.conf
@@ -655,18 +626,12 @@ in {
         }
 
         add_iface "$IFACE_MGMT" "192.168.100" "192.168.100.253"
-        add_iface "$IFACE_PENT" "${IFACE_PENT_SUBNET:-192.168.102}" "${IFACE_PENT_SUBNET:-192.168.102}.253"
-        add_iface "$IFACE_COMM" "${IFACE_COMM_SUBNET:-192.168.104}" "${IFACE_COMM_SUBNET:-192.168.104}.253"
-        add_iface "$IFACE_BROW" "${IFACE_BROW_SUBNET:-192.168.103}" "${IFACE_BROW_SUBNET:-192.168.103}.253"
-        add_iface "$IFACE_DEV"  "${IFACE_DEV_SUBNET:-192.168.105}" "${IFACE_DEV_SUBNET:-192.168.105}.253"
-        add_iface "$IFACE_SHAR" "${IFACE_SHAR_SUBNET:-192.168.106}" "${IFACE_SHAR_SUBNET:-192.168.106}.253"
-        add_iface "$IFACE_BLDR" "${IFACE_BLDR_SUBNET:-192.168.107}" "${IFACE_BLDR_SUBNET:-192.168.107}.253"
-        add_iface "$IFACE_LURK" "${IFACE_LURK_SUBNET:-192.168.108}" "${IFACE_LURK_SUBNET:-192.168.108}.253"
-        add_iface "$IFACE_FILE" "${IFACE_FILE_SUBNET:-192.168.108}" "${IFACE_FILE_SUBNET:-192.168.108}.253"
         ${lib.concatStringsSep "\n        " (map (n: let
-          varName = builtins.replaceStrings ["-"] ["_"] n.name;
-        in "add_iface \"$IFACE_${varName}\" \"${n.subnet}\" \"${n.subnet}.253\"")
-        extraNetworks)}
+          varName = lib.toUpper (builtins.replaceStrings ["-"] ["_"] n.name);
+        in "add_iface \"$IFACE_${varName}\" \"${n.subnet}\" \"${n.subnet}.253\"") allNetworks)}
+        add_iface "$IFACE_SHAR" "192.168.105" "192.168.105.253"
+        add_iface "$IFACE_BLDR" "192.168.106" "192.168.106.253"
+        add_iface "$IFACE_FILE" "192.168.108" "192.168.108.253"
 
         echo "Generated dnsmasq config:"
         cat /etc/dnsmasq.d/hydrix.conf
@@ -701,8 +666,8 @@ in {
 
         ${pkgs.nftables}/bin/nft flush ruleset 2>/dev/null || true
 
-        # Define VM network ranges (built-in + user-defined extra networks)
-        VM_NETWORKS="{ 192.168.100.0/24, 192.168.101.0/24, 192.168.102.0/24, 192.168.103.0/24, 192.168.104.0/24, 192.168.105.0/24, 192.168.106.0/24, 192.168.107.0/24, 192.168.108.0/24${lib.concatMapStrings (n: ", ${n.subnet}.0/24") extraNetworks} }"
+        # Define VM network ranges (profile subnets from meta.nix + infra fixed subnets)
+        VM_NETWORKS="{ 192.168.100.0/24${lib.concatMapStrings (n: ", ${n.subnet}.0/24") allNetworks}, 192.168.105.0/24, 192.168.106.0/24, 192.168.108.0/24 }"
 
         ${pkgs.nftables}/bin/nft -f - << EOF
         table inet router {

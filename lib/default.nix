@@ -165,7 +165,8 @@ in {
   mkMicrovmRouter = {
     system ? "x86_64-linux",
     wifiPciAddress ? "",
-    extraNetworks ? [],  # List of { name, subnet, routerTap } from user profile discovery
+    extraNetworks ? [],       # { name, subnet, routerTap } — user-defined extra networks needing new bridges
+    profileNetworks ? [],     # { name, subnet, routerTap } — all profile networks from meta.nix
     modules ? [],
   }: nixpkgs.lib.nixosSystem {
     inherit system;
@@ -180,6 +181,8 @@ in {
       hydrix.hardware.vfio.wifiPciAddress = wifiPciAddress;
     } ++ nixpkgs.lib.optional (extraNetworks != []) {
       hydrix.networking.extraNetworks = extraNetworks;
+    } ++ nixpkgs.lib.optional (profileNetworks != []) {
+      hydrix.networking.profileNetworks = profileNetworks;
     } ++ modules;
   };
 
