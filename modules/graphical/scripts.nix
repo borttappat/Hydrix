@@ -32,17 +32,20 @@
 # UTILITY
 # -------
 #   pomo                            Pomodoro timer with notification
-
-{ config, lib, pkgs, ... }:
-
-let
+{
+  config,
+  lib,
+  pkgs,
+  ...
+}: let
   cfg = config.hydrix.graphical;
   # When vmColors.enable is true, VMs inherit the host colorscheme for wal cache
   # consistency (matches what Stylix uses at build time)
   ownColorscheme = config.hydrix.colorscheme;
   hostColorscheme = config.hydrix.vmColors.hostColorscheme;
   vmColorsEnabled = config.hydrix.vmColors.enable;
-  colorscheme = if vmColorsEnabled && hostColorscheme != null
+  colorscheme =
+    if vmColorsEnabled && hostColorscheme != null
     then hostColorscheme
     else ownColorscheme;
   username = config.hydrix.username;
@@ -59,202 +62,204 @@ let
   colorschemesPackage = pkgs.stdenvNoCC.mkDerivation {
     name = "hydrix-colorschemes";
     src = ../../colorschemes;
-    installPhase = ''
-      mkdir -p $out/colorschemes
-      cp -r $src/* $out/colorschemes/
-    '' + lib.optionalString (userCsDir != null) ''
-      cp -r ${userCsDir}/*.json $out/colorschemes/ 2>/dev/null || true
-      cp -r ${userCsDir}/*.yaml $out/colorschemes/ 2>/dev/null || true
-    '';
+    installPhase =
+      ''
+        mkdir -p $out/colorschemes
+        cp -r $src/* $out/colorschemes/
+      ''
+      + lib.optionalString (userCsDir != null) ''
+        cp -r ${userCsDir}/*.json $out/colorschemes/ 2>/dev/null || true
+        cp -r ${userCsDir}/*.yaml $out/colorschemes/ 2>/dev/null || true
+      '';
   };
 
   # Shared script to refresh all color-aware applications
   # Called by walrgb, randomwalrgb, apply-colorscheme, restore-colorscheme
   refreshColorsScript = pkgs.writeShellScriptBin "refresh-colors" ''
-    #!/usr/bin/env bash
-    # Refresh all applications with current wal colors
-    # Reads from ~/.cache/wal/colors.json
+        #!/usr/bin/env bash
+        # Refresh all applications with current wal colors
+        # Reads from ~/.cache/wal/colors.json
 
-    WAL_COLORS="$HOME/.cache/wal/colors.json"
-    WAL_XRES="$HOME/.cache/wal/colors.Xresources"
+        WAL_COLORS="$HOME/.cache/wal/colors.json"
+        WAL_XRES="$HOME/.cache/wal/colors.Xresources"
 
-    if [ ! -f "$WAL_COLORS" ]; then
-        echo "Error: No wal colors found at $WAL_COLORS"
-        exit 1
-    fi
+        if [ ! -f "$WAL_COLORS" ]; then
+            echo "Error: No wal colors found at $WAL_COLORS"
+            exit 1
+        fi
 
-    echo "Refreshing colors from wal cache..."
+        echo "Refreshing colors from wal cache..."
 
-    # Extract colors
-    COLOR0=$(${jq} -r '.colors.color0' "$WAL_COLORS")
-    COLOR1=$(${jq} -r '.colors.color1' "$WAL_COLORS")
-    COLOR2=$(${jq} -r '.colors.color2' "$WAL_COLORS")
-    COLOR3=$(${jq} -r '.colors.color3' "$WAL_COLORS")
-    COLOR4=$(${jq} -r '.colors.color4' "$WAL_COLORS")
-    COLOR5=$(${jq} -r '.colors.color5' "$WAL_COLORS")
-    COLOR6=$(${jq} -r '.colors.color6' "$WAL_COLORS")
-    COLOR7=$(${jq} -r '.colors.color7' "$WAL_COLORS")
-    COLOR8=$(${jq} -r '.colors.color8' "$WAL_COLORS")
-    BG=$(${jq} -r '.special.background' "$WAL_COLORS")
-    FG=$(${jq} -r '.special.foreground' "$WAL_COLORS")
+        # Extract colors
+        COLOR0=$(${jq} -r '.colors.color0' "$WAL_COLORS")
+        COLOR1=$(${jq} -r '.colors.color1' "$WAL_COLORS")
+        COLOR2=$(${jq} -r '.colors.color2' "$WAL_COLORS")
+        COLOR3=$(${jq} -r '.colors.color3' "$WAL_COLORS")
+        COLOR4=$(${jq} -r '.colors.color4' "$WAL_COLORS")
+        COLOR5=$(${jq} -r '.colors.color5' "$WAL_COLORS")
+        COLOR6=$(${jq} -r '.colors.color6' "$WAL_COLORS")
+        COLOR7=$(${jq} -r '.colors.color7' "$WAL_COLORS")
+        COLOR8=$(${jq} -r '.colors.color8' "$WAL_COLORS")
+        BG=$(${jq} -r '.special.background' "$WAL_COLORS")
+        FG=$(${jq} -r '.special.foreground' "$WAL_COLORS")
 
-    # === Xresources (rofi, i3, urxvt, etc) ===
-    echo "  Updating Xresources..."
-    if [ -f "$WAL_XRES" ]; then
-        ${xrdb} -merge "$WAL_XRES"
-    fi
-    # Override i3wm.color4 specifically for focused borders
-    ${xrdb} -merge <<< "i3wm.color4: $COLOR4"
+        # === Xresources (rofi, i3, urxvt, etc) ===
+        echo "  Updating Xresources..."
+        if [ -f "$WAL_XRES" ]; then
+            ${xrdb} -merge "$WAL_XRES"
+        fi
+        # Override i3wm.color4 specifically for focused borders
+        ${xrdb} -merge <<< "i3wm.color4: $COLOR4"
 
-    # === i3 ===
-    echo "  Reloading i3..."
-    ${i3msg} reload >/dev/null 2>&1 || true
+        # === i3 ===
+        echo "  Reloading i3..."
+        ${i3msg} reload >/dev/null 2>&1 || true
 
-    # Signal vm-focus-daemon to re-apply border colors
-    ${pkgs.procps}/bin/pkill -USR1 -f vm-focus-daemon 2>/dev/null || true
+        # Signal vm-focus-daemon to re-apply border colors
+        ${pkgs.procps}/bin/pkill -USR1 -f vm-focus-daemon 2>/dev/null || true
 
-    # === Polybar + display-setup (fixes gaps) ===
-    # Skip display-setup in VMs - it would spawn polybar on host displays via xpra
-    # VMs just need polybar-msg to restart with new colors
-    if [ -e "/mnt/hydrix-config" ]; then
-        echo "  Restarting polybar (VM mode)..."
-        ${pkgs.polybar}/bin/polybar-msg cmd restart 2>/dev/null || true
-    elif command -v display-setup >/dev/null 2>&1; then
-        echo "  Running display-setup (polybar + gaps)..."
-        display-setup >/dev/null 2>&1 || true
-    else
-        ${pkgs.polybar}/bin/polybar-msg cmd restart 2>/dev/null || true
-    fi
-
-    # === Firefox (pywalfox) ===
-    if command -v pywalfox >/dev/null 2>&1; then
-        echo "  Updating Firefox..."
-        pywalfox update 2>/dev/null || true
-    fi
-
-    # === Zathura ===
-    echo "  Generating zathura colors..."
-    ZATHURA_DIR="$HOME/.config/zathura"
-    mkdir -p "$ZATHURA_DIR"
-    cat > "$ZATHURA_DIR/zathurarc-wal" << ZEOF
-# Generated by refresh-colors from pywal
-set notification-error-bg "$BG"
-set notification-error-fg "$COLOR1"
-set notification-warning-bg "$BG"
-set notification-warning-fg "$COLOR3"
-set notification-bg "$BG"
-set notification-fg "$COLOR4"
-
-set completion-group-bg "$BG"
-set completion-group-fg "$COLOR4"
-set completion-bg "$COLOR0"
-set completion-fg "$FG"
-set completion-highlight-bg "$COLOR4"
-set completion-highlight-fg "$BG"
-
-set index-bg "$BG"
-set index-fg "$COLOR4"
-set index-active-bg "$COLOR4"
-set index-active-fg "$BG"
-
-set inputbar-bg "$COLOR0"
-set inputbar-fg "$FG"
-
-set statusbar-bg "$COLOR0"
-set statusbar-fg "$FG"
-
-set highlight-color "$COLOR3"
-set highlight-active-color "$COLOR4"
-
-set default-bg "$BG"
-set default-fg "$FG"
-
-set recolor true
-set recolor-lightcolor "$BG"
-set recolor-darkcolor "$FG"
-set recolor-reverse-video true
-set recolor-keephue false
-ZEOF
-    # Link as main config if not managed by home-manager
-    if [ ! -L "$ZATHURA_DIR/zathurarc" ]; then
-        cp "$ZATHURA_DIR/zathurarc-wal" "$ZATHURA_DIR/zathurarc"
-    fi
-
-    # === Dunst ===
-    echo "  Regenerating dunst config..."
-    if command -v generate-dunstrc >/dev/null 2>&1; then
-        generate-dunstrc
-    fi
-    # Restart dunst to pick up new colors (kill + let systemd restart, or start manually)
-    echo "  Restarting dunst..."
-    ${pkgs.procps}/bin/pkill -9 dunst 2>/dev/null || true
-    sleep 0.3
-    # Try systemd first, fall back to direct start
-    if systemctl --user start dunst 2>/dev/null; then
-        true
-    else
-        ${pkgs.dunst}/bin/dunst &>/dev/null &
-        disown 2>/dev/null || true
-    fi
-
-    # === GTK (for virt-manager, nautilus, etc) ===
-    # GTK reads colors from the theme, we use wal-gtk if available
-    if command -v wal-gtk >/dev/null 2>&1; then
-        echo "  Updating GTK theme..."
-        wal-gtk 2>/dev/null || true
-    fi
-
-    # === Alacritty ===
-    # Update runtime colors TOML for live_config_reload (all alacritty instances reload)
-    if command -v write-alacritty-colors >/dev/null 2>&1; then
-        echo "  Updating alacritty runtime colors..."
-        write-alacritty-colors
-    fi
-
-    # Send wal escape sequences to terminals (host only - VMs use live_config_reload)
-    # VMs don't need sequences because alacritty imports colors-runtime.toml
-    WAL_SEQUENCES="$HOME/.cache/wal/sequences"
-    if [ -f "$WAL_SEQUENCES" ] && [ ! -e "/mnt/hydrix-config" ]; then
-        echo "  Updating terminals via sequences..."
-        for pts in /dev/pts/[0-9]*; do
-            # Only write to our own terminals
-            if [ -O "$pts" ] 2>/dev/null; then
-                ${pkgs.coreutils}/bin/cat "$WAL_SEQUENCES" > "$pts" 2>/dev/null || true
-            fi
-        done
-    fi
-
-    # === Starship prompt ===
-    # Uses static config from configs/starship/starship.toml
-    # No runtime generation needed
-
-    # === Sync wal cache to hydrix-config for VMs ===
-    # VMs mount ~/.config/hydrix via 9p and can read wal colors from there
-    # Skip this in VMs (they have /mnt/hydrix-config as a read-only mount)
-    HYDRIX_CONFIG="$HOME/.config/hydrix"
-    WAL_ACTIVE="$HOME/.cache/wal/.active"
-    if [ ! -e "/mnt/hydrix-config" ] && [ -d "$HYDRIX_CONFIG" ] && [ -f "$WAL_COLORS" ]; then
-        echo "  Syncing wal cache to hydrix-config..."
-        mkdir -p "$HYDRIX_CONFIG/wal"
-        cp "$WAL_COLORS" "$HYDRIX_CONFIG/wal/colors.json"
-        # Also sync the .active marker so VMs know when wal is active
-        if [ -f "$WAL_ACTIVE" ]; then
-            touch "$HYDRIX_CONFIG/wal/.active"
+        # === Polybar + display-setup (fixes gaps) ===
+        # Skip display-setup in VMs - it would spawn polybar on host displays via xpra
+        # VMs just need polybar-msg to restart with new colors
+        if [ -e "/mnt/hydrix-config" ]; then
+            echo "  Restarting polybar (VM mode)..."
+            ${pkgs.polybar}/bin/polybar-msg cmd restart 2>/dev/null || true
+        elif command -v display-setup >/dev/null 2>&1; then
+            echo "  Running display-setup (polybar + gaps)..."
+            display-setup >/dev/null 2>&1 || true
         else
-            rm -f "$HYDRIX_CONFIG/wal/.active"
+            ${pkgs.polybar}/bin/polybar-msg cmd restart 2>/dev/null || true
         fi
 
-        # Push colors to running VMs via vsock for instant sync (background)
-        if command -v push-colors-to-vms >/dev/null 2>&1; then
-            echo "  Pushing to VMs via vsock..."
-            push-colors-to-vms &
+        # === Firefox (pywalfox) ===
+        if command -v pywalfox >/dev/null 2>&1; then
+            echo "  Updating Firefox..."
+            pywalfox update 2>/dev/null || true
         fi
-    fi
 
-    # Final i3 reload to ensure everything (borders, colors, gaps) is consistent
-    ${i3msg} reload >/dev/null 2>&1 || true
+        # === Zathura ===
+        echo "  Generating zathura colors..."
+        ZATHURA_DIR="$HOME/.config/zathura"
+        mkdir -p "$ZATHURA_DIR"
+        cat > "$ZATHURA_DIR/zathurarc-wal" << ZEOF
+    # Generated by refresh-colors from pywal
+    set notification-error-bg "$BG"
+    set notification-error-fg "$COLOR1"
+    set notification-warning-bg "$BG"
+    set notification-warning-fg "$COLOR3"
+    set notification-bg "$BG"
+    set notification-fg "$COLOR4"
 
-    echo "Colors refreshed!"
+    set completion-group-bg "$BG"
+    set completion-group-fg "$COLOR4"
+    set completion-bg "$COLOR0"
+    set completion-fg "$FG"
+    set completion-highlight-bg "$COLOR4"
+    set completion-highlight-fg "$BG"
+
+    set index-bg "$BG"
+    set index-fg "$COLOR4"
+    set index-active-bg "$COLOR4"
+    set index-active-fg "$BG"
+
+    set inputbar-bg "$COLOR0"
+    set inputbar-fg "$FG"
+
+    set statusbar-bg "$COLOR0"
+    set statusbar-fg "$FG"
+
+    set highlight-color "$COLOR3"
+    set highlight-active-color "$COLOR4"
+
+    set default-bg "$BG"
+    set default-fg "$FG"
+
+    set recolor true
+    set recolor-lightcolor "$BG"
+    set recolor-darkcolor "$FG"
+    set recolor-reverse-video true
+    set recolor-keephue false
+    ZEOF
+        # Link as main config if not managed by home-manager
+        if [ ! -L "$ZATHURA_DIR/zathurarc" ]; then
+            cp "$ZATHURA_DIR/zathurarc-wal" "$ZATHURA_DIR/zathurarc"
+        fi
+
+        # === Dunst ===
+        echo "  Regenerating dunst config..."
+        if command -v generate-dunstrc >/dev/null 2>&1; then
+            generate-dunstrc
+        fi
+        # Restart dunst to pick up new colors (kill + let systemd restart, or start manually)
+        echo "  Restarting dunst..."
+        ${pkgs.procps}/bin/pkill -9 dunst 2>/dev/null || true
+        sleep 0.3
+        # Try systemd first, fall back to direct start
+        if systemctl --user start dunst 2>/dev/null; then
+            true
+        else
+            ${pkgs.dunst}/bin/dunst &>/dev/null &
+            disown 2>/dev/null || true
+        fi
+
+        # === GTK (for virt-manager, nautilus, etc) ===
+        # GTK reads colors from the theme, we use wal-gtk if available
+        if command -v wal-gtk >/dev/null 2>&1; then
+            echo "  Updating GTK theme..."
+            wal-gtk 2>/dev/null || true
+        fi
+
+        # === Alacritty ===
+        # Update runtime colors TOML for live_config_reload (all alacritty instances reload)
+        if command -v write-alacritty-colors >/dev/null 2>&1; then
+            echo "  Updating alacritty runtime colors..."
+            write-alacritty-colors
+        fi
+
+        # Send wal escape sequences to terminals (host only - VMs use live_config_reload)
+        # VMs don't need sequences because alacritty imports colors-runtime.toml
+        WAL_SEQUENCES="$HOME/.cache/wal/sequences"
+        if [ -f "$WAL_SEQUENCES" ] && [ ! -e "/mnt/hydrix-config" ]; then
+            echo "  Updating terminals via sequences..."
+            for pts in /dev/pts/[0-9]*; do
+                # Only write to our own terminals
+                if [ -O "$pts" ] 2>/dev/null; then
+                    ${pkgs.coreutils}/bin/cat "$WAL_SEQUENCES" > "$pts" 2>/dev/null || true
+                fi
+            done
+        fi
+
+        # === Starship prompt ===
+        # Uses static config from configs/starship/starship.toml
+        # No runtime generation needed
+
+        # === Sync wal cache to hydrix-config for VMs ===
+        # VMs mount ~/.config/hydrix via 9p and can read wal colors from there
+        # Skip this in VMs (they have /mnt/hydrix-config as a read-only mount)
+        HYDRIX_CONFIG="$HOME/.config/hydrix"
+        WAL_ACTIVE="$HOME/.cache/wal/.active"
+        if [ ! -e "/mnt/hydrix-config" ] && [ -d "$HYDRIX_CONFIG" ] && [ -f "$WAL_COLORS" ]; then
+            echo "  Syncing wal cache to hydrix-config..."
+            mkdir -p "$HYDRIX_CONFIG/wal"
+            cp "$WAL_COLORS" "$HYDRIX_CONFIG/wal/colors.json"
+            # Also sync the .active marker so VMs know when wal is active
+            if [ -f "$WAL_ACTIVE" ]; then
+                touch "$HYDRIX_CONFIG/wal/.active"
+            else
+                rm -f "$HYDRIX_CONFIG/wal/.active"
+            fi
+
+            # Push colors to running VMs via vsock for instant sync (background)
+            if command -v push-colors-to-vms >/dev/null 2>&1; then
+                echo "  Pushing to VMs via vsock..."
+                push-colors-to-vms &
+            fi
+        fi
+
+        # Final i3 reload to ensure everything (borders, colors, gaps) is consistent
+        ${i3msg} reload >/dev/null 2>&1 || true
+
+        echo "Colors refreshed!"
   '';
 
   # Write alacritty colors TOML from wal colors.json
@@ -440,12 +445,16 @@ ZEOF
     # Create temp files
     blur_img="/tmp/lockscreen_blur_$$.png"
 
-    ${if cfg.lockscreen.blur then ''
-    # Scale wallpaper to virtual desktop size, then pixelate
-    ${pkgs.imagemagick}/bin/magick "$WALLPAPER" -resize "$VIRT_SIZE^" -gravity Center -extent "$VIRT_SIZE" -scale 20% -scale 500% "$blur_img" 2>>"$LOCK_LOG"
-    '' else ''
-    ${pkgs.imagemagick}/bin/magick "$WALLPAPER" -resize "$VIRT_SIZE^" -gravity Center -extent "$VIRT_SIZE" "$blur_img" 2>>"$LOCK_LOG"
-    ''}
+    ${
+      if cfg.lockscreen.blur
+      then ''
+        # Scale wallpaper to virtual desktop size, then pixelate
+        ${pkgs.imagemagick}/bin/magick "$WALLPAPER" -resize "$VIRT_SIZE^" -gravity Center -extent "$VIRT_SIZE" -scale 20% -scale 500% "$blur_img" 2>>"$LOCK_LOG"
+      ''
+      else ''
+        ${pkgs.imagemagick}/bin/magick "$WALLPAPER" -resize "$VIRT_SIZE^" -gravity Center -extent "$VIRT_SIZE" "$blur_img" 2>>"$LOCK_LOG"
+      ''
+    }
 
     # Add text overlay on primary monitor (fall back to CozetteVector if font fails - bitmap fonts don't work)
     if ! ${pkgs.imagemagick}/bin/magick "$blur_img" -gravity NorthWest \
@@ -624,8 +633,8 @@ ZEOF
         echo "$SCHEME_NAME" > "$SCHEME_MARKER"
 
         ${lib.optionalString (!isVM) ''
-        # Set wallpaper via feh so ~/.fehbg exists for i3 startup
-        ${lib.optionalString (cfg.wallpaper != null) ''
+      # Set wallpaper via feh so ~/.fehbg exists for i3 startup
+      ${lib.optionalString (cfg.wallpaper != null) ''
         if [ ! -f "$HOME/.fehbg" ]; then
             echo "Setting initial wallpaper: ${cfg.wallpaper}"
             ${pkgs.feh}/bin/feh --bg-fill "${cfg.wallpaper}" 2>/dev/null || true
@@ -636,20 +645,20 @@ ZEOF
             echo "Generating initial lockscreen cache..."
             generate-lockscreen "${cfg.wallpaper}" &
         fi
-        ''}
+      ''}
 
-        # Refresh all color-aware apps with the new wal cache
-        if command -v refresh-colors >/dev/null 2>&1; then
-            echo "Refreshing app colors..."
-            refresh-colors 2>/dev/null || true
-        fi
+      # Refresh all color-aware apps with the new wal cache
+      if command -v refresh-colors >/dev/null 2>&1; then
+          echo "Refreshing app colors..."
+          refresh-colors 2>/dev/null || true
+      fi
 
-        # Push colors to any VMs that are already running
-        if command -v push-colors-to-vms >/dev/null 2>&1; then
-            echo "Pushing colors to running VMs..."
-            push-colors-to-vms &
-        fi
-        ''}
+      # Push colors to any VMs that are already running
+      if command -v push-colors-to-vms >/dev/null 2>&1; then
+          echo "Pushing colors to running VMs..."
+          push-colors-to-vms &
+      fi
+    ''}
 
         # Sync to hydrix-config for VMs to access
         HYDRIX_CONFIG="$HOME/.config/hydrix"
@@ -1118,11 +1127,15 @@ ZEOF
     ${pkgs.scrot}/bin/scrot -o "$img" 2>/dev/null || true
 
     if [ -f "$img" ]; then
-      ${if cfg.lockscreen.blur then ''
-      ${pkgs.imagemagick}/bin/magick "$img" -scale 20% -scale 500% "$blur_img" 2>/dev/null || cp "$img" "$blur_img"
-      '' else ''
-      cp "$img" "$blur_img"
-      ''}
+      ${
+      if cfg.lockscreen.blur
+      then ''
+        ${pkgs.imagemagick}/bin/magick "$img" -scale 20% -scale 500% "$blur_img" 2>/dev/null || cp "$img" "$blur_img"
+      ''
+      else ''
+        cp "$img" "$blur_img"
+      ''
+    }
 
       if ! ${pkgs.imagemagick}/bin/magick "$blur_img" -gravity NorthWest \
           -pointsize $FONT_SIZE -font "$FONT" -fill "$color1" \
@@ -1316,6 +1329,22 @@ ZEOF
     echo "Starting display recovery..."
     echo "[$(date)] Manual display recovery triggered" >> /tmp/suspend-debug.log
 
+    # Save current gamma settings before reinitializing
+    GAMMA_SAVE_FILE="/tmp/xrandr-gamma-save"
+    > "$GAMMA_SAVE_FILE"
+    for monitor in $(${pkgs.xorg.xrandr}/bin/xrandr --query 2>/dev/null | grep " connected" | cut -d' ' -f1); do
+      gamma=$(${pkgs.xorg.xrandr}/bin/xrandr --verbose --query 2>/dev/null | ${pkgs.gawk}/bin/awk -v m="$monitor" '
+        BEGIN { found=0; gamma="" }
+        $1 == m { found=1 }
+        found && /Red gamma:/ { gsub(/[^0-9.]/, "", $3); gamma=$3 }
+        found && /Green gamma:/ { gsub(/[^0-9.]/, "", $3); gamma=gamma":"$3 }
+        found && /Blue gamma:/ { gsub(/[^0-9.]/, "", $3); gamma=gamma":"$3; print gamma }
+      ')
+      if [ -n "$gamma" ]; then
+        echo "$monitor=$gamma" >> "$GAMMA_SAVE_FILE"
+      fi
+    done
+
     # Force DPMS on
     echo "  Forcing DPMS on..."
     ${pkgs.xorg.xset}/bin/xset dpms force on 2>/dev/null || true
@@ -1328,6 +1357,17 @@ ZEOF
     ${pkgs.xorg.xrandr}/bin/xrandr --auto 2>/dev/null || true
     sleep 0.5
     ${pkgs.xorg.xrandr}/bin/xrandr --auto 2>/dev/null || true
+
+    # Restore gamma settings after reinitialization
+    sleep 0.5
+    if [ -f "$GAMMA_SAVE_FILE" ] && [ -s "$GAMMA_SAVE_FILE" ]; then
+      while IFS='=' read -r monitor gamma; do
+        if [ -n "$monitor" ] && [ -n "$gamma" ]; then
+          ${pkgs.xorg.xrandr}/bin/xrandr --output "$monitor" --gamma "$gamma" 2>/dev/null || true
+          echo "[$(date)] Restored gamma for $monitor: $gamma" >> /tmp/suspend-debug.log
+        fi
+      done < "$GAMMA_SAVE_FILE"
+    fi
 
     # Restart picom (compositor)
     echo "  Restarting picom..."
@@ -1443,7 +1483,6 @@ ZEOF
       fi
     done < <(${jq} -r 'to_entries[] | [.value.vmName, (.value.cid | tostring)] | @tsv' "$VM_REGISTRY" 2>/dev/null)
   '';
-
 in {
   config = lib.mkIf cfg.enable {
     # Save the current colorscheme name for the restore script
@@ -1455,43 +1494,48 @@ in {
     };
 
     # Add scripts to system packages
-    environment.systemPackages = [
-      applySchemeScript
-      restoreSchemeScript
-      nixWalScript
-      walRgbScript
-      randomWalRgbScript
-      refreshColorsScript
-      initWalCacheScript
-      firefoxPywalScript
-      pomoScript
-      lockScript
-      lockInstantScript
-      generateLockscreenScript
-      displayRecoverScript
-      monitorRescanScript
-      writeAlacrittyColorsScript  # Generate alacritty colors TOML from wal cache
-    ] ++ lib.optionals isVM [
-      walSyncScript
-      setColorschemeModeScript
-      getColorschemeModeScript
-      pkgs.xorg.xsetroot  # For updating xpra background when colors change
-    ] ++ lib.optionals (!isVM) [
-      pushColorsToVmsScript  # Push colors to VMs via vsock (instant sync)
-      pkgs.socat  # For vsock communication with VMs
-    ];
+    environment.systemPackages =
+      [
+        applySchemeScript
+        restoreSchemeScript
+        nixWalScript
+        walRgbScript
+        randomWalRgbScript
+        refreshColorsScript
+        initWalCacheScript
+        firefoxPywalScript
+        pomoScript
+        lockScript
+        lockInstantScript
+        generateLockscreenScript
+        displayRecoverScript
+        monitorRescanScript
+        writeAlacrittyColorsScript # Generate alacritty colors TOML from wal cache
+      ]
+      ++ lib.optionals isVM [
+        walSyncScript
+        setColorschemeModeScript
+        getColorschemeModeScript
+        pkgs.xorg.xsetroot # For updating xpra background when colors change
+      ]
+      ++ lib.optionals (!isVM) [
+        pushColorsToVmsScript # Push colors to VMs via vsock (instant sync)
+        pkgs.socat # For vsock communication with VMs
+      ];
 
     # Systemd user service to initialize wal cache on login
     # This ensures pywalfox has colors to read before Firefox is launched
-    home-manager.users.${username} = { ... }: {
+    home-manager.users.${username} = {...}: {
       systemd.user.services.init-wal-cache = {
-        Unit = {
-          Description = "Initialize pywal cache from colorscheme";
-        } // lib.optionalAttrs (!isVM) {
-          # Host: wait for graphical session
-          After = [ "graphical-session-pre.target" ];
-          PartOf = [ "graphical-session.target" ];
-        };
+        Unit =
+          {
+            Description = "Initialize pywal cache from colorscheme";
+          }
+          // lib.optionalAttrs (!isVM) {
+            # Host: wait for graphical session
+            After = ["graphical-session-pre.target"];
+            PartOf = ["graphical-session.target"];
+          };
         Service = {
           Type = "oneshot";
           RemainAfterExit = true;
@@ -1503,7 +1547,10 @@ in {
         Install = {
           # VMs: run on default.target (graphical-session never activates in microVMs)
           # Host: run on graphical-session.target as before
-          WantedBy = if isVM then [ "default.target" ] else [ "graphical-session.target" ];
+          WantedBy =
+            if isVM
+            then ["default.target"]
+            else ["graphical-session.target"];
         };
       };
 
@@ -1565,7 +1612,7 @@ in {
           Unit = "post-resume-display.service";
         };
         Install = {
-          WantedBy = [ "graphical-session.target" ];
+          WantedBy = ["graphical-session.target"];
         };
       };
     };
