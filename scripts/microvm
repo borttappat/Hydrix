@@ -228,7 +228,7 @@ wait_for_builder() {
     local timeout="${1:-60}"
     local elapsed=0
 
-    while ! echo "PING" | socat -T2 - "VSOCK-CONNECT:${BUILDER_CID}:${BUILDER_STATUS_PORT}" 2>/dev/null | grep -q "PONG"; do
+    while ! echo "PING" | timeout 2 vsock-cmd "${BUILDER_CID}" "${BUILDER_STATUS_PORT}" 2>/dev/null | grep -q "PONG"; do
         sleep 1
         elapsed=$((elapsed + 1))
         if [[ $elapsed -ge $timeout ]]; then
@@ -466,6 +466,14 @@ cmd_stop() {
     log "Stopping ${BOLD}${vm_name}${NC}..."
     local start
     start=$(timer_start)
+
+    # For builder VM, sync SQLite changes back to host before stopping
+    if is_builder "$vm_name" && is_running "$vm_name"; then
+        log "Syncing builder SQLite state to host..."
+        local sync_result
+        sync_result=$(vsock-cmd "${BUILDER_CID}" "${BUILDER_STATUS_PORT}" 30 "SYNC" 2>/dev/null)
+        log "${sync_result:-SYNC command sent}"
+    fi
 
     sudo systemctl stop "microvm@${vm_name}.service"
 
@@ -2688,6 +2696,39 @@ main() {
             # Legacy alias
             [[ $# -lt 1 ]] && { log_error "Usage: microvm builder-exec <flake>"; exit 1; }
             cmd_builder_exec "$1"
+            ;;
+        mvm)
+            # Multi-VM: run build/restart/stop/etc on multiple VMs
+            # Usage: microvm mvm rebuild vault files pentest browsing
+            [[ $# -lt 1 ]] && { log_error "Usage: microvm mvm <command> <vm1> [vm2] ..."; exit 1; }
+            local mvm_cmd="$1"
+            shift
+            case "$mvm_cmd" in
+                build|restart|start|stop|update|purge|rebuild)
+                    [[ $# -lt 1 ]] && { log_error "Usage: microvm mvm $mvm_cmd <vm1> [vm2] ..."; exit 1; }
+                    for vm in "$@"; do
+                        log "Processing ${BOLD}${vm}${NC}..."
+                        if [[ "$mvm_cmd" == "rebuild" ]]; then
+                            cmd_build "$vm" && cmd_restart "$vm"
+                        else
+                            case "$mvm_cmd" in
+                                build)   cmd_build "$vm" ;;
+                                start)   cmd_start "$vm" ;;
+                                stop)    cmd_stop "$vm" ;;
+                                restart) cmd_restart "$vm" ;;
+                                update)  cmd_update "$vm" ;;
+                                purge)   cmd_purge "$vm" ;;
+                            esac
+                        fi
+                        echo ""
+                    done
+                    ;;
+                *)
+                    log_error "Unknown mvm command: $mvm_cmd"
+                    echo "Usage: microvm mvm <build|restart|start|stop|update|purge|rebuild> <vm1> [vm2] ..."
+                    exit 1
+                    ;;
+            esac
             ;;
         test)
             [[ $# -lt 1 ]] && { log_error "Usage: microvm test <name>"; exit 1; }

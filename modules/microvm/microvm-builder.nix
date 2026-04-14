@@ -22,9 +22,13 @@
 #   - Only communicates with: router (internet) and host (vsock + virtiofs)
 #   - Host controls builder via vsock (ports 14510/14511)
 #
-{ config, lib, pkgs, modulesPath, ... }:
-
-let
+{
+  config,
+  lib,
+  pkgs,
+  modulesPath,
+  ...
+}: let
   # Access locale settings from central options
   locale = config.hydrix.locale;
   # Host username for mounting hydrix-config (passed from mkMicrovmBuilder)
@@ -32,7 +36,6 @@ let
   # Optional local Hydrix path for developers
   localHydrixPath = config.hydrix.builder.localHydrixPath;
   vmName = config.networking.hostName;
-
 in {
   imports = [
     # Central options for locale settings
@@ -71,78 +74,94 @@ in {
     # ===== MicroVM Configuration =====
     microvm = {
       hypervisor = "qemu";
-      qemu.machine = "pc";  # Standard PC for full PCI support
+      qemu.machine = "pc"; # Standard PC for full PCI support
 
       # High resources for builds
       vcpu = 8;
-      mem = 16384;  # 16GB for large builds
+      mem = 16384; # 16GB for large builds
 
       # No squashfs store - we mount host's store directly
       storeDiskType = "none";
 
       # Disable virtiofsd sandbox to allow writes to /nix/store
       # Builder needs direct R/W access to host's nix store
-      virtiofsd.extraArgs = [ "--sandbox" "none" ];
+      virtiofsd.extraArgs = ["--sandbox" "none"];
 
       # Headless operation
       graphics.enable = false;
       qemu.extraArgs = [
-        "-vga" "none"
-        "-display" "none"
+        "-vga"
+        "none"
+        "-display"
+        "none"
         # Serial console via unix socket for interactive access
         # Connect with: microvm console microvm-builder
-        "-chardev" "socket,id=console,path=/var/lib/microvms/microvm-builder/console.sock,server=on,wait=off"
-        "-serial" "chardev:console"
+        "-chardev"
+        "socket,id=console,path=/var/lib/microvms/microvm-builder/console.sock,server=on,wait=off"
+        "-serial"
+        "chardev:console"
       ];
 
       # ===== Shared Filesystems =====
       # CRITICAL: These are R/W mounts to host's actual nix store
       # Host nix-daemon MUST be stopped while builder is running
-      shares = [
-        # Host /nix/store - R/W access for building
+      shares =
+        [
+          # Host /nix/store - R/W access for building
+          {
+            tag = "host-nix-store";
+            source = "/nix/store";
+            mountPoint = "/nix/store";
+            proto = "virtiofs";
+          }
+          # Host /nix/var/nix - R/W access for nix database
+          {
+            tag = "host-nix-var";
+            source = "/nix/var/nix";
+            mountPoint = "/nix/var/nix";
+            proto = "virtiofs";
+          }
+          # User's hydrix-config - READ-ONLY for security
+          # Builder can evaluate flakes but cannot modify source code
+          # Uses hostUsername passed from mkMicrovmBuilder
+          {
+            tag = "hydrix-config";
+            source = "/home/${hostUsername}/hydrix-config";
+            mountPoint = "/mnt/hydrix";
+            proto = "virtiofs";
+          }
+        ]
+        ++ lib.optionals (localHydrixPath != null) [
+          # Local Hydrix repo for developers - READ-ONLY for security
+          # Enables path: flake inputs to work inside builder VM
+          # Mount at same path so path references resolve correctly
+          {
+            tag = "local-hydrix";
+            source = localHydrixPath;
+            mountPoint = localHydrixPath;
+            proto = "virtiofs";
+          }
+        ];
+
+      # Ephemeral volume for local SQLite storage (avoids virtiofs slowdown)
+      volumes = [
         {
-          tag = "host-nix-store";
-          source = "/nix/store";
-          mountPoint = "/nix/store";
-          proto = "virtiofs";
-        }
-        # Host /nix/var/nix - R/W access for nix database
-        {
-          tag = "host-nix-var";
-          source = "/nix/var/nix";
-          mountPoint = "/nix/var/nix";
-          proto = "virtiofs";
-        }
-        # User's hydrix-config - READ-ONLY for security
-        # Builder can evaluate flakes but cannot modify source code
-        # Uses hostUsername passed from mkMicrovmBuilder
-        {
-          tag = "hydrix-config";
-          source = "/home/${hostUsername}/hydrix-config";
-          mountPoint = "/mnt/hydrix";
-          proto = "virtiofs";
-        }
-      ] ++ lib.optionals (localHydrixPath != null) [
-        # Local Hydrix repo for developers - READ-ONLY for security
-        # Enables path: flake inputs to work inside builder VM
-        # Mount at same path so path references resolve correctly
-        {
-          tag = "local-hydrix";
-          source = localHydrixPath;
-          mountPoint = localHydrixPath;
-          proto = "virtiofs";
+          image = "nix-state.img";
+          mountPoint = "/nix/.local-state";
+          size = 4096; # 4GB for nix database
+          fsType = "ext4";
+          autoCreate = true;
         }
       ];
 
-      # No persistent volumes - builder is ephemeral
-      volumes = [];
-
       # ===== Network Interface =====
-      interfaces = [{
-        type = "tap";
-        id = "mv-builder";
-        mac = "02:00:00:02:10:01";  # Unique MAC for builder
-      }];
+      interfaces = [
+        {
+          type = "tap";
+          id = "mv-builder";
+          mac = "02:00:00:02:10:01"; # Unique MAC for builder
+        }
+      ];
 
       # ===== Vsock for host communication =====
       vsock.cid = 210;
@@ -153,19 +172,21 @@ in {
     nix = {
       enable = true;
       settings = {
-        trusted-users = [ "root" "builder" ];
-        auto-optimise-store = false;  # Host manages optimization
+        trusted-users = ["root" "builder"];
+        auto-optimise-store = false; # Host manages optimization
         max-jobs = "auto";
-        cores = 0;  # Use all available
+        cores = 0; # Use all available
         # Disable sandbox - doesn't work well with virtiofs store mount
         sandbox = false;
         # Enable flakes and nix-command
-        experimental-features = [ "nix-command" "flakes" ];
+        experimental-features = ["nix-command" "flakes"];
         # Use substituters for faster builds
         substituters = [
           "https://cache.nixos.org"
           "https://nix-community.cachix.org"
         ];
+        # Cache negative narinfo results permanently (reduces redundant DB lookups)
+        narinfo-cache-negative-ttl = 0;
         trusted-public-keys = [
           "cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY="
           "nix-community.cachix.org-1:mB9FSh9qf2dCimDSUo8Zy7bkq5CX+/rkCWyvRCYg3Fs="
@@ -179,10 +200,41 @@ in {
     # (microvm module may disable it when detecting shared store)
     systemd.sockets.nix-daemon = {
       enable = true;
-      wantedBy = [ "sockets.target" ];
+      wantedBy = ["sockets.target"];
     };
     systemd.services.nix-daemon = {
       enable = true;
+    };
+
+    # ===== Local SQLite Setup =====
+    # Copy SQLite DB from host virtiofs mount to local ephemeral storage
+    # This avoids thousands of small reads through virtiofs during builds
+    systemd.services.sqlite-local-setup = {
+      description = "Setup local SQLite copy for builder";
+      wantedBy = ["multi-user.target"];
+      after = ["local-fs.target"];
+
+      serviceConfig = {
+        Type = "oneshot";
+        RemainAfterExit = true;
+      };
+
+      script = ''
+        SOURCE_DB="/nix/var/nix/db/db.sqlite"
+        LOCAL_DB="/nix/.local-state/db.sqlite"
+
+        # Copy from host to local if local doesn't exist or source is newer
+        if [[ ! -f "$LOCAL_DB" ]] || [[ "$SOURCE_DB" -nt "$LOCAL_DB" ]]; then
+          echo "Copying SQLite DB from host to local storage..."
+          cp -f "$SOURCE_DB" "$LOCAL_DB"
+          # Also copy WAL and SHM files if they exist
+          [[ -f "$SOURCE_DB-wal" ]] && cp -f "$SOURCE_DB-wal" "$LOCAL_DB-wal"
+          [[ -f "$SOURCE_DB-shm" ]] && cp -f "$SOURCE_DB-shm" "$LOCAL_DB-shm"
+          echo "SQLite DB copied to local storage"
+        else
+          echo "Local SQLite DB is up-to-date, skipping copy"
+        fi
+      '';
     };
 
     # ===== Local Socket Directory =====
@@ -192,19 +244,26 @@ in {
     fileSystems."/nix/var/nix/daemon-socket" = {
       device = "tmpfs";
       fsType = "tmpfs";
-      options = [ "mode=0755" ];
+      options = ["mode=0755"];
     };
 
     # ===== Writable Nix Store =====
     # By default NixOS remounts /nix/store as read-only for security
     # Builder needs write access to populate host's store
-    boot.nixStoreMountOpts = [ "rw" "relatime" ];
+    boot.nixStoreMountOpts = ["rw" "relatime"];
 
     # ===== Kernel Configuration =====
     boot.initrd.availableKernelModules = [
-      "virtio_balloon" "virtio_blk" "virtio_pci" "virtio_ring"
-      "virtio_net" "virtio_scsi" "virtio_mmio"
-      "9p" "9pnet" "9pnet_virtio"
+      "virtio_balloon"
+      "virtio_blk"
+      "virtio_pci"
+      "virtio_ring"
+      "virtio_net"
+      "virtio_scsi"
+      "virtio_mmio"
+      "9p"
+      "9pnet"
+      "9pnet_virtio"
     ];
 
     boot.kernelParams = [
@@ -217,7 +276,7 @@ in {
       "virtio_blk"
       "virtio_pci"
       "virtio_rng"
-      "vmw_vsock_virtio_transport"  # vsock for host communication
+      "vmw_vsock_virtio_transport" # vsock for host communication
     ];
 
     # ===== Networking =====
@@ -226,11 +285,11 @@ in {
       useDHCP = true;
       enableIPv6 = false;
       networkmanager.enable = false;
-      firewall.enable = false;  # Builder doesn't need firewall
+      firewall.enable = false; # Builder doesn't need firewall
     };
 
     # ===== Services =====
-    services.openssh.enable = false;  # No SSH - vsock only
+    services.openssh.enable = false; # No SSH - vsock only
     services.qemuGuest.enable = true;
     services.getty.autologinUser = "builder";
     services.haveged.enable = true;
@@ -238,8 +297,8 @@ in {
     # ===== User Configuration =====
     users.users.builder = {
       isNormalUser = true;
-      extraGroups = [ "wheel" ];
-      password = "builder";  # Simple password for console access
+      extraGroups = ["wheel"];
+      password = "builder"; # Simple password for console access
     };
     security.sudo.wheelNeedsPassword = false;
 
@@ -256,26 +315,28 @@ in {
 
     # ===== Git Configuration =====
     # Trust the mounted repos despite different ownership (virtiofs UID mapping)
-    environment.etc."gitconfig".text = ''
-      [safe]
-        directory = /mnt/hydrix
-    '' + lib.optionalString (localHydrixPath != null) ''
+    environment.etc."gitconfig".text =
+      ''
+        [safe]
+          directory = /mnt/hydrix
+      ''
+      + lib.optionalString (localHydrixPath != null) ''
         directory = ${localHydrixPath}
-    '';
+      '';
 
     # ===== Read-Only Mounts for Security =====
     # Builder can evaluate flakes but cannot modify source code
-    fileSystems."/mnt/hydrix".options = lib.mkAfter [ "ro" ];
+    fileSystems."/mnt/hydrix".options = lib.mkAfter ["ro"];
     fileSystems.${localHydrixPath} = lib.mkIf (localHydrixPath != null) {
-      options = lib.mkAfter [ "ro" ];
+      options = lib.mkAfter ["ro"];
     };
 
     # ===== Vsock Build Server =====
     # Listens on port 14510 for build commands from host
     systemd.services.builder-vsock = {
       description = "Builder vsock server for host commands";
-      wantedBy = [ "multi-user.target" ];
-      after = [ "network.target" "nix-daemon.service" ];
+      wantedBy = ["multi-user.target"];
+      after = ["network.target" "nix-daemon.service"];
 
       serviceConfig = {
         Type = "simple";
@@ -328,13 +389,31 @@ in {
                 echo "PONG"
                 ;;
 
+              SYNC)
+                echo "Syncing SQLite changes back to host..."
+                # Stop nix-daemon first to ensure all writes are flushed
+                ${pkgs.systemd}/bin/systemctl stop nix-daemon.service
+                sleep 2
+
+                # Copy local DB back to host
+                cp -f /nix/.local-state/db.sqlite /nix/var/nix/db/db.sqlite
+                # Copy WAL/SHM if they have changes
+                [[ -f /nix/.local-state/db.sqlite-wal ]] && \
+                  cp -f /nix/.local-state/db.sqlite-wal /nix/var/nix/db/db.sqlite-wal
+                [[ -f /nix/.local-state/db.sqlite-shm ]] && \
+                  cp -f /nix/.local-state/db.sqlite-shm /nix/var/nix/db/db.sqlite-shm
+
+                echo "SYNC complete"
+                ;;
+
               *)
                 echo "ERROR unknown command: $cmd"
-                echo "Commands: BUILD <flake>, PREFETCH <flake>, PING"
+                echo "Commands: BUILD <flake>, PREFETCH <flake>, PING, SYNC"
                 ;;
             esac
           '';
-        in buildServer;
+        in
+          buildServer;
         Restart = "always";
         RestartSec = 5;
       };
@@ -344,8 +423,8 @@ in {
     # Listens on port 14511 for status queries
     systemd.services.builder-status = {
       description = "Builder status server";
-      wantedBy = [ "multi-user.target" ];
-      after = [ "network.target" ];
+      wantedBy = ["multi-user.target"];
+      after = ["network.target"];
 
       serviceConfig = {
         Type = "simple";
@@ -379,7 +458,8 @@ in {
                 ;;
             esac
           '';
-        in statusServer;
+        in
+          statusServer;
         Restart = "always";
         RestartSec = 5;
       };
@@ -398,25 +478,25 @@ in {
     # ===== MOTD =====
     users.motd = ''
 
-    +-------------------------------------------------+
-    |  HYDRIX BUILDER VM                              |
-    +-------------------------------------------------+
-    |  This VM builds packages for the host's store   |
-    |  Host nix-daemon is STOPPED while this runs     |
-    |                                                 |
-    |  Commands from host (via vsock):                |
-    |    builder build <flake>  - Build a flake       |
-    |    builder status         - Check status        |
-    |    builder stop           - Stop builder VM     |
-    +-------------------------------------------------+
+      +-------------------------------------------------+
+      |  HYDRIX BUILDER VM                              |
+      +-------------------------------------------------+
+      |  This VM builds packages for the host's store   |
+      |  Host nix-daemon is STOPPED while this runs     |
+      |                                                 |
+      |  Commands from host (via vsock):                |
+      |    builder build <flake>  - Build a flake       |
+      |    builder status         - Check status        |
+      |    builder stop           - Stop builder VM     |
+      +-------------------------------------------------+
 
     '';
 
     # ===== Startup Banner =====
     systemd.services.builder-banner = {
       description = "Display builder status";
-      wantedBy = [ "multi-user.target" ];
-      after = [ "network.target" ];
+      wantedBy = ["multi-user.target"];
+      after = ["network.target"];
       serviceConfig = {
         Type = "oneshot";
         RemainAfterExit = true;
