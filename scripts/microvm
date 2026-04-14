@@ -2752,40 +2752,7 @@ main() {
             cmd_builder_exec "$1"
             ;;
         mvm)
-            # Multi-VM: run build/restart/stop/etc on multiple VMs
-            # Usage: microvm mvm rebuild vault files pentest browsing
-            [[ $# -lt 1 ]] && { log_error "Usage: microvm mvm <command> <vm1> [vm2] ..."; exit 1; }
-            local mvm_cmd="$1"
-            shift
-            case "$mvm_cmd" in
-                build|restart|start|stop|update|purge|rebuild)
-                    [[ $# -lt 1 ]] && { log_error "Usage: microvm mvm $mvm_cmd <vm1> [vm2] ..."; exit 1; }
-                    for vm in "$@"; do
-                        log "Processing ${BOLD}${vm}${NC}..."
-                        if [[ "$mvm_cmd" == "rebuild" ]]; then
-                            cmd_build "$vm" && cmd_restart "$vm"
-                        else
-                            case "$mvm_cmd" in
-                                build)   cmd_build "$vm" ;;
-                                start)   cmd_start "$vm" ;;
-                                stop)    cmd_stop "$vm" ;;
-                                restart) cmd_restart "$vm" ;;
-                                update)  cmd_update "$vm" ;;
-                                purge)   cmd_purge "$vm" ;;
-                            esac
-                        fi
-                        echo ""
-                    done
-                    ;;
-                *)
-                    log_error "Unknown mvm command: $mvm_cmd"
-                    echo "Usage: microvm mvm <build|restart|start|stop|update|purge|rebuild> <vm1> [vm2] ..."
-                    exit 1
-                    ;;
-            esac
-            ;;
-        mvm)
-            # Multi-VM helper: run command on multiple VMs
+            # Multi-VM: run command on multiple VMs
             # Usage: microvm mvm <command> <vm1> [vm2] ...
             # The fish shell provides 'mvm' as an abbreviation for 'microvm'
             # which auto-expands to allow multi-VM commands directly.
