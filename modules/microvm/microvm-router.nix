@@ -540,7 +540,7 @@ in {
             subnet=$(${pkgs.jq}/bin/jq -r ".[\"$profile\"].subnet // empty" /var/lib/hydrix/vm-registry.json 2>/dev/null)
             if [[ -n "$subnet" ]]; then
               profileUpper=$(echo "$profile" | tr '[:lower:]' '[:upper:]')
-              eval "IFACE_${profileUpper}_SUBNET=$subnet"
+              eval "IFACE_\${profileUpper}_SUBNET=\$subnet"
             fi
           done
         fi
@@ -572,7 +572,7 @@ in {
             subnet=$(${pkgs.jq}/bin/jq -r ".[\"$profile\"].subnet // empty" /var/lib/hydrix/vm-registry.json 2>/dev/null)
             if [[ -n "$subnet" ]]; then
               profileUpper=$(echo "$profile" | tr '[:lower:]' '[:upper:]')
-              echo "IFACE_${profileUpper}_SUBNET=$subnet" >> "$STATE_DIR/interfaces"
+              echo "IFACE_\${profileUpper}_SUBNET=\$subnet" >> "$STATE_DIR/interfaces"
             fi
           done
         fi
