@@ -2753,7 +2753,8 @@ main() {
             ;;
         console)
             [[ $# -lt 1 ]] && { log_error "Usage: microvm console <name>"; exit 1; }
-            cmd_console "$1"
+            local vm="$(get_vm_name_from_target "$1")"
+            cmd_console "$vm"
             ;;
         builder)
             cmd_builder "$@"
