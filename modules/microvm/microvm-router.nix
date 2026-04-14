@@ -92,7 +92,7 @@ in {
     # QEMU Guest profile for virtio modules
     (modulesPath + "/profiles/qemu-guest.nix")
     # LAN control service (pentest VM LAN access toggle)
-    ../../router-lan-control.nix
+    ../router-lan-control.nix
   ];
 
   # ===== MicroVM Router Options =====
