@@ -159,13 +159,15 @@ in {
           "-netdev" "tap,id=net-files,ifname=mv-rts-file,script=no,downscript=no"
           "-device" "virtio-net-pci,netdev=net-files,mac=02:00:00:03:08:01"
         ]
+        # Only extraNetworks here — framework profiles (pentest, browsing, comms, dev, lurking)
+        # are already hardcoded above. Dynamic block handles user-defined extra profiles only.
         ++ lib.concatLists (lib.imap0 (i: n: [
             "-netdev"
             "tap,id=net-${n.name},ifname=${stableRouterTap n},script=no,downscript=no"
             "-device"
             "virtio-net-pci,netdev=net-${n.name},mac=02:00:00:04:${lib.fixedWidthString 2 "0" (builtins.toString i)}:01"
           ])
-          allNetworks);
+          extraNetworks);
 
       shares = [
         {
@@ -238,7 +240,7 @@ in {
         matchConfig.MACAddress = "02:00:00:04:${lib.fixedWidthString 2 "0" (builtins.toString i)}:01";
         linkConfig.Name = stableRouterTap n;
       };
-    }) allNetworks);
+    }) extraNetworks);
 
     # ===== Networking =====
     networking = {
