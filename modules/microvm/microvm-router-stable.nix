@@ -4,8 +4,9 @@
 # Serves all the same bridges and subnets as the main router using
 # separate TAP interfaces (mv-rts-*) so both can coexist in config.
 #
-# This module is intentionally minimal — no VPN, no wifi-sync. It is
-# the "golden image" that should always work. Add features deliberately.
+# Fully declarative: no runtime bash services. Because systemd.network.links
+# give predictable interface names at boot, all networking (static IPs,
+# dnsmasq, nftables) is generated from Nix at build time.
 #
 # TAP prefix:    mv-rts-* (router-stable)
 # Framework MACs 02:00:00:03:XX:01
@@ -56,13 +57,40 @@
   profileNetworks = cfg.networking.profileNetworks;
   allNetworks = profileNetworks ++ extraNetworks;
 
-  # Derive stable TAP name from the profile's routerTap.
-  # Convention: all routerTaps follow mv-router-<abbrev>; we substitute the prefix.
-  # For any other format, fallback: prepend mv-rts- to the name.
+  # Derive the stable TAP name for a network entry.
+  # All framework routerTaps follow mv-router-<abbrev>; substitute the prefix.
   stableRouterTap = n:
     if lib.hasPrefix "mv-router-" n.routerTap
     then "mv-rts-" + lib.removePrefix "mv-router-" n.routerTap
     else "mv-rts-${n.name}";
+
+  # Framework LAN interfaces — fixed subnets defined by Hydrix.
+  # Each entry: { tap, subnet, routerIp }
+  frameworkLans = [
+    { tap = "mv-rts-mgmt"; subnet = "192.168.100"; routerIp = "192.168.100.253"; }
+    { tap = "mv-rts-shar"; subnet = "192.168.105"; routerIp = "192.168.105.253"; }
+    { tap = "mv-rts-bldr"; subnet = "192.168.106"; routerIp = "192.168.106.253"; }
+    { tap = "mv-rts-file"; subnet = "192.168.108"; routerIp = "192.168.108.253"; }
+  ];
+
+  # All profile/extra network LAN interfaces — derived from meta.nix at build time.
+  profileLans = map (n: {
+    tap      = stableRouterTap n;
+    subnet   = n.subnet;
+    routerIp = "${n.subnet}.253";
+  }) allNetworks;
+
+  allLans = frameworkLans ++ profileLans;
+
+  # All LAN interface names (for nftables and NM unmanaged list)
+  allLanTaps = map (l: l.tap) allLans;
+
+  # Comma-separated list of LAN taps for nftables set literals
+  lanTapSet = lib.concatMapStringsSep ", " (t: "\"${t}\"") (["lo"] ++ allLanTaps);
+
+  # Comma-separated list of VM subnets for nftables
+  vmNetSet = lib.concatMapStringsSep ", " (l: "${l.subnet}.0/24") allLans;
+
 in {
   imports = [
     ../options.nix
@@ -89,11 +117,7 @@ in {
       graphics.enable = false;
 
       interfaces = [
-        {
-          type = "tap";
-          id = "mv-rts-mgmt";
-          mac = "02:00:00:03:00:01";
-        }
+        { type = "tap"; id = "mv-rts-mgmt"; mac = "02:00:00:03:00:01"; }
       ];
 
       qemu.extraArgs =
@@ -196,6 +220,8 @@ in {
 
     # ===== Predictable Interface Naming =====
     # Rename virtio-net devices inside QEMU by MAC → stable TAP name.
+    # This makes all interface names known at build time, enabling fully
+    # declarative networking below.
     systemd.network.links = {
       "10-mv-rts-mgmt" = { matchConfig.MACAddress = "02:00:00:03:00:01"; linkConfig.Name = "mv-rts-mgmt"; };
       "10-mv-rts-pent" = { matchConfig.MACAddress = "02:00:00:03:01:01"; linkConfig.Name = "mv-rts-pent"; };
@@ -218,10 +244,15 @@ in {
     networking = {
       useDHCP = false;
       enableIPv6 = false;
+      firewall.enable = false;
+
+      # NetworkManager handles only the WiFi (WAN) interface.
+      # LAN interfaces (mv-rts-*) are managed by systemd-networkd below.
       networkmanager = {
         enable = true;
         wifi.powersave = false;
         settings.keyfile.path = "/var/lib/NetworkManager/system-connections";
+        unmanaged = [ "interface-name:mv-rts-*" ];
         ensureProfiles = lib.mkIf hasWifiCredentials {
           profiles = builtins.listToAttrs (map (network: {
             name = network.ssid;
@@ -240,215 +271,117 @@ in {
           }) wifiNetworks);
         };
       };
+
       wireless.enable = false;
-      firewall.enable = false;
+    };
+
+    # ===== LAN Interface Configuration (systemd-networkd) =====
+    # All LAN TAPs get static IPs. Interface names are guaranteed by
+    # systemd.network.links above, so this is fully build-time declarative.
+    systemd.network = {
+      enable = true;
+      networks = lib.listToAttrs (map (l: {
+        name = "10-${l.tap}";
+        value = {
+          matchConfig.Name = l.tap;
+          networkConfig = {
+            Address = "${l.routerIp}/24";
+            DHCP = "no";
+            LinkLocalAddressing = "no";
+            ConfigureWithoutCarrier = "yes";
+          };
+        };
+      }) allLans);
     };
 
     boot.kernel.sysctl = {
-      "net.ipv4.ip_forward"                     = 1;
-      "net.ipv4.conf.all.forwarding"             = 1;
-      "net.ipv4.conf.default.rp_filter"          = 0;
-      "net.ipv4.conf.all.rp_filter"              = 0;
-      "net.ipv4.icmp_echo_ignore_broadcasts"     = 1;
+      "net.ipv4.ip_forward"                       = 1;
+      "net.ipv4.conf.all.forwarding"               = 1;
+      "net.ipv4.conf.default.rp_filter"            = 0;
+      "net.ipv4.conf.all.rp_filter"                = 0;
+      "net.ipv4.icmp_echo_ignore_broadcasts"       = 1;
       "net.ipv4.icmp_ignore_bogus_error_responses" = 1;
-      "net.ipv4.tcp_syncookies"                  = 1;
-      "net.ipv4.tcp_rfc1337"                     = 1;
-      "net.ipv4.conf.all.accept_source_route"    = 0;
-      "net.ipv4.conf.all.accept_redirects"       = 0;
-      "net.ipv4.conf.all.send_redirects"         = 0;
-      "net.ipv4.conf.all.log_martians"           = 1;
+      "net.ipv4.tcp_syncookies"                    = 1;
+      "net.ipv4.tcp_rfc1337"                       = 1;
+      "net.ipv4.conf.all.accept_source_route"      = 0;
+      "net.ipv4.conf.all.accept_redirects"         = 0;
+      "net.ipv4.conf.all.send_redirects"           = 0;
+      "net.ipv4.conf.all.log_martians"             = 1;
     };
 
-    # ===== Network Setup =====
-    systemd.services.router-network-setup = {
-      description = "Configure stable router networking";
-      after = ["network.target" "local-fs.target" "systemd-tmpfiles-setup.service"];
-      before = ["dnsmasq.service" "network-online.target"];
-      wantedBy = ["multi-user.target"];
-      path = [pkgs.coreutils pkgs.gnugrep pkgs.iproute2 pkgs.networkmanager];
-      serviceConfig = {
-        Type = "oneshot";
-        RemainAfterExit = true;
-      };
-      script = ''
-        STATE_DIR="/var/lib/hydrix-router-stable"
-        mkdir -p "$STATE_DIR"
-
-        echo "=== Stable Router Network Setup ==="
-
-        # Detect WAN (WiFi passthrough)
-        detect_wan() {
-          for iface in $(ls /sys/class/net/ 2>/dev/null); do
-            [[ "$iface" == wl* ]] && { echo "$iface"; return; }
-          done
-          for iface in $(ls /sys/class/net/ 2>/dev/null); do
-            [[ -d "/sys/class/net/$iface/wireless" ]] && { echo "$iface"; return; }
-          done
-          echo ""
-        }
-
-        echo "Waiting for WiFi interface..."
-        for i in $(seq 1 30); do
-          WAN_IFACE=$(detect_wan)
-          [[ -n "$WAN_IFACE" ]] && break
-          echo "  ... waiting ($i/30)"
-          sleep 1
-        done
-
-        if [[ -z "$WAN_IFACE" ]]; then
-          echo "WARNING: No WiFi interface detected"
-          WAN_IFACE="none"
-        else
-          echo "Detected WAN: $WAN_IFACE"
-        fi
-        echo "$WAN_IFACE" > "$STATE_DIR/wan_interface"
-
-        find_iface_by_name() {
-          local name="$1"
-          for iface in $(ls /sys/class/net/ 2>/dev/null); do
-            [[ "$iface" == "$name" ]] && { echo "$iface"; return 0; }
-          done
-          return 1
-        }
-
-        # Framework infra interfaces (stable TAP names)
-        IFACE_MGMT=$(find_iface_by_name "mv-rts-mgmt")
-        IFACE_SHAR=$(find_iface_by_name "mv-rts-shar")
-        IFACE_BLDR=$(find_iface_by_name "mv-rts-bldr")
-        IFACE_FILE=$(find_iface_by_name "mv-rts-file")
-
-        # Profile + extra network interfaces (derived from meta.nix routerTap)
-        ${lib.concatStringsSep "\n        " (map (n: let
-          varName = lib.toUpper (builtins.replaceStrings ["-"] ["_"] n.name);
-          sTap = stableRouterTap n;
-        in "IFACE_${varName}=$(find_iface_by_name \"${sTap}\")") allNetworks)}
-
-        # Save for dnsmasq and firewall
-        {
-          echo "IFACE_MGMT=$IFACE_MGMT"
-          ${lib.concatStringsSep "\n          " (map (n: let
-            varName = lib.toUpper (builtins.replaceStrings ["-"] ["_"] n.name);
-          in "echo \"IFACE_${varName}=$IFACE_${varName}\"") allNetworks)}
-          echo "IFACE_SHAR=$IFACE_SHAR"
-          echo "IFACE_BLDR=$IFACE_BLDR"
-          echo "IFACE_FILE=$IFACE_FILE"
-        } > "$STATE_DIR/interfaces"
-
-        configure_lan() {
-          local iface="$1" ip="$2" name="$3"
-          if [[ -n "$iface" ]]; then
-            echo "Configuring $name ($iface) → $ip"
-            ${pkgs.networkmanager}/bin/nmcli device set "$iface" managed no 2>/dev/null || true
-            ${pkgs.iproute2}/bin/ip link set "$iface" up 2>/dev/null || true
-            ${pkgs.iproute2}/bin/ip addr add "$ip/24" dev "$iface" 2>/dev/null || true
-          else
-            echo "WARNING: $name interface not found"
-          fi
-        }
-
-        configure_lan "$IFACE_MGMT" "192.168.100.253" "mgmt"
-        ${lib.concatStringsSep "\n        " (map (n: let
-          varName = lib.toUpper (builtins.replaceStrings ["-"] ["_"] n.name);
-        in "configure_lan \"$IFACE_${varName}\" \"${n.subnet}.253\" \"${n.name}\"") allNetworks)}
-        configure_lan "$IFACE_SHAR" "192.168.105.253" "shared"
-        configure_lan "$IFACE_BLDR" "192.168.106.253" "builder"
-        configure_lan "$IFACE_FILE" "192.168.108.253" "files"
-
-        echo "=== Stable Router Network Setup Complete ==="
-      '';
-    };
-
-    # ===== dnsmasq =====
-    systemd.services.dnsmasq-config = {
-      description = "Generate dnsmasq config for stable router";
-      after = ["router-network-setup.service"];
-      before = ["dnsmasq.service"];
-      wantedBy = ["multi-user.target"];
-      serviceConfig = {Type = "oneshot"; RemainAfterExit = true;};
-      script = ''
-        mkdir -p /etc/dnsmasq.d
-        source /var/lib/hydrix-router-stable/interfaces 2>/dev/null || true
-
-        {
-          echo "bind-interfaces"
-          echo "log-dhcp"
-          echo "server=1.1.1.1"
-          echo "server=8.8.8.8"
-        } > /etc/dnsmasq.d/hydrix.conf
-
-        add_iface() {
-          local iface="$1" subnet="$2" router_ip="$3"
-          if [[ -n "$iface" && -e "/sys/class/net/$iface" ]]; then
-            echo "interface=$iface"
-            echo "dhcp-range=$iface,$subnet.10,$subnet.200,24h"
-            echo "dhcp-option=$iface,option:router,$router_ip"
-            echo "dhcp-option=$iface,option:dns-server,$router_ip"
-          fi
-        } >> /etc/dnsmasq.d/hydrix.conf
-
-        add_iface "$IFACE_MGMT" "192.168.100" "192.168.100.253"
-        ${lib.concatStringsSep "\n        " (map (n: let
-          varName = lib.toUpper (builtins.replaceStrings ["-"] ["_"] n.name);
-        in "add_iface \"$IFACE_${varName}\" \"${n.subnet}\" \"${n.subnet}.253\"") allNetworks)}
-        add_iface "$IFACE_SHAR" "192.168.105" "192.168.105.253"
-        add_iface "$IFACE_BLDR" "192.168.106" "192.168.106.253"
-        add_iface "$IFACE_FILE" "192.168.108" "192.168.108.253"
-      '';
-    };
-
+    # ===== dnsmasq (fully declarative) =====
+    # Interface names are known at build time, so no runtime config generation.
     services.dnsmasq = {
       enable = true;
       resolveLocalQueries = true;
-      settings.conf-dir = "/etc/dnsmasq.d/,*.conf";
+      settings = {
+        bind-interfaces = true;
+        log-dhcp = true;
+        server = [ "1.1.1.1" "8.8.8.8" ];
+        interface = allLanTaps;
+        dhcp-range = map (l:
+          "${l.tap},${l.subnet}.10,${l.subnet}.200,24h"
+        ) allLans;
+        dhcp-option = lib.concatMap (l: [
+          "${l.tap},option:router,${l.routerIp}"
+          "${l.tap},option:dns-server,${l.routerIp}"
+        ]) allLans;
+      };
     };
 
-    # ===== Firewall =====
-    systemd.services.router-firewall = {
-      description = "Configure stable router firewall";
-      after = ["router-network-setup.service"];
-      wantedBy = ["multi-user.target"];
-      serviceConfig = {Type = "oneshot"; RemainAfterExit = true;};
-      script = ''
-        WAN=$(cat /var/lib/hydrix-router-stable/wan_interface 2>/dev/null || echo "eth0")
-        echo "Configuring firewall (WAN: $WAN)"
+    # ===== Firewall (nftables, fully declarative) =====
+    # LAN interface names are known at build time.
+    # WAN interface is NOT named — we identify it by negating all known LANs.
+    # Any interface not in the LAN set is treated as WAN/VPN → masquerade.
+    networking.nftables = {
+      enable = true;
+      tables."stable-router" = {
+        family = "inet";
+        content = ''
+          # LAN interfaces (all known at build time)
+          define LAN_IFACES = { ${lanTapSet} }
+          # VM subnets (all known at build time)
+          define VM_NETS = { ${vmNetSet} }
 
-        ${pkgs.nftables}/bin/nft flush ruleset 2>/dev/null || true
-
-        VM_NETWORKS="{ 192.168.100.0/24${lib.concatMapStrings (n: ", ${n.subnet}.0/24") allNetworks}, 192.168.105.0/24, 192.168.106.0/24, 192.168.108.0/24 }"
-
-        ${pkgs.nftables}/bin/nft -f - << EOF
-        table inet router {
           chain input {
             type filter hook input priority filter; policy drop;
             iif lo accept
             ct state established,related accept
             ct state invalid drop
+            # DHCP — source is 0.0.0.0, must allow before IP filtering
             udp dport 67 accept
-            ip saddr $VM_NETWORKS udp dport 53 accept
-            ip saddr $VM_NETWORKS tcp dport 53 accept
-            ip saddr $VM_NETWORKS ip protocol icmp limit rate 10/second accept
-            ip saddr $VM_NETWORKS counter log prefix "STABLE-ROUTER-BLOCKED: " drop
-            iifname "$WAN" accept
+            # DNS from VMs
+            ip saddr $VM_NETS udp dport 53 accept
+            ip saddr $VM_NETS tcp dport 53 accept
+            # ICMP from VMs (rate-limited)
+            ip saddr $VM_NETS ip protocol icmp limit rate 10/second accept
+            # Block everything else from VM networks
+            ip saddr $VM_NETS counter drop
+            # Allow WAN replies (established handled above; this accepts new WAN input)
+            accept
           }
+
           chain forward {
             type filter hook forward priority filter; policy drop;
             ct state established,related accept
             ct state invalid drop
+            # Shared bridge — inter-VM communication allowed
             ip saddr 192.168.105.0/24 accept
             ip daddr 192.168.105.0/24 accept
+            # Files VM — allow HTTP file transfers between VMs
             ip saddr 192.168.108.0/24 tcp dport 8888 accept
             ip saddr 192.168.108.0/24 ip daddr 192.168.108.0/24 accept
-            ip saddr 192.168.108.0/24 ip protocol icmp accept
-            oifname "$WAN" accept
+            # Allow forwarding out to WAN/VPN (any non-LAN egress)
+            oifname != $LAN_IFACES accept
           }
+
           chain postrouting {
             type nat hook postrouting priority srcnat; policy accept;
-            oifname "$WAN" masquerade
+            # Masquerade on any non-LAN egress (WiFi WAN + VPN interfaces)
+            oifname != $LAN_IFACES masquerade
           }
-        }
-        EOF
-        echo "Stable router firewall configured"
-      '';
+        '';
+      };
     };
 
     # ===== Services =====
@@ -471,14 +404,13 @@ in {
     security.sudo.wheelNeedsPassword = false;
 
     environment.systemPackages = with pkgs; [
-      iproute2 iptables nftables dnsmasq tcpdump
+      iproute2 iptables nftables tcpdump
       nettools bind.dnsutils bridge-utils pciutils
-      htop vim nano iw wirelesstools networkmanager
+      htop vim iw wirelesstools networkmanager
     ];
 
     systemd.tmpfiles.rules = [
-      "d /var/lib/hydrix-router-stable 0755 root root -"
-      "d /etc/dnsmasq.d 0755 root root -"
+      "d /etc/wireguard 0700 root root -"
     ];
 
     time.timeZone = locale.timezone;
