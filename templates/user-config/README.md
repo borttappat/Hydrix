@@ -10,10 +10,10 @@ This is your personal Hydrix configuration repository. It manages ALL your machi
 ├── machines/              # One .nix file per machine (named by hardware serial)
 │   └── <serial>.nix       # Your machine config
 ├── profiles/              # VM profile customizations (overlay on Hydrix base)
-│   ├── browsing/          # CID 103, WS 3, subnet .103
 │   ├── pentest/           # CID 102, WS 2, subnet .102
-│   ├── dev/               # CID 105, WS 5, subnet .105
+│   ├── browsing/          # CID 103, WS 3, subnet .103
 │   ├── comms/             # CID 104, WS 4, subnet .104
+│   ├── dev/               # CID 105, WS 5, subnet .105
 │   └── lurking/           # CID 106, WS 6, subnet .106
 ├── shared/                # Settings shared across host machines and VMs
 │   ├── common.nix         # Locale, shared packages
@@ -118,6 +118,31 @@ hydrix.graphical.ui.bar.bottom.right = "rproc-bottom vm-ram-bottom vm-cpu-bottom
 ### fish.nix
 
 Shell abbreviations and functions via `programs.fish.shellAbbrs` and `programs.fish.functions`.
+
+Common abbreviations provided by Hydrix:
+
+| Abbreviation | Expands to | Purpose |
+|--------------|------------|---------|
+| `mvm` | `microvm mvm` | Multi-VM command runner |
+| `za` | `zenaudio` | Audio device switcher (ASUS ZenBook) |
+| `zas` | `zenaudio speakers` | Enable internal speakers |
+| `zah` | `zenaudio headphones` | Enable headphones |
+| `zab` | `zenaudio bluetooth` | Enable Bluetooth headset |
+
+**Multi-VM commands** - The `mvm` abbreviation is built into the framework:
+
+```fish
+# Build multiple VMs at once
+mvm build files pentest browsing
+
+# Restart multiple VMs
+mvm restart files pentest browsing dev
+
+# Rebuild (build + restart) multiple VMs
+mvm rebuild vault files pentest browsing
+
+# Same as: microvm mvm build files pentest browsing
+```
 
 ### alacritty.nix
 

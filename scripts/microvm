@@ -2093,6 +2093,50 @@ cmd_git_auth() {
     cmd_console "$GITSYNC_NAME"
 }
 
+# Multi-VM: help
+cmd_mvm_help() {
+    cat <<EOF
+${BOLD}microvm mvm${NC} - Multi-VM command runner
+
+${BOLD}USAGE${NC}
+    microvm mvm <command> <vm1> [vm2] ...
+
+${BOLD}COMMANDS${NC}
+    build <vm1> [vm2] ...   Build each microVM
+    start <vm1> [vm2] ...   Start each microVM
+    stop <vm1> [vm2] ...    Stop each microVM
+    restart <vm1> [vm2] ... Restart each microVM
+    update <vm1> [vm2] ...  Build + live switch each microVM
+    purge <vm1> [vm2] ...   Delete all persistent data for each microVM
+    rebuild <vm1> [vm2] ... Build and restart each microVM
+
+${BOLD}FISH ABBREVIATION${NC}
+    The shell provides 'mvm' as an abbreviation for 'microvm'.
+    This allows two usage styles:
+
+    # Style 1: microvm mvm <cmd> <vm1> <vm2> ...
+    microvm mvm rebuild files pentest browsing
+
+    # Style 2: mvm <cmd> <vm1> <vm2> ... (fish expands mvm → microvm)
+    mvm rebuild files pentest browsing
+
+    Both styles work with any combination of VMs (profile or infrastructure).
+
+${BOLD}EXAMPLES${NC}
+    # Build multiple VMs at once
+    microvm mvm build microvm-files microvm-pentest microvm-browsing
+
+    # Restart all profile VMs
+    mvm restart files pentest browsing dev comms lurking
+
+    # Stop everything
+    mvm stop files pentest browsing router builder gitsync
+
+    # Rebuild with custom names (fish expands mvm → microvm)
+    mvm rebuild vault files pentest browsing
+EOF
+}
+
 cmd_git_help() {
     cat <<EOF
 ${BOLD}microvm git${NC} - Git operations via git-sync VM (lockdown mode)
@@ -2553,6 +2597,7 @@ ${BOLD}COMMANDS${NC}
     pentest <cmd>           Manage engagement slots (see: microvm pentest help)
 
   ${BOLD}Utilities:${NC}
+    mvm <cmd> <vm1> [...]   Multi-VM: run command on multiple VMs (see: microvm mvm help)
     test <name>             Full workflow test with timing
     purge <name> [-f]       Delete all persistent data (fresh start)
     snapshot <action>       Manage qcow2 snapshots (create/list/revert/delete)
@@ -2729,6 +2774,49 @@ main() {
                     exit 1
                     ;;
             esac
+            ;;
+        mvm)
+            # Multi-VM helper: run command on multiple VMs
+            # Usage: microvm mvm <command> <vm1> [vm2] ...
+            # The fish shell provides 'mvm' as an abbreviation for 'microvm'
+            # which auto-expands to allow multi-VM commands directly.
+            [[ $# -lt 1 ]] && { cmd_mvm_help; exit 0; }
+            local mvm_cmd="$1"
+            shift
+            # Handle the 'help' subcommand
+            case "$mvm_cmd" in
+                help|-h|--help)
+                    cmd_mvm_help
+                    exit 0
+                    ;;
+            esac
+            # Process each VM
+            if [[ $# -lt 1 ]]; then
+                log_error "Usage: microvm mvm <command> <vm1> [vm2] ..."
+                cmd_mvm_help
+                exit 1
+            fi
+            for vm in "$@"; do
+                case "$mvm_cmd" in
+                    build)   log "Processing ${BOLD}${vm}${NC}..."; cmd_build "$vm" ;;
+                    start)   log "Processing ${BOLD}${vm}${NC}..."; cmd_start "$vm" ;;
+                    stop)    log "Processing ${BOLD}${vm}${NC}..."; cmd_stop "$vm" ;;
+                    restart) log "Processing ${BOLD}${vm}${NC}..."; cmd_restart "$vm" ;;
+                    update)  log "Processing ${BOLD}${vm}${NC}..."; cmd_update "$vm" ;;
+                    purge)   log "Processing ${BOLD}${vm}${NC}..."; cmd_purge "$vm" ;;
+                    rebuild)
+                        # rebuild = build + restart
+                        log "Processing ${BOLD}${vm}${NC}..."
+                        cmd_build "$vm" && cmd_restart "$vm"
+                        ;;
+                    *)
+                        log_error "Unknown mvm command: $mvm_cmd"
+                        cmd_mvm_help
+                        exit 1
+                        ;;
+                esac
+                echo ""
+            done
             ;;
         test)
             [[ $# -lt 1 ]] && { log_error "Usage: microvm test <name>"; exit 1; }

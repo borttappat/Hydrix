@@ -46,32 +46,72 @@ After installation, your configuration lives at `~/hydrix-config/`.
 
 ## Architecture Overview
 
+### Network Stack
+
 ```
 +---------------------------------------------------------------------+
 |                         HOST (Lockdown Mode)                        |
 |   - No direct internet access                                       |
 |   - WiFi hardware passed to router VM via VFIO                      |
-|   - Bridge networks for VM isolation                                |
+|   - Bridges: br-mgmt, br-pentest, br-comms, br-browse, br-dev,      |
+|              br-shared, br-builder, br-lurking, br-files            |
 +---------------------------------------------------------------------+
                             |
-         +---- br-mgmt (192.168.100.0/24) --------+
-         +---- br-pentest (192.168.101.0/24) -----+
-         +---- br-comms (192.168.102.0/24) -------+
-         +---- br-browse (192.168.103.0/24) ------+--- Router VM (WiFi)
-         +---- br-dev (192.168.104.0/24) ---------+
-         +---- br-shared (192.168.105.0/24) ------+
-         +---- br-builder (192.168.106.0/24) -----+
-         +---- br-lurking (192.168.107.0/24) -----+
-         +---- br-files (192.168.108.0/24) -------+
+        TAP Interfaces (Router VM connects to each bridge)
                             |
-     +-----------+----------+------------+-----------+-----------+
-     |           |          |            |           |           |
-+--------+  +--------+  +--------+  +---------+  +--------+  +--------+
-|Browsing|  |Pentest |  |  Dev   |  | Builder |  |Gitsync |  | Files  |
-|  VM    |  |   VM   |  |   VM   |  |   VM    |  |  VM    |  |  VM    |
-|CID:103 |  |CID:102 |  |CID:105 |  |CID:210  |  |CID:211 |  |CID:212 |
-+--------+  +--------+  +--------+  +---------+  +--------+  +--------+
+         +---- br-mgmt (192.168.100.0/24) ------+
+         |         ^ mv-router-mgmt              |
+         +---- br-pentest (192.168.101.0/24) ---+
+         |         ^ mv-router-pent              |
+         +---- br-comms (192.168.102.0/24) -----+
+         |         ^ mv-router-comm              |
+         +---- br-browse (192.168.103.0/24) ----+
+         |         ^ mv-router-brow              |--- Router VM (WiFi)
+         +---- br-dev (192.168.104.0/24) -------+
+         |         ^ mv-router-dev               |    CID: 200
+         +---- br-shared (192.168.105.0/24) ----+
+         |         ^ mv-router-shar              |    Subnets: 192.168.100-108.x
+         +---- br-builder (192.168.106.0/24) ---+
+         |         ^ mv-router-bldr              |
+         +---- br-lurking (192.168.107.0/24) ---+
+         |         ^ mv-router-lurk              |
+         +---- br-files (192.168.108.0/24) ------+
+                         ^ mv-router-file        |
+                         |                       |
+              +----------+----------+------------+-----------+
+              |          |          |            |           |
+         +--------+  +--------+  +--------+  +--------+  +--------+
+         |Pentest |  |Browsing|  |  Comms |  |  Dev   |  |Lurking |
+         |   VM   |  |   VM   |  |   VM   |  |   VM   |  |   VM   |
+         |CID:102 |  |CID:103 |  |CID:104 |  |CID:105 |  |CID:106 |
+         +--------+  +--------+  +--------+  +--------+  +--------+
+
+         +--------+  +--------+  +--------+
+         |Builder |  |Gitsync |  | Files  |
+         |   VM   |  |   VM   |  |   VM   |
+         |CID:210 |  |CID:211 |  |CID:212 |
+         +--------+  +--------+  +--------+
 ```
+
+### Router VM TAP Interfaces
+
+The router VM has **one TAP interface per bridge**, acting as the DHCP/DNS gateway for each subnet:
+
+| Router TAP | Bridge | Router IP | Subnet | Purpose |
+|------------|--------|-----------|--------|---------|
+| `mv-router-mgmt` | `br-mgmt` | 192.168.100.253 | 192.168.100.0/24 | Host management |
+| `mv-router-pent` | `br-pentest` | 192.168.101.253 | 192.168.101.0/24 | Pentest VMs |
+| `mv-router-comm` | `br-comms` | 192.168.102.253 | 192.168.102.0/24 | Comms VMs |
+| `mv-router-brow` | `br-browse` | 192.168.103.253 | 192.168.103.0/24 | Browsing VMs |
+| `mv-router-dev` | `br-dev` | 192.168.104.253 | 192.168.104.0/24 | Dev VMs |
+| `mv-router-shar` | `br-shared` | 192.168.105.253 | 192.168.105.0/24 | Shared services |
+| `mv-router-bldr` | `br-builder` | 192.168.106.253 | 192.168.106.0/24 | Builder VM |
+| `mv-router-lurk` | `br-lurking` | 192.168.107.253 | 192.168.107.0/24 | Lurking VM |
+| `mv-router-file` | `br-files` | 192.168.108.253 | 192.168.108.0/24 | Files VM |
+
+Each TAP interface is created by the host before the router VM starts, then attached to its bridge via udev rules. The router VM configures each interface with a static IP and runs `dnsmasq` to provide DHCP and DNS to all subnets simultaneously.
+
+**Custom profiles** with `routerTap` defined automatically get new TAP interfaces added (e.g., `mv-router-<name>` → `br-<name>`).
 
 > **CIDs and subnets are user-configurable.** Built-in profiles (browsing, pentest, dev, comms, lurking) ship with default CIDs/subnets but these are declared in each profile's `meta.nix` in your `hydrix-config/profiles/<name>/meta.nix`. The host module writes all profile metadata to `/etc/hydrix/vm-registry.json` at activation, all scripts, polybar, and i3 read from there at runtime, never from hardcoded maps. Adding a new VM type requires only `profiles/<name>/meta.nix` + `profiles/<name>/default.nix` in your config.
 
@@ -92,20 +132,96 @@ Generated at NixOS activation from all profile `meta.nix` files. Every runtime t
 
 Each entry drives: i3 `for_window` border rules, polybar workspace-desc label, `ws-app`/`ws-rofi` workspace→VM routing, `focus-rofi` menu, `vm-sync` profile targeting, and file transfer IP resolution.
 
+### VM Static IP Scheme
+
+Profile VMs get static `.10` IPs on their bridge (used by Files VM for inter-VM transfers):
+
+| VM | Bridge | Static IP | Router TAP |
+|----|--------|-----------|------------|
+| `microvm-pentest` | `br-pentest` | 192.168.101.10 | `mv-router-pent` |
+| `microvm-browsing` | `br-browse` | 192.168.103.10 | `mv-router-brow` |
+| `microvm-comms` | `br-comms` | 192.168.102.10 | `mv-router-comm` |
+| `microvm-dev` | `br-dev` | 192.168.104.10 | `mv-router-dev` |
+| `microvm-lurking` | `br-lurking` | 192.168.107.10 | `mv-router-lurk` |
+
+The `.10` IP is derived from the VM registry subnet (e.g., `192.168.103` → `192.168.103.10`). Each VM configures this IP on its main TAP interface via systemd-networkd.
+
+### Files VM Cross-Bridge Wiring
+
+The Files VM (`microvm-files`, CID 212) has **multiple TAP interfaces** - one per allowed bridge - enabling direct L2 access for encrypted file transfers:
+
+```
+Files VM (192.168.108.10 on br-files)
+├── mv-files (always → br-files)
+├── mv-files-pent (→ br-pentest, if "pentest" in accessFrom)
+├── mv-files-brow (→ br-browse, if "browsing" in accessFrom)
+├── mv-files-dev  (→ br-dev, if "dev" in accessFrom)
+├── mv-files-comm (→ br-comms, if "comms" in accessFrom)
+├── mv-files-lurk (→ br-lurking, if "lurking" in accessFrom)
+└── mv-router-file (→ br-files, router leg)
+```
+
+Configuration in your flake:
+```nix
+"microvm-files" = hydrix.lib.mkMicrovmFiles {
+  # Bridges the Files VM gets direct TAP access to
+  accessFrom = [ "pentest" "browsing" "dev" "comms" ];
+};
+```
+
+Per-bridge IPs (derived from vm-registry): Files VM gets `.2` on each bridge (e.g., `192.168.103.2` on `br-browse`). The Files VM is **fully isolated** from the router - it communicates directly via TAP interfaces, bypassing router forwarding rules.
+
+---
+
 ### Boot Modes (Specialisations)
 
-| Mode | Purpose | Internet Access |
-|------|---------|-----------------|
-| **Lockdown** (default) | Hardened, isolated host | VMs only (via router) |
-| **Administrative** | Full functionality | Host + VMs |
-| **Fallback** | Emergency direct WiFi | Host direct (no VMs) |
+| Mode | Purpose | Internet | Bridges | WiFi | VMs |
+|------|---------|----------|---------|------|-----|
+| **Lockdown** (default) | Hardened, isolated host | No (via builder VM) | Active | Passthrough to router | Enabled |
+| **Administrative** | Full functionality | Via router VM | Active | Passthrough to router | Enabled |
+| **Fallback** | Emergency direct WiFi | Direct | Removed | Host access | Disabled |
 
-Switch modes live (no reboot needed between lockdown and administrative):
+**Lockdown** (base config):
+- Host has **no default gateway** - no internet access
+- WiFi card passed to router VM via VFIO
+- All bridges active, router VM running
+- Builder VM available for nix builds (fetches via router, writes to host store)
+- Gitsync VM for git operations
+
+**Administrative** specialisation:
+- Adds default gateway through router VM (`192.168.100.253` on `br-mgmt`)
+- Host DNS through router (`dnsmasq` forwards to 1.1.1.1, 8.8.8.8)
+- Full package availability, libvirtd for libvirt pentest VMs
+- All VM isolation properties unchanged
+
+**Fallback** specialisation (**requires reboot**):
+- Releases WiFi card from VFIO (`kernelParams` restored)
+- Re-enables NetworkManager for direct WiFi connection
+- Removes all bridges and routing
+- Disables router VM and all microVMs
+- Use for emergency debugging or when VM isolation not needed
+
+Switch modes live (lockdown ↔ administrative, no reboot):
 
 ```bash
-hydrix-switch administrative    # Live switch to admin mode
-hydrix-switch lockdown          # Live switch to lockdown mode
+hydrix-switch administrative    # Add gateway via router VM
+hydrix-switch lockdown          # Remove gateway, isolate host
 hydrix-mode                     # Show current mode
+rebuild fallback                # Requires reboot (kernel params change)
+```
+
+**Builder VM workflow** (lockdown mode):
+1. Host nix-daemon stops (builder needs R/W store)
+2. Builder VM starts with virtiofs `/nix/store` access
+3. Builder fetches via router VM (has internet)
+4. Build outputs written directly to host's store
+5. Builder stops, host nix-daemon restarts
+6. Host builds instant (all deps cached in store)
+
+```bash
+microvm builder build browsing   # Fetch/build in builder VM
+microvm builder build host       # Build host config
+microvm builder status           # Check builder state
 ```
 
 ### VM Types
@@ -1502,6 +1618,36 @@ deploy-vm --type dev --name work --encrypt    # LUKS encrypted
 ## Shell
 
 Fish shell with babelfish for fast environment variable sourcing.
+
+### Abbreviations & Aliases
+
+The Hydrix framework provides several shell abbreviations for common commands:
+
+| Abbreviation | Expands to | Purpose |
+|--------------|------------|---------|
+| `mvm` | `microvm` | Multi-VM command runner |
+| `za` | `zenaudio` | Audio device switcher (ASUS ZenBook) |
+| `zas` | `zenaudio speakers` | Enable internal speakers |
+| `zah` | `zenaudio headphones` | Enable headphones |
+| `zab` | `zenaudio bluetooth` | Enable Bluetooth headset |
+| `za` | `zenaudio toggle` | Toggle speakers/headphones |
+| `rvm` | `rebuildvms` | Rebuild multiple VMs at once |
+
+**Multi-VM commands** - `mvm` expands to `microvm mvm`, allowing you to run commands on multiple VMs:
+
+```fish
+# Build multiple VMs at once
+mvm build files pentest browsing
+
+# Restart multiple VMs
+mvm restart files pentest browsing dev
+
+# Rebuild (build + restart) multiple VMs
+mvm rebuild vault files pentest browsing
+
+# Same as: microvm mvm build files pentest browsing
+# The 'microvm mvm' subcommand also works for non-fish shells
+```
 
 ### Babelfish
 
