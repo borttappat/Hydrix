@@ -319,6 +319,28 @@ in {
     hardware.enableAllFirmware = true;
     hardware.enableRedistributableFirmware = true;
 
+    # ===== Predictable Interface Naming =====
+    # Inside the QEMU VM, virtio-net devices get kernel-assigned names (ens3, ens4, …),
+    # not the host-side TAP names. These .link files rename each interface by its
+    # known MAC address so that find_iface_by_name works in the setup scripts.
+    systemd.network.links = {
+      "10-mv-router-mgmt" = { matchConfig.MACAddress = "02:00:00:01:00:01"; linkConfig.Name = "mv-router-mgmt"; };
+      "10-mv-router-pent" = { matchConfig.MACAddress = "02:00:00:01:01:01"; linkConfig.Name = "mv-router-pent"; };
+      "10-mv-router-comm" = { matchConfig.MACAddress = "02:00:00:01:02:01"; linkConfig.Name = "mv-router-comm"; };
+      "10-mv-router-brow" = { matchConfig.MACAddress = "02:00:00:01:03:01"; linkConfig.Name = "mv-router-brow"; };
+      "10-mv-router-dev"  = { matchConfig.MACAddress = "02:00:00:01:04:01"; linkConfig.Name = "mv-router-dev";  };
+      "10-mv-router-shar" = { matchConfig.MACAddress = "02:00:00:01:05:01"; linkConfig.Name = "mv-router-shar"; };
+      "10-mv-router-bldr" = { matchConfig.MACAddress = "02:00:00:01:06:01"; linkConfig.Name = "mv-router-bldr"; };
+      "10-mv-router-lurk" = { matchConfig.MACAddress = "02:00:00:01:07:01"; linkConfig.Name = "mv-router-lurk"; };
+      "10-mv-router-file" = { matchConfig.MACAddress = "02:00:00:01:08:01"; linkConfig.Name = "mv-router-file"; };
+    } // lib.listToAttrs (lib.imap0 (i: n: {
+      name  = "20-${n.routerTap}";
+      value = {
+        matchConfig.MACAddress = "02:00:00:02:${lib.fixedWidthString 2 "0" (builtins.toString i)}:01";
+        linkConfig.Name = n.routerTap;
+      };
+    }) extraNetworks);
+
     # ===== Networking Configuration =====
     networking = {
       useDHCP = false;
