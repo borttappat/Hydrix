@@ -113,6 +113,54 @@ Each TAP interface is created by the host before the router VM starts, then atta
 
 **Custom profiles** with `routerTap` defined automatically get new TAP interfaces added (e.g., `mv-router-<name>` → `br-<name>`).
 
+### Stable Fallback Router (`microvm-router-stable`)
+
+A second router VM is always declared alongside the main router. It serves as an immutable fallback that starts automatically if the main router fails.
+
+**Design goals:** the stable router is intentionally never casually modified. Rebuild it explicitly when you want to promote a known-good config as the new baseline. The main router is where you tune and experiment.
+
+| Property | Main router | Stable router |
+|----------|-------------|---------------|
+| Name | `microvm-router` | `microvm-router-stable` |
+| CID | 200 | 201 |
+| TAP prefix | `mv-router-*` | `mv-rts-*` |
+| Framework MACs | `02:00:00:01:XX:01` | `02:00:00:03:XX:01` |
+| Extra profile MACs | `02:00:00:02:XX:01` | `02:00:00:04:XX:01` |
+| Autostart | configurable | `false` (failover only) |
+| VPN support | yes | no (intentionally minimal) |
+| Config generation | runtime bash scripts | fully declarative (build-time) |
+
+**How failover works:**
+
+```
+Main router fails (VFIO error, crash, bad config)
+  → systemd OnFailure= triggers microvm@microvm-router-stable
+  → Conflicts= ensures only one router runs at a time (VFIO can't be shared)
+
+Main router manually started while stable is running:
+  → systemd Conflicts= stops the stable router first
+```
+
+**TAP naming:** the stable router uses a separate `mv-rts-*` TAP prefix so both VMs can coexist in config without conflicting. Both sets of TAPs attach to the **same bridges** — the bridges are shared infrastructure, only the router connected to them changes during failover.
+
+**Declarative networking:** because `systemd.network.links` renames interfaces by MAC at boot, all interface names are known at build time. The stable router uses declarative `systemd.network.networks` (static IPs), `services.dnsmasq.settings` (DHCP/DNS), and `networking.nftables.tables` (firewall) — no runtime bash config generation.
+
+**WAN identification without runtime detection:** the firewall identifies the WAN interface by negating all known LAN interfaces:
+```nft
+oifname != { "lo", "mv-rts-mgmt", "mv-rts-pent", ... } masquerade
+```
+Any interface not in the LAN set (i.e., the WiFi or VPN interface) is masqueraded.
+
+**Manual control:**
+```bash
+microvm build router-stable      # build the golden image
+microvm start router-stable      # start manually (stops main router via Conflicts=)
+microvm stop router-stable       # stop (main router can then be started)
+microvm console router-stable    # serial console access
+```
+
+Short names accepted: `router-stable`, `stable-router`, `stable`.
+
 > **CIDs and subnets are user-configurable.** Built-in profiles (browsing, pentest, dev, comms, lurking) ship with default CIDs/subnets but these are declared in each profile's `meta.nix` in your `hydrix-config/profiles/<name>/meta.nix`. The host module writes all profile metadata to `/etc/hydrix/vm-registry.json` at activation, all scripts, polybar, and i3 read from there at runtime, never from hardcoded maps. Adding a new VM type requires only `profiles/<name>/meta.nix` + `profiles/<name>/default.nix` in your config.
 
 ### VM Registry (`/etc/hydrix/vm-registry.json`)
@@ -128,7 +176,7 @@ Generated at NixOS activation from all profile `meta.nix` files. Every runtime t
 }
 ```
 
-**Convention: `vsockCid` = subnet last octet = i3 workspace.** All three use the same number. Custom profiles start at CID 107+. Reserved: 200 (router), 210 (builder), 211 (gitsync).
+**Convention: `vsockCid` = subnet last octet = i3 workspace.** All three use the same number. Custom profiles start at CID 107+. Reserved: 200 (router), 201 (router-stable), 210 (builder), 211 (gitsync), 212 (files).
 
 Each entry drives: i3 `for_window` border rules, polybar workspace-desc label, `ws-app`/`ws-rofi` workspace→VM routing, `focus-rofi` menu, `vm-sync` profile targeting, and file transfer IP resolution.
 
@@ -415,8 +463,9 @@ Hydrix auto-detects your config with this priority:
     };
 
     # Infrastructure VMs (not user-configurable)
-    nixosConfigurations."microvm-router"  = hydrix.lib.mkMicrovmRouter {};
-    nixosConfigurations."microvm-builder" = hydrix.lib.mkMicrovmBuilder {};
+    nixosConfigurations."microvm-router"        = hydrix.lib.mkMicrovmRouter { inherit wifiPciAddress; };
+    nixosConfigurations."microvm-router-stable" = hydrix.lib.mkMicrovmRouterStable { inherit wifiPciAddress; };
+    nixosConfigurations."microvm-builder"       = hydrix.lib.mkMicrovmBuilder {};
   };
 }
 ```
@@ -427,7 +476,8 @@ Hydrix auto-detects your config with this priority:
 |----------|---------|
 | `hydrix.lib.mkHost` | Create host configuration |
 | `hydrix.lib.mkMicroVM` | Create MicroVM configuration |
-| `hydrix.lib.mkMicrovmRouter` | Create MicroVM router |
+| `hydrix.lib.mkMicrovmRouter` | Create MicroVM router (main, tunable) |
+| `hydrix.lib.mkMicrovmRouterStable` | Create stable fallback router (auto-starts on main router failure) |
 | `hydrix.lib.mkMicrovmBuilder` | Create builder VM for lockdown mode |
 | `hydrix.lib.mkVM` | Create libvirt VM (for images) |
 | `hydrix.lib.mkLibvirtRouter` | Create libvirt router (fallback) |
