@@ -66,6 +66,12 @@
   # WiFi PCI address from hardware options
   wifiPciAddress = cfg.hardware.vfio.wifiPciAddress;
 
+  # WAN configuration
+  wanCfg = routerCfg.wan;
+  wanMode = wanCfg.mode;
+  wanDevice = wanCfg.device;
+  preferWireless = wanCfg.preferWireless;
+
   # Mullvad VPN configuration from options
   hasMullvad = vpnCfg.mullvad.enable && vpnCfg.mullvad.privateKey != "";
 
@@ -107,16 +113,20 @@ in {
   config = {
     assertions = [
       {
-        assertion = wifiPciAddress != "";
+        assertion = wanMode != "pci-passthrough" || wifiPciAddress != "";
         message = ''
           hydrix.hardware.vfio.wifiPciAddress is empty — the router VM needs a WiFi PCI
-          address for VFIO passthrough. Pass wifiPciAddress to mkMicrovmRouter in your flake:
+          address for VFIO passthrough when wan.mode = "pci-passthrough". Pass wifiPciAddress
+          to mkMicrovmRouter in your flake:
 
             "microvm-router" = hydrix.lib.mkMicrovmRouter {
               wifiPciAddress = "00:14.3";  # from: lspci -D | grep -i wireless
             };
 
           The address should be in XX:XX.X format (without the 0000: domain prefix).
+
+          Alternative: use wan.mode = "auto" (auto-detects WiFi or falls back to macvtap)
+          or wan.mode = "macvtap" (uses ethernet instead of WiFi).
         '';
       }
     ];
@@ -500,22 +510,39 @@ in {
           done
         fi
 
-        # Map interfaces by MAC address
-        # MAC addresses from microvm-router.nix qemu.extraArgs:
-        IFACE_MGMT=$(find_iface_by_mac "02:00:00:01:00:01")    # mv-router-mgmt
-        IFACE_PENT=$(find_iface_by_mac "02:00:00:01:01:01")    # mv-router-pent
-        IFACE_COMM=$(find_iface_by_mac "02:00:00:01:02:01")    # mv-router-comm
-        IFACE_BROW=$(find_iface_by_mac "02:00:00:01:03:01")    # mv-router-brow
-        IFACE_DEV=$(find_iface_by_mac "02:00:00:01:04:01")     # mv-router-dev
-        IFACE_SHAR=$(find_iface_by_mac "02:00:00:01:05:01")    # mv-router-shar
-        IFACE_BLDR=$(find_iface_by_mac "02:00:00:01:06:01")    # mv-router-bldr
-        IFACE_LURK=$(find_iface_by_mac "02:00:00:01:07:01")    # mv-router-lurk
-        IFACE_FILE=$(find_iface_by_mac "02:00:00:01:08:01")    # mv-router-file
-        ${lib.concatStringsSep "\n        " (lib.imap0 (i: n: let
-          varName = builtins.replaceStrings ["-"] ["_"] n.name;
-          macIndex = lib.fixedWidthString 2 "0" (builtins.toString i);
-        in "IFACE_${varName}=$(find_iface_by_mac \"02:00:00:02:${macIndex}:01\")    # ${n.routerTap}")
-        extraNetworks)}
+        # Map interfaces by name (routerTap from vm-registry)
+        # Router interfaces follow pattern: mv-router-<name>
+        find_iface_by_name() {
+          local name="$1"
+          for iface in $(ls /sys/class/net/ 2>/dev/null); do
+            if [[ "$iface" == "$name" ]]; then
+              echo "$iface"
+              return 0
+            fi
+          done
+          return 1
+        }
+
+        # Detect interfaces by name pattern
+        IFACE_MGMT=$(find_iface_by_name "mv-router-mgmt")
+        IFACE_PENT=$(find_iface_by_name "mv-router-pent")
+        IFACE_COMM=$(find_iface_by_name "mv-router-comm")
+        IFACE_BROW=$(find_iface_by_name "mv-router-brow")
+        IFACE_DEV=$(find_iface_by_name "mv-router-dev")
+        IFACE_SHAR=$(find_iface_by_name "mv-router-shar")
+        IFACE_BLDR=$(find_iface_by_name "mv-router-bldr")
+        IFACE_LURK=$(find_iface_by_name "mv-router-lurk")
+        IFACE_FILE=$(find_iface_by_name "mv-router-file")
+
+        # Load subnets from vm-registry.json for dynamic profile support
+        if [[ -f "/var/lib/hydrix/vm-registry.json" ]]; then
+          for profile in browsing comms dev lurking pentest shared; do
+            subnet=$(${pkgs.jq}/bin/jq -r ".[\"$profile\"].subnet // empty" /var/lib/hydrix/vm-registry.json 2>/dev/null)
+            if [[ -n "$subnet" ]]; then
+              eval "IFACE_${profile^^}_SUBNET=$subnet"
+            fi
+          done
+        fi
 
         echo "Detected LAN interfaces:"
         echo "  MGMT: $IFACE_MGMT"
@@ -527,11 +554,6 @@ in {
         echo "  BLDR: $IFACE_BLDR"
         echo "  LURK: $IFACE_LURK"
         echo "  FILE: $IFACE_FILE"
-        echo "  VAUL: $IFACE_VAUL"
-        ${lib.concatStringsSep "\n        " (map (n: let
-          varName = builtins.replaceStrings ["-"] ["_"] n.name;
-        in "echo \"  ${n.name}: $IFACE_${varName}\"")
-        extraNetworks)}
 
         # Save interface mapping for dnsmasq and firewall
         echo "IFACE_MGMT=$IFACE_MGMT" > "$STATE_DIR/interfaces"
@@ -543,10 +565,13 @@ in {
         echo "IFACE_BLDR=$IFACE_BLDR" >> "$STATE_DIR/interfaces"
         echo "IFACE_LURK=$IFACE_LURK" >> "$STATE_DIR/interfaces"
         echo "IFACE_FILE=$IFACE_FILE" >> "$STATE_DIR/interfaces"
-        ${lib.concatStringsSep "\n        " (map (n: let
-          varName = builtins.replaceStrings ["-"] ["_"] n.name;
-        in "echo \"IFACE_${varName}=$IFACE_${varName}\" >> \"$STATE_DIR/interfaces\"")
-        extraNetworks)}
+        # Save profile subnets
+        if [[ -f "/var/lib/hydrix/vm-registry.json" ]]; then
+          for profile in browsing comms dev lurking pentest shared; do
+            subnet=$(${pkgs.jq}/bin/jq -r ".[\"$profile\"].subnet // empty" /var/lib/hydrix/vm-registry.json 2>/dev/null)
+            echo "IFACE_${profile^^}_SUBNET=$subnet" >> "$STATE_DIR/interfaces"
+          done
+        fi
 
         # Configure each LAN interface
         configure_lan() {
@@ -564,14 +589,14 @@ in {
         }
 
         configure_lan "$IFACE_MGMT" "192.168.100.253" "mgmt"
-        configure_lan "$IFACE_PENT" "192.168.102.253" "pentest"
-        configure_lan "$IFACE_COMM" "192.168.104.253" "comms"
-        configure_lan "$IFACE_BROW" "192.168.103.253" "browse"
-        configure_lan "$IFACE_DEV"  "192.168.105.253" "dev"
-        configure_lan "$IFACE_SHAR" "192.168.105.253" "shared"
-        configure_lan "$IFACE_BLDR" "192.168.106.253" "builder"
-        configure_lan "$IFACE_LURK" "192.168.107.253" "lurking"
-        configure_lan "$IFACE_FILE" "192.168.108.253" "files"
+        configure_lan "$IFACE_PENT" "${IFACE_PENT_SUBNET:-192.168.102}.253" "pentest"
+        configure_lan "$IFACE_COMM" "${IFACE_COMM_SUBNET:-192.168.104}.253" "comms"
+        configure_lan "$IFACE_BROW" "${IFACE_BROW_SUBNET:-192.168.103}.253" "browse"
+        configure_lan "$IFACE_DEV"  "${IFACE_DEV_SUBNET:-192.168.105}.253" "dev"
+        configure_lan "$IFACE_SHAR" "${IFACE_SHAR_SUBNET:-192.168.106}.253" "shared"
+        configure_lan "$IFACE_BLDR" "${IFACE_BLDR_SUBNET:-192.168.107}.253" "builder"
+        configure_lan "$IFACE_LURK" "${IFACE_LURK_SUBNET:-192.168.108}.253" "lurking"
+        configure_lan "$IFACE_FILE" "${IFACE_FILE_SUBNET:-192.168.108}.253" "files"
         ${lib.concatStringsSep "\n        " (map (n: let
           varName = builtins.replaceStrings ["-"] ["_"] n.name;
         in "configure_lan \"$IFACE_${varName}\" \"${n.subnet}.253\" \"${n.name}\"")
@@ -626,14 +651,14 @@ in {
         }
 
         add_iface "$IFACE_MGMT" "192.168.100" "192.168.100.253"
-        add_iface "$IFACE_PENT" "192.168.101" "192.168.101.253"
-        add_iface "$IFACE_COMM" "192.168.102" "192.168.102.253"
-        add_iface "$IFACE_BROW" "192.168.103" "192.168.103.253"
-        add_iface "$IFACE_DEV"  "192.168.104" "192.168.104.253"
-        add_iface "$IFACE_SHAR" "192.168.105" "192.168.105.253"
-        add_iface "$IFACE_BLDR" "192.168.106" "192.168.106.253"
-        add_iface "$IFACE_LURK" "192.168.107" "192.168.107.253"
-        add_iface "$IFACE_FILE" "192.168.108" "192.168.108.253"
+        add_iface "$IFACE_PENT" "${IFACE_PENT_SUBNET:-192.168.102}" "${IFACE_PENT_SUBNET:-192.168.102}.253"
+        add_iface "$IFACE_COMM" "${IFACE_COMM_SUBNET:-192.168.104}" "${IFACE_COMM_SUBNET:-192.168.104}.253"
+        add_iface "$IFACE_BROW" "${IFACE_BROW_SUBNET:-192.168.103}" "${IFACE_BROW_SUBNET:-192.168.103}.253"
+        add_iface "$IFACE_DEV"  "${IFACE_DEV_SUBNET:-192.168.105}" "${IFACE_DEV_SUBNET:-192.168.105}.253"
+        add_iface "$IFACE_SHAR" "${IFACE_SHAR_SUBNET:-192.168.106}" "${IFACE_SHAR_SUBNET:-192.168.106}.253"
+        add_iface "$IFACE_BLDR" "${IFACE_BLDR_SUBNET:-192.168.107}" "${IFACE_BLDR_SUBNET:-192.168.107}.253"
+        add_iface "$IFACE_LURK" "${IFACE_LURK_SUBNET:-192.168.108}" "${IFACE_LURK_SUBNET:-192.168.108}.253"
+        add_iface "$IFACE_FILE" "${IFACE_FILE_SUBNET:-192.168.108}" "${IFACE_FILE_SUBNET:-192.168.108}.253"
         ${lib.concatStringsSep "\n        " (map (n: let
           varName = builtins.replaceStrings ["-"] ["_"] n.name;
         in "add_iface \"$IFACE_${varName}\" \"${n.subnet}\" \"${n.subnet}.253\"")
@@ -738,6 +763,7 @@ in {
             ip saddr 192.168.107.0/24 ip daddr { 192.168.100.0/24, 192.168.101.0/24, 192.168.102.0/24, 192.168.103.0/24, 192.168.104.0/24, 192.168.105.0/24, 192.168.106.0/24, 192.168.108.0/24 } drop
             # Files VM: allow inter-VM HTTP traffic for file transfers (port 8888)
             ip saddr 192.168.108.0/24 tcp dport 8888 accept
+            ip saddr 192.168.108.0/24 ip daddr 192.168.108.0/24 accept
             ip saddr 192.168.108.0/24 ip protocol icmp accept
 
             # Allow forwarding to WAN (external internet)
