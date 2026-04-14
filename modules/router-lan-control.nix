@@ -155,7 +155,8 @@ in
 
           # DNAT rule (pentest subnet is 192.168.102.x)
           local vm_ip="192.168.102.$cid"
-          iptables -t nat -A PREROUTING -i "$wan_iface" -p tcp --dport "$port" -j DNAT --to-destination "${vm_ip}:${port}" 2>/dev/null || true
+          local dest="$vm_ip:$port"
+          iptables -t nat -A PREROUTING -i "$wan_iface" -p tcp --dport "$port" -j DNAT --to-destination "$dest" 2>/dev/null || true
           if [ -n "$tap_iface" ]; then
             iptables -I FORWARD 1 -i "$wan_iface" -o "$tap_iface" -p tcp --dport "$port" -j ACCEPT 2>/dev/null || true
           fi
@@ -176,7 +177,8 @@ in
           log "Removing port forward: $port from CID $cid"
 
           local vm_ip="192.168.102.$cid"
-          iptables -t nat -D PREROUTING -i "$wan_iface" -p tcp --dport "$port" -j DNAT --to-destination "${vm_ip}:${port}" 2>/dev/null || true
+          local dest="$vm_ip:$port"
+          iptables -t nat -D PREROUTING -i "$wan_iface" -p tcp --dport "$port" -j DNAT --to-destination "$dest" 2>/dev/null || true
           iptables -D FORWARD -i "$wan_iface" -p tcp --dport "$port" -j ACCEPT 2>/dev/null || true
 
           local tmp_file=$(mktemp)
