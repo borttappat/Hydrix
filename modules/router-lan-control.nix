@@ -104,7 +104,7 @@ in
 
           # Enable forwarding
           echo 1 > /proc/sys/net/ipv4/conf/all/forwarding
-          echo 1 > /proc/sys/net/ipv4/conf/${bridge_name}/forwarding
+          echo 1 > /proc/sys/net/ipv4/conf/$bridge_name/forwarding
 
           # Update state
           local tmp_file=$(mktemp)
