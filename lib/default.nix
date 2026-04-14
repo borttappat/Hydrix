@@ -187,6 +187,37 @@ in {
   };
 
   # =========================================================================
+  # mkMicrovmRouterStable - Create the immutable fallback router VM
+  # =========================================================================
+  # Same parameters as mkMicrovmRouter — the stable router receives the same
+  # profile/extra network data so it serves all the same subnets.
+  # Uses separate TAP names (mv-rts-*) so both routers can coexist in config.
+  # autostart = false; starts only via OnFailure on the main router.
+  mkMicrovmRouterStable = {
+    system ? "x86_64-linux",
+    wifiPciAddress ? "",
+    extraNetworks ? [],
+    profileNetworks ? [],
+    modules ? [],
+  }: nixpkgs.lib.nixosSystem {
+    inherit system;
+    modules = [
+      { nixpkgs.config.allowUnfree = true; }
+      { nixpkgs.overlays = [ overlay-unstable ]; }
+      ../modules/options.nix
+      microvm.nixosModules.microvm
+      ../modules/microvm/microvm-router-stable.nix
+      { networking.hostName = "microvm-router-stable"; }
+    ] ++ nixpkgs.lib.optional (wifiPciAddress != "") {
+      hydrix.hardware.vfio.wifiPciAddress = wifiPciAddress;
+    } ++ nixpkgs.lib.optional (extraNetworks != []) {
+      hydrix.networking.extraNetworks = extraNetworks;
+    } ++ nixpkgs.lib.optional (profileNetworks != []) {
+      hydrix.networking.profileNetworks = profileNetworks;
+    } ++ modules;
+  };
+
+  # =========================================================================
   # mkMicrovmBuilder - Create the MicroVM builder for lockdown mode
   # =========================================================================
   # hostUsername: Username on the host machine (for mounting ~/hydrix-config)

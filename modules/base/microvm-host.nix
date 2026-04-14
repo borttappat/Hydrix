@@ -27,6 +27,9 @@ let
   routerEnabled =
     (cfg.vms ? "microvm-router" && cfg.vms."microvm-router".enable);
 
+  stableRouterEnabled =
+    (cfg.vms ? "microvm-router-stable" && cfg.vms."microvm-router-stable".enable);
+
   # Router TAP interface to bridge mapping
   # TAP names must be max 15 chars (Linux limit)
   routerTaps = {
@@ -86,11 +89,16 @@ in {
       ];
     }
 
-    # Default: enable microvm-router when microvmHost is enabled
+    # Default: enable microvm-router and microvm-router-stable when microvmHost is enabled
     # Note: autostart is controlled by router.nix via hydrix.router.autostart
     (lib.mkIf cfg.enable {
       hydrix.microvmHost.vms."microvm-router" = {
         enable = lib.mkDefault true;
+      };
+      # Stable router: always declared, never autostarts — triggered by OnFailure on main router
+      hydrix.microvmHost.vms."microvm-router-stable" = {
+        enable = lib.mkDefault true;
+        autostart = lib.mkDefault false;
       };
     })
 
@@ -112,6 +120,17 @@ in {
       ACTION=="add", SUBSYSTEM=="net", KERNEL=="mv-router-shar", RUN+="${attachTapScript} %k br-shared"
       ACTION=="add", SUBSYSTEM=="net", KERNEL=="mv-router-bldr", RUN+="${attachTapScript} %k br-builder"
 
+      # Stable router TAP interfaces — same bridges as main router, different prefix
+      ACTION=="add", SUBSYSTEM=="net", KERNEL=="mv-rts-mgmt", RUN+="${attachTapScript} %k br-mgmt"
+      ACTION=="add", SUBSYSTEM=="net", KERNEL=="mv-rts-pent", RUN+="${attachTapScript} %k br-pentest"
+      ACTION=="add", SUBSYSTEM=="net", KERNEL=="mv-rts-comm", RUN+="${attachTapScript} %k br-comms"
+      ACTION=="add", SUBSYSTEM=="net", KERNEL=="mv-rts-lurk", RUN+="${attachTapScript} %k br-lurking"
+      ACTION=="add", SUBSYSTEM=="net", KERNEL=="mv-rts-brow", RUN+="${attachTapScript} %k br-browse"
+      ACTION=="add", SUBSYSTEM=="net", KERNEL=="mv-rts-dev",  RUN+="${attachTapScript} %k br-dev"
+      ACTION=="add", SUBSYSTEM=="net", KERNEL=="mv-rts-shar", RUN+="${attachTapScript} %k br-shared"
+      ACTION=="add", SUBSYSTEM=="net", KERNEL=="mv-rts-bldr", RUN+="${attachTapScript} %k br-builder"
+      ACTION=="add", SUBSYSTEM=="net", KERNEL=="mv-rts-file", RUN+="${attachTapScript} %k br-files"
+
       # Git-sync VM TAP → builder bridge (trusted utility VM, shares builder network)
       ACTION=="add", SUBSYSTEM=="net", KERNEL=="mv-gitsync", RUN+="${attachTapScript} %k br-builder"
 
@@ -129,9 +148,14 @@ in {
 # VFIO device permissions for microvm user (needed for PCI passthrough)
       # This allows the microvm user to access VFIO IOMMU group devices
       SUBSYSTEM=="vfio", MODE="0666"
-    '' + lib.concatMapStrings (n: ''
+    '' + lib.concatMapStrings (n: let
+      stableTap = if lib.hasPrefix "mv-router-" n.routerTap
+        then "mv-rts-" + lib.removePrefix "mv-router-" n.routerTap
+        else "mv-rts-${n.name}";
+    in ''
       # Extra network: ${n.name} (br-${n.name}, subnet ${n.subnet}.0/24)
       ACTION=="add", SUBSYSTEM=="net", KERNEL=="${n.routerTap}", RUN+="${attachTapScript} %k br-${n.name}"
+      ACTION=="add", SUBSYSTEM=="net", KERNEL=="${stableTap}", RUN+="${attachTapScript} %k br-${n.name}"
       ACTION=="add", SUBSYSTEM=="net", KERNEL=="mv-${n.name}*",  RUN+="${attachTapScript} %k br-${n.name}"
     '') config.hydrix.networking.extraNetworks
     + lib.concatStringsSep "\n" (lib.mapAttrsToList (tap: bridge:
@@ -248,7 +272,7 @@ in {
     # Declare microVMs from hydrix.microvmHost.vms
     # VM names must match nixosConfigurations in the Hydrix flake
     microvm.vms = let
-      infrastructureVMs = [ "microvm-router" "microvm-builder" ];
+      infrastructureVMs = [ "microvm-router" "microvm-router-stable" "microvm-builder" ];
       enabledVMs = lib.filterAttrs (_: v: v.enable) cfg.vms;
       filteredVMs = if cfg.infrastructureOnly
         then lib.filterAttrs (name: _: builtins.elem name infrastructureVMs) enabledVMs
@@ -281,11 +305,29 @@ in {
       }) (lib.filterAttrs (_: v: v.enable) cfg.vms)))
 
       # Router MicroVM needs to run as root for VFIO PCI passthrough
+      # Main router: triggers stable router on failure; conflicts with stable (VFIO)
       (lib.mkIf routerEnabled {
         "microvm@microvm-router" = {
           serviceConfig = {
             User = lib.mkForce "root";
             Group = lib.mkForce "root";
+          };
+          unitConfig = lib.mkIf stableRouterEnabled {
+            OnFailure = "microvm@microvm-router-stable.service";
+          };
+        };
+      })
+
+      # Stable router: root for VFIO, conflicts with main router (can't share WiFi card)
+      (lib.mkIf stableRouterEnabled {
+        "microvm@microvm-router-stable" = {
+          serviceConfig = {
+            User = lib.mkForce "root";
+            Group = lib.mkForce "root";
+          };
+          unitConfig = {
+            Conflicts = "microvm@microvm-router.service";
+            After = lib.mkForce [ "microvm-router-stable-taps.service" ];
           };
         };
       })
@@ -338,6 +380,80 @@ in {
         };
       })
 
+      # Stable Router TAP Interface Setup
+      # Creates mv-rts-* TAPs (same bridges as main router, different names)
+      (lib.mkIf stableRouterEnabled {
+        microvm-router-stable-taps = {
+          description = "Create TAP interfaces for stable router microVM";
+          requiredBy = [ "microvm@microvm-router-stable.service" ];
+          before = [ "microvm@microvm-router-stable.service" ];
+          after = [ "network.target" ];
+
+          serviceConfig = {
+            Type = "oneshot";
+            RemainAfterExit = true;
+          };
+
+          path = [ pkgs.iproute2 ];
+
+          script = let
+            stableTaps = {
+              "mv-rts-pent" = "br-pentest";
+              "mv-rts-comm" = "br-comms";
+              "mv-rts-brow" = "br-browse";
+              "mv-rts-dev"  = "br-dev";
+              "mv-rts-shar" = "br-shared";
+              "mv-rts-bldr" = "br-builder";
+              "mv-rts-lurk" = "br-lurking";
+              "mv-rts-file" = "br-files";
+            } // lib.listToAttrs (map (n: {
+              name  = if lib.hasPrefix "mv-router-" n.routerTap
+                      then "mv-rts-" + lib.removePrefix "mv-router-" n.routerTap
+                      else "mv-rts-${n.name}";
+              value = "br-${n.name}";
+            }) config.hydrix.networking.extraNetworks);
+          in ''
+            set -e
+            echo "Creating stable router TAP interfaces..."
+            ${lib.concatStringsSep "\n" (lib.mapAttrsToList (tap: bridge: ''
+              if ! ip link show ${tap} &>/dev/null; then
+                ip tuntap add dev ${tap} mode tap
+                echo "  Created ${tap}"
+              fi
+              ip link set ${tap} master ${bridge} 2>/dev/null || true
+              ip link set ${tap} up
+              echo "  ${tap} -> ${bridge}"
+            '') stableTaps)}
+            echo "Stable router TAP interfaces ready"
+          '';
+
+          preStop = let
+            stableTaps = {
+              "mv-rts-pent" = "br-pentest";
+              "mv-rts-comm" = "br-comms";
+              "mv-rts-brow" = "br-browse";
+              "mv-rts-dev"  = "br-dev";
+              "mv-rts-shar" = "br-shared";
+              "mv-rts-bldr" = "br-builder";
+              "mv-rts-lurk" = "br-lurking";
+              "mv-rts-file" = "br-files";
+            } // lib.listToAttrs (map (n: {
+              name  = if lib.hasPrefix "mv-router-" n.routerTap
+                      then "mv-rts-" + lib.removePrefix "mv-router-" n.routerTap
+                      else "mv-rts-${n.name}";
+              value = "br-${n.name}";
+            }) config.hydrix.networking.extraNetworks);
+          in ''
+            echo "Cleaning up stable router TAP interfaces..."
+            ${lib.concatStringsSep "\n" (lib.mapAttrsToList (tap: _: ''
+              if ip link show ${tap} &>/dev/null; then
+                ip link del ${tap} 2>/dev/null || true
+              fi
+            '') stableTaps)}
+          '';
+        };
+      })
+
       # Ensure all TAP interfaces are attached to correct bridges
       # Runs on every activation (including specialisation switches)
       # Handles the case where bridges are recreated but TAPs already exist
@@ -345,7 +461,7 @@ in {
         microvm-tap-bridges = {
           description = "Ensure microVM TAP interfaces are attached to bridges";
           wantedBy = [ "multi-user.target" ];
-          after = [ "network.target" "microvm-router-taps.service" ];
+          after = [ "network.target" "microvm-router-taps.service" "microvm-router-stable-taps.service" ];
           # Re-run on every activation (rebuild/switch) to fix TAPs detached by bridge recreation
           restartIfChanged = true;
           # Trigger restart whenever network target is re-reached (bridges recreated)
@@ -361,13 +477,38 @@ in {
           script = ''
             echo "Ensuring TAP-to-bridge attachments..."
 
-            # Router TAPs -> specific bridges
+            # Main router TAPs -> specific bridges
             ${lib.concatStringsSep "\n" (lib.mapAttrsToList (tap: bridge: ''
               if ip link show ${tap} &>/dev/null && ip link show ${bridge} &>/dev/null; then
                 ip link set ${tap} master ${bridge} 2>/dev/null || true
                 ip link set ${tap} up 2>/dev/null || true
               fi
             '') routerTaps)}
+
+            # Stable router TAPs (mv-rts-*) -> same bridges
+            for tap in $(ip -o link show 2>/dev/null | grep -oP 'mv-rts-[a-z0-9-]+(?=[@:])' | sort -u); do
+              bridge=""
+              case "$tap" in
+                mv-rts-mgmt) bridge="br-mgmt" ;;
+                mv-rts-pent) bridge="br-pentest" ;;
+                mv-rts-comm) bridge="br-comms" ;;
+                mv-rts-brow) bridge="br-browse" ;;
+                mv-rts-dev)  bridge="br-dev" ;;
+                mv-rts-shar) bridge="br-shared" ;;
+                mv-rts-bldr) bridge="br-builder" ;;
+                mv-rts-lurk) bridge="br-lurking" ;;
+                mv-rts-file) bridge="br-files" ;;
+                ${lib.concatStringsSep "\n                " (map (n: let
+                  sTap = if lib.hasPrefix "mv-router-" n.routerTap
+                    then "mv-rts-" + lib.removePrefix "mv-router-" n.routerTap
+                    else "mv-rts-${n.name}";
+                in "${sTap}) bridge=\"br-${n.name}\" ;;") config.hydrix.networking.extraNetworks)}
+              esac
+              if [[ -n "$bridge" ]] && ip link show "$bridge" &>/dev/null; then
+                ip link set "$tap" master "$bridge" 2>/dev/null || true
+                ip link set "$tap" up 2>/dev/null || true
+              fi
+            done
 
             # VM TAPs -> default or profile-specific bridge
             for tap in $(ip -o link show 2>/dev/null | grep -oP 'mv-(?!router)[a-z-]+(?=[@:])' | sort -u); do
