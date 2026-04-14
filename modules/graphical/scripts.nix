@@ -1380,9 +1380,10 @@
     ${pkgs.i3}/bin/i3-msg reload 2>/dev/null || true
 
     # Run display-setup if available (refreshes polybar, gaps)
+    # Use --no-move to preserve workspace-to-monitor assignments
     if command -v display-setup >/dev/null 2>&1; then
       echo "  Running display-setup..."
-      display-setup >/dev/null 2>&1 || true
+      display-setup --no-move >/dev/null 2>&1 || true
     fi
 
     echo "Display recovery complete!"

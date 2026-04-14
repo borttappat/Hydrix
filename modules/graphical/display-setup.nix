@@ -108,9 +108,14 @@
                 FORCE_RECOVER="--force"
                 shift
                 ;;
+            --no-move)
+                # Skip workspace movement entirely (for display-recover)
+                FORCE_RECOVER="--no-move"
+                shift
+                ;;
             *)
                 echo "Unknown option: $1"
-                echo "Usage: display-setup [--step N] [--reset-step] [--reverse-monitors] [--recover]"
+                echo "Usage: display-setup [--step N] [--reset-step] [--reverse-monitors] [--recover] [--no-move]"
                 exit 1
                 ;;
         esac
@@ -346,12 +351,15 @@
     # --- WORKSPACE RECOVERY ---
     # Move workspaces from disconnected/inactive monitors to a connected output
     # Force mode: recover_workspaces --force moves ALL external workspaces to internal
+    # No-move mode: recover_workspaces --no-move skips workspace movement entirely
     # Uses i3's own output information to ensure consistency with workspace assignments
     recover_workspaces() {
         local force_internal=false
+        local no_move=false
         [ "$1" = "--force" ] && force_internal=true
+        [ "$1" = "--no-move" ] && no_move=true
 
-        echo "$(${date}): Checking for orphaned workspaces (force=$force_internal)..." >> "$LOG"
+        echo "$(${date}): Checking for orphaned workspaces (force=$force_internal, no_move=$no_move)..." >> "$LOG"
 
         # Use i3's own output list - this is the authoritative source for workspace assignment
         # Retry a few times if no outputs found (i3 may be in transition state)
@@ -422,22 +430,27 @@
 
         # Move workspaces from inactive/disconnected outputs
         # With --force, also move from any non-eDP output
+        # With --no-move, skip workspace movement entirely
         # Use timeout to prevent hanging if i3 is busy during hotplug
-        ${timeout} 5 ${i3msg} -t get_workspaces 2>/dev/null | ${jq} -r '.[] | "\(.name)|\(.output)"' 2>/dev/null | while IFS='|' read ws output; do
-            local should_move=false
+        if [ "$no_move" = "false" ]; then
+            ${timeout} 5 ${i3msg} -t get_workspaces 2>/dev/null | ${jq} -r '.[] | "\(.name)|\(.output)"' 2>/dev/null | while IFS='|' read ws output; do
+                local should_move=false
 
-            if ! echo "$active" | ${grep} -q "^$output$"; then
-                should_move=true  # Output not active according to i3
-                echo "$(${date}): Workspace $ws on inactive output $output" >> "$LOG"
-            elif [ "$force_internal" = "true" ] && ! echo "$output" | ${grep} -q "eDP"; then
-                should_move=true  # Force mode: move all external to internal
-            fi
+                if ! echo "$active" | ${grep} -q "^$output$"; then
+                    should_move=true  # Output not active according to i3
+                    echo "$(${date}): Workspace $ws on inactive output $output" >> "$LOG"
+                elif [ "$force_internal" = "true" ] && ! echo "$output" | ${grep} -q "eDP"; then
+                    should_move=true  # Force mode: move all external to internal
+                fi
 
-            if [ "$should_move" = "true" ]; then
-                echo "$(${date}): Moving workspace $ws from $output to $target" >> "$LOG"
-                ${timeout} 5 ${i3msg} "workspace $ws; move workspace to output $target" >> "$LOG" 2>&1 || true
-            fi
-        done
+                if [ "$should_move" = "true" ]; then
+                    echo "$(${date}): Moving workspace $ws from $output to $target" >> "$LOG"
+                    ${timeout} 5 ${i3msg} "workspace $ws; move workspace to output $target" >> "$LOG" 2>&1 || true
+                fi
+            done
+        else
+            echo "$(${date}): Skipping workspace movement (no_move flag set)" >> "$LOG"
+        fi
 
         # Restore original workspace focus
         if [ -n "$current_ws" ]; then
