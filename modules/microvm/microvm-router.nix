@@ -564,10 +564,10 @@ in {
         }
 
         configure_lan "$IFACE_MGMT" "192.168.100.253" "mgmt"
-        configure_lan "$IFACE_PENT" "192.168.101.253" "pentest"
-        configure_lan "$IFACE_COMM" "192.168.102.253" "comms"
+        configure_lan "$IFACE_PENT" "192.168.102.253" "pentest"
+        configure_lan "$IFACE_COMM" "192.168.104.253" "comms"
         configure_lan "$IFACE_BROW" "192.168.103.253" "browse"
-        configure_lan "$IFACE_DEV"  "192.168.104.253" "dev"
+        configure_lan "$IFACE_DEV"  "192.168.105.253" "dev"
         configure_lan "$IFACE_SHAR" "192.168.105.253" "shared"
         configure_lan "$IFACE_BLDR" "192.168.106.253" "builder"
         configure_lan "$IFACE_LURK" "192.168.107.253" "lurking"
@@ -736,8 +736,9 @@ in {
             ip saddr 192.168.106.0/24 ip daddr { 192.168.100.0/24, 192.168.101.0/24, 192.168.102.0/24, 192.168.103.0/24, 192.168.104.0/24, 192.168.105.0/24, 192.168.107.0/24, 192.168.108.0/24 } drop
             # Lurking is FULLY isolated - maximum privacy, cannot reach any other VM network
             ip saddr 192.168.107.0/24 ip daddr { 192.168.100.0/24, 192.168.101.0/24, 192.168.102.0/24, 192.168.103.0/24, 192.168.104.0/24, 192.168.105.0/24, 192.168.106.0/24, 192.168.108.0/24 } drop
-            # Files VM is FULLY isolated via router - it communicates directly via TAP interfaces
-            ip saddr 192.168.108.0/24 ip daddr { 192.168.100.0/24, 192.168.101.0/24, 192.168.102.0/24, 192.168.103.0/24, 192.168.104.0/24, 192.168.105.0/24, 192.168.106.0/24, 192.168.107.0/24 } drop
+            # Files VM: allow inter-VM HTTP traffic for file transfers (port 8888)
+            ip saddr 192.168.108.0/24 tcp dport 8888 accept
+            ip saddr 192.168.108.0/24 ip protocol icmp accept
 
             # Allow forwarding to WAN (external internet)
             oifname "$WAN" accept
