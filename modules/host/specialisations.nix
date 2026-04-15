@@ -308,6 +308,7 @@ in {
             mv-router-dev)  bridge="br-dev" ;;
             mv-router-shar) bridge="br-shared" ;;
             mv-router-bldr) bridge="br-builder" ;;
+            mv-router-wan)  bridge="br-wan" ;;
             mv-browse*)  bridge="br-browse" ;;
             mv-pentest*) bridge="br-pentest" ;;
             mv-hack*)    bridge="br-pentest" ;;

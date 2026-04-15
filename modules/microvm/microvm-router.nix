@@ -368,30 +368,44 @@ in {
         settings = {
           keyfile.path = "/var/lib/NetworkManager/system-connections";
         };
-        ensureProfiles = lib.mkIf hasWifiCredentials {
-          profiles = builtins.listToAttrs (map (network: {
-              name = network.ssid;
-              value = {
-                connection = {
-                  id = network.ssid;
-                  type = "wifi";
-                  autoconnect = "true";
-                  autoconnect-priority = toString (network.priority or 50);
+        ensureProfiles.profiles =
+          # WiFi profiles (one per network)
+          (lib.optionalAttrs hasWifiCredentials
+            (builtins.listToAttrs (map (network: {
+                name = network.ssid;
+                value = {
+                  connection = {
+                    id = network.ssid;
+                    type = "wifi";
+                    autoconnect = "true";
+                    autoconnect-priority = toString (network.priority or 50);
+                  };
+                  wifi = {
+                    mode = "infrastructure";
+                    ssid = network.ssid;
+                  };
+                  wifi-security = {
+                    key-mgmt = "wpa-psk";
+                    psk = network.password;
+                  };
+                  ipv4.method = "auto";
+                  ipv6.method = "disabled";
                 };
-                wifi = {
-                  mode = "infrastructure";
-                  ssid = network.ssid;
-                };
-                wifi-security = {
-                  key-mgmt = "wpa-psk";
-                  psk = network.password;
-                };
-                ipv4.method = "auto";
-                ipv6.method = "disabled";
+              })
+              wifiNetworks)))
+          # Ethernet WAN profile (for macvtap/ethernet WAN mode)
+          // (lib.optionalAttrs useEthernetWan {
+            wan-ethernet = {
+              connection = {
+                id = "wan-ethernet";
+                type = "ethernet";
+                interface-name = "mv-router-wan";
+                autoconnect = "true";
               };
-            })
-            wifiNetworks);
-        };
+              ipv4.method = "auto";
+              ipv6.method = "disabled";
+            };
+          });
       };
       wireless.enable = false; # NetworkManager handles WiFi
       firewall.enable = false; # We use nftables directly
