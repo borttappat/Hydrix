@@ -236,6 +236,12 @@
         modules = [ ./shared/wifi.nix ];
       };
 
+      # MicroVM Router Stable (immutable fallback — starts automatically if main router fails)
+      "microvm-router-stable" = hydrix.lib.mkMicrovmRouterStable {
+        inherit wifiPciAddress extraNetworks;
+        modules = [ ./shared/wifi.nix ];
+      };
+
       # MicroVM Builder (for lockdown mode rebuilds)
       "microvm-builder" = hydrix.lib.mkMicrovmBuilder { inherit hostUsername; };
 
