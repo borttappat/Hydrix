@@ -390,16 +390,16 @@ in {
                 ;;
 
               SYNC)
-                echo "Syncing SQLite changes back to host..."
-
                 LOCAL_DB="/nix/.local-state/db.sqlite"
                 SOURCE_DB="/nix/var/nix/db/db.sqlite"
 
                 # Check if local DB exists and copy if it does
                 if [[ -f "$LOCAL_DB" ]]; then
-                  # Stop nix-daemon first to ensure all writes are flushed
-                  ${pkgs.systemd}/bin/systemctl stop nix-daemon.service 2>/dev/null || true
-                  sleep 2
+                  # Stop nix-daemon if running (don't hang if it's not)
+                  if pgrep -x "nix-daemon" > /dev/null 2>&1; then
+                    ${pkgs.systemd}/bin/systemctl stop nix-daemon.service 2>/dev/null || true
+                    sleep 2
+                  fi
 
                   # Copy local DB back to host
                   cp -f "$LOCAL_DB" "$SOURCE_DB" 2>&1 || echo "ERROR copying DB"
