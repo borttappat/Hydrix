@@ -395,7 +395,7 @@
       # ui.rofiWidth  = 800;           # DEFAULT: 800 - launcher window width (px)
       # ui.rofiHeight = 400;           # DEFAULT: 400 - launcher window height (px)
       # ui.dunstWidth  = 300;          # DEFAULT: 300 - notification popup width (px)
-      # ui.dunstOffset = 24;           # DEFAULT: 24  - notification edge offset (px)
+      # ui.dunstOffset = 300;          # DEFAULT: 300 - notification edge offset (px)
       # ui.dunstSound  = true;         # DEFAULT: true - play sound on notifications
       # ui.outerGapsMatchBar = false;  # DEFAULT: false - match outer i3 gaps to bar margins
       # ui.barEdgeGapsFactor = 1.0;    # DEFAULT: 1.0 - bar-to-screen-edge gap multiplier

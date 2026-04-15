@@ -211,6 +211,9 @@ in {
           cf = "clear && fastfetch";
           reload = "source ~/.config/fish/config.fish";
 
+          # Multi-VM commands - expands to "microvm", allows multi-VM commands
+          mvm = "microvm";
+
           # Config files - user's hydrix-config (what you edit day-to-day)
           f = "vim ~/.config/fish/config.fish";
           fishconf = "vim ~/.config/fish/config.fish";

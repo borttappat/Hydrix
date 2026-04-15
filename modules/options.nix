@@ -1417,7 +1417,7 @@ in {
 
         dunstOffset = lib.mkOption {
           type = lib.types.int;
-          default = 24;
+          default = 300;
           description = "Dunst offset from screen edge";
         };
 

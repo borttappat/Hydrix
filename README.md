@@ -708,7 +708,7 @@ All configuration is done through `hydrix.*` options in your machine config file
       rofiWidth = 800;
       rofiHeight = 400;
       dunstWidth = 300;
-      dunstOffset = 24;
+      dunstOffset = 300;
 
       # Compositor animations
       compositor.animations = "modern"; # "none" or "modern" (bouncy picom v12)

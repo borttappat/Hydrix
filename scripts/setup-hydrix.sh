@@ -1400,7 +1400,7 @@ MACHINE_EOF
         # rofiWidth = 800;              # DEFAULT: 800
         # rofiHeight = 400;             # DEFAULT: 400
         # dunstWidth = 300;             # DEFAULT: 300
-        # dunstOffset = 24;             # DEFAULT: 24
+        # dunstOffset = 300;            # DEFAULT: 300
 
         # compositor.animations = "modern";  # DEFAULT: "modern" (options: none, modern)
 
