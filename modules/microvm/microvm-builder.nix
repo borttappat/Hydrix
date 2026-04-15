@@ -85,7 +85,7 @@ in {
 
       # Disable virtiofsd sandbox to allow writes to /nix/store
       # Builder needs direct R/W access to host's nix store
-      virtiofsd.extraArgs = ["--sandbox" "none"];
+      virtiofsd.extraArgs = ["--sandbox" "none" "--cache" "always" "--thread-pool-size" "16"];
 
       # Headless operation
       graphics.enable = false;
@@ -143,6 +143,17 @@ in {
           }
         ];
 
+      # Persistent eval cache - survives builder restarts, avoids 2+ min cold eval
+      volumes = [
+        {
+          image = "builder-cache.img";
+          mountPoint = "/root/.cache/nix";
+          size = 8192; # 8GB for eval cache + narinfo cache
+          fsType = "ext4";
+          autoCreate = true;
+        }
+      ];
+
       # ===== Network Interface =====
       interfaces = [
         {
@@ -176,6 +187,9 @@ in {
         ];
         # Cache negative narinfo results permanently (reduces redundant DB lookups)
         narinfo-cache-negative-ttl = 0;
+        # Parallel substituter downloads
+        http-connections = 128;
+        max-substitution-jobs = 32;
         trusted-public-keys = [
           "cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY="
           "nix-community.cachix.org-1:mB9FSh9qf2dCimDSUo8Zy7bkq5CX+/rkCWyvRCYg3Fs="

@@ -1333,14 +1333,12 @@ get_vm_name_from_target() {
     esac
 }
 
-# Builder: full workflow (start -> build in VM -> stop -> build on host)
+# Builder: full workflow (start -> build all targets in VM -> stop -> host builds)
+# Accepts multiple targets - eval cache stays warm across builds in one session:
+#   microvm builder build browsing pentest dev
 cmd_builder_build() {
-    local target="$1"
-    [[ -z "$target" ]] && { log_error "Usage: microvm builder build <target>"; return 1; }
-
-    local flake_target
-    flake_target=$(resolve_builder_target "$target")
-    log "Target: ${BOLD}${target}${NC} → ${flake_target}"
+    [[ $# -eq 0 ]] && { log_error "Usage: microvm builder build <target> [target...]"; return 1; }
+    local targets=("$@")
 
     local total_start
     total_start=$(timer_start)
@@ -1353,97 +1351,99 @@ cmd_builder_build() {
         log "Builder already running"
     fi
 
-    # Step 2: Build in builder via vsock
-    log "Building in builder VM..."
-    local build_output
-    local build_status=0
-    # Use -t600 to wait up to 10 minutes for remote to close after we send command
-    # The { echo; sleep 1; } keeps stdin "open" briefly to prevent early close
-    build_output=$({ echo "BUILD $flake_target"; sleep 1; } | socat -t600 -T900 - "VSOCK-CONNECT:${BUILDER_CID}:${BUILDER_BUILD_PORT}" 2>&1) || build_status=$?
+    # Step 2: Build all targets in one builder session
+    # Eval cache is warm after the first build - subsequent targets skip the 2+ min eval
+    local failed_targets=()
+    for target in "${targets[@]}"; do
+        local flake_target
+        flake_target=$(resolve_builder_target "$target")
+        log "Building ${BOLD}${target}${NC}..."
 
-    # Parse and display output
-    local result_path=""
-    while IFS= read -r line; do
-        case "$line" in
-            OK*)
-                log "$line"
-                ;;
-            RESULT\ *)
-                result_path="${line#RESULT }"
-                log_success "Result: ${BOLD}${result_path}${NC}"
-                ;;
-            DONE*)
-                log_success "$line"
-                ;;
-            ERROR*)
-                log_error "$line"
-                ;;
-            *)
-                [[ -n "$line" ]] && echo "  $line"
-                ;;
-        esac
-    done <<< "$build_output"
+        local build_output build_status=0
+        build_output=$({ echo "BUILD $flake_target"; sleep 1; } | socat -t600 -T900 - "VSOCK-CONNECT:${BUILDER_CID}:${BUILDER_BUILD_PORT}" 2>&1) || build_status=$?
 
-    # Check for build failure
-    if echo "$build_output" | grep -q "^ERROR"; then
-        log_error "Build failed in builder VM"
-        return 1
-    fi
+        while IFS= read -r line; do
+            case "$line" in
+                OK*)       log "$line" ;;
+                RESULT\ *) log_success "Result: ${BOLD}${line#RESULT }${NC}" ;;
+                DONE*)     log_success "$line" ;;
+                ERROR*)    log_error "$line" ;;
+                *)         [[ -n "$line" ]] && echo "  $line" ;;
+            esac
+        done <<< "$build_output"
 
-    # Step 3: Stop builder
+        if echo "$build_output" | grep -q "^ERROR"; then
+            log_error "Build failed: ${BOLD}${target}${NC}"
+            failed_targets+=("$target")
+        fi
+    done
+
+    # Step 3: Stop builder (restores host nix-daemon and read-only store)
     log "Stopping builder..."
     cmd_stop "$BUILDER_NAME" || return 1
 
-    # Step 4: Build on host (should be instant since deps are cached)
-    log "Building on host (should be instant)..."
+    # Step 4: Host-side registration for each successful target
+    # Store is already populated - these complete in seconds
+    log "Registering builds on host..."
+    local host_failed=false
+    for target in "${targets[@]}"; do
+        # Skip targets that failed in builder
+        local skip=false
+        for f in "${failed_targets[@]}"; do [[ "$f" == "$target" ]] && skip=true && break; done
+        $skip && continue
 
-    if [[ "$target" == "host" ]]; then
-        # Detect current specialisation for switch
-        local current_spec
-        current_spec=$(detect_current_specialisation)
-        log "Current specialisation: ${BOLD}${current_spec}${NC}"
-
-        # Host build uses nixos-rebuild
-        local host_start
-        host_start=$(timer_start)
-        if sudo nixos-rebuild build --flake "${FLAKE_DIR}#$(detect_host_config)"; then
-            local host_time
-            host_time=$(timer_end "$host_start")
-            log_time "Host build completed in ${BOLD}${host_time}s${NC}"
-        else
-            log_error "Host build failed"
-            return 1
-        fi
-
-        echo ""
-        log "To apply the build, run:"
-        if [[ "$current_spec" == "lockdown" ]]; then
-            echo "  sudo nixos-rebuild switch --flake ${FLAKE_DIR}#$(detect_host_config)"
-        else
-            echo "  sudo nixos-rebuild switch --flake ${FLAKE_DIR}#$(detect_host_config) --specialisation ${current_spec}"
-        fi
-    else
-        # Get VM name for microvm build
-        local vm_name
-        vm_name=$(get_vm_name_from_target "$target")
-
-        if [[ -n "$vm_name" ]]; then
-            _HYDRIX_BUILDER_FLOW=1 cmd_build "$vm_name" || return 1
-        else
-            # Raw flake path - just verify it exists on host
-            if nix path-info "$flake_target" &>/dev/null; then
-                log_success "Path verified in store"
+        if [[ "$target" == "host" ]]; then
+            local current_spec
+            current_spec=$(detect_current_specialisation)
+            log "Host config (specialisation: ${BOLD}${current_spec}${NC})..."
+            local host_start
+            host_start=$(timer_start)
+            if sudo nixos-rebuild build --flake "${FLAKE_DIR}#$(detect_host_config)"; then
+                log_time "Host build: ${BOLD}$(timer_end "$host_start")s${NC}"
             else
-                log_error "Built path not found on host: $flake_target"
-                return 1
+                log_error "Host build failed"
+                host_failed=true
+                continue
+            fi
+            echo ""
+            log "To apply:"
+            if [[ "$current_spec" == "lockdown" ]]; then
+                echo "  sudo nixos-rebuild switch --flake ${FLAKE_DIR}#$(detect_host_config)"
+            else
+                echo "  sudo nixos-rebuild switch --flake ${FLAKE_DIR}#$(detect_host_config) --specialisation ${current_spec}"
+            fi
+        else
+            local vm_name
+            vm_name=$(get_vm_name_from_target "$target")
+            if [[ -n "$vm_name" ]]; then
+                _HYDRIX_BUILDER_FLOW=1 cmd_build "$vm_name" || { log_error "Host registration failed: ${target}"; host_failed=true; }
+            else
+                local flake_target_check
+                flake_target_check=$(resolve_builder_target "$target")
+                if nix path-info "$flake_target_check" &>/dev/null; then
+                    log_success "Path verified: ${target}"
+                else
+                    log_error "Built path not found on host: ${target}"
+                    host_failed=true
+                fi
             fi
         fi
-    fi
+    done
 
     local total_time
     total_time=$(timer_end "$total_start")
     echo ""
-    log_success "Build complete: ${BOLD}${target}${NC} in ${BOLD}${total_time}s${NC}"
+
+    if [[ ${#failed_targets[@]} -gt 0 ]] || $host_failed; then
+        log_error "Completed with errors in ${BOLD}${total_time}s${NC}"
+        [[ ${#failed_targets[@]} -gt 0 ]] && log_error "Builder failures: ${failed_targets[*]}"
+        return 1
+    fi
+
+    local count=${#targets[@]}
+    local label
+    [[ $count -gt 1 ]] && label="${count} targets: ${targets[*]}" || label="${targets[0]}"
+    log_success "Build complete: ${BOLD}${label}${NC} in ${BOLD}${total_time}s${NC}"
 }
 
 # Builder: fetch only (prefetch deps, don't stop builder or build on host)
@@ -1599,9 +1599,9 @@ ${BOLD}NAMED TARGETS${NC}
     .#path             → Raw flake path (passed through)
 
 ${BOLD}EXAMPLES${NC}
-    # Build a microVM (full workflow)
+    # Build one or more microVMs (full workflow, eval cache warm after first)
     microvm builder build browsing
-    microvm builder build microvm-pentest
+    microvm builder build browsing pentest dev
 
     # Build host config
     microvm builder build host
@@ -2662,7 +2662,7 @@ ${BOLD}EXAMPLES${NC}
     microvm build microvm-dev
 
     # Builder workflow (streamlined)
-    microvm builder build browsing     # Full workflow: start→build→stop→host build
+    microvm builder build browsing pentest dev  # All in one session: eval cache warm after first
     microvm builder switch             # Build AND apply host config (preserves specialisation)
     microvm builder fetch pentest      # Just prefetch deps
     microvm builder stop               # Stop when done
