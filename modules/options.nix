@@ -786,9 +786,9 @@ in {
           options = {
             vmName = lib.mkOption {type = lib.types.str;};
             cid = lib.mkOption {type = lib.types.int;};
-            bridge = lib.mkOption {type = lib.types.str;};
-            subnet = lib.mkOption {type = lib.types.str;};
-            workspace = lib.mkOption {type = lib.types.int;};
+            bridge = lib.mkOption {type = lib.types.nullOr lib.types.str; default = null;};
+            subnet = lib.mkOption {type = lib.types.nullOr lib.types.str; default = null;};
+            workspace = lib.mkOption {type = lib.types.nullOr lib.types.int; default = null;};
             label = lib.mkOption {
               type = lib.types.str;
               default = "";
