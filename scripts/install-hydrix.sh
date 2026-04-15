@@ -164,8 +164,11 @@ declare -A CONFIG=(
     [xkbVariant]=""
     [platform]="intel"
     [isAsus]="false"
+    [vfioEnable]="true"
     [wifiPciAddress]=""
     [wifiPciId]=""
+    [wanMode]="pci-passthrough"
+    [wanDevice]=""
     [wifiSsid]=""
     [wifiPassword]=""
     [routerType]="microvm"
@@ -767,6 +770,50 @@ detect_asus() {
     else
         CONFIG[isAsus]="false"
         log "  Detected: Non-ASUS"
+    fi
+}
+
+detect_virtualization() {
+    log "Detecting virtualization environment..."
+
+    local vendor
+    vendor=$(cat /sys/class/dmi/id/sys_vendor 2>/dev/null || echo "")
+
+    if echo "$vendor" | grep -qi "vmware"; then
+        log "  Detected: VMware VM"
+        CONFIG[vfioEnable]="false"
+        CONFIG[wanMode]="macvtap"
+        # Detect the ethernet interface (skip lo, virtual bridges, and taps)
+        local eth_iface=""
+        for iface in $(ls /sys/class/net/ 2>/dev/null); do
+            [[ "$iface" == "lo" ]] && continue
+            [[ "$iface" == br-* || "$iface" == tap* || "$iface" == veth* ]] && continue
+            if [[ -d "/sys/class/net/$iface/device" ]]; then
+                eth_iface="$iface"
+                break
+            fi
+        done
+        CONFIG[wanDevice]="${eth_iface:-ens33}"
+        log "  WAN device: ${CONFIG[wanDevice]} (macvtap mode)"
+    elif echo "$vendor" | grep -qi "qemu\|kvm"; then
+        log "  Detected: QEMU/KVM VM"
+        CONFIG[vfioEnable]="false"
+        CONFIG[wanMode]="macvtap"
+        local eth_iface=""
+        for iface in $(ls /sys/class/net/ 2>/dev/null); do
+            [[ "$iface" == "lo" ]] && continue
+            [[ "$iface" == br-* || "$iface" == tap* || "$iface" == veth* ]] && continue
+            if [[ -d "/sys/class/net/$iface/device" ]]; then
+                eth_iface="$iface"
+                break
+            fi
+        done
+        CONFIG[wanDevice]="${eth_iface:-ens3}"
+        log "  WAN device: ${CONFIG[wanDevice]} (macvtap mode)"
+    else
+        log "  Detected: Bare metal"
+        CONFIG[vfioEnable]="true"
+        CONFIG[wanMode]="pci-passthrough"
     fi
 }
 
@@ -2071,8 +2118,11 @@ generate_machine_nix() {
         -e "s|@ROUTER_TYPE@|${CONFIG[routerType]}|g" \
         -e "s|@PLATFORM@|${CONFIG[platform]}|g" \
         -e "s|@IS_ASUS@|${CONFIG[isAsus]}|g" \
+        -e "s|@VFIO_ENABLE@|${CONFIG[vfioEnable]}|g" \
         -e "s|@WIFI_PCI_ID@|${CONFIG[wifiPciId]}|g" \
         -e "s|@WIFI_PCI_ADDRESS@|${CONFIG[wifiPciAddress]}|g" \
+        -e "s|@WAN_MODE@|${CONFIG[wanMode]}|g" \
+        -e "s|@WAN_DEVICE@|${CONFIG[wanDevice]}|g" \
         -e "s|@GRUB_GFXMODE@|${CONFIG[grubGfxmode]}|g" \
         -e "s|@EFI_BOOTLOADER_ID@|${CONFIG[efiBootloaderId]}|g" \
         "$template_file" > "$config_dir/machines/${CONFIG[serial]}.nix"
@@ -2779,8 +2829,12 @@ access-tokens = github.com=$gh_token"
 
     # Hardware detection (needed early for display in prompts)
     detect_cpu_platform
-    detect_asus
-    detect_wifi_hardware
+    detect_virtualization
+    # ASUS and WiFi/VFIO detection only on bare metal; VMs use ethernet WAN and have no ASUS hardware
+    if [[ "${CONFIG[vfioEnable]}" == "true" ]]; then
+        detect_asus
+        detect_wifi_hardware
+    fi
     detect_display_resolution
     detect_wifi_credentials
     detect_hardware_serial

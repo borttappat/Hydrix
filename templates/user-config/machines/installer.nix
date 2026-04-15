@@ -56,13 +56,15 @@
     router = {
       type = "@ROUTER_TYPE@";
       autostart = true;
+      wan.mode = "@WAN_MODE@";
+      wan.device = if "@WAN_DEVICE@" != "" then "@WAN_DEVICE@" else null;
     };
 
     hardware = {
       platform = "@PLATFORM@";
       isAsus = @IS_ASUS@;
       vfio = {
-        enable = true;
+        enable = @VFIO_ENABLE@;
         pciIds = [ "@WIFI_PCI_ID@" ];
         wifiPciAddress = "@WIFI_PCI_ADDRESS@";
       };
