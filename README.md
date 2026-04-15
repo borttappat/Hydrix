@@ -182,17 +182,27 @@ Each entry drives: i3 `for_window` border rules, polybar workspace-desc label, `
 
 ### VM Static IP Scheme
 
-Profile VMs get static `.10` IPs on their bridge (used by Files VM for inter-VM transfers):
+Profile VMs use a static `.10` IP on their bridge for Files VM reachability. The IP is **automatically derived** from `hydrix.networking.vmSubnet`, which every profile sets from its own `meta.nix`:
 
-| VM | Bridge | Static IP | Router TAP |
-|----|--------|-----------|------------|
-| `microvm-pentest` | `br-pentest` | 192.168.101.10 | `mv-router-pent` |
-| `microvm-browsing` | `br-browse` | 192.168.103.10 | `mv-router-brow` |
-| `microvm-comms` | `br-comms` | 192.168.102.10 | `mv-router-comm` |
-| `microvm-dev` | `br-dev` | 192.168.104.10 | `mv-router-dev` |
-| `microvm-lurking` | `br-lurking` | 192.168.107.10 | `mv-router-lurk` |
+```nix
+# In profiles/<name>/default.nix — this one line drives everything
+hydrix.networking.vmSubnet = meta.subnet;  # e.g. "192.168.102"
+# → staticIp auto-set to "192.168.102.10" by microvm-base.nix
+```
 
-The `.10` IP is derived from the VM registry subnet (e.g., `192.168.103` → `192.168.103.10`). Each VM configures this IP on its main TAP interface via systemd-networkd.
+`microvm-base.nix` sets `hydrix.microvm.staticIp = lib.mkDefault "${vmSubnet}.10"` whenever `vmSubnet` is non-empty. No explicit `staticIp` declaration is needed in profile modules — the template includes the `vmSubnet` line and that is sufficient.
+
+The table below shows the Hydrix built-in profile **defaults** — your `meta.nix` values take precedence automatically:
+
+| VM | Default Bridge | Default Static IP |
+|----|---------------|------------------|
+| `microvm-pentest` | `br-pentest` | `<subnet>.10` |
+| `microvm-browsing` | `br-browse` | `<subnet>.10` |
+| `microvm-comms` | `br-comms` | `<subnet>.10` |
+| `microvm-dev` | `br-dev` | `<subnet>.10` |
+| `microvm-lurking` | `br-lurking` | `<subnet>.10` |
+
+Each VM configures this IP on its main TAP interface via systemd-networkd. The Files VM derives the destination IP for each VM from the vm-registry (`subnet + ".10"`) at transfer time.
 
 ### Files VM Cross-Bridge Wiring
 
@@ -1917,6 +1927,37 @@ All scripts are wrapped via Nix and available in PATH after installation.
 ---
 
 ## Troubleshooting
+
+### Files VM Transfer Fails (`curl rc=7`)
+
+`curl rc=7` means the destination VM isn't reachable. The files VM reaches each profile VM at `<subnet>.10` over a dedicated TAP on that bridge.
+
+**Check 1 — TAP on correct bridge:**
+```bash
+ip link show mv-files-pent   # Should say "master br-pentest"
+ip link show mv-files-brow   # Should say "master br-browse"
+# etc.
+```
+If a TAP shows the wrong bridge, it has stale state from before the last host rebuild. Fix: restart the files VM so QEMU destroys and recreates the TAP — the udev rule re-fires with the current config:
+```bash
+microvm restart microvm-files
+ip link show mv-files-pent   # Verify correct bridge
+```
+
+**Check 2 — Profile VM has correct static IP:**
+From the files VM console (`microvm console microvm-files`), ping the target VM:
+```bash
+ping 192.168.102.10   # Replace with target subnet
+```
+If unreachable, the profile VM may have the wrong IP. Verify `hydrix.networking.vmSubnet = meta.subnet` is set in `profiles/<name>/default.nix` — that line drives static IP derivation automatically. Rebuild and restart the profile VM if it was missing.
+
+**Check 3 — Files-agent responding on profile VM:**
+```bash
+# From host:
+echo "PING" | socat -T5 - VSOCK-CONNECT:<cid>:14506
+# Expected: PONG
+```
+Port 8888 on each profile VM only accepts connections from the files VM's `.2` address on that bridge. If the files VM TAP was on the wrong bridge it had the wrong source IP, and iptables would drop it even if the VM was otherwise reachable.
 
 ### MicroVM Won't Start
 

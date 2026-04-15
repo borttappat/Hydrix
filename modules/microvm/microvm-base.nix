@@ -756,6 +756,15 @@ in {
     ];
 
     # ===== Networking =====
+    # Derive staticIp from vmSubnet if not explicitly set.
+    # vmSubnet is always set from meta.nix via hydrix.networking.vmSubnet = meta.subnet.
+    # This means profile VMs get the correct .10 IP regardless of which subnet they're on,
+    # without needing any override in hydrix-config profiles.
+    hydrix.microvm.staticIp = lib.mkDefault (
+      let subnet = config.hydrix.networking.vmSubnet;
+      in if subnet != "" then "${subnet}.10" else null
+    );
+
     networking.useDHCP = lib.mkDefault (config.hydrix.microvm.staticIp == null);
     networking.networkmanager.enable = lib.mkForce false;
 
