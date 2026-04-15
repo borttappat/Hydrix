@@ -143,17 +143,6 @@ in {
           }
         ];
 
-      # Ephemeral volume for local SQLite storage (avoids virtiofs slowdown)
-      volumes = [
-        {
-          image = "nix-state.img";
-          mountPoint = "/nix/.local-state";
-          size = 4096; # 4GB for nix database
-          fsType = "ext4";
-          autoCreate = true;
-        }
-      ];
-
       # ===== Network Interface =====
       interfaces = [
         {
@@ -210,37 +199,6 @@ in {
     };
     systemd.services.nix-daemon = {
       enable = true;
-    };
-
-    # ===== Local SQLite Setup =====
-    # Copy SQLite DB from host virtiofs mount to local ephemeral storage
-    # This avoids thousands of small reads through virtiofs during builds
-    systemd.services.sqlite-local-setup = {
-      description = "Setup local SQLite copy for builder";
-      wantedBy = ["multi-user.target"];
-      after = ["local-fs.target"];
-
-      serviceConfig = {
-        Type = "oneshot";
-        RemainAfterExit = true;
-      };
-
-      script = ''
-        SOURCE_DB="/nix/var/nix/db/db.sqlite"
-        LOCAL_DB="/nix/.local-state/db.sqlite"
-
-        # Copy from host to local if local doesn't exist or source is newer
-        if [[ ! -f "$LOCAL_DB" ]] || [[ "$SOURCE_DB" -nt "$LOCAL_DB" ]]; then
-          echo "Copying SQLite DB from host to local storage..."
-          cp -f "$SOURCE_DB" "$LOCAL_DB"
-          # Also copy WAL and SHM files if they exist
-          [[ -f "$SOURCE_DB-wal" ]] && cp -f "$SOURCE_DB-wal" "$LOCAL_DB-wal"
-          [[ -f "$SOURCE_DB-shm" ]] && cp -f "$SOURCE_DB-shm" "$LOCAL_DB-shm"
-          echo "SQLite DB copied to local storage"
-        else
-          echo "Local SQLite DB is up-to-date, skipping copy"
-        fi
-      '';
     };
 
     # ===== Local Socket Directory =====
@@ -395,36 +353,9 @@ in {
                 echo "PONG"
                 ;;
 
-              SYNC)
-                LOCAL_DB="/nix/.local-state/db.sqlite"
-                SOURCE_DB="/nix/var/nix/db/db.sqlite"
-
-                # Check if local DB exists and copy if it does
-                if [[ -f "$LOCAL_DB" ]]; then
-                  # Stop nix-daemon if running (don't hang if it's not)
-                  if pgrep -x "nix-daemon" > /dev/null 2>&1; then
-                    ${pkgs.systemd}/bin/systemctl stop nix-daemon.service 2>/dev/null || true
-                    sleep 2
-                  fi
-
-                  # Copy local DB back to host
-                  cp -f "$LOCAL_DB" "$SOURCE_DB" 2>&1 || echo "ERROR copying DB"
-
-                  # Copy WAL/SHM if they have changes
-                  [[ -f "$LOCAL_DB-wal" ]] && \
-                    cp -f "$LOCAL_DB-wal" "$SOURCE_DB-wal" 2>/dev/null || true
-                  [[ -f "$LOCAL_DB-shm" ]] && \
-                    cp -f "$LOCAL_DB-shm" "$SOURCE_DB-shm" 2>/dev/null || true
-
-                  echo "SYNC complete"
-                else
-                  echo "No local SQLite DB to sync (first boot or not built yet)"
-                fi
-                ;;
-
               *)
                 echo "ERROR unknown command: $cmd"
-                echo "Commands: BUILD <flake>, PREFETCH <flake>, PING, SYNC"
+                echo "Commands: BUILD <flake>, PREFETCH <flake>, PING"
                 ;;
             esac
           '';
