@@ -6,6 +6,7 @@
 let
   cfg = config.hydrix;
   netCfg = cfg.networking;
+  routerCfg = cfg.router;
 
   # Generate bridge config from built-in list
   bridgeConfigs = lib.genAttrs netCfg.bridges (br: { interfaces = []; });
@@ -14,6 +15,17 @@ let
   extraBridgeConfigs = lib.genAttrs
     (map (n: "br-${n.name}") netCfg.extraNetworks)
     (_: { interfaces = []; });
+
+  # WAN bridge for ethernet WAN mode (macvtap): physical NIC is a member so
+  # the router VM's mv-router-wan TAP shares the same L2 segment and can DHCP.
+  ethernetWanEnabled =
+    routerCfg.wan.mode == "macvtap" ||
+    (routerCfg.wan.mode == "auto" && cfg.hardware.vfio.wifiPciAddress == "");
+  wanBridgeConfig = lib.optionalAttrs ethernetWanEnabled {
+    br-wan = {
+      interfaces = lib.optional (routerCfg.wan.device != null) routerCfg.wan.device;
+    };
+  };
 
   # Management and shared bridges get host IPs
   mgmtSubnet = netCfg.subnets.mgmt or "192.168.100";
@@ -24,8 +36,8 @@ in {
     networking.networkmanager.enable = lib.mkForce false;
     networking.useDHCP = lib.mkForce false;
 
-    # Create bridges (built-in + user-defined extra networks)
-    networking.bridges = bridgeConfigs // extraBridgeConfigs;
+    # Create bridges (built-in + user-defined extra networks + WAN if ethernet mode)
+    networking.bridges = bridgeConfigs // extraBridgeConfigs // wanBridgeConfig;
 
     # Host IPs on management and shared bridges
     networking.interfaces = {

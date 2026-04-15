@@ -111,6 +111,7 @@ in {
     services.udev.extraRules = ''
       # Router microVM TAP interfaces - each goes to specific bridge
       # Uses retry script to handle race condition with bridge creation
+      ACTION=="add", SUBSYSTEM=="net", KERNEL=="mv-router-wan",  RUN+="${attachTapScript} %k br-wan"
       ACTION=="add", SUBSYSTEM=="net", KERNEL=="mv-router-mgmt", RUN+="${attachTapScript} %k br-mgmt"
       ACTION=="add", SUBSYSTEM=="net", KERNEL=="mv-router-pent", RUN+="${attachTapScript} %k br-pentest"
       ACTION=="add", SUBSYSTEM=="net", KERNEL=="mv-router-comm", RUN+="${attachTapScript} %k br-comms"

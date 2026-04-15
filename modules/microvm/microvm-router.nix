@@ -72,6 +72,10 @@
   wanDevice = wanCfg.device;
   preferWireless = wanCfg.preferWireless;
 
+  # Derived WAN mode booleans (resolved at eval time, embedded in generated scripts)
+  usePciPassthrough = wanMode == "pci-passthrough" || (wanMode == "auto" && wifiPciAddress != "");
+  useEthernetWan    = wanMode == "macvtap"         || (wanMode == "auto" && wifiPciAddress == "");
+
   # Mullvad VPN configuration from options
   hasMullvad = vpnCfg.mullvad.enable && vpnCfg.mullvad.privateKey != "";
 
@@ -144,7 +148,8 @@ in {
     microvm = {
       hypervisor = "qemu";
       qemu.machine = "q35"; # Q35 chipset - better PCIe/VFIO support (matches libvirt router)
-      qemu.package = qemuNoSeccomp; # QEMU without seccomp - disables sandbox for VFIO
+      # Only disable seccomp when VFIO passthrough is in use (seccomp blocks /dev/vfio access)
+      qemu.package = if usePciPassthrough then qemuNoSeccomp else pkgs.qemu_kvm;
 
       # Resources - router is lightweight
       vcpu = 2;
@@ -185,13 +190,19 @@ in {
           "-serial"
           "chardev:console"
 
-          # PCIe root port for VFIO passthrough (required for Q35)
-          "-device"
-          "pcie-root-port,id=pcie.1,slot=1,chassis=1"
-          # WiFi PCI passthrough via VFIO - attached to PCIe root port
+        ]
+        # VFIO passthrough — only when using WiFi PCI passthrough as WAN
+        ++ lib.optionals usePciPassthrough [
+          "-device" "pcie-root-port,id=pcie.1,slot=1,chassis=1"
           # Strip "0000:" prefix if user provided full format (handles both "00:14.3" and "0000:00:14.3")
-          "-device"
-          "vfio-pci,host=0000:${lib.removePrefix "0000:" wifiPciAddress},bus=pcie.1"
+          "-device" "vfio-pci,host=0000:${lib.removePrefix "0000:" wifiPciAddress},bus=pcie.1"
+        ]
+        # Ethernet WAN TAP — only when using macvtap/ethernet as WAN
+        ++ lib.optionals useEthernetWan [
+          "-netdev" "tap,id=net-wan,ifname=mv-router-wan,script=no,downscript=no"
+          "-device" "virtio-net-pci,netdev=net-wan,mac=02:00:00:01:09:01"
+        ]
+        ++ [
 
           # Additional TAP interfaces for each bridge
           # TAP interfaces created by host-side systemd service
@@ -333,6 +344,9 @@ in {
       "10-mv-router-bldr" = { matchConfig.MACAddress = "02:00:00:01:06:01"; linkConfig.Name = "mv-router-bldr"; };
       "10-mv-router-lurk" = { matchConfig.MACAddress = "02:00:00:01:07:01"; linkConfig.Name = "mv-router-lurk"; };
       "10-mv-router-file" = { matchConfig.MACAddress = "02:00:00:01:08:01"; linkConfig.Name = "mv-router-file"; };
+    } // lib.optionalAttrs useEthernetWan {
+      # Ethernet WAN TAP — renamed by MAC so detect_wan() can find it reliably
+      "10-mv-router-wan" = { matchConfig.MACAddress = "02:00:00:01:09:01"; linkConfig.Name = "mv-router-wan"; };
     } // lib.listToAttrs (lib.imap0 (i: n: {
       name  = "20-${n.routerTap}";
       value = {
@@ -480,59 +494,75 @@ in {
           echo ""
         }
 
-        # Detect WAN interface (WiFi passthrough)
+        # WAN mode baked in at build time
+        USE_ETHERNET_WAN="${if useEthernetWan then "true" else "false"}"
+
+        # Detect WAN interface
         detect_wan() {
-          # First, look for wireless interfaces (wlp*, wlan*)
-          for iface in $(ls /sys/class/net/ 2>/dev/null); do
-            if [[ "$iface" == wl* ]]; then
-              echo "$iface"
-              return
-            fi
-          done
-          # Check if /sys/class/net/*/wireless exists
-          for iface in $(ls /sys/class/net/ 2>/dev/null); do
-            if [[ -d "/sys/class/net/$iface/wireless" ]]; then
-              echo "$iface"
-              return
-            fi
-          done
-          echo ""
+          if [[ "$USE_ETHERNET_WAN" == "true" ]]; then
+            # Ethernet WAN: find by static MAC assigned to mv-router-wan TAP
+            find_iface_by_mac "02:00:00:01:09:01"
+          else
+            # WiFi passthrough WAN: look for wireless interfaces (wlp*, wlan*)
+            for iface in $(ls /sys/class/net/ 2>/dev/null); do
+              [[ "$iface" == wl* ]] && { echo "$iface"; return; }
+            done
+            for iface in $(ls /sys/class/net/ 2>/dev/null); do
+              [[ -d "/sys/class/net/$iface/wireless" ]] && { echo "$iface"; return; }
+            done
+            echo ""
+          fi
         }
 
-        # Wait for WiFi interface to appear (VFIO passthrough takes time)
-        echo "Waiting for WiFi interface..."
-        for i in $(seq 1 30); do
-          WAN_IFACE=$(detect_wan)
-          if [[ -n "$WAN_IFACE" ]]; then
-            break
+        # Wait for WAN interface to appear
+        if [[ "$USE_ETHERNET_WAN" == "true" ]]; then
+          echo "Ethernet WAN mode — waiting for mv-router-wan..."
+          for i in $(seq 1 15); do
+            WAN_IFACE=$(detect_wan)
+            [[ -n "$WAN_IFACE" ]] && break
+            echo "  ... waiting ($i/15)"
+            sleep 1
+          done
+          if [[ -z "$WAN_IFACE" ]]; then
+            echo "WARNING: Ethernet WAN TAP not found. Check br-wan bridge and host udev rules."
+            ${pkgs.iproute2}/bin/ip link show
+            WAN_IFACE="none"
           fi
-          echo "  ... waiting ($i/30)"
-          sleep 1
-        done
-
-        if [[ -z "$WAN_IFACE" ]]; then
-          echo "WARNING: No WiFi interface detected! Check VFIO passthrough."
-          echo "Available interfaces:"
-          ${pkgs.iproute2}/bin/ip link show
-          WAN_IFACE="none"
         else
-          echo "Detected WAN interface: $WAN_IFACE"
+          echo "WiFi WAN mode — waiting for WiFi interface..."
+          for i in $(seq 1 30); do
+            WAN_IFACE=$(detect_wan)
+            [[ -n "$WAN_IFACE" ]] && break
+            echo "  ... waiting ($i/30)"
+            sleep 1
+          done
+          if [[ -z "$WAN_IFACE" ]]; then
+            echo "WARNING: No WiFi interface detected! Check VFIO passthrough."
+            ${pkgs.iproute2}/bin/ip link show
+            WAN_IFACE="none"
+          fi
         fi
 
+        echo "Detected WAN interface: $WAN_IFACE"
         echo "$WAN_IFACE" > "$STATE_DIR/wan_interface"
         echo "standard" > "$STATE_DIR/mode"
 
-        # NetworkManager handles WiFi connection
-        if [[ "$WAN_IFACE" != "none" && "$WAN_IFACE" == wl* ]]; then
-          echo "WAN is WiFi - NetworkManager will handle connection"
-          for i in $(seq 1 60); do
-            if ${pkgs.networkmanager}/bin/nmcli device show "$WAN_IFACE" 2>/dev/null | grep -q "connected"; then
-              echo "WiFi connected via NetworkManager"
-              break
-            fi
-            echo "  Waiting for WiFi connection ($i/60)..."
-            sleep 1
-          done
+        # Bring up WAN interface
+        if [[ "$WAN_IFACE" != "none" ]]; then
+          if [[ "$USE_ETHERNET_WAN" == "true" ]]; then
+            echo "WAN is ethernet ($WAN_IFACE) — enabling DHCP via NetworkManager"
+            ${pkgs.networkmanager}/bin/nmcli device set "$WAN_IFACE" managed yes 2>/dev/null || true
+          elif [[ "$WAN_IFACE" == wl* ]]; then
+            echo "WAN is WiFi — NetworkManager will handle connection"
+            for i in $(seq 1 60); do
+              if ${pkgs.networkmanager}/bin/nmcli device show "$WAN_IFACE" 2>/dev/null | grep -q "connected"; then
+                echo "WiFi connected via NetworkManager"
+                break
+              fi
+              echo "  Waiting for WiFi connection ($i/60)..."
+              sleep 1
+            done
+          fi
         fi
 
         # Map interfaces by name (routerTap from vm-registry)
