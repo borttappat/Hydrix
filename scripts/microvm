@@ -472,7 +472,7 @@ cmd_stop() {
     if is_builder "$vm_name" && is_running "$vm_name"; then
         log "Syncing builder SQLite state to host..."
         local sync_result
-        sync_result=$(vsock-cmd "${BUILDER_CID}" "${BUILDER_BUILD_PORT}" 60 "SYNC" 2>/dev/null)
+        sync_result=$(echo "SYNC" | timeout 60 socat -T60 - "VSOCK-CONNECT:${BUILDER_CID}:${BUILDER_BUILD_PORT}" 2>/dev/null) || true
         log "${sync_result:-SYNC completed}"
     fi
 
