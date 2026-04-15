@@ -391,19 +391,29 @@ in {
 
               SYNC)
                 echo "Syncing SQLite changes back to host..."
-                # Stop nix-daemon first to ensure all writes are flushed
-                ${pkgs.systemd}/bin/systemctl stop nix-daemon.service
-                sleep 2
 
-                # Copy local DB back to host
-                cp -f /nix/.local-state/db.sqlite /nix/var/nix/db/db.sqlite
-                # Copy WAL/SHM if they have changes
-                [[ -f /nix/.local-state/db.sqlite-wal ]] && \
-                  cp -f /nix/.local-state/db.sqlite-wal /nix/var/nix/db/db.sqlite-wal
-                [[ -f /nix/.local-state/db.sqlite-shm ]] && \
-                  cp -f /nix/.local-state/db.sqlite-shm /nix/var/nix/db/db.sqlite-shm
+                LOCAL_DB="/nix/.local-state/db.sqlite"
+                SOURCE_DB="/nix/var/nix/db/db.sqlite"
 
-                echo "SYNC complete"
+                # Check if local DB exists and copy if it does
+                if [[ -f "$LOCAL_DB" ]]; then
+                  # Stop nix-daemon first to ensure all writes are flushed
+                  ${pkgs.systemd}/bin/systemctl stop nix-daemon.service 2>/dev/null || true
+                  sleep 2
+
+                  # Copy local DB back to host
+                  cp -f "$LOCAL_DB" "$SOURCE_DB" 2>&1 || echo "ERROR copying DB"
+
+                  # Copy WAL/SHM if they have changes
+                  [[ -f "$LOCAL_DB-wal" ]] && \
+                    cp -f "$LOCAL_DB-wal" "$SOURCE_DB-wal" 2>/dev/null || true
+                  [[ -f "$LOCAL_DB-shm" ]] && \
+                    cp -f "$LOCAL_DB-shm" "$SOURCE_DB-shm" 2>/dev/null || true
+
+                  echo "SYNC complete"
+                else
+                  echo "No local SQLite DB to sync (first boot or not built yet)"
+                fi
                 ;;
 
               *)
