@@ -2394,10 +2394,10 @@ cmd_files_transfer() {
 
     # Step 7: NOW release passphrase to dest VM for decryption
     # extract_parent: dir to extract INTO (archive recreates the top-level name)
-    # empty string = home dir, so "wallpapers" extracts to ~/wallpapers not ~/wallpapers/wallpapers
+    # dst_path IS the target directory: "wallpapers" → extract to ~/wallpapers/
+    # empty dst_path → extract directly into $HOME
     local extract_parent decrypt_cmd
-    extract_parent=$(dirname "$dst_path")
-    [[ "$extract_parent" == "." ]] && extract_parent=""
+    extract_parent="$dst_path"
     if [[ -n "$extract_parent" ]]; then
         decrypt_cmd="DECRYPT $passphrase shared/xfer.enc $extract_parent"
     else
