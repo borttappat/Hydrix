@@ -196,6 +196,12 @@ in {
       gc.automatic = false;
     };
 
+    # Increase file descriptor limits for nix builds
+    # Nix builds can open thousands of files simultaneously
+    systemd.services.nix-daemon.serviceConfig = {
+      LimitNOFILE = 1048576;
+    };
+
     # Explicitly enable nix-daemon socket and service
     # (microvm module may disable it when detecting shared store)
     systemd.sockets.nix-daemon = {
