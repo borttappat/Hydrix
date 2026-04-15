@@ -62,8 +62,9 @@ let
     # Wait for bridge to exist
     for i in $(seq 1 $MAX_RETRIES); do
       if ${pkgs.iproute2}/bin/ip link show "$BRIDGE" &>/dev/null; then
-        # Bridge exists, attach TAP
+        # Bridge exists, attach TAP and bring it up
         if ${pkgs.iproute2}/bin/ip link set "$TAP" master "$BRIDGE" 2>/dev/null; then
+          ${pkgs.iproute2}/bin/ip link set "$TAP" up 2>/dev/null || true
           exit 0
         fi
       fi
