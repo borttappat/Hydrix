@@ -1439,6 +1439,12 @@ in {
 
         # Compositor settings
         compositor = {
+          enable = lib.mkOption {
+            type = lib.types.bool;
+            default = true;
+            description = "Enable compositor (picom) for shadows, rounded corners, and animations.";
+          };
+
           animations = lib.mkOption {
             type = lib.types.enum ["none" "modern"];
             default = "modern";

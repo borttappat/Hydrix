@@ -18,7 +18,8 @@ let
   sc = config.hydrix.graphical.scaling.computed;
 
   # Compositor settings
-  animationMode = config.hydrix.graphical.ui.compositor.animations;
+  compositorCfg = config.hydrix.graphical.ui.compositor;
+  animationMode = compositorCfg.animations;
 
   # Opacity settings
   opacityCfg = config.hydrix.graphical.ui.opacity;
@@ -236,9 +237,10 @@ let
 
 in {
   config = lib.mkIf config.hydrix.graphical.enable {
+    # Only enable picom when compositor is enabled and not in a VM
     home-manager.users.${username} = { pkgs, ... }: {
       # "none" mode: Use Home Manager services.picom (no animations, fading only)
-      services.picom = lib.mkIf (animationMode == "none") {
+      services.picom = lib.mkIf (compositorCfg.enable && animationMode == "none") {
         enable = !isVM;
         package = pkgs.picom;
 
@@ -310,7 +312,7 @@ in {
       };
 
       # "modern" mode: Use custom systemd service with modern animations
-      systemd.user.services.picom = lib.mkIf (animationMode == "modern" && !isVM) {
+      systemd.user.services.picom = lib.mkIf (compositorCfg.enable && animationMode == "modern" && !isVM) {
         Unit = {
           Description = "Picom compositor (modern animations)";
           After = [ "graphical-session-pre.target" ];
