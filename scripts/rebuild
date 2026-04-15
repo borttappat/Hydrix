@@ -243,25 +243,6 @@ do_build_via_builder() {
     fi
 }
 
-# Get system info
-is_vm() {
-    local chassis vendor
-    chassis=$(hostnamectl 2>/dev/null | awk -F': ' '/Chassis/{print $2}' | xargs || true)
-    vendor=$(hostnamectl 2>/dev/null | awk -F': ' '/Hardware Vendor/{print $2}' | xargs || true)
-    [[ "$chassis" == "vm" ]] || [[ "${vendor:-}" =~ QEMU|VMware ]]
-}
-
-get_vm_type() {
-    local hostname
-    hostname=$(hostnamectl hostname 2>/dev/null || true)
-    if [[ "$hostname" =~ ^(pentest|comms|browsing|dev|lurking|transfer|router)- ]] || [[ "$hostname" == "router-vm" ]]; then
-        if [[ "$hostname" == "router-vm" ]]; then
-            echo "router"
-        else
-            echo "${BASH_REMATCH[1]}"
-        fi
-    fi
-}
 
 # Detect machine config name
 # Priority: 1) DMI serial, 2) board_name (mb-<name>), 3) product_name (prod-/<name>/mb-<name>), 4) single config
@@ -613,80 +594,60 @@ post_build() {
 main() {
     clean_hm_backups
 
-    if is_vm; then
-        # Inside a VM - use standard nh rebuild
+    local machine_config
+    machine_config=$(detect_machine_config "$FLAKE_DIR")
+
+    log "Machine: $machine_config"
+
+    # Determine target mode
+    local current_mode
+    current_mode=$(detect_mode)
+    local target_mode="${SPEC_OVERRIDE:-$current_mode}"
+
+    # Convert mode to nh specialisation flag
+    # lockdown = base (no -s), administrative/fallback = -s <name>
+    local target_spec
+    target_spec=$(mode_to_spec "$target_mode")
+
+    log "Mode: $current_mode -> $target_mode"
+
+    # Lockdown mode: use builder VM (host has no network)
+    if [[ "$current_mode" == "lockdown" ]]; then
+        # Note: flake update not supported in lockdown (no network)
+        if $UPDATE_FLAKE; then
+            err "Cannot update flake in lockdown mode (no network)"
+            err "Switch to administrative mode first: hydrix-switch admin"
+            exit 1
+        fi
+
+        if ! do_build_via_builder "$target_spec"; then
+            exit 1
+        fi
+
+        restore_network
+        post_build
+        log "Done (lockdown mode via builder)"
+    else
+        # Administrative or fallback mode: direct nh rebuild
+
+        # Check if builder VM is running (it stops nix-daemon, blocking host builds)
+        if systemctl is-active --quiet microvm@microvm-builder.service 2>/dev/null; then
+            err "Builder VM is running — host nix-daemon is stopped"
+            err "Stop it first: microvm stop microvm-builder"
+            exit 1
+        fi
+
         if $UPDATE_FLAKE; then
             log "Updating flake..."
             nix flake update "$FLAKE_DIR"
         fi
 
-        local vm_type
-        vm_type=$(get_vm_type)
-        if [[ -z "$vm_type" ]]; then
-            err "Unknown VM hostname pattern"
+        if ! do_build "$machine_config" "$target_spec"; then
             exit 1
         fi
-        if ! do_build "vm-${vm_type}" ""; then
-            exit 1
-        fi
-        log "Done"
-    else
-        # Host system - identify by hardware or hostname
-        local machine_config
-        machine_config=$(detect_machine_config "$FLAKE_DIR")
 
-        log "Machine: $machine_config"
-
-        # Determine target mode
-        local current_mode
-        current_mode=$(detect_mode)
-        local target_mode="${SPEC_OVERRIDE:-$current_mode}"
-
-        # Convert mode to nh specialisation flag
-        # lockdown = base (no -s), administrative/fallback = -s <name>
-        local target_spec
-        target_spec=$(mode_to_spec "$target_mode")
-
-        log "Mode: $current_mode -> $target_mode"
-
-        # Lockdown mode: use builder VM (host has no network)
-        if [[ "$current_mode" == "lockdown" ]]; then
-            # Note: flake update not supported in lockdown (no network)
-            if $UPDATE_FLAKE; then
-                err "Cannot update flake in lockdown mode (no network)"
-                err "Switch to administrative mode first: hydrix-switch admin"
-                exit 1
-            fi
-
-            if ! do_build_via_builder "$target_spec"; then
-                exit 1
-            fi
-
-            restore_network
-            post_build
-            log "Done (lockdown mode via builder)"
-        else
-            # Administrative or fallback mode: direct nh rebuild
-
-            # Check if builder VM is running (it stops nix-daemon, blocking host builds)
-            if systemctl is-active --quiet microvm@microvm-builder.service 2>/dev/null; then
-                err "Builder VM is running — host nix-daemon is stopped"
-                err "Stop it first: microvm stop microvm-builder"
-                exit 1
-            fi
-
-            if $UPDATE_FLAKE; then
-                log "Updating flake..."
-                nix flake update "$FLAKE_DIR"
-            fi
-
-            if ! do_build "$machine_config" "$target_spec"; then
-                exit 1
-            fi
-
-            post_build
-            log "Done ($target_mode)"
-        fi
+        post_build
+        log "Done ($target_mode)"
     fi
 }
 
