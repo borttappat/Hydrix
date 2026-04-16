@@ -1243,15 +1243,23 @@
     LOCK_TEXT="${cfg.lockscreen.text}"
     FONT_SIZE=${toString cfg.lockscreen.fontSize}
 
+    # Get actual screen dimensions for correct image size
+    SCREEN_DIM=$(${pkgs.xorg.xdpyinfo}/bin/xdpyinfo | ${pkgs.gnugrep}/bin/grep "dimensions:" | ${pkgs.gnugrep}/bin/grep -oE '[0-9]+x[0-9]+' | head -1)
+    SCREEN_W=$(echo "$SCREEN_DIM" | cut -dx -f1)
+    SCREEN_H=$(echo "$SCREEN_DIM" | cut -dx -f2)
+
     # Detect primary monitor position for correct element placement on multi-monitor setups
     PRIMARY_GEOM=$(${pkgs.xorg.xrandr}/bin/xrandr --query | ${pkgs.gnugrep}/bin/grep " connected primary " | ${pkgs.gnugrep}/bin/grep -oE '[0-9]+x[0-9]+\+[0-9]+\+[0-9]+' | head -1)
     [ -z "$PRIMARY_GEOM" ] && PRIMARY_GEOM=$(${pkgs.xorg.xrandr}/bin/xrandr --query | ${pkgs.gnugrep}/bin/grep " connected " | ${pkgs.gnugrep}/bin/grep -oE '[0-9]+x[0-9]+\+[0-9]+\+[0-9]+' | head -1)
-    MON_W=1920; MON_H=1200; MON_X=0; MON_Y=0
+    MON_W=${SCREEN_W}; MON_H=${SCREEN_H}; MON_X=0; MON_Y=0
     if [ -n "$PRIMARY_GEOM" ]; then
-      MON_W=$(echo "$PRIMARY_GEOM" | cut -dx -f1)
-      MON_H=$(echo "$PRIMARY_GEOM" | cut -dx -f2 | cut -d+ -f1)
-      MON_X=$(echo "$PRIMARY_GEOM" | cut -d+ -f2)
-      MON_Y=$(echo "$PRIMARY_GEOM" | cut -d+ -f3)
+      MON_GEOM=$(${pkgs.xorg.xrandr}/bin/xrandr --query | ${pkgs.gnugrep}/bin/grep " connected primary " | ${pkgs.gnugrep}/bin/grep -oE '[0-9]+x[0-9]+\+[0-9]+\+[0-9]+' | head -1)
+      if [ -n "$MON_GEOM" ]; then
+        MON_W=$(echo "$MON_GEOM" | cut -dx -f1)
+        MON_H=$(echo "$MON_GEOM" | cut -dx -f2 | cut -d+ -f1)
+        MON_X=$(echo "$MON_GEOM" | cut -d+ -f2)
+        MON_Y=$(echo "$MON_GEOM" | cut -d+ -f3)
+      fi
     fi
     # Positions proportional to primary monitor (ratios derived from 1920x1200 originals)
     IND_X=$((MON_X + MON_W * 171 / 1000))
@@ -1264,9 +1272,9 @@
     TEXT_X=$((MON_X + 50))
     TEXT_Y=$((MON_Y + 50))
 
-    # Create solid black background with "Enter password" text overlay
+    # Create solid black background matching actual screen size with "Enter password" text overlay
     LOCK_IMG="/tmp/i3lock_black.png"
-    ${pkgs.imagemagick}/bin/magick -size "1920x1200" "xc:$color0" "$LOCK_IMG" 2>/dev/null || true
+    ${pkgs.imagemagick}/bin/magick -size "${SCREEN_W:-1920}x${SCREEN_H:-1200}" "xc:$color0" "$LOCK_IMG" 2>/dev/null || true
 
     # Add "Enter password" text overlay at NorthWest position
     if ! ${pkgs.imagemagick}/bin/magick "$LOCK_IMG" -gravity NorthWest \
