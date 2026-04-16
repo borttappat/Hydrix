@@ -528,6 +528,9 @@
             };
             # Nim dependencies are auto-resolved via nimble lock
             # If build fails, add nimble deps: nimbleDeps = with pkgs.nimPackages; [ ... ];
+            # For packages with custom binary names (from .nimble bin = @["..."]),
+            # set meta.mainProgram to point to the actual binary
+            meta.mainProgram = "@NIM_BIN_NAME@";
           };
         };
     }
@@ -1430,6 +1433,7 @@ in {
         PROJECT_TYPE="unknown"
         HAS_PYPROJECT="false"
         MAIN_PROGRAM=""
+        NIM_BIN_NAME=""
 
         # Detection priority order (most specific first)
         if [ -f "$TEMP_DIR/Cargo.toml" ]; then
@@ -1473,6 +1477,9 @@ in {
           PROJECT_TYPE="dotnet"
         elif ls "$TEMP_DIR"/*.nimble 1>/dev/null 2>&1; then
           PROJECT_TYPE="nim"
+          # Extract binary name from nimble file's bin = @["..."]
+          NIM_BIN_NAME=$(${pkgs.gnugrep}/bin/grep -oP 'bin\s*=\s*@\"\K[^\"]+' "$TEMP_DIR"/*.nimble 2>/dev/null | head -1 || true)
+          [ -n "$NIM_BIN_NAME" ] && echo "Detected binary name: $NIM_BIN_NAME"
         elif [ -f "$TEMP_DIR/build.zig" ]; then
           PROJECT_TYPE="zig"
         elif [ -f "$TEMP_DIR/dune-project" ] || ls "$TEMP_DIR"/*.opam 1>/dev/null 2>&1; then
@@ -1695,6 +1702,7 @@ in {
             -e "s|@ENTRY_POINT@|$ENTRY_POINT|g" \
             -e "s|@PLACEHOLDER@|${hashPlaceholder}|g" \
             -e "s|@META_LINE@|$META_LINE|g" \
+            -e "s|@NIM_BIN_NAME@|''${NIM_BIN_NAME:-$NAME}|g" \
             "$template" > "$PKG_DIR/flake.nix"
         }
 
