@@ -204,13 +204,14 @@ is_running() {
     systemctl is-active --quiet "microvm@${vm_name}.service" 2>/dev/null
 }
 
-# Check if VM is headless (no xpra - router, builder)
+# Check if VM is headless (no xpra - router, builder, infra)
 is_headless() {
     local vm_name="$1"
     [[ "$vm_name" == "microvm-router" || "$vm_name" == "microvm-router-stable" || \
        "$vm_name" == "microvm-builder" || "$vm_name" == "microrouter" || \
        "$vm_name" == "microbuild" || "$vm_name" == "microvm-files" || \
-       "$vm_name" == "microvm-gitsync" || "$vm_name" == "microvm-vault" ]]
+       "$vm_name" == "microvm-gitsync" || "$vm_name" == "microvm-vault" || \
+       "$vm_name" == "microvm-usb-sandbox" ]]
 }
 
 # Check if VM is the builder
@@ -2283,6 +2284,20 @@ cmd_files_transfer() {
     dst_cid=$(get_vm_cid "$dst_vm") || exit 1
 
     log "Files: ${BOLD}${src_vm}/${src_path}${NC} → ${BOLD}${dst_vm}/${dst_path}${NC}"
+
+    # Check that source and destination VMs are running
+    local missing_vms=""
+    if ! is_running "$src_vm"; then
+        missing_vms="${missing_vms}source VM ($src_vm)${missing_vms:+, }"
+    fi
+    if ! is_running "$dst_vm"; then
+        missing_vms="${missing_vms}destination VM ($dst_vm)${missing_vms:+, }"
+    fi
+    if [[ -n "$missing_vms" ]]; then
+        log_error "Required VM(s) not running: ${missing_vms%+ }"
+        log_error "Start the missing VM(s) before transferring files."
+        exit 1
+    fi
 
     # Generate per-transfer passphrase (stays in host memory only)
     local passphrase
