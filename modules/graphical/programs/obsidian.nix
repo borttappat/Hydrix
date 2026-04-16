@@ -32,18 +32,18 @@ let
     /* Font: ${fontName} | Colorscheme: ${config.hydrix.colorscheme} */
 
     .theme-${polarity} {
-      /* Base16 colorscheme */
+      /* Base16 colorscheme — smooth ramp from darkest (00) to lightest text (100) */
       --color-base-00: ${colors.base00};
-      --color-base-05: ${colors.base00};
-      --color-base-10: ${colors.base00};
-      --color-base-20: ${colors.base01};
-      --color-base-25: ${colors.base01};
-      --color-base-30: ${colors.base02};
-      --color-base-35: ${colors.base02};
-      --color-base-40: ${colors.base03};
-      --color-base-50: ${colors.base03};
-      --color-base-60: ${colors.base04};
-      --color-base-70: ${colors.base04};
+      --color-base-05: ${colors.base01};
+      --color-base-10: ${colors.base01};
+      --color-base-20: ${colors.base02};
+      --color-base-25: ${colors.base02};
+      --color-base-30: ${colors.base03};
+      --color-base-35: ${colors.base03};
+      --color-base-40: ${colors.base04};
+      --color-base-50: ${colors.base04};
+      --color-base-60: ${colors.base05};
+      --color-base-70: ${colors.base05};
       --color-base-100: ${colors.base05};
 
       --color-accent: ${colors.base0D};
@@ -58,7 +58,7 @@ let
       --color-blue: ${colors.base0D};
       --color-purple: ${colors.base0E};
 
-      /* UI elements */
+      /* UI elements — backgrounds stay near base00, text always base05 */
       --background-primary: ${colors.base00};
       --background-primary-alt: ${colors.base01};
       --background-secondary: ${colors.base01};
@@ -71,9 +71,10 @@ let
       --background-modifier-error-hover: ${colors.base08};
       --background-modifier-cover: rgba(0, 0, 0, 0.8);
 
+      /* All text uses base05 or higher to avoid matching base01-base03 backgrounds */
       --text-normal: ${colors.base05};
-      --text-muted: ${colors.base04};
-      --text-faint: ${colors.base03};
+      --text-muted: ${colors.base05};
+      --text-faint: ${colors.base05};
       --text-error: ${colors.base08};
       --text-accent: ${colors.base0D};
       --text-accent-hover: ${colors.base0C};
