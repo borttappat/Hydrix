@@ -151,8 +151,8 @@ in {
       # Only disable seccomp when VFIO passthrough is in use (seccomp blocks /dev/vfio access)
       qemu.package = if usePciPassthrough then qemuNoSeccomp else pkgs.qemu_kvm;
 
-      # Resources - router is lightweight
-      vcpu = 2;
+      # Resources - router is lightweight (NAT/routing only, 1 vCPU sufficient)
+      vcpu = 1;
       mem = 1024; # 1GB should be plenty
 
       # No store disk - we'll use virtiofs like other microvms
@@ -254,6 +254,9 @@ in {
             "virtio-net-pci,netdev=net-${n.name},mac=02:00:00:02:${lib.fixedWidthString 2 "0" (builtins.toString i)}:01"
           ])
           extraNetworks);
+
+      # Limit virtiofsd threads: default spawns nproc threads per share, wasteful when idle
+      virtiofsd.threadPoolSize = 1;
 
       # ===== Shared Filesystems =====
       shares = [
