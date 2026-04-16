@@ -58,14 +58,14 @@ let
       --color-blue: ${colors.base0D};
       --color-purple: ${colors.base0E};
 
-      /* UI elements — backgrounds stay near base00, text always base05 */
+      /* UI elements — all backgrounds use base00 so text (base05) always has ~15:1 contrast */
       --background-primary: ${colors.base00};
-      --background-primary-alt: ${colors.base01};
-      --background-secondary: ${colors.base01};
+      --background-primary-alt: ${colors.base00};
+      --background-secondary: ${colors.base00};
       --background-secondary-alt: ${colors.base00};
-      --background-modifier-border: ${colors.base02};
-      --background-modifier-form-field: ${colors.base01};
-      --background-modifier-form-field-highlighted: ${colors.base02};
+      --background-modifier-border: ${colors.base01};
+      --background-modifier-form-field: ${colors.base00};
+      --background-modifier-form-field-highlighted: ${colors.base01};
       --background-modifier-success: ${colors.base0B};
       --background-modifier-error: ${colors.base08};
       --background-modifier-error-hover: ${colors.base08};
@@ -191,13 +191,10 @@ in {
             if [ -d "$VAULT_DIR" ]; then
               mkdir -p "$VAULT_DIR/snippets"
               if [ -f "$APPEARANCE" ]; then
-                # Patch existing: remove cssTheme, ensure hydrix-theme snippet enabled
+                # Patch existing: remove cssTheme, set hydrix-theme as the only enabled snippet
                 ${pkgs.jq}/bin/jq '
                   del(.cssTheme) |
-                  .enabledCssSnippets = (
-                    (.enabledCssSnippets // [])
-                    | if any(. == "hydrix-theme") then . else . + ["hydrix-theme"] end
-                  ) |
+                  .enabledCssSnippets = ["hydrix-theme"] |
                   .interfaceFontFamily = "${fontName}" |
                   .textFontFamily = "${fontName}" |
                   .monospaceFontFamily = "${fontName}"
