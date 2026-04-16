@@ -1260,7 +1260,7 @@
     IND_X=$((MON_X + PRIM_W * 60 / 100))
     IND_Y=$((MON_Y + PRIM_H * 45 / 100))
     TIME_X=$((MON_X + PRIM_W * 45 / 100))
-    TIME_Y=$IND_Y
+    DATE_X=$((MON_X + PRIM_W * 45 / 100))
     DATE_Y=$((MON_Y + PRIM_H * 40 / 100))
     VERIF_X=$((MON_X + PRIM_W * 55 / 100))
     WRONG_X=$((MON_X + PRIM_W * 55 / 100))
