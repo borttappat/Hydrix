@@ -95,7 +95,7 @@ in {
       qemu.machine = "pc";
 
       # Lightweight - git ops don't need much
-      vcpu = 2;
+      vcpu = 1;
       mem = 2560;  # 2.5GB (avoid exactly 2GB - QEMU hang bug)
 
       # Use squashfs for the store (no host store access needed)
@@ -109,6 +109,9 @@ in {
         "-chardev" "socket,id=console,path=/var/lib/microvms/microvm-gitsync/console.sock,server=on,wait=off"
         "-serial" "chardev:console"
       ];
+
+      # Cap virtiofsd threads (default = nproc per share, wasteful for git-only workloads)
+      virtiofsd.threadPoolSize = 1;
 
       # ===== Shared Filesystems =====
       shares = (map (repo: {
