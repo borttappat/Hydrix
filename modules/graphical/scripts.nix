@@ -1267,7 +1267,7 @@
 
     # Use solid background color matching actual screen resolution
     LOCK_IMG="/tmp/i3lock_solid.png"
-    ${pkgs.imagemagick}/bin/magick -size "${SCREEN_W}x${SCREEN_H}" "xc:$color0" "$LOCK_IMG" 2>/dev/null || true
+    ${pkgs.imagemagick}/bin/magick -size "''${SCREEN_W}x''${SCREEN_H}" "xc:$color0" "$LOCK_IMG" 2>/dev/null || true
 
     # Run i3lock-color with solid background and built-in clock/indicator
     ${pkgs.i3lock-color}/bin/i3lock \
