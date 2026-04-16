@@ -29,9 +29,12 @@
 #
 # Imported by both vm-base.nix (libvirt VMs) and microvm-base.nix (microVMs)
 #
-{ config, lib, pkgs, ... }:
-
-let
+{
+  config,
+  lib,
+  pkgs,
+  ...
+}: let
   vmType = config.hydrix.vmType;
   username = config.hydrix.username;
 
@@ -40,659 +43,658 @@ let
 
   # Externalized flake templates - no more triple-escaping in heredocs
   templateDir = pkgs.runCommand "vm-dev-templates" {} ''
-    mkdir -p $out
+        mkdir -p $out
 
-    cat > $out/rust.nix << 'EOF'
-{
-  description = "@NAME@ - tested in VM";
-  inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-  outputs = { self, nixpkgs }:
-    let
-      system = "@SYSTEM@";
-      pkgs = nixpkgs.legacyPackages.''${system};
-      src = pkgs.fetchFromGitHub {
-        owner = "@OWNER@";
-        repo = "@REPO@";
-        rev = "@BRANCH@";
-        hash = "@HASH@";
-      };
-    in {
-      packages.''${system}.default = pkgs.rustPlatform.buildRustPackage {
-        pname = "@NAME@";
-        version = "unstable";
-        inherit src;
-        @CARGO_HASH_LINE@
-      };
-    };
-}
-EOF
-
-    cat > $out/go.nix << 'EOF'
-{
-  description = "@NAME@ - tested in VM";
-  inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-  outputs = { self, nixpkgs }:
-    let
-      system = "@SYSTEM@";
-      pkgs = nixpkgs.legacyPackages.''${system};
-    in {
-      packages.''${system}.default = pkgs.buildGoModule {
-        pname = "@NAME@";
-        version = "unstable";
-        src = pkgs.fetchFromGitHub {
-          owner = "@OWNER@";
-          repo = "@REPO@";
-          rev = "@BRANCH@";
-          hash = "@HASH@";
-        };
-        vendorHash = @VENDOR_HASH@;
-      };
-    };
-}
-EOF
-
-    cat > $out/python-pyproject.nix << 'EOF'
-{
-  description = "@NAME@ - tested in VM";
-  inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-  outputs = { self, nixpkgs }:
-    let
-      system = "@SYSTEM@";
-      pkgs = nixpkgs.legacyPackages.''${system};
-    in {
-      packages.''${system}.default = pkgs.python3Packages.buildPythonApplication {
-        pname = "@NAME@";
-        version = "unstable";
-        src = pkgs.fetchFromGitHub {
-          owner = "@OWNER@";
-          repo = "@REPO@";
-          rev = "@BRANCH@";
-          hash = "@HASH@";
-        };
-        pyproject = true;
-        build-system = with pkgs.python3Packages; [
-          setuptools
-        ];
-        propagatedBuildInputs = with pkgs.python3Packages; [
-          # runtime deps — add after inspecting the package
-        ];@META_LINE@
-      };
-    };
-}
-EOF
-
-    cat > $out/python-setuptools.nix << 'EOF'
-{
-  description = "@NAME@ - tested in VM";
-  inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-  outputs = { self, nixpkgs }:
-    let
-      system = "@SYSTEM@";
-      pkgs = nixpkgs.legacyPackages.''${system};
-    in {
-      packages.''${system}.default = pkgs.python3Packages.buildPythonApplication {
-        pname = "@NAME@";
-        version = "unstable";
-        src = pkgs.fetchFromGitHub {
-          owner = "@OWNER@";
-          repo = "@REPO@";
-          rev = "@BRANCH@";
-          hash = "@HASH@";
-        };
-        format = "setuptools";
-        propagatedBuildInputs = with pkgs.python3Packages; [
-          # runtime deps — add after inspecting the package
-        ];
-      };
-    };
-}
-EOF
-
-    cat > $out/python-script.nix << 'EOF'
-{
-  description = "@NAME@ - tested in VM";
-  inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-  outputs = { self, nixpkgs }:
-    let
-      system = "@SYSTEM@";
-      pkgs = nixpkgs.legacyPackages.''${system};
-      pythonEnv = pkgs.python3.withPackages (ps: with ps; [ @NIXPKGS_DEPS@ ]);
-    in {
-      packages.''${system}.default = pkgs.stdenv.mkDerivation {
-        pname = "@NAME@";
-        version = "unstable";
-        src = pkgs.fetchFromGitHub {
-          owner = "@OWNER@";
-          repo = "@REPO@";
-          rev = "@BRANCH@";
-          hash = "@HASH@";
-        };
-        nativeBuildInputs = [ pkgs.makeWrapper ];
-        dontBuild = true;
-        installPhase = '''
-          mkdir -p $out/bin $out/lib/@NAME@
-          cp -r . $out/lib/@NAME@/
-          chmod -R u+rX $out/lib/@NAME@/
-          makeWrapper ''${pythonEnv}/bin/python3 $out/bin/@NAME@ \
-            --add-flags "$out/lib/@NAME@/@ENTRY_POINT@"
-        ''';
-        meta.mainProgram = "@NAME@";
-      };
-    };
-}
-EOF
-
-    cat > $out/npm.nix << 'EOF'
-{
-  description = "@NAME@ - tested in VM";
-  inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-  outputs = { self, nixpkgs }:
-    let
-      system = "@SYSTEM@";
-      pkgs = nixpkgs.legacyPackages.''${system};
-    in {
-      packages.''${system}.default = pkgs.buildNpmPackage {
-        pname = "@NAME@";
-        version = "unstable";
-        src = pkgs.fetchFromGitHub {
-          owner = "@OWNER@";
-          repo = "@REPO@";
-          rev = "@BRANCH@";
-          hash = "@HASH@";
-        };
-        npmDepsHash = "@PLACEHOLDER@";
-      };
-    };
-}
-EOF
-
-    cat > $out/yarn.nix << 'EOF'
-{
-  description = "@NAME@ - tested in VM";
-  inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-  outputs = { self, nixpkgs }:
-    let
-      system = "@SYSTEM@";
-      pkgs = nixpkgs.legacyPackages.''${system};
-    in {
-      packages.''${system}.default = pkgs.mkYarnPackage {
-        pname = "@NAME@";
-        version = "unstable";
-        src = pkgs.fetchFromGitHub {
-          owner = "@OWNER@";
-          repo = "@REPO@";
-          rev = "@BRANCH@";
-          hash = "@HASH@";
-        };
-      };
-    };
-}
-EOF
-
-    cat > $out/cmake.nix << 'EOF'
-{
-  description = "@NAME@ - tested in VM";
-  inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-  outputs = { self, nixpkgs }:
-    let
-      system = "@SYSTEM@";
-      pkgs = nixpkgs.legacyPackages.''${system};
-    in {
-      packages.''${system}.default = pkgs.stdenv.mkDerivation {
-        pname = "@NAME@";
-        version = "unstable";
-        src = pkgs.fetchFromGitHub {
-          owner = "@OWNER@";
-          repo = "@REPO@";
-          rev = "@BRANCH@";
-          hash = "@HASH@";
-        };
-        nativeBuildInputs = with pkgs; [ cmake ];
-        buildInputs = with pkgs; [ ];
-      };
-    };
-}
-EOF
-
-    cat > $out/meson.nix << 'EOF'
-{
-  description = "@NAME@ - tested in VM";
-  inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-  outputs = { self, nixpkgs }:
-    let
-      system = "@SYSTEM@";
-      pkgs = nixpkgs.legacyPackages.''${system};
-    in {
-      packages.''${system}.default = pkgs.stdenv.mkDerivation {
-        pname = "@NAME@";
-        version = "unstable";
-        src = pkgs.fetchFromGitHub {
-          owner = "@OWNER@";
-          repo = "@REPO@";
-          rev = "@BRANCH@";
-          hash = "@HASH@";
-        };
-        nativeBuildInputs = with pkgs; [ meson ninja pkg-config ];
-        buildInputs = with pkgs; [ ];
-      };
-    };
-}
-EOF
-
-    cat > $out/autotools.nix << 'EOF'
-{
-  description = "@NAME@ - tested in VM";
-  inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-  outputs = { self, nixpkgs }:
-    let
-      system = "@SYSTEM@";
-      pkgs = nixpkgs.legacyPackages.''${system};
-    in {
-      packages.''${system}.default = pkgs.stdenv.mkDerivation {
-        pname = "@NAME@";
-        version = "unstable";
-        src = pkgs.fetchFromGitHub {
-          owner = "@OWNER@";
-          repo = "@REPO@";
-          rev = "@BRANCH@";
-          hash = "@HASH@";
-        };
-        nativeBuildInputs = with pkgs; [ autoreconfHook ];
-        buildInputs = with pkgs; [ ];
-      };
-    };
-}
-EOF
-
-    cat > $out/haskell.nix << 'EOF'
-{
-  description = "@NAME@ - tested in VM";
-  inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-  outputs = { self, nixpkgs }:
-    let
-      system = "@SYSTEM@";
-      pkgs = nixpkgs.legacyPackages.''${system};
-      src = pkgs.fetchFromGitHub {
-        owner = "@OWNER@";
-        repo = "@REPO@";
-        rev = "@BRANCH@";
-        hash = "@HASH@";
-      };
-    in {
-      packages.''${system}.default = pkgs.haskellPackages.callCabal2nix "@NAME@" src { };
-    };
-}
-EOF
-
-    cat > $out/elixir.nix << 'EOF'
-{
-  description = "@NAME@ - tested in VM";
-  inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-  outputs = { self, nixpkgs }:
-    let
-      system = "@SYSTEM@";
-      pkgs = nixpkgs.legacyPackages.''${system};
-    in {
-      packages.''${system}.default = pkgs.beam.packages.erlang.mixRelease {
-        pname = "@NAME@";
-        version = "unstable";
-        src = pkgs.fetchFromGitHub {
-          owner = "@OWNER@";
-          repo = "@REPO@";
-          rev = "@BRANCH@";
-          hash = "@HASH@";
-        };
-        mixFodDeps = pkgs.beam.packages.erlang.fetchMixDeps {
-          pname = "@NAME@-deps";
-          version = "unstable";
+        cat > $out/rust.nix << 'EOF'
+    {
+      description = "@NAME@ - tested in VM";
+      inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+      outputs = { self, nixpkgs }:
+        let
+          system = "@SYSTEM@";
+          pkgs = nixpkgs.legacyPackages.''${system};
           src = pkgs.fetchFromGitHub {
             owner = "@OWNER@";
             repo = "@REPO@";
             rev = "@BRANCH@";
             hash = "@HASH@";
           };
-          hash = "@PLACEHOLDER@";
+        in {
+          packages.''${system}.default = pkgs.rustPlatform.buildRustPackage {
+            pname = "@NAME@";
+            version = "unstable";
+            inherit src;
+            @CARGO_HASH_LINE@
+          };
         };
-      };
-    };
-}
-EOF
+    }
+    EOF
 
-    cat > $out/ruby.nix << 'EOF'
-# Ruby/Bundler packages require gemset.nix from bundix.
-# Auto-generation is not supported. Manual steps:
-#
-#   cd ~/dev/packages/@NAME@
-#   nix-shell -p bundix ruby -- bundix
-#   vm-dev rebuild @NAME@
-#
-{
-  description = "@NAME@ - tested in VM";
-  inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-  outputs = { self, nixpkgs }:
-    let
-      system = "@SYSTEM@";
-      pkgs = nixpkgs.legacyPackages.''${system};
-    in {
-      packages.''${system}.default = pkgs.bundlerApp {
-        pname = "@NAME@";
-        gemdir = pkgs.fetchFromGitHub {
-          owner = "@OWNER@";
-          repo = "@REPO@";
-          rev = "@BRANCH@";
-          hash = "@HASH@";
+        cat > $out/go.nix << 'EOF'
+    {
+      description = "@NAME@ - tested in VM";
+      inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+      outputs = { self, nixpkgs }:
+        let
+          system = "@SYSTEM@";
+          pkgs = nixpkgs.legacyPackages.''${system};
+        in {
+          packages.''${system}.default = pkgs.buildGoModule {
+            pname = "@NAME@";
+            version = "unstable";
+            src = pkgs.fetchFromGitHub {
+              owner = "@OWNER@";
+              repo = "@REPO@";
+              rev = "@BRANCH@";
+              hash = "@HASH@";
+            };
+            vendorHash = @VENDOR_HASH@;
+          };
         };
-        exes = [ "@NAME@" ];
-      };
-    };
-}
-EOF
+    }
+    EOF
 
-    cat > $out/maven.nix << 'EOF'
-{
-  description = "@NAME@ - tested in VM";
-  inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-  outputs = { self, nixpkgs }:
-    let
-      system = "@SYSTEM@";
-      pkgs = nixpkgs.legacyPackages.''${system};
-    in {
-      packages.''${system}.default = pkgs.maven.buildMavenPackage {
-        pname = "@NAME@";
-        version = "unstable";
-        src = pkgs.fetchFromGitHub {
-          owner = "@OWNER@";
-          repo = "@REPO@";
-          rev = "@BRANCH@";
-          hash = "@HASH@";
+        cat > $out/python-pyproject.nix << 'EOF'
+    {
+      description = "@NAME@ - tested in VM";
+      inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+      outputs = { self, nixpkgs }:
+        let
+          system = "@SYSTEM@";
+          pkgs = nixpkgs.legacyPackages.''${system};
+        in {
+          packages.''${system}.default = pkgs.python3Packages.buildPythonApplication {
+            pname = "@NAME@";
+            version = "unstable";
+            src = pkgs.fetchFromGitHub {
+              owner = "@OWNER@";
+              repo = "@REPO@";
+              rev = "@BRANCH@";
+              hash = "@HASH@";
+            };
+            pyproject = true;
+            build-system = with pkgs.python3Packages; [
+              setuptools
+            ];
+            propagatedBuildInputs = with pkgs.python3Packages; [
+              # runtime deps — add after inspecting the package
+            ];@META_LINE@
+          };
         };
-        mvnHash = "@PLACEHOLDER@";
-      };
-    };
-}
-EOF
+    }
+    EOF
 
-    cat > $out/gradle.nix << 'EOF'
-{
-  description = "@NAME@ - tested in VM";
-  inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-  outputs = { self, nixpkgs }:
-    let
-      system = "@SYSTEM@";
-      pkgs = nixpkgs.legacyPackages.''${system};
-    in {
-      packages.''${system}.default = pkgs.stdenv.mkDerivation {
-        pname = "@NAME@";
-        version = "unstable";
-        src = pkgs.fetchFromGitHub {
-          owner = "@OWNER@";
-          repo = "@REPO@";
-          rev = "@BRANCH@";
-          hash = "@HASH@";
+        cat > $out/python-setuptools.nix << 'EOF'
+    {
+      description = "@NAME@ - tested in VM";
+      inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+      outputs = { self, nixpkgs }:
+        let
+          system = "@SYSTEM@";
+          pkgs = nixpkgs.legacyPackages.''${system};
+        in {
+          packages.''${system}.default = pkgs.python3Packages.buildPythonApplication {
+            pname = "@NAME@";
+            version = "unstable";
+            src = pkgs.fetchFromGitHub {
+              owner = "@OWNER@";
+              repo = "@REPO@";
+              rev = "@BRANCH@";
+              hash = "@HASH@";
+            };
+            format = "setuptools";
+            propagatedBuildInputs = with pkgs.python3Packages; [
+              # runtime deps — add after inspecting the package
+            ];
+          };
         };
-        nativeBuildInputs = with pkgs; [ gradle jdk ];
-        buildPhase = '''
-          export GRADLE_USER_HOME=$PWD/.gradle
-          gradle build --no-daemon
-        ''';
-        installPhase = '''
-          mkdir -p $out/lib
-          cp build/libs/*.jar $out/lib/
-          mkdir -p $out/bin
-          cat > $out/bin/@NAME@ << WRAPPER
-#!/bin/sh
-exec ''${pkgs.jre}/bin/java -jar $out/lib/@NAME@.jar "\$@"
-WRAPPER
-          chmod +x $out/bin/@NAME@
-        ''';
-      };
-    };
-}
-EOF
+    }
+    EOF
 
-    cat > $out/dotnet.nix << 'EOF'
-{
-  description = "@NAME@ - tested in VM";
-  inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-  outputs = { self, nixpkgs }:
-    let
-      system = "@SYSTEM@";
-      pkgs = nixpkgs.legacyPackages.''${system};
-    in {
-      packages.''${system}.default = pkgs.buildDotnetModule {
-        pname = "@NAME@";
-        version = "unstable";
-        src = pkgs.fetchFromGitHub {
-          owner = "@OWNER@";
-          repo = "@REPO@";
-          rev = "@BRANCH@";
-          hash = "@HASH@";
+        cat > $out/python-script.nix << 'EOF'
+    {
+      description = "@NAME@ - tested in VM";
+      inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+      outputs = { self, nixpkgs }:
+        let
+          system = "@SYSTEM@";
+          pkgs = nixpkgs.legacyPackages.''${system};
+          pythonEnv = pkgs.python3.withPackages (ps: with ps; [ @NIXPKGS_DEPS@ ]);
+        in {
+          packages.''${system}.default = pkgs.stdenv.mkDerivation {
+            pname = "@NAME@";
+            version = "unstable";
+            src = pkgs.fetchFromGitHub {
+              owner = "@OWNER@";
+              repo = "@REPO@";
+              rev = "@BRANCH@";
+              hash = "@HASH@";
+            };
+            nativeBuildInputs = [ pkgs.makeWrapper ];
+            dontBuild = true;
+            installPhase = '''
+              mkdir -p $out/bin $out/lib/@NAME@
+              cp -r . $out/lib/@NAME@/
+              chmod -R u+rX $out/lib/@NAME@/
+              makeWrapper ''${pythonEnv}/bin/python3 $out/bin/@NAME@ \
+                --add-flags "$out/lib/@NAME@/@ENTRY_POINT@"
+            ''';
+            meta.mainProgram = "@NAME@";
+          };
         };
-        nugetDeps = ./deps.nix;
-        dotnet-sdk = pkgs.dotnetCorePackages.sdk_8_0;
-        dotnet-runtime = pkgs.dotnetCorePackages.runtime_8_0;
-      };
-    };
-}
-EOF
+    }
+    EOF
 
-    cat > $out/makefile.nix << 'EOF'
-{
-  description = "@NAME@ - tested in VM";
-  inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-  outputs = { self, nixpkgs }:
-    let
-      system = "@SYSTEM@";
-      pkgs = nixpkgs.legacyPackages.''${system};
-    in {
-      packages.''${system}.default = pkgs.stdenv.mkDerivation {
-        pname = "@NAME@";
-        version = "unstable";
-        src = pkgs.fetchFromGitHub {
-          owner = "@OWNER@";
-          repo = "@REPO@";
-          rev = "@BRANCH@";
-          hash = "@HASH@";
+        cat > $out/npm.nix << 'EOF'
+    {
+      description = "@NAME@ - tested in VM";
+      inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+      outputs = { self, nixpkgs }:
+        let
+          system = "@SYSTEM@";
+          pkgs = nixpkgs.legacyPackages.''${system};
+        in {
+          packages.''${system}.default = pkgs.buildNpmPackage {
+            pname = "@NAME@";
+            version = "unstable";
+            src = pkgs.fetchFromGitHub {
+              owner = "@OWNER@";
+              repo = "@REPO@";
+              rev = "@BRANCH@";
+              hash = "@HASH@";
+            };
+            npmDepsHash = "@PLACEHOLDER@";
+          };
         };
-        # Add dependencies here if build fails (e.g., missing headers)
-        # buildInputs = [ pkgs.ncurses pkgs.openssl ];
-        installPhase = '''
-          mkdir -p $out/bin
-          cp @NAME@ $out/bin/ || cp *@NAME@* $out/bin/ || find . -maxdepth 1 -type f -executable -exec cp {} $out/bin/ \;
-        ''';
-      };
-    };
-}
-EOF
+    }
+    EOF
 
-    cat > $out/nim.nix << 'EOF'
-{
-  description = "@NAME@ - tested in VM";
-  inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-  outputs = { self, nixpkgs }:
-    let
-      system = "@SYSTEM@";
-      pkgs = nixpkgs.legacyPackages.''${system};
-    in {
-      packages.''${system}.default = pkgs.buildNimPackage {
-        pname = "@NAME@";
-        version = "unstable";
-        src = pkgs.fetchFromGitHub {
-          owner = "@OWNER@";
-          repo = "@REPO@";
-          rev = "@BRANCH@";
-          hash = "@HASH@";
+        cat > $out/yarn.nix << 'EOF'
+    {
+      description = "@NAME@ - tested in VM";
+      inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+      outputs = { self, nixpkgs }:
+        let
+          system = "@SYSTEM@";
+          pkgs = nixpkgs.legacyPackages.''${system};
+        in {
+          packages.''${system}.default = pkgs.mkYarnPackage {
+            pname = "@NAME@";
+            version = "unstable";
+            src = pkgs.fetchFromGitHub {
+              owner = "@OWNER@";
+              repo = "@REPO@";
+              rev = "@BRANCH@";
+              hash = "@HASH@";
+            };
+          };
         };
-        # Nim dependencies are auto-resolved via nimble lock
-        # If build fails, add nimble deps: nimbleDeps = with pkgs.nimPackages; [ ... ];
-      };
-    };
-}
-EOF
+    }
+    EOF
 
-    cat > $out/zig.nix << 'EOF'
-{
-  description = "@NAME@ - tested in VM";
-  inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-  outputs = { self, nixpkgs }:
-    let
-      system = "@SYSTEM@";
-      pkgs = nixpkgs.legacyPackages.''${system};
-    in {
-      packages.''${system}.default = pkgs.stdenv.mkDerivation {
-        pname = "@NAME@";
-        version = "unstable";
-        src = pkgs.fetchFromGitHub {
-          owner = "@OWNER@";
-          repo = "@REPO@";
-          rev = "@BRANCH@";
-          hash = "@HASH@";
+        cat > $out/cmake.nix << 'EOF'
+    {
+      description = "@NAME@ - tested in VM";
+      inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+      outputs = { self, nixpkgs }:
+        let
+          system = "@SYSTEM@";
+          pkgs = nixpkgs.legacyPackages.''${system};
+        in {
+          packages.''${system}.default = pkgs.stdenv.mkDerivation {
+            pname = "@NAME@";
+            version = "unstable";
+            src = pkgs.fetchFromGitHub {
+              owner = "@OWNER@";
+              repo = "@REPO@";
+              rev = "@BRANCH@";
+              hash = "@HASH@";
+            };
+            nativeBuildInputs = with pkgs; [ cmake ];
+            buildInputs = with pkgs; [ ];
+          };
         };
-        nativeBuildInputs = [ pkgs.zig.hook ];
-        zigBuildFlags = [ "-Doptimize=ReleaseSafe" ];
-      };
-    };
-}
-EOF
+    }
+    EOF
 
-    cat > $out/ocaml.nix << 'EOF'
-{
-  description = "@NAME@ - tested in VM";
-  inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-  outputs = { self, nixpkgs }:
-    let
-      system = "@SYSTEM@";
-      pkgs = nixpkgs.legacyPackages.''${system};
-    in {
-      packages.''${system}.default = pkgs.ocamlPackages.buildDunePackage {
-        pname = "@NAME@";
-        version = "unstable";
-        src = pkgs.fetchFromGitHub {
-          owner = "@OWNER@";
-          repo = "@REPO@";
-          rev = "@BRANCH@";
-          hash = "@HASH@";
+        cat > $out/meson.nix << 'EOF'
+    {
+      description = "@NAME@ - tested in VM";
+      inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+      outputs = { self, nixpkgs }:
+        let
+          system = "@SYSTEM@";
+          pkgs = nixpkgs.legacyPackages.''${system};
+        in {
+          packages.''${system}.default = pkgs.stdenv.mkDerivation {
+            pname = "@NAME@";
+            version = "unstable";
+            src = pkgs.fetchFromGitHub {
+              owner = "@OWNER@";
+              repo = "@REPO@";
+              rev = "@BRANCH@";
+              hash = "@HASH@";
+            };
+            nativeBuildInputs = with pkgs; [ meson ninja pkg-config ];
+            buildInputs = with pkgs; [ ];
+          };
         };
-        buildInputs = with pkgs.ocamlPackages; [
-          # add OCaml deps here (e.g. lwt cmdliner yojson)
-        ];
-      };
-    };
-}
-EOF
+    }
+    EOF
 
-    cat > $out/perl.nix << 'EOF'
-{
-  description = "@NAME@ - tested in VM";
-  inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-  outputs = { self, nixpkgs }:
-    let
-      system = "@SYSTEM@";
-      pkgs = nixpkgs.legacyPackages.''${system};
-    in {
-      packages.''${system}.default = pkgs.perlPackages.buildPerlPackage {
-        pname = "@NAME@";
-        version = "unstable";
-        src = pkgs.fetchFromGitHub {
-          owner = "@OWNER@";
-          repo = "@REPO@";
-          rev = "@BRANCH@";
-          hash = "@HASH@";
+        cat > $out/autotools.nix << 'EOF'
+    {
+      description = "@NAME@ - tested in VM";
+      inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+      outputs = { self, nixpkgs }:
+        let
+          system = "@SYSTEM@";
+          pkgs = nixpkgs.legacyPackages.''${system};
+        in {
+          packages.''${system}.default = pkgs.stdenv.mkDerivation {
+            pname = "@NAME@";
+            version = "unstable";
+            src = pkgs.fetchFromGitHub {
+              owner = "@OWNER@";
+              repo = "@REPO@";
+              rev = "@BRANCH@";
+              hash = "@HASH@";
+            };
+            nativeBuildInputs = with pkgs; [ autoreconfHook ];
+            buildInputs = with pkgs; [ ];
+          };
         };
-        buildInputs = with pkgs.perlPackages; [
-          # add CPAN deps here
-        ];
-      };
-    };
-}
-EOF
+    }
+    EOF
 
-    cat > $out/php.nix << 'EOF'
-{
-  description = "@NAME@ - tested in VM";
-  inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-  outputs = { self, nixpkgs }:
-    let
-      system = "@SYSTEM@";
-      pkgs = nixpkgs.legacyPackages.''${system};
-    in {
-      packages.''${system}.default = pkgs.php.buildComposerProject {
-        pname = "@NAME@";
-        version = "unstable";
-        src = pkgs.fetchFromGitHub {
-          owner = "@OWNER@";
-          repo = "@REPO@";
-          rev = "@BRANCH@";
-          hash = "@HASH@";
+        cat > $out/haskell.nix << 'EOF'
+    {
+      description = "@NAME@ - tested in VM";
+      inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+      outputs = { self, nixpkgs }:
+        let
+          system = "@SYSTEM@";
+          pkgs = nixpkgs.legacyPackages.''${system};
+          src = pkgs.fetchFromGitHub {
+            owner = "@OWNER@";
+            repo = "@REPO@";
+            rev = "@BRANCH@";
+            hash = "@HASH@";
+          };
+        in {
+          packages.''${system}.default = pkgs.haskellPackages.callCabal2nix "@NAME@" src { };
         };
-        vendorHash = "@PLACEHOLDER@";
-      };
-    };
-}
-EOF
+    }
+    EOF
 
-    cat > $out/crystal.nix << 'EOF'
-{
-  description = "@NAME@ - tested in VM";
-  inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-  outputs = { self, nixpkgs }:
-    let
-      system = "@SYSTEM@";
-      pkgs = nixpkgs.legacyPackages.''${system};
-    in {
-      packages.''${system}.default = pkgs.stdenv.mkDerivation {
-        pname = "@NAME@";
-        version = "unstable";
-        src = pkgs.fetchFromGitHub {
-          owner = "@OWNER@";
-          repo = "@REPO@";
-          rev = "@BRANCH@";
-          hash = "@HASH@";
+        cat > $out/elixir.nix << 'EOF'
+    {
+      description = "@NAME@ - tested in VM";
+      inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+      outputs = { self, nixpkgs }:
+        let
+          system = "@SYSTEM@";
+          pkgs = nixpkgs.legacyPackages.''${system};
+        in {
+          packages.''${system}.default = pkgs.beam.packages.erlang.mixRelease {
+            pname = "@NAME@";
+            version = "unstable";
+            src = pkgs.fetchFromGitHub {
+              owner = "@OWNER@";
+              repo = "@REPO@";
+              rev = "@BRANCH@";
+              hash = "@HASH@";
+            };
+            mixFodDeps = pkgs.beam.packages.erlang.fetchMixDeps {
+              pname = "@NAME@-deps";
+              version = "unstable";
+              src = pkgs.fetchFromGitHub {
+                owner = "@OWNER@";
+                repo = "@REPO@";
+                rev = "@BRANCH@";
+                hash = "@HASH@";
+              };
+              hash = "@PLACEHOLDER@";
+            };
+          };
         };
-        nativeBuildInputs = with pkgs; [ crystal shards ];
-        buildPhase = '''
-          shards build --release --no-debug
-        ''';
-        installPhase = '''
-          mkdir -p $out/bin
-          cp bin/* $out/bin/
-        ''';
-      };
-    };
-}
-EOF
+    }
+    EOF
 
-    cat > $out/generic.nix << 'EOF'
-{
-  description = "@NAME@ - tested in VM";
-  inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-  outputs = { self, nixpkgs }:
-    let
-      system = "@SYSTEM@";
-      pkgs = nixpkgs.legacyPackages.''${system};
-    in {
-      packages.''${system}.default = pkgs.stdenv.mkDerivation {
-        pname = "@NAME@";
-        version = "unstable";
-        src = pkgs.fetchFromGitHub {
-          owner = "@OWNER@";
-          repo = "@REPO@";
-          rev = "@BRANCH@";
-          hash = "@HASH@";
+        cat > $out/ruby.nix << 'EOF'
+    # Ruby/Bundler packages require gemset.nix from bundix.
+    # Auto-generation is not supported. Manual steps:
+    #
+    #   cd ~/dev/packages/@NAME@
+    #   nix-shell -p bundix ruby -- bundix
+    #   vm-dev rebuild @NAME@
+    #
+    {
+      description = "@NAME@ - tested in VM";
+      inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+      outputs = { self, nixpkgs }:
+        let
+          system = "@SYSTEM@";
+          pkgs = nixpkgs.legacyPackages.''${system};
+        in {
+          packages.''${system}.default = pkgs.bundlerApp {
+            pname = "@NAME@";
+            gemdir = pkgs.fetchFromGitHub {
+              owner = "@OWNER@";
+              repo = "@REPO@";
+              rev = "@BRANCH@";
+              hash = "@HASH@";
+            };
+            exes = [ "@NAME@" ];
+          };
         };
-        # Add dependencies here if build fails (e.g., missing headers)
-        # buildInputs = [ pkgs.ncurses pkgs.openssl ];
-        installPhase = '''
-          mkdir -p $out/bin
-          # Adjust based on what the build produces
-          cp @NAME@ $out/bin/ 2>/dev/null || find . -maxdepth 1 -type f -executable -exec cp {} $out/bin/ \;
-        ''';
-      };
-    };
-}
-EOF
+    }
+    EOF
+
+        cat > $out/maven.nix << 'EOF'
+    {
+      description = "@NAME@ - tested in VM";
+      inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+      outputs = { self, nixpkgs }:
+        let
+          system = "@SYSTEM@";
+          pkgs = nixpkgs.legacyPackages.''${system};
+        in {
+          packages.''${system}.default = pkgs.maven.buildMavenPackage {
+            pname = "@NAME@";
+            version = "unstable";
+            src = pkgs.fetchFromGitHub {
+              owner = "@OWNER@";
+              repo = "@REPO@";
+              rev = "@BRANCH@";
+              hash = "@HASH@";
+            };
+            mvnHash = "@PLACEHOLDER@";
+          };
+        };
+    }
+    EOF
+
+        cat > $out/gradle.nix << 'EOF'
+    {
+      description = "@NAME@ - tested in VM";
+      inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+      outputs = { self, nixpkgs }:
+        let
+          system = "@SYSTEM@";
+          pkgs = nixpkgs.legacyPackages.''${system};
+        in {
+          packages.''${system}.default = pkgs.stdenv.mkDerivation {
+            pname = "@NAME@";
+            version = "unstable";
+            src = pkgs.fetchFromGitHub {
+              owner = "@OWNER@";
+              repo = "@REPO@";
+              rev = "@BRANCH@";
+              hash = "@HASH@";
+            };
+            nativeBuildInputs = with pkgs; [ gradle jdk ];
+            buildPhase = '''
+              export GRADLE_USER_HOME=$PWD/.gradle
+              gradle build --no-daemon
+            ''';
+            installPhase = '''
+              mkdir -p $out/lib
+              cp build/libs/*.jar $out/lib/
+              mkdir -p $out/bin
+              cat > $out/bin/@NAME@ << WRAPPER
+    #!/bin/sh
+    exec ''${pkgs.jre}/bin/java -jar $out/lib/@NAME@.jar "\$@"
+    WRAPPER
+              chmod +x $out/bin/@NAME@
+            ''';
+          };
+        };
+    }
+    EOF
+
+        cat > $out/dotnet.nix << 'EOF'
+    {
+      description = "@NAME@ - tested in VM";
+      inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+      outputs = { self, nixpkgs }:
+        let
+          system = "@SYSTEM@";
+          pkgs = nixpkgs.legacyPackages.''${system};
+        in {
+          packages.''${system}.default = pkgs.buildDotnetModule {
+            pname = "@NAME@";
+            version = "unstable";
+            src = pkgs.fetchFromGitHub {
+              owner = "@OWNER@";
+              repo = "@REPO@";
+              rev = "@BRANCH@";
+              hash = "@HASH@";
+            };
+            nugetDeps = ./deps.nix;
+            dotnet-sdk = pkgs.dotnetCorePackages.sdk_8_0;
+            dotnet-runtime = pkgs.dotnetCorePackages.runtime_8_0;
+          };
+        };
+    }
+    EOF
+
+        cat > $out/makefile.nix << 'EOF'
+    {
+      description = "@NAME@ - tested in VM";
+      inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+      outputs = { self, nixpkgs }:
+        let
+          system = "@SYSTEM@";
+          pkgs = nixpkgs.legacyPackages.''${system};
+        in {
+          packages.''${system}.default = pkgs.stdenv.mkDerivation {
+            pname = "@NAME@";
+            version = "unstable";
+            src = pkgs.fetchFromGitHub {
+              owner = "@OWNER@";
+              repo = "@REPO@";
+              rev = "@BRANCH@";
+              hash = "@HASH@";
+            };
+            # Add dependencies here if build fails (e.g., missing headers)
+            # buildInputs = [ pkgs.ncurses pkgs.openssl ];
+            installPhase = '''
+              mkdir -p $out/bin
+              cp @NAME@ $out/bin/ || cp *@NAME@* $out/bin/ || find . -maxdepth 1 -type f -executable -exec cp {} $out/bin/ \;
+            ''';
+          };
+        };
+    }
+    EOF
+
+        cat > $out/nim.nix << 'EOF'
+    {
+      description = "@NAME@ - tested in VM";
+      inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+      outputs = { self, nixpkgs }:
+        let
+          system = "@SYSTEM@";
+          pkgs = nixpkgs.legacyPackages.''${system};
+        in {
+          packages.''${system}.default = pkgs.buildNimPackage {
+            pname = "@NAME@";
+            version = "unstable";
+            src = pkgs.fetchFromGitHub {
+              owner = "@OWNER@";
+              repo = "@REPO@";
+              rev = "@BRANCH@";
+              hash = "@HASH@";
+            };
+            # Nim dependencies are auto-resolved via nimble lock
+            # If build fails, add nimble deps: nimbleDeps = with pkgs.nimPackages; [ ... ];
+          };
+        };
+    }
+    EOF
+
+        cat > $out/zig.nix << 'EOF'
+    {
+      description = "@NAME@ - tested in VM";
+      inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+      outputs = { self, nixpkgs }:
+        let
+          system = "@SYSTEM@";
+          pkgs = nixpkgs.legacyPackages.''${system};
+        in {
+          packages.''${system}.default = pkgs.stdenv.mkDerivation {
+            pname = "@NAME@";
+            version = "unstable";
+            src = pkgs.fetchFromGitHub {
+              owner = "@OWNER@";
+              repo = "@REPO@";
+              rev = "@BRANCH@";
+              hash = "@HASH@";
+            };
+            nativeBuildInputs = [ pkgs.zig.hook ];
+            zigBuildFlags = [ "-Doptimize=ReleaseSafe" ];
+          };
+        };
+    }
+    EOF
+
+        cat > $out/ocaml.nix << 'EOF'
+    {
+      description = "@NAME@ - tested in VM";
+      inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+      outputs = { self, nixpkgs }:
+        let
+          system = "@SYSTEM@";
+          pkgs = nixpkgs.legacyPackages.''${system};
+        in {
+          packages.''${system}.default = pkgs.ocamlPackages.buildDunePackage {
+            pname = "@NAME@";
+            version = "unstable";
+            src = pkgs.fetchFromGitHub {
+              owner = "@OWNER@";
+              repo = "@REPO@";
+              rev = "@BRANCH@";
+              hash = "@HASH@";
+            };
+            buildInputs = with pkgs.ocamlPackages; [
+              # add OCaml deps here (e.g. lwt cmdliner yojson)
+            ];
+          };
+        };
+    }
+    EOF
+
+        cat > $out/perl.nix << 'EOF'
+    {
+      description = "@NAME@ - tested in VM";
+      inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+      outputs = { self, nixpkgs }:
+        let
+          system = "@SYSTEM@";
+          pkgs = nixpkgs.legacyPackages.''${system};
+        in {
+          packages.''${system}.default = pkgs.perlPackages.buildPerlPackage {
+            pname = "@NAME@";
+            version = "unstable";
+            src = pkgs.fetchFromGitHub {
+              owner = "@OWNER@";
+              repo = "@REPO@";
+              rev = "@BRANCH@";
+              hash = "@HASH@";
+            };
+            buildInputs = with pkgs.perlPackages; [
+              # add CPAN deps here
+            ];
+          };
+        };
+    }
+    EOF
+
+        cat > $out/php.nix << 'EOF'
+    {
+      description = "@NAME@ - tested in VM";
+      inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+      outputs = { self, nixpkgs }:
+        let
+          system = "@SYSTEM@";
+          pkgs = nixpkgs.legacyPackages.''${system};
+        in {
+          packages.''${system}.default = pkgs.php.buildComposerProject {
+            pname = "@NAME@";
+            version = "unstable";
+            src = pkgs.fetchFromGitHub {
+              owner = "@OWNER@";
+              repo = "@REPO@";
+              rev = "@BRANCH@";
+              hash = "@HASH@";
+            };
+            vendorHash = "@PLACEHOLDER@";
+          };
+        };
+    }
+    EOF
+
+        cat > $out/crystal.nix << 'EOF'
+    {
+      description = "@NAME@ - tested in VM";
+      inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+      outputs = { self, nixpkgs }:
+        let
+          system = "@SYSTEM@";
+          pkgs = nixpkgs.legacyPackages.''${system};
+        in {
+          packages.''${system}.default = pkgs.stdenv.mkDerivation {
+            pname = "@NAME@";
+            version = "unstable";
+            src = pkgs.fetchFromGitHub {
+              owner = "@OWNER@";
+              repo = "@REPO@";
+              rev = "@BRANCH@";
+              hash = "@HASH@";
+            };
+            nativeBuildInputs = with pkgs; [ crystal shards ];
+            buildPhase = '''
+              shards build --release --no-debug
+            ''';
+            installPhase = '''
+              mkdir -p $out/bin
+              cp bin/* $out/bin/
+            ''';
+          };
+        };
+    }
+    EOF
+
+        cat > $out/generic.nix << 'EOF'
+    {
+      description = "@NAME@ - tested in VM";
+      inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+      outputs = { self, nixpkgs }:
+        let
+          system = "@SYSTEM@";
+          pkgs = nixpkgs.legacyPackages.''${system};
+        in {
+          packages.''${system}.default = pkgs.stdenv.mkDerivation {
+            pname = "@NAME@";
+            version = "unstable";
+            src = pkgs.fetchFromGitHub {
+              owner = "@OWNER@";
+              repo = "@REPO@";
+              rev = "@BRANCH@";
+              hash = "@HASH@";
+            };
+            # Add dependencies here if build fails (e.g., missing headers)
+            # buildInputs = [ pkgs.ncurses pkgs.openssl ];
+            installPhase = '''
+              mkdir -p $out/bin
+              # Adjust based on what the build produces
+              cp @NAME@ $out/bin/ 2>/dev/null || find . -maxdepth 1 -type f -executable -exec cp {} $out/bin/ \;
+            ''';
+          };
+        };
+    }
+    EOF
   '';
-
 in {
   config = {
     environment.systemPackages = [
@@ -1841,6 +1843,32 @@ in {
           if [ -n "$BUILD_OUTPUT" ]; then
             echo "Build log saved to $PKG_DIR/build.log"
           fi
+
+          # For Go packages without vendor/, try to extract vendorHash from build output
+          # Nix sometimes provides the hash in different formats
+          if [ "$PROJECT_TYPE" = "go" ]; then
+            local go_hash
+            # Try various patterns that Nix might use
+            go_hash=$(echo "$BUILD_OUTPUT" | ${pkgs.gnugrep}/bin/grep -oP 'vendorHash.*got:\s+\Ksha256-[A-Za-z0-9+/=]+' | head -1 || true)
+            if [ -z "$go_hash" ]; then
+              go_hash=$(echo "$BUILD_OUTPUT" | ${pkgs.gnugrep}/bin/grep -oP 'sha256-[A-Za-z0-9+/=]+' | head -1 || true)
+            fi
+            if [ -z "$go_hash" ]; then
+              go_hash=$(echo "$BUILD_OUTPUT" | ${pkgs.gnugrep}/bin/grep -oP 'sha256-[A-Za-z0-9+/=]{88}' | head -1 || true)
+            fi
+
+            if [ -n "$go_hash" ]; then
+              echo "Found Go vendorHash in build output: $go_hash"
+              ${pkgs.gnused}/bin/sed -i "s|vendorHash = \"${hashPlaceholder}\";|vendorHash = \"$go_hash\";|" "$PKG_DIR/flake.nix"
+              echo "Updated flake with vendorHash"
+              echo ""
+              echo "Retrying build..."
+              cd "$PKG_DIR" && ${pkgs.nix}/bin/nix build ".#default" 2>&1 | tee -a "$PKG_DIR/build.log" || true
+            else
+              echo "Could not extract vendorHash automatically."
+              echo "Run: vm-dev-fixhash go $NAME"
+            fi
+          fi
         fi
 
         # ── Self-heal: remove bad python3Packages names and retry ─────────────
@@ -1880,6 +1908,194 @@ in {
       (pkgs.writeShellScriptBin "mvm-sync" ''
         echo "Note: mvm-sync is renamed to vm-sync"
         exec vm-sync "$@"
+      '')
+
+      # ===== vm-dev-fixhash: Compute dependency hashes for Go/NPM packages =====
+      # For Go modules without vendor/, computes vendorHash from go.mod/go.sum
+      # For NPM packages, computes npmDepsHash from package-lock.json
+      (pkgs.writeShellScriptBin "vm-dev-fixhash" ''
+        #!/usr/bin/env bash
+        set -e
+
+        PACKAGES_DIR="$HOME/dev/packages"
+
+        usage() {
+          echo "vm-dev-fixhash - Compute dependency hashes for packages"
+          echo ""
+          echo "Commands:"
+          echo "  go <pkg>     Compute vendorHash for Go package"
+          echo "  npm <pkg>    Compute npmDepsHash for NPM package"
+          echo "  all <pkg>    Auto-detect and compute hash for package"
+          echo ""
+          echo "Examples:"
+          echo "  vm-dev-fixhash go sheets"
+          echo "  vm-dev-fixhash all sheets"
+          echo ""
+          echo "This computes the correct dependency hash and updates your flake.nix"
+          echo "by actually building/fetching the dependencies in the Nix environment."
+        }
+
+        # Compute Go module vendorHash
+        cmd_go() {
+          local pkg="$1"
+          local pkg_dir="$PACKAGES_DIR/$pkg"
+
+          if [ ! -d "$pkg_dir" ]; then
+            echo "Error: Package '$pkg' not found at $pkg_dir"
+            exit 1
+          fi
+
+          if [ ! -f "$pkg_dir/flake.nix" ]; then
+            echo "Error: No flake.nix in $pkg_dir"
+            exit 1
+          fi
+
+          cd "$pkg_dir"
+
+          # Check for go.mod/go.sum
+          if [ ! -f "go.mod" ]; then
+            echo "Error: No go.mod found in $pkg_dir"
+            exit 1
+          fi
+
+          echo "Computing vendorHash for Go module..."
+
+          # Approach: Use go mod download to fetch dependencies, then compute hash
+          # The vendorHash needs to match what buildGoModule expects
+
+          # First, try to build and capture the actual error with the correct hash
+          echo "Attempting build to extract correct hash..."
+          local build_output
+          build_output=$(nix build ".#default" 2>&1) || true
+
+          # Check if we got a vendorHash mismatch with the real hash
+          local real_hash
+          real_hash=$(echo "$build_output" | ${pkgs.gnugrep}/bin/grep -oP 'got:\s+\Ksha256-[A-Za-z0-9+/=]+' | head -1 || true)
+
+          if [ -n "$real_hash" ];
+          then
+            echo "Found vendorHash in build output: $real_hash"
+            ${pkgs.gnused}/bin/sed -i "s|vendorHash = \"[^\"]*\";|vendorHash = \"$real_hash\";|" "$pkg_dir/flake.nix"
+            echo "Updated flake.nix"
+            echo ""
+            echo "Try building again: vm-dev rebuild $pkg"
+            return
+          fi
+
+          # If that failed, try nix-prefetch-url on go.mod expanded content
+          echo "Using alternative hash computation..."
+
+          # Create a temp directory for vendor
+          local tmp_vendor
+          tmp_vendor=$(mktemp -d)
+
+          # Use go mod vendor to fetch dependencies
+          if go mod vendor -mod=mod 2>/dev/null; then
+            if [ -d vendor ]; then
+              echo "Computing hash from vendored dependencies..."
+              local vendor_hash
+              vendor_hash=$(nix-prefetch-url --unpack file://$(pwd)/vendor 2>&1 | \
+                ${pkgs.gnugrep}/bin/grep -o 'sha256-[A-Za-z0-9+/=]*' | head -1 || true)
+
+              if [ -n "$vendor_hash" ];
+              then
+                echo "Computed vendorHash: $vendor_hash"
+                ${pkgs.gnused}/bin/sed -i "s|vendorHash = \"[^\"]*\";|vendorHash = \"$vendor_hash\";|" "$pkg_dir/flake.nix"
+                echo "Updated flake.nix"
+                rm -rf "$tmp_vendor"
+                echo ""
+                echo "Try building again: vm-dev rebuild $pkg"
+                return
+              fi
+            fi
+          fi
+
+          rm -rf "$tmp_vendor"
+
+          # Final fallback: manual instructions
+          echo "Could not compute vendorHash automatically."
+          echo ""
+          echo "Manual approach:"
+          echo "  1. cd $pkg_dir"
+          echo "  2. go mod vendor"
+          echo "  3. nix-prefetch-url --unpack file://\$(pwd)/vendor"
+          echo "  4. Copy the hash and update vendorHash in flake.nix"
+          echo ""
+          echo "Or let Nix tell you the hash:"
+          echo "  1. Run: nix build '.#default'"
+          echo "  2. Copy the 'got: sha256-...' hash from the error"
+          echo "  3. Update vendorHash in flake.nix manually"
+          exit 1
+        }
+
+        # Compute NPM deps hash
+        cmd_npm() {
+          local pkg="$1"
+          local pkg_dir="$PACKAGES_DIR/$pkg"
+
+          if [ ! -f "$pkg_dir/package-lock.json" ]; then
+            echo "Error: No package-lock.json found in $pkg_dir"
+            exit 1
+          fi
+
+          cd "$pkg_dir"
+          echo "Computing npmDepsHash..."
+
+          # Try build first to get hash from error
+          local build_output
+          build_output=$(nix build ".#default" 2>&1) || true
+
+          local real_hash
+          real_hash=$(echo "$build_output" | ${pkgs.gnugrep}/bin/grep -oP 'got:\s+\Ksha256-[A-Za-z0-9+/=]+' | head -1 || true)
+
+          if [ -n "$real_hash" ];
+          then
+            echo "Found npmDepsHash in build output: $real_hash"
+            ${pkgs.gnused}/bin/sed -i "s|npmDepsHash = \"[^\"]*\";|npmDepsHash = \"$real_hash\";|" "$pkg_dir/flake.nix"
+            echo "Updated flake.nix"
+            return
+          fi
+
+          echo "Failed to compute npmDepsHash automatically"
+          echo "Manual approach:"
+          echo "  1. Run: nix build '.#default'"
+          echo "  2. Copy the 'got: sha256-...' hash from the error"
+          echo "  3. Update npmDepsHash in flake.nix manually"
+          exit 1
+        }
+
+        # Auto-detect project type and compute appropriate hash
+        cmd_all() {
+          local pkg="$1"
+          local pkg_dir="$PACKAGES_DIR/$pkg"
+
+          if [ ! -d "$pkg_dir" ]; then
+            echo "Error: Package '$pkg' not found at $pkg_dir"
+            exit 1
+          fi
+
+          if [ -f "$pkg_dir/go.mod" ]; then
+            cmd_go "$pkg"
+          elif [ -f "$pkg_dir/package-lock.json" ]; then
+            cmd_npm "$pkg"
+          elif [ -f "$pkg_dir/yarn.lock" ]; then
+            echo "Yarn hash computation not yet implemented"
+            echo "Manual approach: nix build '.#default' and extract hash from error"
+            exit 1
+          else
+            echo "No supported project type found (go.mod, package-lock.json, yarn.lock)"
+            exit 1
+          fi
+        }
+
+        case ''${2:-} in
+          go) shift; shift; cmd_go "$1" ;;
+          npm) shift; shift; cmd_npm "$1" ;;
+          yarn) shift; shift; echo "Yarn hash computation not yet implemented" ;;
+          all) shift; shift; cmd_all "$1" ;;
+          -h|--help|"") usage ;;
+          *) usage ;;
+        esac
       '')
     ];
   };
