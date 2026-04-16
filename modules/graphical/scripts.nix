@@ -1211,7 +1211,7 @@
     ${pkgs.xorg.xset}/bin/xset dpms force on 2>/dev/null || true
   '';
 
-  # Instant lockscreen script using pre-cached background from walrgb
+  # Instant lockscreen script - solid black background with lock indicator
   # Used for lid closure/suspend where speed is critical
   # Also triggered by xss-lock on idle timeout - exits early if already locked
   lockInstantScript = pkgs.writeShellScriptBin "lock-instant" ''
@@ -1240,6 +1240,8 @@
     CLOCK_SIZE=${toString cfg.lockscreen.clockSize}
     WRONG_TEXT="${cfg.lockscreen.wrongText}"
     VERIFY_TEXT="${cfg.lockscreen.verifyText}"
+    LOCK_TEXT="${cfg.lockscreen.text}"
+    FONT_SIZE=${toString cfg.lockscreen.fontSize}
 
     # Detect primary monitor position for correct element placement on multi-monitor setups
     PRIMARY_GEOM=$(${pkgs.xorg.xrandr}/bin/xrandr --query | ${pkgs.gnugrep}/bin/grep " connected primary " | ${pkgs.gnugrep}/bin/grep -oE '[0-9]+x[0-9]+\+[0-9]+\+[0-9]+' | head -1)
@@ -1259,16 +1261,22 @@
     DATE_Y=$((MON_Y + MON_H * 158 / 1000))
     VERIF_X=$((MON_X + MON_W * 162 / 1000))
     WRONG_X=$((MON_X + MON_W * 479 / 1000))
+    TEXT_X=$((MON_X + 50))
+    TEXT_Y=$((MON_Y + 50))
 
-    # Use pre-cached lockscreen background (instant) or fall back to solid color
-    LOCK_CACHE="$HOME/.cache/lockscreen.png"
-    if [ -f "$LOCK_CACHE" ]; then
-      LOCK_IMG="$LOCK_CACHE"
-    else
-      # No cached image - create solid color fallback (instant, no screenshot)
-      LOCK_IMG="/tmp/i3lock_solid.png"
-      SCREEN_SIZE=$(${pkgs.xorg.xdpyinfo}/bin/xdpyinfo | ${pkgs.gnugrep}/bin/grep -oP 'dimensions:\s+\K[0-9]+x[0-9]+' | head -1)
-      ${pkgs.imagemagick}/bin/magick -size "''${SCREEN_SIZE:-1920x1200}" "xc:$color0" "$LOCK_IMG" 2>/dev/null || true
+    # Create solid black background with "Enter password" text overlay
+    LOCK_IMG="/tmp/i3lock_black.png"
+    ${pkgs.imagemagick}/bin/magick -size "1920x1200" "xc:$color0" "$LOCK_IMG" 2>/dev/null || true
+
+    # Add "Enter password" text overlay at NorthWest position
+    if ! ${pkgs.imagemagick}/bin/magick "$LOCK_IMG" -gravity NorthWest \
+        -pointsize $FONT_SIZE -font "$FONT" -fill "$color1" \
+        -annotate +"$TEXT_X"+"$TEXT_Y" "$LOCK_TEXT" "$LOCK_IMG" 2>/dev/null; then
+      # Fallback font if primary fails
+      FONT="CozetteVector"
+      ${pkgs.imagemagick}/bin/magick "$LOCK_IMG" -gravity NorthWest \
+          -pointsize $FONT_SIZE -font "$FONT" -fill "$color1" \
+          -annotate +"$TEXT_X"+"$TEXT_Y" "$LOCK_TEXT" "$LOCK_IMG" 2>/dev/null || true
     fi
 
     # Run i3lock-color with wal colors and custom text
@@ -1314,8 +1322,8 @@
         --bar-max-height=5 \
         --bar-color="''${color0:1}00"
 
-    # Cleanup only fallback image (keep cached image)
-    rm -f /tmp/i3lock_solid.png
+    # Cleanup temporary files
+    rm -f "$LOCK_IMG"
 
     # After unlock: wake display (DPMS) to prevent black screen on resume
     ${pkgs.xorg.xset}/bin/xset dpms force on 2>/dev/null || true
