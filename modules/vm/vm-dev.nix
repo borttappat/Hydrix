@@ -508,7 +508,7 @@
     }
     EOF
 
-        cat > $out/nim.nix << 'EOF'
+        cat > $out/nim.nix << 'NIMTEMPLATE'
     {
       description = "@NAME@ - tested in VM";
       inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
@@ -516,6 +516,7 @@
         let
           system = "@SYSTEM@";
           pkgs = nixpkgs.legacyPackages.''${system};
+          binName = "@NIM_BIN_NAME@";
         in {
           packages.''${system}.default = pkgs.buildNimPackage {
             pname = "@NAME@";
@@ -528,13 +529,10 @@
             };
             # Nim dependencies are auto-resolved via nimble lock
             # If build fails, add nimble deps: nimbleDeps = with pkgs.nimPackages; [ ... ];
-            # For packages with custom binary names (from .nimble bin = @["..."]),
-            # set meta.mainProgram to point to the actual binary
-            meta.mainProgram = "@NIM_BIN_NAME@";
           };
         };
     }
-    EOF
+    NIMTEMPLATE;
 
         cat > $out/zig.nix << 'EOF'
     {
@@ -1703,6 +1701,8 @@ in {
             -e "s|@PLACEHOLDER@|${hashPlaceholder}|g" \
             -e "s|@META_LINE@|$META_LINE|g" \
             -e "s|@NIM_BIN_NAME@|''${NIM_BIN_NAME:-$NAME}|g" \
+            -e "s|NIM_BIN_NAME_PLACEHOLDER|''${NIM_BIN_NAME:-$NAME}|g" \
+            -e "s|NAME_PLACEHOLDER|$NAME|g" \
             "$template" > "$PKG_DIR/flake.nix"
         }
 
