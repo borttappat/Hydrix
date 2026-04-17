@@ -644,7 +644,7 @@ in {
           varName = lib.toUpper (builtins.replaceStrings ["-"] ["_"] n.name);
         in "configure_lan \"$IFACE_${varName}\" \"${n.subnet}.253\" \"${n.name}\"") allNetworks)}
         configure_lan "$IFACE_SHAR" "192.168.105.253" "shared"
-        configure_lan "$IFACE_BLDR" "192.168.106.253" "builder"
+        configure_lan "$IFACE_BLDR" "192.168.107.253" "builder"
         configure_lan "$IFACE_FILE" "192.168.108.253" "files"
 
         echo "=== Network Setup Complete ==="
@@ -699,7 +699,7 @@ in {
           varName = lib.toUpper (builtins.replaceStrings ["-"] ["_"] n.name);
         in "add_iface \"$IFACE_${varName}\" \"${n.subnet}\" \"${n.subnet}.253\"") allNetworks)}
         add_iface "$IFACE_SHAR" "192.168.105" "192.168.105.253"
-        add_iface "$IFACE_BLDR" "192.168.106" "192.168.106.253"
+        add_iface "$IFACE_BLDR" "192.168.107" "192.168.107.253"
         add_iface "$IFACE_FILE" "192.168.108" "192.168.108.253"
 
         echo "Generated dnsmasq config:"
@@ -736,7 +736,7 @@ in {
         ${pkgs.nftables}/bin/nft flush ruleset 2>/dev/null || true
 
         # Define VM network ranges (profile subnets from meta.nix + infra fixed subnets)
-        VM_NETWORKS="{ 192.168.100.0/24${lib.concatMapStrings (n: ", ${n.subnet}.0/24") allNetworks}, 192.168.105.0/24, 192.168.106.0/24, 192.168.108.0/24 }"
+        VM_NETWORKS="{ 192.168.100.0/24${lib.concatMapStrings (n: ", ${n.subnet}.0/24") allNetworks}, 192.168.105.0/24, 192.168.107.0/24, 192.168.108.0/24 }"
 
         ${pkgs.nftables}/bin/nft -f - << EOF
         table inet router {
