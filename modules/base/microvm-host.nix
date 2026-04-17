@@ -556,20 +556,23 @@ in {
           wants = [ "hydrix-github-secrets.service" ];
           after = [ "local-fs.target" "hydrix-github-secrets.service" ];
 
+          # Skip entirely when age key is absent (fresh install / no sops configured).
+          # ConditionPathExists causes systemd to mark the service "skipped" (not failed),
+          # so it never blocks virtiofsd or the microVM from starting.
+          unitConfig.ConditionPathExists = "/var/lib/sops-nix/age-key.txt";
+
           serviceConfig = {
             Type = "oneshot";
             RemainAfterExit = true;
           };
 
           script = ''
-            set -e
-
             SECRETS_DIR="/run/hydrix-secrets/${name}/ssh"
             GITHUB_SECRETS="/run/secrets/github"
 
             # Create secrets directory
-            mkdir -p "$SECRETS_DIR"
-            chmod 700 "$SECRETS_DIR"
+            mkdir -p "$SECRETS_DIR" || true
+            chmod 700 "$SECRETS_DIR" || true
 
             # Copy GitHub SSH keys if they exist
             if [ -f "$GITHUB_SECRETS/id_ed25519" ]; then
