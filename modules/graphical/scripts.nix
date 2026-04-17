@@ -21,6 +21,7 @@
 # HOST-ONLY COMMANDS
 # ------------------
 #   push-colors-to-vms              Push pywal colors to all running VMs
+#   wifi-sync                       Sync WiFi credentials from router VM
 #   display-recover                 Recover display after suspend/resume
 #
 # VM-ONLY COMMANDS
@@ -1444,6 +1445,9 @@
   colorschemeJsonExists = builtins.pathExists colorschemeJsonPath;
 
   # Host-only: Push colors to all running VMs via vsock (replaces 9p polling)
+  wifiSyncScript = pkgs.writeShellScriptBin "wifi-sync"
+    (builtins.readFile ../../scripts/wifi-sync.sh);
+
   pushColorsToVmsScript = pkgs.writeShellScriptBin "push-colors-to-vms" ''
     #!/usr/bin/env bash
     # Push host background color to all running VMs via vsock port 14503.
@@ -1519,6 +1523,7 @@ in {
       ]
       ++ lib.optionals (!isVM) [
         pushColorsToVmsScript # Push colors to VMs via vsock (instant sync)
+        wifiSyncScript        # Sync WiFi credentials from router VM
         pkgs.socat # For vsock communication with VMs
       ];
 

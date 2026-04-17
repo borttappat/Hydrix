@@ -48,7 +48,7 @@ let meta = import ./meta.nix; in
         mountPoint = "/var/lib/docker";
       }];
     };
-    secrets.github = true;
+    secrets.github = false;
   };
   hydrix.networking.vmSubnet = meta.subnet;
 
