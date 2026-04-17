@@ -1273,8 +1273,10 @@ resolve_builder_target() {
             echo "$target"
             ;;
         *)
-            # Try as VM name
-            echo "${builder_flake}#nixosConfigurations.${target}.config.microvm.declaredRunner"
+            # Any unrecognized name: prepend microvm- if not already prefixed
+            local vm_name="$target"
+            [[ "$vm_name" != microvm-* ]] && vm_name="microvm-$vm_name"
+            echo "${builder_flake}#nixosConfigurations.${vm_name}.config.microvm.declaredRunner"
             ;;
     esac
 }
@@ -1329,7 +1331,12 @@ get_vm_name_from_target() {
             echo ""
             ;;
         *)
-            echo "$target"
+            # Any unrecognized name: prepend microvm- if not already prefixed
+            if [[ "$target" == microvm-* ]]; then
+                echo "$target"
+            else
+                echo "microvm-$target"
+            fi
             ;;
     esac
 }
