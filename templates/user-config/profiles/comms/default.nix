@@ -30,6 +30,13 @@ let meta = import ./meta.nix; in
   # Firefox user-agent: avoid standing out on messaging platforms.
   # Presets: "edge-windows" | "chrome-windows" | "chrome-mac" | "safari-mac" | "firefox-windows"
   hydrix.graphical.firefox.userAgent = "chrome-windows";
+  # Extensions to force-install in this profile.
+  # Available: ublock-origin, pywalfox, vimium-ff, detach-tab,
+  #            bitwarden, foxyproxy, wappalyzer, singlefile, darkreader, styl-us
+  hydrix.graphical.firefox.extensions = [
+    "ublock-origin" "pywalfox" "vimium-ff" "detach-tab"
+    "bitwarden" "darkreader"
+  ];
 
   # Inherit host colors for consistent look
   hydrix.vmColors.enable = true;

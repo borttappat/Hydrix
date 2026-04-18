@@ -1038,6 +1038,40 @@ in {
         example = "edge-windows";
       };
 
+      firefox.extensions = lib.mkOption {
+        type = lib.types.listOf lib.types.str;
+        default = [];
+        description = ''
+          Firefox extensions to force-install, referenced by name from the
+          built-in extension registry. Set per-profile to customise the
+          extension set for each VM type.
+          Available: ublock-origin, pywalfox, vimium-ff, detach-tab,
+                     bitwarden, foxyproxy, wappalyzer, singlefile, darkreader, styl-us.
+        '';
+        example = [ "ublock-origin" "pywalfox" "bitwarden" "darkreader" ];
+      };
+
+      firefox.search.default = lib.mkOption {
+        type = lib.types.str;
+        default = "ddg";
+        description = "Default search engine for Firefox. Use the engine short name (ddg, google, etc.).";
+      };
+
+      firefox.verticalTabs = lib.mkOption {
+        type = lib.types.bool;
+        default = true;
+        description = ''
+          Enable vertical tabs sidebar. The horizontal tab bar is hidden and the
+          sidebar collapses to an icon strip, expanding on hover.
+        '';
+      };
+
+      firefox.uidensity = lib.mkOption {
+        type = lib.types.int;
+        default = 1;
+        description = "Firefox UI density: 0 = normal, 1 = compact, 2 = touch.";
+      };
+
       obsidian.hostEnable = lib.mkOption {
         type = lib.types.bool;
         default = false;

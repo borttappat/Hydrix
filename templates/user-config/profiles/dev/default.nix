@@ -30,6 +30,13 @@ let meta = import ./meta.nix; in
   # Firefox user-agent: unset (null) keeps the real UA — useful when testing
   # web apps where accurate browser detection matters.
   # hydrix.graphical.firefox.userAgent = "edge-windows";
+  # Extensions to force-install in this profile.
+  # Available: ublock-origin, pywalfox, vimium-ff, detach-tab,
+  #            bitwarden, foxyproxy, wappalyzer, singlefile, darkreader, styl-us
+  hydrix.graphical.firefox.extensions = [
+    "ublock-origin" "pywalfox" "vimium-ff" "detach-tab"
+    "bitwarden"
+  ];
 
   # Inherit host colors for consistent look
   hydrix.vmColors.enable = true;

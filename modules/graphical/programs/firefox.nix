@@ -83,43 +83,8 @@ let
     };
   };
 
-  # ===== Profile Extension Sets =====
-  # Define which extensions each profile gets
-  # Extensions are referenced by name from allExtensions
-  baseExtensions = [
-    "ublock-origin"
-    "pywalfox"
-    "vimium-ff"
-    "detach-tab"
-  ];
-
-  profileExtensions = {
-    pentest = baseExtensions ++ [
-      "foxyproxy"
-      "wappalyzer"
-      "singlefile"
-    ];
-    browsing = baseExtensions ++ [
-      "bitwarden"
-      "darkreader"
-      "styl-us"
-    ];
-    comms = baseExtensions ++ [
-      "bitwarden"
-      "darkreader"
-    ];
-    dev = baseExtensions ++ [
-      "bitwarden"
-    ];
-    lurking = baseExtensions;  # Ephemeral - minimal set, no passwords
-    host = baseExtensions ++ [
-      "bitwarden"
-      "darkreader"
-    ];
-  };
-
-  # Get extensions for current profile (fallback to base if vmType not defined)
-  currentExtensions = profileExtensions.${vmType} or baseExtensions;
+  # Extensions to install — set via hydrix.graphical.firefox.extensions in user config
+  currentExtensions = ffCfg.extensions;
 
   # Build ExtensionSettings from extension list
   buildExtensionSettings = extNames:
@@ -323,14 +288,16 @@ let
     firefox-windows = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:132.0) Gecko/20100101 Firefox/132.0";
   };
 
-  uaRaw = config.hydrix.graphical.firefox.userAgent;
+  ffCfg = config.hydrix.graphical.firefox;
+
+  uaRaw = ffCfg.userAgent;
   resolvedUA = if uaRaw == null then null else uaPresets.${uaRaw} or uaRaw;
 
   # On hosts, Firefox is only included when hostEnable is true.
   # VMs always get Firefox when graphical is enabled.
   isHost = vmType == "host" || vmType == null;
   firefoxEnabled = config.hydrix.graphical.enable
-    && (!isHost || config.hydrix.graphical.firefox.hostEnable);
+    && (!isHost || ffCfg.hostEnable);
 
 in {
   config = lib.mkIf firefoxEnabled {
@@ -377,11 +344,6 @@ in {
           "browser.newtabpage.activity-stream.asrouter.userprefs.cfr.features" = lock-false;
           # Prevent extension update notifications
           "extensions.update.notifyUser" = lock-false;
-          # Sidebar - start collapsed with vertical tabs
-          "sidebar.revamp" = lock-true;
-          "sidebar.verticalTabs" = lock-true;
-          "sidebar.visibility" = { Value = "hide-sidebar"; Status = "locked"; };
-          "sidebar.position_start" = lock-true;
           "browser.topsites.contile.enabled" = lock-false;
           "browser.formfill.enable" = lock-false;
           "browser.search.suggest.enabled" = lock-false;
@@ -397,6 +359,11 @@ in {
           "browser.newtabpage.activity-stream.showSponsored" = lock-false;
           "browser.newtabpage.activity-stream.system.showSponsored" = lock-false;
           "browser.newtabpage.activity-stream.showSponsoredTopSites" = lock-false;
+        } // lib.optionalAttrs ffCfg.verticalTabs {
+          "sidebar.revamp" = lock-true;
+          "sidebar.verticalTabs" = lock-true;
+          "sidebar.visibility" = { Value = "hide-sidebar"; Status = "locked"; };
+          "sidebar.position_start" = lock-true;
         } // lib.optionalAttrs (resolvedUA != null) {
           "general.useragent.override" = { Value = resolvedUA; Status = "locked"; };
         };
@@ -415,7 +382,7 @@ in {
           isDefault = true;
 
           search = {
-            default = "ddg";
+            default = ffCfg.search.default;
           };
 
           settings = {
@@ -432,17 +399,10 @@ in {
             "toolkit.telemetry.unified" = false;
 
             # UI customization
-            "browser.uidensity" = 1;  # Compact mode
+            "browser.uidensity" = ffCfg.uidensity;
             # Dark base theme so startup flash is dark (pywalfox overrides dynamically)
             "extensions.activeThemeID" = "firefox-compact-dark@mozilla.org";
             "browser.tabs.inTitlebar" = 1;
-            
-            # Native Vertical Tabs - start collapsed, expand on hover
-            "sidebar.revamp" = true;
-            "sidebar.verticalTabs" = true;
-            "sidebar.expandOnHover" = true;
-            "sidebar.visibility" = "hide-sidebar";  # Start collapsed
-            "sidebar.position_start" = true;  # Sidebar on left
 
             # Ctrl+Tab cycles through tabs in recently used order
             "browser.ctrlTab.recentlyUsedOrder" = true;
@@ -465,6 +425,13 @@ in {
             "font.name.serif.x-western" = lib.mkForce fontName;
             "font.size.variable.x-western" = lib.mkForce fontSize;
             "font.size.monospace.x-western" = lib.mkForce fontSize;
+          } // lib.optionalAttrs ffCfg.verticalTabs {
+            # Native Vertical Tabs - start collapsed, expand on hover
+            "sidebar.revamp" = true;
+            "sidebar.verticalTabs" = true;
+            "sidebar.expandOnHover" = true;
+            "sidebar.visibility" = "hide-sidebar";  # Start collapsed
+            "sidebar.position_start" = true;  # Sidebar on left
           };
 
           # Custom CSS for Firefox UI
@@ -514,6 +481,7 @@ in {
               font-size: ${toString fontSize}px !important;
             }
 
+            ${lib.optionalString ffCfg.verticalTabs ''
             /* Hide horizontal tabs for Vertical Tabs mode */
             #TabsToolbar {
               visibility: collapse !important;
@@ -529,7 +497,7 @@ in {
             #sidebar-main:hover {
               max-width: 300px !important;
             }
-
+            ''}
           '';
 
           userContent = ''

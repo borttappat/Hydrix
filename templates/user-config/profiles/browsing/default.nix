@@ -31,6 +31,13 @@ let meta = import ./meta.nix; in
   # Presets: "edge-windows" | "chrome-windows" | "chrome-mac" | "safari-mac" | "firefox-windows"
   # Or pass a raw UA string. null = use Firefox's real UA.
   hydrix.graphical.firefox.userAgent = "edge-windows";
+  # Extensions to force-install in this profile.
+  # Available: ublock-origin, pywalfox, vimium-ff, detach-tab,
+  #            bitwarden, foxyproxy, wappalyzer, singlefile, darkreader, styl-us
+  hydrix.graphical.firefox.extensions = [
+    "ublock-origin" "pywalfox" "vimium-ff" "detach-tab"
+    "bitwarden" "darkreader" "styl-us"
+  ];
 
   # MicroVM resources (must match CID in host scripts)
   hydrix.microvm = {

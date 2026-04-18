@@ -33,6 +33,12 @@ let meta = import ./meta.nix; in
   # anonymity set when browsing over Tor (all Tor Browser users look identical).
   # Presets: "edge-windows" | "chrome-windows" | "chrome-mac" | "safari-mac" | "firefox-windows"
   hydrix.graphical.firefox.userAgent = "firefox-windows";
+  # Minimal extension set — ephemeral profile, no password manager
+  # Available: ublock-origin, pywalfox, vimium-ff, detach-tab,
+  #            bitwarden, foxyproxy, wappalyzer, singlefile, darkreader, styl-us
+  hydrix.graphical.firefox.extensions = [
+    "ublock-origin" "pywalfox" "vimium-ff" "detach-tab"
+  ];
 
   # Inherit host colors for consistent look
   hydrix.vmColors.enable = true;
