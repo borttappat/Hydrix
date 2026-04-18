@@ -410,7 +410,7 @@ cmd_start() {
     fi
 
     # Desktop notification
-    notify-send "MicroVM Ready" "${vm_name} is ready for interaction" 2>/dev/null || true
+    notify-send "MicroVM launched" "${vm_name} is ready for interaction" 2>/dev/null || true
 
     # Register task pentest slots as the active pentest VM for polybar/rofi
     if [[ "$vm_name" == microvm-pentest-task* ]]; then
