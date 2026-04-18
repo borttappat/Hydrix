@@ -225,6 +225,21 @@ host_daemon_running() {
     systemctl is-active --quiet nix-daemon.service 2>/dev/null
 }
 
+# Wait for gitsync vsock to be ready
+wait_for_gitsync() {
+    local timeout="${1:-60}"
+    local elapsed=0
+
+    while ! echo "PING" | timeout 2 vsock-cmd "${GITSYNC_CID}" "${GITSYNC_STATUS_PORT}" 2>/dev/null | grep -q "PONG"; do
+        sleep 1
+        elapsed=$((elapsed + 1))
+        if [[ $elapsed -ge $timeout ]]; then
+            return 1
+        fi
+    done
+    return 0
+}
+
 # Wait for builder vsock to be ready
 wait_for_builder() {
     local timeout="${1:-60}"
@@ -2033,6 +2048,12 @@ gitsync_vsock_cmd() {
         log "Starting git-sync VM..."
         cmd_start "$GITSYNC_NAME" || return 1
         we_started=true
+    fi
+
+    if ! wait_for_gitsync 60; then
+        log_error "Timeout waiting for git-sync VM to be ready"
+        [[ "$we_started" == "true" ]] && cmd_stop "$GITSYNC_NAME" 2>/dev/null || true
+        return 1
     fi
 
     local output
