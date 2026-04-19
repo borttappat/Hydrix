@@ -24,6 +24,7 @@
     ./@SERIAL@-hardware.nix
     ../specialisations/lockdown.nix
     ./grub-entries.nix
+    ../shared/usb-blocking.nix
   ];
 
   specialisation.administrative.configuration = {

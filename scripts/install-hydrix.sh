@@ -1784,6 +1784,18 @@ copy_template_specialisations() {
     log "  Copied from template"
 }
 
+copy_template_infra() {
+    local config_dir="$1"
+    log "Creating infra VMs..."
+
+    mkdir -p "$config_dir/infra"
+
+    local template_dir="$SCRIPT_DIR/../templates/user-config/infra"
+
+    cp -r "$template_dir"/* "$config_dir/infra/"
+    log "  Copied from template"
+}
+
 copy_template_profiles() {
     local config_dir="$1"
     log "Creating profiles..."
@@ -1951,6 +1963,7 @@ generate_config_to_temp() {
         # Fresh installation: generate everything
         generate_flake_nix "$TEMP_CONFIG"
         copy_template_specialisations "$TEMP_CONFIG"
+        copy_template_infra "$TEMP_CONFIG"
         copy_template_profiles "$TEMP_CONFIG"
         copy_template_shared "$TEMP_CONFIG"
         copy_template_modules "$TEMP_CONFIG"

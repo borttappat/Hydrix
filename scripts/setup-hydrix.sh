@@ -492,6 +492,8 @@ migrate_legacy_config() {
         copy_template_profiles
     fi
 
+    [[ ! -d "$CONFIG_DIR/infra" ]] && copy_template_infra
+
     # Ensure modules, colorschemes, templates, configs directories exist
     [[ ! -d "$CONFIG_DIR/modules" ]]    && copy_template_modules
     [[ ! -d "$CONFIG_DIR/templates" ]]  && copy_template_templates
@@ -807,6 +809,23 @@ copy_template_specialisations() {
     fi
 
     cp -r "$template_dir"/* "$CONFIG_DIR/specialisations/"
+    log "  Copied from template"
+}
+
+copy_template_infra() {
+    log "Creating infra VMs from template..."
+
+    mkdir -p "$CONFIG_DIR/infra"
+
+    local template_dir=""
+
+    if [[ -d "$HOME/Hydrix/templates/user-config/infra" ]]; then
+        template_dir="$HOME/Hydrix/templates/user-config/infra"
+    elif [[ -d "$SCRIPT_DIR/../templates/user-config/infra" ]]; then
+        template_dir="$SCRIPT_DIR/../templates/user-config/infra"
+    fi
+
+    cp -r "$template_dir"/* "$CONFIG_DIR/infra/"
     log "  Copied from template"
 }
 
