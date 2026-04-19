@@ -20,6 +20,8 @@ let
     #!/usr/bin/env bash
     set -euo pipefail
 
+    export PATH="${pkgs.iproute2}/bin:${pkgs.iptables}/bin:${pkgs.coreutils}/bin:$PATH"
+
     STATE_FILE="${stateDir}/lan-state.json"
     LOG_FILE="${stateDir}/lan-control.log"
     PHYSICAL_IF="${stateDir}/wan_interface"
