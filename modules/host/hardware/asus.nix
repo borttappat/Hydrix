@@ -72,10 +72,10 @@ let
           echo 1 | sudo tee /sys/devices/system/cpu/intel_pstate/no_turbo > /dev/null 2>&1 || true
           # Set ASUS platform profile to Quiet for minimal fan noise
           if command -v asusctl >/dev/null 2>&1; then
-            sudo asusctl profile -P Quiet 2>/dev/null || true
+            sudo asusctl profile -P Quiet >/dev/null 2>&1 || true
           fi
           echo "powersave" > "$STATE_FILE"
-          echo "Power-save mode active. CPU limited to 60% for battery life."
+          echo "Mode: powersave — CPU 60%, turbo off, fans quiet"
           ;;
         balanced|auto)
           echo "Restoring auto management..."
@@ -86,10 +86,10 @@ let
           sudo systemctl start auto-cpufreq.service
           # Set ASUS platform profile to Balanced
           if command -v asusctl >/dev/null 2>&1; then
-            sudo asusctl profile -P Balanced 2>/dev/null || true
+            sudo asusctl profile -P Balanced >/dev/null 2>&1 || true
           fi
           echo "auto" > "$STATE_FILE"
-          echo "Auto mode active. CPU managed by auto-cpufreq."
+          echo "Mode: balanced — auto-cpufreq, fans balanced"
           ;;
         performance|high)
           echo "Setting performance mode..."
@@ -106,10 +106,10 @@ let
           done
           # Set ASUS platform profile to Performance for aggressive fan cooling
           if command -v asusctl >/dev/null 2>&1; then
-            sudo asusctl profile -P Performance 2>/dev/null || true
+            sudo asusctl profile -P Performance >/dev/null 2>&1 || true
           fi
           echo "performance" > "$STATE_FILE"
-          echo "Performance mode active. Maximum speed, aggressive cooling."
+          echo "Mode: performance — 100% CPU, turbo on, fans high"
           ;;
         *)
           echo "Unknown mode: $mode"
@@ -129,6 +129,13 @@ let
       esac
     }
 
+    # asusctl prints verbose zbus/tracing output to stdout — filter it out
+    asusctl_quiet() { asusctl "$@" 2>/dev/null | grep -v "^\[INFO\|^Starting version\|^$" ; }
+
+    get_fan_profile() {
+      asusctl_quiet profile -p | grep "^Active profile" | sed 's/Active profile is //'
+    }
+
     set_fans() {
       local level="$1"
       if ! command -v asusctl >/dev/null 2>&1; then
@@ -137,19 +144,19 @@ let
       fi
       case "$level" in
         low|quiet|silent)
-          sudo asusctl profile -P Quiet
-          echo "Fans: low (Quiet profile)"
+          sudo asusctl profile -P Quiet >/dev/null 2>&1
+          echo "Fans: low (Quiet)"
           ;;
         medium|balanced|auto)
-          sudo asusctl profile -P Balanced
-          echo "Fans: medium (Balanced profile)"
+          sudo asusctl profile -P Balanced >/dev/null 2>&1
+          echo "Fans: medium (Balanced)"
           ;;
         high|max|performance)
-          sudo asusctl profile -P Performance
-          echo "Fans: high (Performance profile)"
+          sudo asusctl profile -P Performance >/dev/null 2>&1
+          echo "Fans: high (Performance)"
           ;;
         status|*)
-          echo "ASUS fan profile: $(asusctl profile -p 2>/dev/null || echo "unknown")"
+          echo "Fan profile: $(get_fan_profile)"
           echo "Usage: power-mode fans [low|medium|high]"
           ;;
       esac
@@ -167,15 +174,10 @@ let
         epp=$(cat /sys/devices/system/cpu/cpu0/cpufreq/energy_performance_preference 2>/dev/null || echo "n/a")
         turbo_off=$(cat /sys/devices/system/cpu/intel_pstate/no_turbo 2>/dev/null || echo "n/a")
         freq=$(( $(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq) / 1000 ))
-        fan_profile=$(asusctl profile -p 2>/dev/null || echo "n/a")
+        fan_profile=$(get_fan_profile)
 
-        echo "=== Power Mode ==="
-        echo "Current mode:  $current"
-        echo "Governor:      $gov"
-        echo "EPP:           $epp"
-        echo "Turbo:         $([ "$turbo_off" = "0" ] && echo "enabled" || echo "disabled")"
-        echo "Frequency:     $freq MHz"
-        echo "Fan profile:   $fan_profile"
+        echo "Mode:     $current  |  Governor: $gov  |  EPP: $epp"
+        echo "Turbo:    $([ "$turbo_off" = "0" ] && echo "on" || echo "off")  |  Freq: $freq MHz  |  Fans: $fan_profile"
         echo ""
         echo "Usage: power-mode [powersave|balanced|performance|toggle|fans|status]"
         echo "  powersave   - Minimal power, limited CPU"
@@ -192,45 +194,22 @@ let
   mkPowerProfileScript = pkgs.writeShellScriptBin "power-profile" ''
     case "$1" in
       quiet|save|powersave)
-        echo "Setting quiet power profile..."
-        ${pkgs.asusctl}/bin/asusctl profile -P Quiet
+        ${pkgs.asusctl}/bin/asusctl profile -P Quiet >/dev/null 2>&1
         ${powerModeScript}/bin/power-mode powersave
-        echo ""
-        echo "Quiet mode active:"
-        echo "  - ASUS platform: Quiet (conservative fans)"
-        echo "  - CPU: 60% max, turbo off"
         ;;
       balanced|auto)
-        echo "Setting balanced power profile..."
-        ${pkgs.asusctl}/bin/asusctl profile -P Balanced
+        ${pkgs.asusctl}/bin/asusctl profile -P Balanced >/dev/null 2>&1
         ${powerModeScript}/bin/power-mode balanced
-        echo ""
-        echo "Balanced mode active:"
-        echo "  - ASUS platform: Balanced"
-        echo "  - CPU: auto-cpufreq managed"
         ;;
       performance|high)
-        echo "Setting performance power profile..."
-        ${pkgs.asusctl}/bin/asusctl profile -P Performance
+        ${pkgs.asusctl}/bin/asusctl profile -P Performance >/dev/null 2>&1
         ${powerModeScript}/bin/power-mode performance
-        echo ""
-        echo "Performance mode active:"
-        echo "  - ASUS platform: Performance (aggressive cooling)"
-        echo "  - CPU: 100% max, turbo on"
         ;;
       status|*)
-        echo "=== Power Profile Status ==="
-        echo ""
-        echo "ASUS Platform:"
-        ${pkgs.asusctl}/bin/asusctl profile -p
-        echo ""
         ${powerModeScript}/bin/power-mode status
-        echo ""
         if [ "$1" != "status" ]; then
+          echo ""
           echo "Usage: power-profile <quiet|balanced|performance|status>"
-          echo "  quiet       - Minimum noise, maximum battery"
-          echo "  balanced    - Auto management (default)"
-          echo "  performance - Maximum speed"
         fi
         ;;
     esac
