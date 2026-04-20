@@ -51,29 +51,27 @@ let
       esac
     }
 
+    # Derive VM subnet from CID (convention: 192.168.<cid>.0/24)
+    get_vm_subnet() {
+      echo "192.168.''${1}.0/24"
+    }
+
     enable_lan() {
       local cid="''${1}"
       local tap_iface="''${2}"
       local wan_iface
       wan_iface=$(get_wan_iface)
-      local bridge_name="br-pentest-lan"
+      local vm_subnet
+      vm_subnet=$(get_vm_subnet "$cid")
 
-      log "ENABLING LAN for CID $cid (tap: $tap_iface, wan: $wan_iface)"
+      log "ENABLING LAN for CID $cid subnet=$vm_subnet tap=$tap_iface wan=$wan_iface"
 
-      if ! ip link show "$bridge_name" &>/dev/null; then
-        ip link add name "$bridge_name" type bridge
-        ip link set "$bridge_name" up
-        log "Created bridge $bridge_name"
-      fi
-
-      if [ -n "$tap_iface" ] && ip link show "$tap_iface" &>/dev/null; then
-        ip link set "$tap_iface" master "$bridge_name"
-        ip link set "$tap_iface" up
-        log "Added $tap_iface to $bridge_name"
-      fi
-
-      echo 1 > /proc/sys/net/ipv4/conf/all/forwarding
-      echo 1 > /proc/sys/net/ipv4/conf/"$bridge_name"/forwarding
+      # Enable forwarding from VM tap to WAN
+      iptables -I FORWARD 1 -i "$tap_iface" -o "$wan_iface" -j ACCEPT 2>/dev/null || true
+      # Allow established/related return traffic
+      iptables -I FORWARD 1 -i "$wan_iface" -o "$tap_iface" -m state --state ESTABLISHED,RELATED -j ACCEPT 2>/dev/null || true
+      # MASQUERADE so LAN hosts see traffic as coming from router's WAN IP (replies return correctly)
+      iptables -t nat -I POSTROUTING 1 -s "$vm_subnet" -o "$wan_iface" -j MASQUERADE 2>/dev/null || true
 
       local tmp_file
       tmp_file=$(mktemp)
@@ -83,28 +81,22 @@ let
       mv "$tmp_file" "$STATE_FILE"
 
       log "LAN enabled for CID $cid"
-      echo "OK: LAN enabled for CID $cid"
+      echo "OK: LAN enabled for CID $cid via $wan_iface (MASQUERADE as $(ip addr show "$wan_iface" | awk '/inet / {print $2}' | cut -d/ -f1))"
     }
 
     disable_lan() {
       local cid="''${1}"
       local tap_iface="''${2}"
-      local bridge_name="br-pentest-lan"
+      local wan_iface
+      wan_iface=$(get_wan_iface)
+      local vm_subnet
+      vm_subnet=$(get_vm_subnet "$cid")
 
       log "DISABLING LAN for CID $cid"
 
-      if [ -n "$tap_iface" ] && ip link show "$tap_iface" &>/dev/null; then
-        ip link set "$tap_iface" nomaster 2>/dev/null || true
-        log "Removed $tap_iface from bridge"
-      fi
-
-      local bridge_ports
-      bridge_ports=$(ip link show type bridge_slave 2>/dev/null | grep -c "$bridge_name" || echo "0")
-      if [ "$bridge_ports" = "0" ]; then
-        ip link set "$bridge_name" down 2>/dev/null || true
-        ip link delete "$bridge_name" 2>/dev/null || true
-        log "Removed bridge $bridge_name"
-      fi
+      iptables -D FORWARD -i "$tap_iface" -o "$wan_iface" -j ACCEPT 2>/dev/null || true
+      iptables -D FORWARD -i "$wan_iface" -o "$tap_iface" -m state --state ESTABLISHED,RELATED -j ACCEPT 2>/dev/null || true
+      iptables -t nat -D POSTROUTING -s "$vm_subnet" -o "$wan_iface" -j MASQUERADE 2>/dev/null || true
 
       local tmp_file
       tmp_file=$(mktemp)
@@ -171,6 +163,8 @@ let
     }
 
     show_status() {
+      local wan_iface
+      wan_iface=$(get_wan_iface)
       echo "=== LAN Access Status ==="
       echo ""
       echo "Enabled VMs:"
@@ -179,10 +173,10 @@ let
       echo "Port Forwards:"
       ${pkgs.jq}/bin/jq -r '.portForwards[] | "  " + .cid + ":" + .port' "$STATE_FILE" 2>/dev/null || echo "  (none)"
       echo ""
-      echo "Bridge: br-pentest-lan"
-      ip link show br-pentest-lan 2>/dev/null || echo "  (not created)"
+      echo "WAN Interface: $wan_iface ($(ip addr show "$wan_iface" 2>/dev/null | awk '/inet / {print $2}' | head -1 || echo "no IP"))"
       echo ""
-      echo "WAN Interface: $(get_wan_iface)"
+      echo "Active MASQUERADE rules:"
+      iptables -t nat -L POSTROUTING -n 2>/dev/null | grep MASQUERADE || echo "  (none)"
     }
 
     # Ensure state file exists
@@ -206,7 +200,7 @@ let
 in
 
 {
-  environment.systemPackages = [ lanControlBin pkgs.jq pkgs.bridge-utils ];
+  environment.systemPackages = [ lanControlBin pkgs.jq pkgs.iptables ];
 
   # Init: ensure state dir exists at boot
   systemd.services.router-lan-control = {
