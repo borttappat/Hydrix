@@ -659,21 +659,20 @@
 
         VM_REGISTRY="/etc/hydrix/vm-registry.json"
 
-        # Special workspaces (not in vm-registry)
-        case "$ws" in
-          1)  desc="HOST"; return ;;
-          10) desc="ROUTER"; return ;;
-        esac
-
         # Look up workspace name from vm-registry
-        # Returns the VM label for occupied workspaces, empty for others
-        if [[ -f "$VM_REGISTRY" ]]; then
-          desc=$(${jq} -r --argjson w "$ws" \
-            'to_entries[] | select(.value.workspace == $w) | .value.label // ""' \
-            "$VM_REGISTRY" 2>/dev/null | head -1)
-        else
-          desc=""
-        fi
+        # Special workspaces (not in vm-registry)
+        desc=""
+        case "$ws" in
+          1)  desc="HOST" ;;
+          10) desc="ROUTER" ;;
+          *)
+            if [[ -f "$VM_REGISTRY" ]]; then
+              desc=$(${jq} -r --argjson w "$ws" \
+                'to_entries[] | select(.value.workspace == $w) | .value.label // ""' \
+                "$VM_REGISTRY" 2>/dev/null | head -1)
+            fi
+            ;;
+        esac
 
         if [ -n "$desc" ]; then
           ${getColorHelper}
