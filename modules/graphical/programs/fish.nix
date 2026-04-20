@@ -160,6 +160,9 @@ in {
             # Nix shell
             nsp = "nix-shell --run fish -p";
 
+            # Nix flake update
+            nfu = "nix flake update"
+
             # System
             reboot = "systemctl reboot";
             shutdown = "shutdown -h now";
@@ -212,21 +215,18 @@ in {
             md = "mkdir -p";
             ip = "ip -color";
             cf = "clear && fastfetch";
-            reload = "source ~/.config/fish/config.fish";
 
             # Multi-VM commands - expands to "microvm", allows multi-VM commands
             mvm = "microvm";
 
             # Config files - user's hydrix-config (what you edit day-to-day)
             f = "vim ~/.config/fish/config.fish";
-            fishconf = "vim ~/.config/fish/config.fish";
             flake = "vim ${config.hydrix.paths.configDir}/flake.nix";
 
             # Pentesting
             msf = "figlet -f cricket 'msf' && sudo msfconsole -q";
             sesp = "searchsploit";
             ptime = "sudo pentest-time -r Europe/Stockholm";
-            htblabs = "sudo openvpn ~/Downloads/lab_griefhoundTCP.ovpn";
             pyserver = "sudo python -m http.server 8002";
 
             # Applications
@@ -246,16 +246,6 @@ in {
             xrandrwide = "xrandr --output HDMI-1 --mode 3440x1440 --output eDP-1 --off && wal -R && killall polybar && polybar -q &";
             xrandrrestore = "xrandr --output eDP-1 --mode 1920x1200 --output HDMI-1 --off && wal -R && killall polybar && polybar -q &";
 
-            # Network (host-only)
-            nwshow = "nmcli dev wifi show";
-            nwconnect = "nmcli --ask dev wifi connect";
-
-            # Tailscale (host-only)
-            tds = "sudo tailscale file cp";
-            tdr = "sudo tailscale file get";
-
-            # VM/Router (host-only)
-            tui = "sh ~/splix/scripts/router-tui.sh";
           };
 
         functions =
@@ -410,12 +400,8 @@ in {
               end
             '';
 
-            # OpenRGB
-            rgb = "openrgb --device 0 --mode static --color $argv";
           };
       };
-
-      # Starship prompt is configured in starship.nix
 
       # Zoxide (smart cd)
       programs.zoxide = {
