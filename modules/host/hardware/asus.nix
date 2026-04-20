@@ -129,17 +129,45 @@ let
       esac
     }
 
+    set_fans() {
+      local level="$1"
+      if ! command -v asusctl >/dev/null 2>&1; then
+        echo "asusctl not available" >&2
+        return 1
+      fi
+      case "$level" in
+        low|quiet|silent)
+          sudo asusctl profile -P Quiet
+          echo "Fans: low (Quiet profile)"
+          ;;
+        medium|balanced|auto)
+          sudo asusctl profile -P Balanced
+          echo "Fans: medium (Balanced profile)"
+          ;;
+        high|max|performance)
+          sudo asusctl profile -P Performance
+          echo "Fans: high (Performance profile)"
+          ;;
+        status|*)
+          echo "ASUS fan profile: $(asusctl profile -p 2>/dev/null || echo "unknown")"
+          echo "Usage: power-mode fans [low|medium|high]"
+          ;;
+      esac
+    }
+
     case "''${1:-status}" in
-      powersave|save|low) set_mode powersave ;;
+      powersave|save) set_mode powersave ;;
       balanced|auto) set_mode balanced ;;
-      performance|high) set_mode performance ;;
+      performance) set_mode performance ;;
       toggle) toggle ;;
+      fans) set_fans "''${2:-status}" ;;
       status|*)
         current=$(get_current)
         gov=$(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor)
         epp=$(cat /sys/devices/system/cpu/cpu0/cpufreq/energy_performance_preference 2>/dev/null || echo "n/a")
         turbo_off=$(cat /sys/devices/system/cpu/intel_pstate/no_turbo 2>/dev/null || echo "n/a")
         freq=$(( $(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq) / 1000 ))
+        fan_profile=$(asusctl profile -p 2>/dev/null || echo "n/a")
 
         echo "=== Power Mode ==="
         echo "Current mode:  $current"
@@ -147,12 +175,14 @@ let
         echo "EPP:           $epp"
         echo "Turbo:         $([ "$turbo_off" = "0" ] && echo "enabled" || echo "disabled")"
         echo "Frequency:     $freq MHz"
+        echo "Fan profile:   $fan_profile"
         echo ""
-        echo "Usage: power-mode [powersave|balanced|performance|toggle|status]"
+        echo "Usage: power-mode [powersave|balanced|performance|toggle|fans|status]"
         echo "  powersave   - Minimal power, limited CPU"
         echo "  balanced    - Auto management (default)"
         echo "  performance - Maximum speed"
         echo "  toggle      - Cycle between powersave and balanced"
+        echo "  fans <low|medium|high> - Set fan speed independently"
         ;;
     esac
   '';
