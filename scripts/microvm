@@ -2,10 +2,12 @@
 # microvm - Simple microVM management with timing
 #
 # Usage:
-#   microvm build <name>      Build/rebuild microVM image
+#   microvm build <name>      Build microVM image
 #   microvm start <name>      Start microVM (waits until ready)
 #   microvm stop <name>       Stop microVM
 #   microvm restart <name>    Restart microVM
+#   microvm update <name>     Live switch to already-built config
+#   microvm rebuild <name>    Build + live switch (no restart)
 #   microvm app <name> <cmd>  Launch app in microVM
 #   microvm status [name]     Show status of microVM(s)
 #   microvm list              List all declared microVMs
@@ -1070,33 +1072,26 @@ cmd_switch() {
     fi
 }
 
-# Combined build + switch (no restart)
+# Live switch to already-built configuration
 cmd_update() {
     local vm_name="$1"
     [[ -z "$vm_name" ]] && { log_error "Usage: microvm update <name>"; return 1; }
 
-    log "Updating ${BOLD}${vm_name}${NC} (build + live switch)..."
+    if ! is_running "$vm_name"; then
+        log_error "${vm_name} is not running. Start it first with: microvm start ${vm_name}"
+        return 1
+    fi
+
+    log "Updating ${BOLD}${vm_name}${NC} (live switch)..."
     local start
     start=$(timer_start)
 
-    # Build first
-    cmd_build "$vm_name" || return 1
+    cmd_switch "$vm_name" || return 1
 
-    # If VM is running, switch live; otherwise just report
-    if is_running "$vm_name"; then
-        cmd_switch "$vm_name" || return 1
-
-        local total_time
-        total_time=$(timer_end "$start")
-        echo ""
-        log_success "Update complete in ${BOLD}${total_time}s${NC} (no restart required)"
-    else
-        local total_time
-        total_time=$(timer_end "$start")
-        echo ""
-        log_success "Build complete in ${BOLD}${total_time}s${NC}"
-        echo -e "  ${DIM}VM not running. Start with:${NC} microvm start ${vm_name}"
-    fi
+    local total_time
+    total_time=$(timer_end "$start")
+    echo ""
+    log_success "Update complete in ${BOLD}${total_time}s${NC} (no restart required)"
 }
 
 # Query switch status from VM
@@ -2143,9 +2138,9 @@ ${BOLD}COMMANDS${NC}
     start <vm1> [vm2] ...   Start each microVM
     stop <vm1> [vm2] ...    Stop each microVM
     restart <vm1> [vm2] ... Restart each microVM
-    update <vm1> [vm2] ...  Build + live switch each microVM
+    update <vm1> [vm2] ...  Live switch each microVM (to already-built config)
     purge <vm1> [vm2] ...   Delete all persistent data for each microVM
-    rebuild <vm1> [vm2] ... Build and restart each microVM
+    rebuild <vm1> [vm2] ... Build + live switch each microVM
 
 ${BOLD}FISH ABBREVIATION${NC}
     The shell provides 'mvm' as an abbreviation for 'microvm'.
@@ -2625,12 +2620,13 @@ ${BOLD}USAGE${NC}
 
 ${BOLD}COMMANDS${NC}
   ${BOLD}Lifecycle:${NC}
-    build <name>            Build/rebuild microVM image
+    build <name>            Build microVM image
     start <name>            Start microVM (waits until ready)
     stop <name>             Stop microVM
     restart <name>          Restart microVM
-    update <name>           Build + live switch (no restart)
-    switch <name> [path]    Live switch to new config (no restart)
+    update <name>           Live switch to already-built config (no restart)
+    rebuild <name>          Build + live switch (no restart)
+    switch <name> [path]    Live switch to specified config (no restart)
 
   ${BOLD}Apps & Sessions:${NC}
     app <name> <cmd>        Launch app in microVM
@@ -2732,12 +2728,26 @@ main() {
     shift
 
     case "$cmd" in
-        rebuild|build)
+        build)
             [[ $# -lt 1 ]] && { log_error "Usage: microvm build <name1> [name2] ..."; exit 1; }
             for vm in "$@"; do
                 vm="$(get_vm_name_from_target "$vm")"
                 log "Building ${BOLD}${vm}${NC}..."
                 cmd_build "$vm"
+                echo ""
+            done
+            ;;
+        rebuild)
+            [[ $# -lt 1 ]] && { log_error "Usage: microvm rebuild <name1> [name2] ..."; exit 1; }
+            for vm in "$@"; do
+                vm="$(get_vm_name_from_target "$vm")"
+                log "Rebuilding ${BOLD}${vm}${NC} (build + live switch)..."
+                cmd_build "$vm" || continue
+                if is_running "$vm"; then
+                    cmd_switch "$vm" || continue
+                else
+                    log "VM not running. Use 'microvm start' to launch it."
+                fi
                 echo ""
             done
             ;;
