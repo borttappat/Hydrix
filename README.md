@@ -16,6 +16,8 @@ Hydrix is an options-driven NixOS framework that provides complete network isola
 - [MicroVM Management](#microvm-management)
   - [Task Pentest VMs](#task-pentest-vms-per-engagement)
   - [Files VM (Encrypted Inter-VM Transfer)](#files-vm-encrypted-inter-vm-transfer)
+  - [USB Sandbox](#usb-sandbox-microvm-usb-sandbox)
+  - [Builder VM](#builder-vm-lockdown-mode-builds)
 - [Vsock Communication](#vsock-communication)
 - [VM Store Sharing](#vm-store-sharing)
 - [Build System](#build-system)
@@ -281,6 +283,114 @@ microvm builder build browsing   # Fetch/build in builder VM
 microvm builder build host       # Build host config
 microvm builder status           # Check builder state
 ```
+
+### Builder VM (Lockdown Mode Builds)
+
+The Builder VM enables nix package builds in lockdown mode when the host has no internet access. It fetches dependencies through the router VM and writes build outputs directly to the host's `/nix/store`.
+
+**Architecture:**
+
+```
+Host (Lockdown Mode)                    Builder VM                    Router VM
+┌─────────────────────┐               ┌─────────────────┐            ┌─────────────┐
+│ /nix/store (R/O)    │◄──virtiofs───►│ /nix/store      │──vsock───► │ WiFi (WAN)  │
+│ nix-daemon: STOPPED │  (mounted)    │   (R/W overlay) │  internet  │             │
+└─────────────────────┘               └─────────────────┘            └─────────────┘
+         │                                                                   │
+         │                                                                   │
+         └────────────────────────── nix build outputs ──────────────────────┘
+```
+
+**Setup** in your `machines/<serial>.nix`:
+
+```nix
+hydrix.builder.enable = true;      # Enables Builder VM support
+```
+
+The Builder VM (`microvm-builder`, CID 210) is automatically declared by the framework—no manual VM declaration needed.
+
+**Commands:**
+
+```bash
+# Full workflow (build target, then switch to host)
+microvm builder build browsing      # Build microVM in builder
+microvm builder build host          # Build host config
+
+# Build AND apply host config (preserves current specialisation)
+microvm builder switch
+microvm builder switch administrative  # Switch to specific specialisation
+
+# Prefetch only (keep builder running for batch operations)
+microvm builder fetch browsing
+microvm builder fetch pentest
+microvm builder fetch host
+microvm builder stop               # Stop when done
+
+# Manual control
+microvm builder start       # Start builder (stops host nix-daemon)
+microvm builder shell       # Attach to builder console
+microvm builder status      # Check builder state
+microvm builder stop        # Stop builder (restarts host nix-daemon)
+```
+
+**Named targets:**
+
+| Target | Resolves To | Purpose |
+|--------|-------------|---------|
+| `browsing` | `microvm-browsing` | Browsing VM |
+| `pentest` | `microvm-pentest` | Pentest VM |
+| `dev` | `microvm-dev` | Dev VM |
+| `comms` | `microvm-comms` | Comms VM |
+| `lurking` | `microvm-lurking` | Lurking VM |
+| `router` | `microvm-router` | Router VM |
+| `builder` | `microvm-builder` | Builder VM itself |
+| `host` | Host system | Host NixOS configuration |
+| `.#path` | Raw flake path | e.g., `.#nixosConfigurations.microvm-dev` |
+
+**How it works:**
+
+1. **Start**: Host nix-daemon stops, `/nix/store` remounted R/W
+2. **Build**: Builder evaluates flake from `/mnt/hydrix` (your config)
+3. **Fetch**: Dependencies fetched via router VM (has internet)
+4. **Build**: Compilation happens in Builder with virtiofs store access
+5. **Stop**: Outputs written to host's `/nix/store`, Builder stops
+6. **Switch**: Host nix-daemon restarts, host builds instant (all deps cached)
+
+**Builder shell access:**
+
+```bash
+microvm builder shell
+
+# Inside builder shell:
+nix flake metadata           # Check flake inputs
+nix build .#microvm-browsing # Manual build
+exit                         # Return to host
+```
+
+**Builder status:**
+
+```bash
+microvm builder status
+
+# Output:
+# Builder state: running
+# Process ID: 12345
+# Target: browsing
+# Progress: fetching...
+```
+
+**Recovery if builder crashes:**
+
+```bash
+# Manual recovery if builder is stuck
+microvm stop microvm-builder  # This also restores host nix-daemon
+
+# If store is still rw after builder crash
+sudo mount -o remount,ro /nix/store
+sudo systemctl start nix-daemon
+```
+
+---
 
 ### VM Types
 
@@ -579,6 +689,12 @@ All configuration is done through `hydrix.*` options in your machine config file
         { ssid = "WorkNetwork"; password = "secret2"; priority = 50; }
       ];
     };
+
+    # Iterative network updates:
+    # 1. Connect to new WiFi on router VM console (nmcli / nmtui)
+    # 2. wifi-sync poll  # Compare router vs local config
+    # 3. wifi-sync pull   # Pull credentials into shared/wifi.nix
+    # 4. rebuild          # Apply to router VM
 
     # Mullvad VPN integration
     vpn.mullvad = {
@@ -1268,6 +1384,33 @@ Declared in `hydrix-config/profiles/<name>/meta.nix`, auto-discovered by the fla
 
 Custom profiles start at CID 107+. Use `new-profile <name>` to scaffold one.
 
+**Adding a new profile VM:**
+
+```bash
+# Scaffold new profile (auto-discovers next free CID/workspace)
+new-profile myprofile
+
+# Creates:
+#   profiles/myprofile/meta.nix    # CID, bridge, subnet, workspace, label
+#   profiles/myprofile/default.nix # NixOS config (imports, resources)
+#   profiles/myprofile/packages.nix # Package declarations
+
+# Then enable in your flake.nix:
+"microvm-myprofile" = hydrix.lib.mkMicroVM {
+  profile = "myprofile";
+  hostname = "microvm-myprofile";
+  inherit userProfiles;
+};
+
+# Rebuild and start
+rebuild
+microvm start microvm-myprofile
+```
+
+The `new-profile` script copies from `templates/profiles/_template/`, substitutes `__PLACEHOLDER__` values, and stages the files for git.
+
+**Router VM rebuild required:** Adding a new profile creates a new TAP interface and bridge. The router VM needs its `networks` config updated via rebuild so it can configure the new TAP interface + dnsmasq for that subnet.
+
 ### Infrastructure VMs
 
 Fixed CIDs defined in Hydrix framework modules. **Not user-configurable**, not in `profiles/`, not in the vm-registry. Do not assign these CIDs to profile VMs.
@@ -1477,6 +1620,107 @@ Regular VMs: static .10 IPs on their bridge
 | Home TAP | `mv-files` → `br-files` |
 | Router TAP | `mv-router-file` → `br-files` |
 
+### USB Sandbox (microvm-usb-sandbox)
+
+Ephemeral VM for safely handling USB storage devices. USB drives are passed through via QEMU USB hotplug, isolated from all networks except the files VM.
+
+**Setup** in your `machines/<serial>.nix`:
+
+```nix
+hydrix.microvmHost.vms."microvm-usb-sandbox".enable = true;
+```
+
+Then rebuild and start:
+
+```bash
+rebuild
+microvm start microvm-usb-sandbox
+```
+
+**Host-side USB device pass-through:**
+
+```bash
+# List USB storage devices (format: BUS-ADDR, e.g., 002-003)
+usb list
+
+# Pass device to VM (QEMU USB hotplug)
+usb-sandbox add 002-003
+
+# Detach device from VM
+usb-sandbox remove 002-003
+```
+
+The `usb-sandbox add` command hotplugs the USB storage as `/dev/vdb` (read-only) into the VM via QEMU `drive_add` + `device_add virtio-blk-pci`. The device persists until explicitly removed or VM restart.
+
+**Inside the VM (auto-logged in as `sandbox`):**
+
+```bash
+# List block devices
+usb list
+
+# Scan for filesystems
+usb scan
+
+# Mount partition (e.g., /dev/vdb1)
+usb mount /dev/vdb1
+
+# View mounted files
+ls ~/usb/vdb1/
+
+# Unmount
+usb umount /dev/vdb1
+
+# USB device info
+lsusb
+
+# Block device tree
+lsblk
+```
+
+**File transfer (from host):**
+
+```bash
+# Archive from USB to files VM (encrypted)
+microvm files store usb-sandbox/usb/vdb1/<path>
+
+# Transfer to another VM
+microvm files transfer usb-sandbox/usb/vdb1/<path> dev/<dest>
+```
+
+Paths are relative to `/home/sandbox/` inside the VM. USB drives mount at `/home/sandbox/usb/`.
+
+**Security model:**
+
+| Protection | Status |
+|------------|--------|
+| Network isolation from host | ✓ No network bridge, no internet |
+| Network isolation from other VMs | ✓ Only files VM access (port 8888) |
+| Read-only USB access | ✓ USB passed as `/dev/vdb` read-only |
+| Encrypted file transfers | ✓ AES-256-CBC via files VM |
+| Block device hotplug | ✓ QEMU monitor socket, no libusb on host |
+| **Host USB driver vulnerabilities** | ✗ **Not protected** |
+| **Firmware-level attacks** | ✗ **Not protected** |
+| **Malicious USB peripherals** | ✗ **Not protected** (only storage) |
+
+**What it protects against:**
+- Malicious filesystems on USB drives
+- Auto-run malware
+- Network-based USB attacks from compromised drives
+
+**What it does NOT protect against:**
+- Host kernel vulnerabilities in USB drivers (USB/IP, usb-storage)
+- Malicious USB firmware (BadUSB, Rubber Ducky-style attacks)
+- USB controller exploits
+- Devices masquerading as keyboards/ethernet (only storage passed)
+
+**Usage warnings:**
+- Only pass through **USB storage** devices, not other USB peripherals
+- The USB drive is read-only inside the VM
+- Always scan transferred files before use on trusted systems
+- Consider using Tails or Whonix for untrusted USB devices requiring higher assurance
+
+---
+
 ### In-VM Development (vm-dev workflow)
 
 Test packages without nixos-rebuild using per-package flakes:
@@ -1628,36 +1872,105 @@ nixbuild                # Same as rebuild
 
 ### Builder VM (Lockdown Mode)
 
-When the host has no internet (lockdown mode), use the builder VM to fetch packages:
+The builder VM enables nix builds in lockdown mode when the host has no internet. It fetches dependencies via the router VM and writes build outputs directly to the host's `/nix/store`.
+
+**Commands:**
 
 ```bash
-# Full workflow: start builder -> build -> stop -> build on host
+# Build a single target
 microvm builder build browsing
 microvm builder build host
 
+# Build multiple targets in one session (eval cache stays warm)
+microvm builder build browsing pentest dev
+
+# Build and immediately switch host config
+microvm builder switch                 # Switches to current specialisation
+microvm builder switch administrative  # Switch to specific specialisation
+
+# Prefetch only (keep builder running for batch operations)
+microvm builder fetch browsing
+microvm builder fetch pentest
+microvm builder stop                  # Stop when done
+
 # Manual control
-microvm builder start       # Stops host nix-daemon
-microvm builder fetch <target>
-microvm builder stop        # Restarts host nix-daemon
-microvm builder status
-microvm builder shell       # Console access
+microvm builder start                 # Start builder (stops host nix-daemon)
+microvm builder shell                 # Attach to builder console
+microvm builder status                # Check builder state
+microvm builder stop                  # Stop builder (restarts host nix-daemon)
 ```
 
-**Named targets**:
-- `browsing`, `pentest`, `dev`, `comms`, `lurking` - MicroVMs
-- `router` - Router VM
-- `host` - Host system
-- `.#path` - Raw flake paths
+**Named targets:**
 
-**How it works**:
-1. Host nix-daemon stops (required for SQLite locking)
-2. /nix/store remounted read-write
-3. Builder VM starts with virtiofs access to /nix/store
-4. Builder fetches dependencies via router VM (has internet)
-5. Build outputs written directly to host's /nix/store
-6. Builder stops, store remounted read-only
+| Target | Resolves To |
+|--------|-------------|
+| `browsing` | `microvm-browsing` |
+| `pentest` | `microvm-pentest` |
+| `dev` | `microvm-dev` |
+| `comms` | `microvm-comms` |
+| `lurking` | `microvm-lurking` |
+| `router` | `microvm-router` |
+| `builder` | `microvm-builder` |
+| `host` | Host NixOS config |
+
+**Operational flow:**
+
+```
+microvm builder build browsing
+
+1. Host nix-daemon stops, /nix/store remounted R/W
+2. Builder VM starts with virtiofs /nix/store access
+3. Builder evaluates flake (cached after first build)
+4. Dependencies fetched via router VM (has internet)
+5. Build happens in builder, outputs written to host's /nix/store
+6. Builder stops, /nix/store remounted R/O
 7. Host nix-daemon restarts
-8. Host build is instant (all deps cached)
+8. Host builds packages instantly (all deps already in store)
+```
+
+**Builder shell access:**
+
+```bash
+microvm builder shell
+
+# Inside builder:
+nix flake metadata            # Check flake inputs
+nix build .#microvm-browsing  # Manual build
+exit                          # Return to host, builder stops
+```
+
+**Status checking:**
+
+```bash
+microvm builder status
+
+# Output:
+# Builder state: running
+# Process ID: 12345
+# Target: browsing
+# Progress: building...
+```
+
+**Recovery if builder crashes:**
+
+```bash
+# If builder is stuck
+microvm stop microvm-builder  # This also restores host nix-daemon
+
+# If store is still rw after crash
+sudo mount -o remount,ro /nix/store
+sudo systemctl start nix-daemon
+```
+
+**Persistent eval cache:**
+
+The builder maintains an 8GB persistent volume (`builder-cache.img` at `/root/.cache/nix`) that survives restarts. First build after purge is slow (2+ min for flake eval); subsequent builds skip evaluation entirely.
+
+To reset:
+```bash
+microvm builder purge          # Remove builder-cache.img
+microvm builder start          # Rebuild clean cache
+```
 
 ### Libvirt VMs
 
@@ -1743,7 +2056,8 @@ Workspaces are mapped to VMs via the `ws-app` script. Pressing `Super+Return` la
 | WS3 | Browsing VM | Active VM tracking |
 | WS4 | Comms VM | Fixed (microvm-comms) |
 | WS5 | Dev VM | Active VM tracking |
-| WS6-9 | Host | Always host terminal |
+| WS6 | Lurking VM | Fixed (microvm-lurking) |
+| WS7-9 | Host | Always host terminal |
 | WS10 | Router | Serial console |
 
 ### Active VM Tracking
@@ -1873,6 +2187,14 @@ All scripts are wrapped via Nix and available in PATH after installation.
 | `hydrix-switch <mode>` | Live switch between lockdown/administrative/fallback |
 | `hydrix-mode` | Show current mode and available modes |
 | `router-status` | Show router VM and bridge status |
+
+### WiFi Management
+
+| Command | Purpose |
+|---------|---------|
+| `wifi-sync poll` | Query router VM for current networks, compare with local config |
+| `wifi-sync pull` | Pull credentials from router, update `shared/wifi.nix` |
+| `wifi-sync status` | Quick sync status check |
 
 ### MicroVM
 
@@ -2074,7 +2396,3 @@ cat ~/.config/hydrix/scaling.json
 - [secrets/README.md](./secrets/README.md) - Secrets management setup
 
 ---
-
-## License
-
-MIT License - See LICENSE file for details.

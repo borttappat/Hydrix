@@ -651,25 +651,28 @@
     printf "%%{F%s}%s %%{F-}%%{u%s}%%{+u}%d:%02d%%{-u}" "$color_prefix" "$prefix" "$uc" "$hours" "$mins"
   '';
 
-  # WORKSPACE DESC: Shows current workspace description with underline
+  # WORKSPACE DESC: Shows current workspace name from vm-registry with underline
+  # Reads from /etc/hydrix/vm-registry.json at runtime - no hardcoded values
   workspaceDescScript = pkgs.writeShellScript "polybar-workspace-desc" ''
         # Get current workspace number
         ws=$(${pkgs.i3}/bin/i3-msg -t get_workspaces 2>/dev/null | ${pkgs.jq}/bin/jq -r '.[] | select(.focused==true) | .name' | head -1)
 
-        # Look up description from user-configured workspaceDescriptions
+        VM_REGISTRY="/etc/hydrix/vm-registry.json"
+
+        # Special workspaces (not in vm-registry)
         case "$ws" in
-    ${workspaceDescCases}
-        *) desc="" ;;
+          1)  desc="HOST"; return ;;
+          10) desc="ROUTER"; return ;;
         esac
 
-        # Fallback: look up label from VM registry (covers auto-discovered VM types)
-        if [ -z "$desc" ]; then
-          VM_REGISTRY="/etc/hydrix/vm-registry.json"
-          if [[ -f "$VM_REGISTRY" ]]; then
-            desc=$(${jq} -r --argjson w "$ws" \
-              'to_entries[] | select(.value.workspace == $w) | .value.label // ""' \
-              "$VM_REGISTRY" 2>/dev/null | head -1)
-          fi
+        # Look up workspace name from vm-registry
+        # Returns the VM label for occupied workspaces, empty for others
+        if [[ -f "$VM_REGISTRY" ]]; then
+          desc=$(${jq} -r --argjson w "$ws" \
+            'to_entries[] | select(.value.workspace == $w) | .value.label // ""' \
+            "$VM_REGISTRY" 2>/dev/null | head -1)
+        else
+          desc=""
         fi
 
         if [ -n "$desc" ]; then
