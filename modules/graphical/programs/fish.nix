@@ -161,7 +161,7 @@ in {
             nsp = "nix-shell --run fish -p";
 
             # Nix flake update
-            nfu = "nix flake update"
+            nfu = "nix flake update";
 
             # System
             reboot = "systemctl reboot";
