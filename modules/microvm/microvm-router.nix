@@ -84,7 +84,7 @@
     [Interface]
     PrivateKey = ${vpnCfg.mullvad.privateKey}
     Address = ${vpnCfg.mullvad.address}
-    DNS = 10.64.0.1
+    Table = off
 
     [Peer]
     PublicKey = ${node.publicKey}
