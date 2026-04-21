@@ -835,11 +835,16 @@ in {
       path = [ pkgs.wireguard-tools pkgs.iproute2 vpnAssign ];
       serviceConfig = { Type = "oneshot"; RemainAfterExit = true; };
       script =
-        # Connect each configured tunnel and assign its bridge
+        # Connect each configured tunnel — fall back to direct if wg-quick fails
+        # so a failed tunnel never leaves a bridge with an empty routing table
         lib.concatMapStrings (bridge: ''
           echo "Connecting mullvad-${bridge}..."
-          wg-quick up mullvad-${bridge} || echo "Warning: mullvad-${bridge} failed to connect"
-          vpn-assign ${bridge} mullvad-${bridge}
+          if wg-quick up mullvad-${bridge}; then
+            vpn-assign ${bridge} mullvad-${bridge}
+          else
+            echo "Warning: mullvad-${bridge} failed to connect, routing ${bridge} direct"
+            vpn-assign ${bridge} direct
+          fi
         '') (lib.attrNames mullvadBridges)
         # All other known networks go direct
         + lib.concatMapStrings (n:
