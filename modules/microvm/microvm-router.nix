@@ -80,9 +80,16 @@
   hasMullvad = vpnCfg.mullvad.enable && vpnCfg.mullvad.bridges != {};
   mullvadBridges = vpnCfg.mullvad.bridges; # attrset: bridge-name → conf-file path
 
-  # Inject Table=off into a conf file so wg-quick doesn't touch the main routing table
+  # Sanitise a Mullvad conf for router use:
+  #   - Table = off        so wg-quick doesn't touch the main routing table
+  #   - strip IPv6 address (router has enableIPv6 = false)
+  #   - strip DNS line     (router uses dnsmasq, not wg-quick DNS management)
   injectTableOff = f: pkgs.runCommand (builtins.baseNameOf f) { } ''
-    ${pkgs.gnused}/bin/sed '/^\[Interface\]/a Table = off' ${f} > $out
+    ${pkgs.gnused}/bin/sed \
+      -e '/^\[Interface\]/a Table = off' \
+      -e '/^Address/s/,.*$//' \
+      -e '/^DNS/d' \
+      ${f} > $out
   '';
 
   # Named derivations so the boot-assign service can reference them in path

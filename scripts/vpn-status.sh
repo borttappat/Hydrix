@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 # Quick VPN status check for Router VM
-# Wrapper around vpn-assign status with watch support
 #
 # Usage:
 #   vpn-status        # One-time status
@@ -9,32 +8,29 @@
 
 set -euo pipefail
 
-SCRIPT_DIR="$(dirname "$(readlink -f "$0")")"
-
 case "${1:-}" in
     -w|--watch)
-        watch -n 2 -c "$SCRIPT_DIR/vpn-assign.sh status"
+        watch -n 2 -c vpn-assign status
         ;;
     -j|--json)
-        # JSON output for programmatic use
         STATE_DIR="/var/lib/hydrix-vpn"
+        NETWORK_MAP_FILE="/etc/hydrix-router/network-map"
         echo "{"
         echo "  \"networks\": {"
         first=true
-        for network in pentest comms browse dev lurking; do
+        while IFS=: read -r name table_id subnet; do
+            [[ -z "$name" || "$name" =~ ^# ]] && continue
             if [ "$first" = false ]; then echo ","; fi
             first=false
             assignment="blocked"
-            if [ -f "$STATE_DIR/${network}.assignment" ]; then
-                assignment=$(cat "$STATE_DIR/${network}.assignment")
-            fi
-            printf "    \"%s\": \"%s\"" "$network" "$assignment"
-        done
+            [ -f "$STATE_DIR/${name}.assignment" ] && assignment=$(cat "$STATE_DIR/${name}.assignment")
+            printf "    \"%s\": \"%s\"" "$name" "$assignment"
+        done < "$NETWORK_MAP_FILE"
         echo ""
         echo "  },"
         echo "  \"vpn_tunnels\": ["
         first=true
-        for iface in $(ip -o link show 2>/dev/null | awk -F': ' '{print $2}' | grep -E '^(wg-|tun)' || true); do
+        for iface in $(ip -o link show 2>/dev/null | awk -F': ' '{print $2}' | grep -E '^(mullvad-|wg-|tun)' || true); do
             if [ "$first" = false ]; then echo ","; fi
             first=false
             printf "    \"%s\"" "$iface"
@@ -44,6 +40,6 @@ case "${1:-}" in
         echo "}"
         ;;
     *)
-        "$SCRIPT_DIR/vpn-assign.sh" status
+        vpn-assign status
         ;;
 esac
