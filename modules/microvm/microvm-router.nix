@@ -76,21 +76,13 @@
   usePciPassthrough = wanMode == "pci-passthrough" || (wanMode == "auto" && wifiPciAddress != "");
   useEthernetWan    = wanMode == "macvtap"         || (wanMode == "auto" && wifiPciAddress == "");
 
-  # Mullvad VPN configuration from options
-  hasMullvad = vpnCfg.mullvad.enable && vpnCfg.mullvad.privateKey != "";
+  # Mullvad VPN active when enabled and at least one bridge configured
+  hasMullvad = vpnCfg.mullvad.enable && vpnCfg.mullvad.bridges != {};
+  mullvadBridges = vpnCfg.mullvad.bridges; # attrset: bridge-name → conf-file path
 
-  # Generate WireGuard config content for a Mullvad exit node
-  mkMullvadConfig = name: node: ''
-    [Interface]
-    PrivateKey = ${vpnCfg.mullvad.privateKey}
-    Address = ${vpnCfg.mullvad.address}
-    Table = off
-
-    [Peer]
-    PublicKey = ${node.publicKey}
-    Endpoint = ${node.server}:51820
-    AllowedIPs = 0.0.0.0/0
-    PersistentKeepalive = 25
+  # Inject Table=off into a conf file so wg-quick doesn't touch the main routing table
+  injectTableOff = f: pkgs.runCommand (builtins.baseNameOf f) { } ''
+    ${pkgs.gnused}/bin/sed '/^\[Interface\]/a Table = off' ${f} > $out
   '';
 
   vmName = config.networking.hostName;
@@ -445,29 +437,29 @@ in {
     # Merged with Mullvad configs below using lib.mkMerge
     environment.etc = lib.mkMerge [
       {
+        # Routing tables — one per profile, using vsockCid as table ID (unique, stable)
         "iproute2/rt_tables".text = ''
           255     local
           254     main
           253     default
           0       unspec
-          # Hydrix VPN routing tables
-          100     pentest
-          101     comms
-          102     browse
-          103     dev
-          104     lurking
-        '';
+          # Hydrix profile routing tables (ID = vsockCid)
+        '' + lib.concatMapStrings (n:
+          "  ${toString n.vsockCid}     ${n.name}\n"
+        ) allNetworks;
+
+        # Runtime network map for vpn-assign: name:tableId:subnet
+        "hydrix-router/network-map".text =
+          lib.concatMapStrings (n:
+            "${n.name}:${toString n.vsockCid}:${n.subnet}.0/24\n"
+          ) allNetworks;
       }
-      # Mullvad WireGuard configs (if available)
+      # Mullvad WireGuard conf files — Table=off injected, copied to /etc/wireguard/
       (lib.mkIf hasMullvad (
-        lib.mapAttrs' (name: node: {
-          name = "wireguard/mullvad-${name}.conf";
-          value = {
-            text = mkMullvadConfig name node;
-            mode = "0600";
-          };
-        })
-        vpnCfg.mullvad.exitNodes
+        lib.mapAttrs' (bridge: f: {
+          name = "wireguard/mullvad-${bridge}.conf";
+          value = { source = injectTableOff f; mode = "0600"; };
+        }) mullvadBridges
       ))
     ];
 
@@ -825,6 +817,31 @@ in {
         echo "  - VMs cannot: SSH, HTTP, or access any router services"
         echo "  - Inter-VM traffic: blocked (except br-shared)"
       '';
+    };
+
+    # ===== Mullvad Boot-Assign Service =====
+    # Connects configured tunnels and routes bridges at startup.
+    # Generated from vpn.mullvad.bridges — no hardcoded network names.
+    systemd.services.vpn-boot-assign = lib.mkIf hasMullvad {
+      description = "Apply Mullvad VPN bridge assignments";
+      after = [ "network-online.target" "router-firewall.service" ];
+      wants = [ "network-online.target" ];
+      wantedBy = [ "multi-user.target" ];
+      path = [ pkgs.wireguard-tools pkgs.iproute2 ];
+      serviceConfig = { Type = "oneshot"; RemainAfterExit = true; };
+      script =
+        # Connect each configured tunnel and assign its bridge
+        lib.concatMapStrings (bridge: ''
+          echo "Connecting mullvad-${bridge}..."
+          wg-quick up mullvad-${bridge} 2>/dev/null || echo "Warning: mullvad-${bridge} failed to connect"
+          vpn-assign ${bridge} mullvad-${bridge}
+        '') (lib.attrNames mullvadBridges)
+        # All other known networks go direct
+        + lib.concatMapStrings (n:
+          lib.optionalString (!lib.hasAttr n.name mullvadBridges) ''
+            vpn-assign ${n.name} direct
+          ''
+        ) allNetworks;
     };
 
     # ===== WiFi Sync Service =====
