@@ -117,7 +117,7 @@ Each TAP interface is created by the host before the router VM starts, then atta
 
 ### Stable Fallback Router (`microvm-router-stable`)
 
-A second router VM is always declared alongside the main router. It serves as an immutable fallback that starts automatically if the main router fails.
+A second router VM is always declared alongside the main router. It is a manual "break glass" fallback — never auto-starts. Use it when a rebuild breaks the main router and you need network access restored quickly.
 
 **Design goals:** the stable router is intentionally never casually modified. Rebuild it explicitly when you want to promote a known-good config as the new baseline. The main router is where you tune and experiment.
 
@@ -128,19 +128,20 @@ A second router VM is always declared alongside the main router. It serves as an
 | TAP prefix | `mv-router-*` | `mv-rts-*` |
 | Framework MACs | `02:00:00:01:XX:01` | `02:00:00:03:XX:01` |
 | Extra profile MACs | `02:00:00:02:XX:01` | `02:00:00:04:XX:01` |
-| Autostart | configurable | `false` (failover only) |
+| Autostart | configurable | `false` (manual only) |
 | VPN support | yes | no (intentionally minimal) |
 | Config generation | runtime bash scripts | fully declarative (build-time) |
 
-**How failover works:**
+**How it works:**
 
 ```
-Main router fails (VFIO error, crash, bad config)
-  → systemd OnFailure= triggers microvm@microvm-router-stable
-  → Conflicts= ensures only one router runs at a time (VFIO can't be shared)
+Main router broken (bad config, crash, etc.)
+  → manually start stable: microvm start router-stable
+  → Conflicts= stops the main router if still running (VFIO can't be shared)
 
-Main router manually started while stable is running:
-  → systemd Conflicts= stops the stable router first
+Done with stable, back to main router:
+  → microvm stop router-stable
+  → microvm start router
 ```
 
 **TAP naming:** the stable router uses a separate `mv-rts-*` TAP prefix so both VMs can coexist in config without conflicting. Both sets of TAPs attach to the **same bridges** — the bridges are shared infrastructure, only the router connected to them changes during failover.
@@ -597,7 +598,7 @@ Hydrix auto-detects your config with this priority:
 | `hydrix.lib.mkHost` | Create host configuration |
 | `hydrix.lib.mkMicroVM` | Create MicroVM configuration |
 | `hydrix.lib.mkMicrovmRouter` | Create MicroVM router (main, tunable) |
-| `hydrix.lib.mkMicrovmRouterStable` | Create stable fallback router (auto-starts on main router failure) |
+| `hydrix.lib.mkMicrovmRouterStable` | Create stable fallback router (manual "break glass", never auto-starts) |
 | `hydrix.lib.mkMicrovmBuilder` | Create builder VM for lockdown mode |
 | `hydrix.lib.mkVM` | Create libvirt VM (for images) |
 | `hydrix.lib.mkLibvirtRouter` | Create libvirt router (fallback) |
