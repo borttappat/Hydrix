@@ -15,10 +15,12 @@
 # Hostname:      microvm-router-stable
 #
 # Host-side wiring (microvm-host.nix):
-#   microvm@microvm-router    → OnFailure=microvm@microvm-router-stable.service
 #   microvm@microvm-router-stable → Conflicts=microvm@microvm-router.service
-#   autostart = false  (starts only via OnFailure or manually)
+#   autostart = false  — manual-only "break glass" fallback
 #   added to infrastructureVMs (available in lockdown mode)
+#
+# To launch: microvm start router-stable
+# (stops the main router if running, then starts stable)
 {
   config,
   lib,

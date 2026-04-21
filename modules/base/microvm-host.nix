@@ -96,7 +96,7 @@ in {
       hydrix.microvmHost.vms."microvm-router" = {
         enable = lib.mkDefault true;
       };
-      # Stable router: always declared, never autostarts — triggered by OnFailure on main router
+      # Stable router: always declared, never autostarts — manual "break glass" fallback only
       hydrix.microvmHost.vms."microvm-router-stable" = {
         enable = lib.mkDefault true;
         autostart = lib.mkDefault false;
@@ -307,20 +307,17 @@ in {
       }) (lib.filterAttrs (_: v: v.enable) cfg.vms)))
 
       # Router MicroVM needs to run as root for VFIO PCI passthrough
-      # Main router: triggers stable router on failure; conflicts with stable (VFIO)
       (lib.mkIf routerEnabled {
         "microvm@microvm-router" = {
           serviceConfig = {
             User = lib.mkForce "root";
             Group = lib.mkForce "root";
           };
-          unitConfig = lib.mkIf stableRouterEnabled {
-            OnFailure = "microvm@microvm-router-stable.service";
-          };
         };
       })
 
-      # Stable router: root for VFIO, conflicts with main router (can't share WiFi card)
+      # Stable router: root for VFIO, conflicts with main router (can't share WiFi card).
+      # Never auto-starts — launch manually with: microvm start router-stable
       (lib.mkIf stableRouterEnabled {
         "microvm@microvm-router-stable" = {
           serviceConfig = {
