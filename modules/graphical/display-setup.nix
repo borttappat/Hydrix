@@ -774,7 +774,7 @@
     echo "$(${pkgs.coreutils}/bin/date)" > /tmp/display-hotplug.trigger
   '';
 in {
-  config = lib.mkIf cfg.enable {
+  config = lib.mkIf (cfg.enable && config.hydrix.i3.enable) {
     # Make the script available system-wide
     environment.systemPackages = [
       (pkgs.runCommand "display-setup" {} ''

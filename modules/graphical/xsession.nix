@@ -189,7 +189,7 @@ let
   '';
 
 in {
-  config = lib.mkIf config.hydrix.graphical.enable {
+  config = lib.mkIf (config.hydrix.graphical.enable && config.hydrix.i3.enable) {
     home-manager.users.${username} = { pkgs, config, ... }: {
       # X session configuration
       xsession = {

@@ -3,7 +3,7 @@
 # Locks all VM keybindings to a single VM type regardless of workspace.
 # Workspaces 1 (host) and 10 (router) are never overridden.
 #
-{ pkgs, ... }:
+{ config, lib, pkgs, ... }:
 let
   VM_REGISTRY = "/etc/hydrix/vm-registry.json";
 
@@ -78,6 +78,6 @@ let
 
     exec ${focus}/bin/focus "$selected"
   '';
-in {
+in lib.mkIf config.hydrix.i3.enable {
   environment.systemPackages = [ focus focus-rofi ];
 }

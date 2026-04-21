@@ -182,7 +182,7 @@ let
     alacritty-dpi --class floating -o window.position.x=$current_x -o window.position.y=$current_y &
   '';
 in {
-  config = lib.mkIf config.hydrix.graphical.enable {
+  config = lib.mkIf (config.hydrix.graphical.enable && config.hydrix.i3.enable) {
     environment.systemPackages = [
       hydrix-brightness
       hydrix-vibrancy

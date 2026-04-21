@@ -15,7 +15,7 @@ let
   cfg = config.hydrix.graphical;
 in
 {
-  config = lib.mkIf cfg.enable {
+  config = lib.mkIf (cfg.enable && config.hydrix.i3.enable) {
     services.xserver.displayManager.startx.enable = true;
     services.xserver.windowManager.i3.enable = true;
     services.xserver.windowManager.i3.package = pkgs.i3;

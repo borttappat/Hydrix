@@ -236,7 +236,7 @@ let
   '';
 
 in {
-  config = lib.mkIf config.hydrix.graphical.enable {
+  config = lib.mkIf (config.hydrix.graphical.enable && config.hydrix.i3.enable) {
     # Only enable picom when compositor is enabled and not in a VM
     home-manager.users.${username} = { pkgs, ... }: {
       # "none" mode: Use Home Manager services.picom (no animations, fading only)

@@ -442,7 +442,7 @@ EOF
   '';
 
 in {
-  config = lib.mkIf config.hydrix.graphical.enable {
+  config = lib.mkIf (config.hydrix.graphical.enable && config.hydrix.i3.enable) {
     environment.systemPackages = [ hostRofi ];
 
     home-manager.users.${username} = { pkgs, ... }: {

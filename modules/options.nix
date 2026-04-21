@@ -431,38 +431,19 @@ in {
         mullvad = {
           enable = lib.mkEnableOption "Mullvad VPN integration";
 
-          privateKey = lib.mkOption {
-            type = lib.types.str;
-            default = "";
-            description = "WireGuard private key for Mullvad";
-          };
-
-          address = lib.mkOption {
-            type = lib.types.str;
-            default = "";
-            description = "Assigned Mullvad VPN address (e.g., 10.65.x.x/32)";
-          };
-
-          exitNodes = lib.mkOption {
-            type = lib.types.attrsOf (lib.types.submodule {
-              options = {
-                server = lib.mkOption {
-                  type = lib.types.str;
-                  description = "Server hostname or IP";
-                };
-                publicKey = lib.mkOption {
-                  type = lib.types.str;
-                  description = "Server public key";
-                };
-              };
-            });
+          bridges = lib.mkOption {
+            type = lib.types.attrsOf lib.types.path;
             default = {};
-            description = "Mullvad exit nodes configuration";
+            description = ''
+              Map of bridge name to Mullvad WireGuard conf file.
+              At router boot, each bridge is auto-connected and routed through
+              its tunnel. Bridges omitted from this map go direct (no VPN).
+              Table = off is injected automatically.
+              Valid keys: pentest, comms, browse, dev, lurking
+            '';
             example = {
-              se-sto = {
-                server = "se-sto-wg-001.relays.mullvad.net";
-                publicKey = "...";
-              };
+              browse  = ./mullvad-browsing.conf;
+              pentest = ./mullvad-pentest.conf;
             };
           };
         };
@@ -1729,6 +1710,35 @@ in {
           description = "Splash font (null = CozetteVector)";
         };
       };
+    };
+  };
+
+  # =========================================================================
+  # WINDOW MANAGER OPTIONS
+  # =========================================================================
+
+  options.hydrix.i3 = {
+    enable = lib.mkOption {
+      type = lib.types.bool;
+      default = false;
+      description = ''
+        Enable the i3/X11 window manager stack.
+        Activates: i3, polybar, rofi, picom, xsession, display-setup, focus-mode.
+        Set true in shared/graphical.nix to preserve the current X11 setup.
+        Set false (with hydrix.hyprland.enable = true) to switch to Wayland.
+      '';
+    };
+  };
+
+  options.hydrix.hyprland = {
+    enable = lib.mkOption {
+      type = lib.types.bool;
+      default = false;
+      description = ''
+        Enable the Hyprland/Wayland window manager stack.
+        Activates: Hyprland, Waybar, wofi, hypridle, hyprlock, hypr-focus-daemon.
+        Can be true alongside hydrix.i3.enable during transition testing.
+      '';
     };
   };
 

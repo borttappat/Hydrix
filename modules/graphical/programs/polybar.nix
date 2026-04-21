@@ -2210,7 +2210,7 @@
     ${commonModules}
   '';
 in {
-  config = lib.mkIf config.hydrix.graphical.enable {
+  config = lib.mkIf (config.hydrix.graphical.enable && config.hydrix.i3.enable) {
     home-manager.users.${username} = {pkgs, ...}: {
       # Install polybar package but DON'T use services.polybar
       # display-setup handles startup with runtime DPI scaling
