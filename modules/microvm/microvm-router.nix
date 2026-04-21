@@ -445,13 +445,14 @@ in {
           0       unspec
           # Hydrix profile routing tables (ID = vsockCid)
         '' + lib.concatMapStrings (n:
-          "  ${toString n.vsockCid}     ${n.name}\n"
+          "  ${lib.last (lib.splitString "." n.subnet)}     ${n.name}\n"
         ) allNetworks;
 
         # Runtime network map for vpn-assign: name:tableId:subnet
+        # Table ID = subnet last octet (e.g. 192.168.102 → 102), same as CID by convention
         "hydrix-router/network-map".text =
           lib.concatMapStrings (n:
-            "${n.name}:${toString n.vsockCid}:${n.subnet}.0/24\n"
+            "${n.name}:${lib.last (lib.splitString "." n.subnet)}:${n.subnet}.0/24\n"
           ) allNetworks;
       }
       # Mullvad WireGuard conf files — Table=off injected, copied to /etc/wireguard/
