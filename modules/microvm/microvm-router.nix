@@ -905,7 +905,6 @@ in {
 
     # ===== Packages =====
     environment.systemPackages = with pkgs; [
-      wireguard-tools
       openvpn
       iproute2
       iptables
@@ -926,8 +925,8 @@ in {
       networkmanager
       termshark
       bandwhich
-
-      # VPN management scripts
+    ] ++ lib.optionals hasMullvad [
+      wireguard-tools
       (writeShellScriptBin "vpn-assign" (builtins.readFile ../../scripts/vpn-assign.sh))
       (writeShellScriptBin "vpn-status" (builtins.readFile ../../scripts/vpn-status.sh))
     ];
