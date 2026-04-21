@@ -85,6 +85,10 @@
     ${pkgs.gnused}/bin/sed '/^\[Interface\]/a Table = off' ${f} > $out
   '';
 
+  # Named derivations so the boot-assign service can reference them in path
+  vpnAssign = pkgs.writeShellScriptBin "vpn-assign" (builtins.readFile ../../scripts/vpn-assign.sh);
+  vpnStatus = pkgs.writeShellScriptBin "vpn-status" (builtins.readFile ../../scripts/vpn-status.sh);
+
   vmName = config.networking.hostName;
   extraNetworks = cfg.networking.extraNetworks;
   profileNetworks = cfg.networking.profileNetworks;
@@ -828,13 +832,13 @@ in {
       after = [ "network-online.target" "router-firewall.service" ];
       wants = [ "network-online.target" ];
       wantedBy = [ "multi-user.target" ];
-      path = [ pkgs.wireguard-tools pkgs.iproute2 ];
+      path = [ pkgs.wireguard-tools pkgs.iproute2 vpnAssign ];
       serviceConfig = { Type = "oneshot"; RemainAfterExit = true; };
       script =
         # Connect each configured tunnel and assign its bridge
         lib.concatMapStrings (bridge: ''
           echo "Connecting mullvad-${bridge}..."
-          wg-quick up mullvad-${bridge} 2>/dev/null || echo "Warning: mullvad-${bridge} failed to connect"
+          wg-quick up mullvad-${bridge} || echo "Warning: mullvad-${bridge} failed to connect"
           vpn-assign ${bridge} mullvad-${bridge}
         '') (lib.attrNames mullvadBridges)
         # All other known networks go direct
@@ -945,8 +949,8 @@ in {
       bandwhich
     ] ++ lib.optionals hasMullvad [
       wireguard-tools
-      (writeShellScriptBin "vpn-assign" (builtins.readFile ../../scripts/vpn-assign.sh))
-      (writeShellScriptBin "vpn-status" (builtins.readFile ../../scripts/vpn-status.sh))
+      vpnAssign
+      vpnStatus
     ];
 
     # ===== Tmpfiles =====
