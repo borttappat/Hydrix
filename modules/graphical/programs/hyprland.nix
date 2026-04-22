@@ -102,6 +102,7 @@ in lib.mkIf (cfg.enable && config.hydrix.hyprland.enable) {
           disable_hyprland_logo    = true;
           disable_splash_rendering = true;
           focus_on_activate        = true;
+          font_family              = cfg.font.family;
         };
 
         # ── Variables ────────────────────────────────────────────────────────
