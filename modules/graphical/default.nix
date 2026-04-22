@@ -55,6 +55,9 @@ in {
       stylix.enable = true;
       home-manager.backupFileExtension = "hm-backup";
 
+      # Required when any home-manager module enables xdg.portal (e.g. Hyprland)
+      environment.pathsToLink = [ "/share/applications" "/share/xdg-desktop-portal" ];
+
       # PAM service for i3lock-color authentication
       security.pam.services.i3lock.enable = true;
 
