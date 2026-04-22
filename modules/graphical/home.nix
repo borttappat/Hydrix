@@ -27,6 +27,7 @@ in {
     ./programs/alacritty.nix
     ./programs/fish.nix
     ./programs/i3.nix
+    ./programs/hyprland.nix
     ./programs/polybar.nix
     ./programs/rofi.nix
     ./programs/dunst.nix

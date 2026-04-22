@@ -18,6 +18,7 @@ in
   imports = [
     # Window manager and desktop environment
     ./wm/i3.nix
+    ./wm/hyprland.nix
     ./wm/focus-mode.nix
 
     # Shell configuration (fish, starship)
