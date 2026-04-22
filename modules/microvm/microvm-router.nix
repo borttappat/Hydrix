@@ -469,7 +469,7 @@ in {
       # Mullvad WireGuard conf files — Table=off injected, copied to /etc/wireguard/
       (lib.mkIf hasMullvad (
         lib.mapAttrs' (bridge: f: {
-          name = "wireguard/mullvad-${bridge}.conf";
+          name = "wireguard/wg-${bridge}.conf";
           value = { source = injectTableOff f; mode = "0600"; };
         }) mullvadBridges
       ))
@@ -845,11 +845,11 @@ in {
         # Connect each configured tunnel — fall back to direct if wg-quick fails
         # so a failed tunnel never leaves a bridge with an empty routing table
         lib.concatMapStrings (bridge: ''
-          echo "Connecting mullvad-${bridge}..."
-          if wg-quick up mullvad-${bridge}; then
-            vpn-assign ${bridge} mullvad-${bridge}
+          echo "Connecting wg-${bridge}..."
+          if wg-quick up wg-${bridge}; then
+            vpn-assign ${bridge} wg-${bridge}
           else
-            echo "Warning: mullvad-${bridge} failed to connect, routing ${bridge} direct"
+            echo "Warning: wg-${bridge} failed to connect, routing ${bridge} direct"
             vpn-assign ${bridge} direct
           fi
         '') (lib.attrNames mullvadBridges)

@@ -222,7 +222,7 @@ list_mullvad() {
     echo -e "${CYAN}=== Mullvad Exit Nodes ===${NC}"
     echo ""
     local found=false
-    for conf in /etc/wireguard/mullvad-*.conf; do
+    for conf in /etc/wireguard/wg-*.conf; do
         [ -f "$conf" ] || continue
         found=true
         local name endpoint active
