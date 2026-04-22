@@ -1,64 +1,38 @@
-# Mullvad VPN Configuration for Hydrix Router
-# Copy this file to your hydrix-config as vpn/mullvad.nix and fill in credentials
+# Mullvad VPN Configuration
 #
-# To get your credentials:
-# 1. Log into https://mullvad.net/account
-# 2. Go to "WireGuard configuration"
-# 3. Generate a key pair or use existing
-# 4. Note your private key and assigned IP address
-# 5. Get public keys from: https://mullvad.net/servers/
+# HOW TO SET UP:
+#   1. Log into https://mullvad.net → Account → WireGuard configuration
+#   2. Select a country, city, and server — download the .conf file
+#   3. Place the downloaded file in ~/hydrix-config/vpn/ with a descriptive name:
+#        ~/hydrix-config/vpn/mullvad-browsing.conf   ← exit node for browsing VM
+#        ~/hydrix-config/vpn/mullvad-pentest.conf    ← exit node for pentest VM
+#        ~/hydrix-config/vpn/mullvad-comms.conf      ← exit node for comms VM
+#   4. Copy this file to vpn/mullvad.nix and add each .conf to the bridges map below
+#   5. Wire it into your router in flake.nix (see the commented example there)
+#   6. Set enable = true and rebuild the router:
+#        nix flake update && microvm build microvm-router && microvm restart microvm-router
 #
-# This file should be gitignored - your credentials stay local
+# Each bridge can use a DIFFERENT exit node (different country/server per VM).
+# Download one .conf per VM from Mullvad — they can share the same key pair.
+# Table = off, IPv6, and DNS lines are automatically stripped at build time.
 #
-# Usage in your hydrix-config flake.nix or machine config:
-#   hydrix.router.vpn.mullvad = import ./vpn/mullvad.nix;
+# RUNTIME MANAGEMENT (from router console, no rebuild needed):
+#   vpn-assign status                       # Show all bridge assignments
+#   vpn-assign browsing direct              # Bypass VPN for browsing VM
+#   vpn-assign browsing wg-browsing         # Re-enable VPN for browsing VM
+#   vpn-assign --persistent pentest direct  # Persist across reboots
+#   vpn-assign list-mullvad                 # List configured exit nodes
+#
+# Valid bridge names: browsing, pentest, comms, dev, lurking
+# Bridges omitted from the map go direct (no VPN, no kill switch).
 {
-  enable = true;
+  # Set to true once .conf files are in place and bridges map is filled in
+  enable = false;
 
-  # Your Mullvad WireGuard private key
-  privateKey = "YOUR_PRIVATE_KEY_HERE";
-
-  # Your assigned Mullvad IP address (from account page)
-  # Format: 10.x.x.x/32
-  address = "10.x.x.x/32";
-
-  # Exit nodes to generate configs for
-  # Each becomes a WireGuard interface on the router: mullvad-se, mullvad-de, etc.
-  # Server hostnames and public keys from: https://mullvad.net/servers/
-  exitNodes = {
-    # Sweden - Stockholm (e.g. for surfing/banking)
-    se = {
-      server = "se-sto-wg-001.relays.mullvad.net";
-      publicKey = "SERVER_PUBLIC_KEY_SE";
-    };
-    # Germany - Frankfurt (e.g. for lurking/privacy)
-    de = {
-      server = "de-fra-wg-001.relays.mullvad.net";
-      publicKey = "SERVER_PUBLIC_KEY_DE";
-    };
-    # Switzerland - Zurich
-    ch = {
-      server = "ch-zrh-wg-001.relays.mullvad.net";
-      publicKey = "SERVER_PUBLIC_KEY_CH";
-    };
-    # United States - New York
-    us = {
-      server = "us-nyc-wg-001.relays.mullvad.net";
-      publicKey = "SERVER_PUBLIC_KEY_US";
-    };
+  bridges = {
+    # browsing = ./mullvad-browsing.conf;
+    # pentest  = ./mullvad-pentest.conf;
+    # comms    = ./mullvad-comms.conf;
+    # lurking  = ./mullvad-lurking.conf;
   };
-
-  # Per-bridge VPN assignments are handled at runtime via vpn-assign on the router:
-  #   vpn-assign browse mullvad-se       # Route browsing through Sweden
-  #   vpn-assign lurking mullvad-de      # Route lurking through Germany
-  #   vpn-assign --persistent browse mullvad-se  # Persist across reboots
-  #
-  # Defaults (when Mullvad is enabled):
-  #   pentest = direct     (needs direct WAN)
-  #   comms   = mullvad-se
-  #   browse  = mullvad-ch
-  #   dev     = direct
-  #   lurking = mullvad-ch
-  #
-  # Override defaults in libvirt-router.nix vpn-persistent-load service
 }
