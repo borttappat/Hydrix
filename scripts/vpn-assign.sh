@@ -87,9 +87,17 @@ update_routing() {
     fi
 
     local table="${ROUTING_TABLES[$network]}"
+    local net_subnet="${NETWORK_SUBNETS[$network]}"
     ensure_ip_rules
 
     ip route flush table "$table" 2>/dev/null || true
+
+    # Re-add the directly-connected subnet route so router services (dnsmasq, DHCP)
+    # sourcing from the bridge IP are not routed into the VPN/policy table.
+    local net_iface
+    net_iface=$(ip route show table main scope link | awk -v pfx="$net_subnet" \
+        '$1==pfx{for(i=2;i<=NF;i++) if($i=="dev"){print $(i+1); exit}}')
+    [ -n "$net_iface" ] && ip route add "$net_subnet" dev "$net_iface" table "$table" 2>/dev/null || true
 
     case "$target" in
         blocked)
