@@ -30,12 +30,15 @@ in {
     environment.systemPackages = with pkgs; [
       hyprland
       hyprpicker         # Color picker (Wayland-native)
+      hyprlock           # Screen locker
       wl-clipboard       # wl-copy / wl-paste
       wlr-randr          # xrandr equivalent for wlroots
       grim               # Screenshot
       slurp              # Region select (for grim)
       dunst              # Notifications (Wayland-native since v1.7)
       libnotify
+      waybar             # Status bar
+      wofi               # Launcher (replaces rofi)
 
       # Waypipe + socat for VM app forwarding
       waypipe

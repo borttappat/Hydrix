@@ -646,12 +646,13 @@ in {
   config = lib.mkIf (cfg.enable && cfg.scaling.auto) {
     environment.systemPackages = [ hydrixScaleScript ] ++ runtimeDeps;
 
-    # Host service
+    # Host service (X11 only — Wayland sessions use graphical-session.target too)
     systemd.user.services.hydrix-scale = lib.mkIf (!isVM) {
       description = "Hydrix Dynamic Scaling";
       wantedBy = [ "graphical-session.target" ];
       partOf = [ "graphical-session.target" ];
       after = [ "graphical-session.target" ];
+      unitConfig.ConditionEnvironment = "!WAYLAND_DISPLAY";
       serviceConfig = {
         Type = "oneshot";
         ExecStart = "${hydrixScaleScript}/bin/hydrix-scale${lib.optionalString cfg.scaling.applyOnLogin " --apply"}";

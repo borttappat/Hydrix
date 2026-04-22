@@ -311,12 +311,13 @@ in {
         };
       };
 
-      # "modern" mode: Use custom systemd service with modern animations
+      # "modern" mode: Use custom systemd service with modern animations (X11 only)
       systemd.user.services.picom = lib.mkIf (compositorCfg.enable && animationMode == "modern" && !isVM) {
         Unit = {
           Description = "Picom compositor (modern animations)";
           After = [ "graphical-session-pre.target" ];
           PartOf = [ "graphical-session.target" ];
+          ConditionEnvironment = "!WAYLAND_DISPLAY";
         };
         Service = {
           ExecStart = "${pkgs.picom}/bin/picom --config ${modernPicomConfig}";

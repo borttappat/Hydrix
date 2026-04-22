@@ -202,9 +202,10 @@ in {
       # Autostart blugon daemon (auto mode - follows time-based schedule)
       systemd.user.services.blugon = {
         Unit = {
-          Description = "Blugon blue light filter (auto mode)";
+          Description = "Blugon blue light filter (auto mode, X11 only)";
           After = [ "graphical-session.target" ];
           PartOf = [ "graphical-session.target" ];
+          ConditionEnvironment = "!WAYLAND_DISPLAY";
         };
         Service = {
           Type = "simple";

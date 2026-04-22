@@ -794,8 +794,9 @@ in {
 
     # Systemd path unit watches for trigger file from udev
     systemd.user.paths.display-hotplug = lib.mkIf (!isVM) {
-      description = "Watch for display hotplug trigger";
+      description = "Watch for display hotplug trigger (X11 only)";
       wantedBy = ["graphical-session.target"];
+      unitConfig.ConditionEnvironment = "!WAYLAND_DISPLAY";
       pathConfig = {
         PathChanged = "/tmp/display-hotplug.trigger";
         Unit = "display-setup.service";
