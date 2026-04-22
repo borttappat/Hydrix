@@ -182,11 +182,11 @@ in {
       grub = {
         enable = true;
         efiSupport = true;
-        # useOSProber disabled: the installer's EFI directory scan already
-        # generates chainload entries for all other OSes (Ubuntu, Windows, etc.)
-        # via grubExtraEntries. Enabling osProber alongside that produces
-        # duplicate entries for the same OSes.
-        useOSProber = false;
+        # useOSProber: detects Windows, Ubuntu, and other Linux installs on every
+        # rebuild and adds them to the GRUB menu automatically. The installer's
+        # static EFI scan only handles previous NixOS/Hydrix installs (via
+        # grub-entries.nix/configfile); os-prober covers everything else.
+        useOSProber = true;
         # Chain-boot entries use insmod cryptodisk + cryptomount -u <UUID>
         # directly, so no global LUKS scan at GRUB startup is needed.
         # (enableCryptodisk = true would prompt for all LUKS devices before

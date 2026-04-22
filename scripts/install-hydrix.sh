@@ -1185,11 +1185,11 @@ _detect_existing_os_entries() {
 }
 
 # Called after partition_and_mount, when the old EFI content is accessible at
-# /mnt/boot. Builds GRUB entries for every previous install without any
-# GRUB-level crypto, so Argon2id and PBKDF2 LUKS issues are irrelevant:
+# /mnt/boot. Builds static GRUB entries for previous NixOS/Hydrix installs
+# only — non-NixOS OSes (Windows, Ubuntu, etc.) are detected automatically
+# by os-prober on every rebuild (boot.loader.grub.useOSProber = true).
 #
-# Plain previous installs (and new-installer LUKS installs whose kernels are
-# already on the EFI):
+# Plain previous NixOS/Hydrix installs (kernels already on the EFI):
 #   - Copy /boot/kernels/ → /boot/old-nixos/kernels/ (survives nixos-install cleanup)
 #   - Save a rewritten grub.cfg to /boot/old-nixos/grub.cfg
 #   - One `configfile` entry gives the full old menu (all specialisations,
@@ -1390,67 +1390,9 @@ _finalize_dual_boot_entries() {
         fi
     fi
 
-    # --- EFI chainload entries for non-NixOS OSes (Ubuntu, Windows, etc.) ---
-    # Scan /EFI/ for subdirectories that contain an EFI binary and generate a
-    # chainload entry for each. This works regardless of whether the OS uses
-    # encryption — we just hand control to its own EFI bootloader and let it
-    # handle everything from there (LUKS prompt, kernel, the lot).
-    #
-    # Preference order for EFI binary: shim (Secure Boot) > grub > anything else.
-    # Checks one subdirectory level deep so Microsoft/Boot/bootmgfw.efi is found.
-    if [[ -d "/mnt/boot/EFI" ]]; then
-        declare -A _efi_labels=(
-            [ubuntu]="Ubuntu"           [microsoft]="Windows"
-            [fedora]="Fedora"           [arch]="Arch Linux"
-            [manjaro]="Manjaro"         [opensuse]="openSUSE"
-            [debian]="Debian"           [linuxmint]="Linux Mint"
-            [pop]="Pop!_OS"             [elementary]="elementary OS"
-            [steamos]="SteamOS"         [garuda]="Garuda Linux"
-            [endeavouros]="EndeavourOS" [cachyos]="CachyOS"
-            [zorin]="Zorin OS"          [kali]="Kali Linux"
-            [parrot]="Parrot OS"
-        )
-
-        for efi_subdir in /mnt/boot/EFI/*/; do
-            [[ -d "$efi_subdir" ]] || continue
-            local dn; dn="${efi_subdir%/}"; dn="${dn##*/}"
-            local dn_lower="${dn,,}"
-
-            # Skip generic fallback, NixOS (handled above), and the new Hydrix install
-            [[ "$dn_lower" == "boot" ]]   && continue
-            [[ "$dn_lower" == "nixos" ]]  && continue
-            [[ "$dn_lower" == hydrix* ]]  && continue
-
-            # Find the best EFI binary at this level, then one level deeper
-            local efi_bin=""
-            for _c in \
-                    "$efi_subdir"shim*.efi  "$efi_subdir"Shim*.efi \
-                    "$efi_subdir"grub*.efi  "$efi_subdir"Grub*.efi \
-                    "$efi_subdir"boot*.efi  "$efi_subdir"Boot*.efi \
-                    "$efi_subdir"*.efi      "$efi_subdir"*.EFI \
-                    "$efi_subdir"*/shim*.efi "$efi_subdir"*/Shim*.efi \
-                    "$efi_subdir"*/grub*.efi "$efi_subdir"*/Grub*.efi \
-                    "$efi_subdir"*/boot*.efi "$efi_subdir"*/Boot*.efi \
-                    "$efi_subdir"*/*.efi     "$efi_subdir"*/*.EFI; do
-                [[ -f "$_c" ]] && { efi_bin="$_c"; break; }
-            done
-            [[ -n "$efi_bin" ]] || continue
-
-            local rel_path="${efi_bin#/mnt/boot}"
-            local label="${_efi_labels[$dn_lower]:-${dn^}}"
-
-            log "Found EFI binary for $label: $rel_path"
-
-            new_entries+="menuentry '$label' {\n"
-            new_entries+="  insmod part_gpt\n"
-            new_entries+="  insmod fat\n"
-            new_entries+="  insmod chain\n"
-            new_entries+="  search --no-floppy --fs-uuid --set=root $efi_uuid\n"
-            new_entries+="  chainloader $rel_path\n"
-            new_entries+="}\n"
-        done
-        unset _efi_labels
-    fi
+    # Non-NixOS OSes (Windows, Ubuntu, Fedora, etc.) are detected automatically
+    # by os-prober on every rebuild via boot.loader.grub.useOSProber = true.
+    # No static EFI scan is needed or generated here for those OSes.
 
     CONFIG[grubExtraEntries]="$(printf '%b' "$new_entries")"
     generate_grub_entries_nix "$TEMP_CONFIG"
