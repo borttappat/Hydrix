@@ -839,7 +839,7 @@ in {
       after = [ "network-online.target" "router-firewall.service" ];
       wants = [ "network-online.target" ];
       wantedBy = [ "multi-user.target" ];
-      path = [ pkgs.wireguard-tools pkgs.iproute2 vpnAssign ];
+      path = [ pkgs.wireguard-tools pkgs.iproute2 pkgs.gawk vpnAssign ];
       serviceConfig = { Type = "oneshot"; RemainAfterExit = true; };
       script =
         # Connect each configured tunnel — fall back to direct if wg-quick fails
