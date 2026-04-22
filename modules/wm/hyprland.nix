@@ -24,6 +24,9 @@ in {
       config.hyprland.default = [ "hyprland" "gtk" ];
     };
 
+    # Required by home-manager's xdg.portal with useUserPackages enabled
+    environment.pathsToLink = [ "/share/applications" "/share/xdg-desktop-portal" ];
+
     environment.systemPackages = with pkgs; [
       hyprland
       hyprpicker         # Color picker (Wayland-native)

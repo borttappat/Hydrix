@@ -239,6 +239,7 @@ in {
             # Host-only abbreviations (hardware, host commands)
             suspend = "systemctl suspend";
             x = "startx";
+            w = "Hyprland";
             rb = "rebuild";
             machine = "vim ${config.hydrix.paths.configDir}/machines/${config.hydrix.hostname}.nix";
 
@@ -384,6 +385,9 @@ in {
 
             # Start X session
             x = "startx";
+
+            # Start Hyprland (Wayland) session
+            w = "Hyprland";
 
             # Smart router console
             rc = ''
