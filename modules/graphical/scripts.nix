@@ -1609,7 +1609,8 @@ in {
       # Uses /sys/power/wakeup_count changing as trigger indicator
       systemd.user.paths.post-resume-trigger = lib.mkIf (!isVM) {
         Unit = {
-          Description = "Watch for resume events";
+          Description = "Watch for resume events (X11 only)";
+          ConditionEnvironment = "!WAYLAND_DISPLAY";
         };
         Path = {
           PathChanged = "/tmp/resume-trigger";

@@ -1929,11 +1929,11 @@ in {
   ];
 
   systemd.user.services.vm-focus-daemon = {
-    description = "VM Focus Daemon (updates i3 border colors)";
+    description = "VM Focus Daemon (updates i3 border colors, X11 only)";
     wantedBy = [ "graphical-session.target" ];
     partOf = [ "graphical-session.target" ];
-    # Delay startup to ensure i3 is ready
     after = [ "graphical-session.target" ];
+    unitConfig.ConditionEnvironment = "!WAYLAND_DISPLAY";
     serviceConfig = {
       ExecStart = "${i3FocusDaemon}/bin/vm-focus-daemon";
       Restart = "always";

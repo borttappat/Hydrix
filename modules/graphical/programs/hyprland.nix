@@ -251,8 +251,8 @@ in lib.mkIf (cfg.enable && config.hydrix.hyprland.enable) {
 
         # ── Startup ───────────────────────────────────────────────────────────
         exec-once = [
-          "dunst"
-          "${pkgs.procps}/bin/pkill waybar 2>/dev/null; waybar"
+          "${pkgs.dunst}/bin/dunst"
+          "${pkgs.waybar}/bin/waybar"
         ];
       };
 
