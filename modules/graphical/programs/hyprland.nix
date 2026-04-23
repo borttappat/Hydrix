@@ -111,7 +111,7 @@ in lib.mkIf (cfg.enable && config.hydrix.hyprland.enable) {
         # ── Keybindings ──────────────────────────────────────────────────────
         bind = [
           # === Terminal ===
-          "$mod, Return,       exec, ws-app alacritty"
+          "$mod, Return,       exec, hypr-ws-app alacritty"
           "$mod SHIFT, Return, exec, alacritty"
           "$mod, S,            exec, hydrix-float-terminal"
 
@@ -120,11 +120,11 @@ in lib.mkIf (cfg.enable && config.hydrix.hyprland.enable) {
           "$mod, D,       exec, host-rofi"
 
           # === Browser (via VM) ===
-          "$mod, B, exec, ws-app firefox"
-          "$mod, A, exec, ws-app firefox https://claude.ai"
-          "$mod, T, exec, ws-app firefox https://borttappat.github.io/links.html"
-          "$mod, G, exec, ws-app firefox https://github.com/borttappat/Hydrix"
-          "$mod, N, exec, ws-app firefox https://search.nixos.org/packages?channel=unstable"
+          "$mod, B, exec, hypr-ws-app firefox"
+          "$mod, A, exec, hypr-ws-app firefox https://claude.ai"
+          "$mod, T, exec, hypr-ws-app firefox https://borttappat.github.io/links.html"
+          "$mod, G, exec, hypr-ws-app firefox https://github.com/borttappat/Hydrix"
+          "$mod, N, exec, hypr-ws-app firefox https://search.nixos.org/packages?channel=unstable"
 
           # === Applications ===
           "$mod, O,       exec, obsidian"
@@ -164,7 +164,7 @@ in lib.mkIf (cfg.enable && config.hydrix.hyprland.enable) {
           "$mod SHIFT, comma, exec, alacritty -e vim ${configDir}/machines/${hostname}.nix"
 
           # === File manager / search ===
-          "$mod SHIFT, F, exec, ws-app alacritty -e joshuto"
+          "$mod SHIFT, F, exec, hypr-ws-app alacritty -e joshuto"
           "$mod SHIFT, O, exec, file-finder"
 
           # === Git status ===
