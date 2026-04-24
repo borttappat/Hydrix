@@ -270,6 +270,9 @@ in {
 
             # Restore wallpaper
             { command = "~/.fehbg"; always = true; notification = false; }
+
+            # Push display mode (xpra) to all running profile VMs
+            { command = "vm-push-display-mode"; notification = false; }
           ];
 
           # Window rules

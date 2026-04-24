@@ -394,31 +394,51 @@ cmd_start() {
         return 0
     fi
 
-    # Graphical VMs - wait for xpra
-    log "Waiting for xpra server..."
-    local xpra_start
-    xpra_start=$(timer_start)
+    # Graphical VMs - wait for display-mode service (vsock:14509)
+    log "Waiting for VM display service..."
+    local dm_start
+    dm_start=$(timer_start)
+    local dm_timeout=30
+    local dm_elapsed=0
+    local dm_ready=0
+    while [[ $dm_elapsed -lt $((dm_timeout * 2)) ]]; do
+        if echo "PING" | socat -T2 - "VSOCK-CONNECT:${cid}:14509" 2>/dev/null | grep -q "OK"; then
+            dm_ready=1
+            break
+        fi
+        sleep 0.5
+        dm_elapsed=$((dm_elapsed + 1))
+    done
 
-    if ! wait_for_xpra "$cid" 30; then
-        log_error "Timeout waiting for xpra"
+    if [[ $dm_ready -eq 0 ]]; then
+        log_error "Timeout waiting for VM display service"
         log "Check logs with: microvm logs ${vm_name}"
-        log "Try manually: xpra info vsock://${cid}:${XPRA_PORT}"
         return 1
     fi
 
-    local xpra_time
-    xpra_time=$(timer_end "$xpra_start")
-    log_time "Xpra ready in ${BOLD}${xpra_time}s${NC}"
+    local dm_time
+    dm_time=$(timer_end "$dm_start")
+    log_time "VM ready in ${BOLD}${dm_time}s${NC}"
 
     local total_time
     total_time=$(timer_end "$start")
     log_success "Ready! Total boot time: ${BOLD}${total_time}s${NC}"
 
-    # Pre-attach xpra session in background for instant first app launch
-    log "Pre-attaching xpra session..."
-    vm-app "$vm_name" --attach >/dev/null 2>&1 &
-    disown
-    log_success "Pre-attached"
+    # Push display mode (xpra or waypipe) based on current WM
+    if command -v vm-push-display-mode >/dev/null 2>&1; then
+        local profile
+        profile=$(echo "$vm_name" | sed 's/^microvm-//')
+        vm-push-display-mode "$profile" >/dev/null 2>&1 &
+        disown
+    fi
+
+    # In xpra mode (X11), pre-attach session for instant first app launch
+    if [[ -z "${WAYLAND_DISPLAY:-}" ]] && command -v vm-app >/dev/null 2>&1; then
+        log "Pre-attaching xpra session..."
+        vm-app "$vm_name" --attach >/dev/null 2>&1 &
+        disown
+        log_success "Pre-attached"
+    fi
 
     # Push current host colors to the new VM via vsock
     if command -v push-colors-to-vms >/dev/null 2>&1; then
@@ -567,12 +587,22 @@ cmd_restart() {
         return 0
     fi
 
-    # Graphical VMs - wait for xpra
-    log "Waiting for xpra server..."
-    if ! wait_for_xpra "$cid" 30; then
-        log_error "Timeout waiting for xpra"
+    # Graphical VMs - wait for display-mode service (vsock:14509)
+    log "Waiting for VM display service..."
+    local dm_elapsed=0
+    local dm_ready=0
+    while [[ $dm_elapsed -lt 60 ]]; do
+        if echo "PING" | socat -T2 - "VSOCK-CONNECT:${cid}:14509" 2>/dev/null | grep -q "OK"; then
+            dm_ready=1
+            break
+        fi
+        sleep 0.5
+        dm_elapsed=$((dm_elapsed + 1))
+    done
+
+    if [[ $dm_ready -eq 0 ]]; then
+        log_error "Timeout waiting for VM display service"
         log "Check logs with: microvm logs ${vm_name}"
-        log "Try manually: xpra info vsock://${cid}:${XPRA_PORT}"
         return 1
     fi
 
@@ -580,11 +610,21 @@ cmd_restart() {
     total_time=$(timer_end "$start")
     log_success "Restarted in ${BOLD}${total_time}s${NC}"
 
-    # Pre-attach xpra session in background
-    log "Pre-attaching xpra session..."
-    vm-app "$vm_name" --attach >/dev/null 2>&1 &
-    disown
-    log_success "Pre-attached"
+    # Push display mode (xpra or waypipe) based on current WM
+    if command -v vm-push-display-mode >/dev/null 2>&1; then
+        local profile
+        profile=$(echo "$vm_name" | sed 's/^microvm-//')
+        vm-push-display-mode "$profile" >/dev/null 2>&1 &
+        disown
+    fi
+
+    # In xpra mode (X11), pre-attach session for instant first app launch
+    if [[ -z "${WAYLAND_DISPLAY:-}" ]] && command -v vm-app >/dev/null 2>&1; then
+        log "Pre-attaching xpra session..."
+        vm-app "$vm_name" --attach >/dev/null 2>&1 &
+        disown
+        log_success "Pre-attached"
+    fi
 
     # Desktop notification
     notify-send "MicroVM Ready" "${vm_name} is ready for interaction" 2>/dev/null || true

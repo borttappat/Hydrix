@@ -253,6 +253,7 @@ in lib.mkIf (cfg.enable && config.hydrix.hyprland.enable) {
         exec-once = [
           "${pkgs.dunst}/bin/dunst"
           "${pkgs.waybar}/bin/waybar"
+          "vm-push-display-mode"
         ];
       };
 
