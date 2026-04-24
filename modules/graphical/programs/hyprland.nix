@@ -33,13 +33,13 @@
 
   # Workspace border colors (matching VM color scheme)
   workspaceColors = {
-    "1" = "rgba(7aa2f7ff)"; # host - purple/blue
-    "2" = "rgba(ff749fff)"; # pentest - red/pink
-    "3" = "rgba(98c379ff)"; # browsing - green
-    "4" = "rgba(ffe075ff)"; # comms - yellow
-    "5" = "rgba(56b6c2ff)"; # dev - cyan
-    "6" = "rgba(bb9a7fff)"; # lurking - orange/brown
-    "10" = "rgba(61afefff)"; # router - blue
+    "1" = "7aa2f7ff"; # host - purple/blue
+    "2" = "ff749fff"; # pentest - red/pink
+    "3" = "98c379ff"; # browsing - green
+    "4" = "ffe075ff"; # comms - yellow
+    "5" = "56b6c2ff"; # dev - cyan
+    "6" = "bb9a7fff"; # lurking - orange/brown
+    "10" = "61afefff"; # router - blue
   };
 
   configDir = config.hydrix.paths.configDir;
@@ -127,9 +127,6 @@ in
             layout = "dwindle";
           };
 
-          # ── Reserved screen area for bars ────────────────────────────────────
-          stripReserved = "23,23"; # Top and bottom bar height (will be overridden locally)
-
           # ── Decoration ───────────────────────────────────────────────────────
           decoration = {
             rounding = rounding;
@@ -140,15 +137,13 @@ in
               size = 3;
               passes = 1;
               vibrancy = 0.1696;
-              ignoreOpaque = true;
+              ignoreopaque = true;
             };
 
             # Soft shadows
             shadow = {
               enabled = true;
               range = 10;
-              render = true;
-              idle = true;
             };
           };
 
@@ -335,13 +330,13 @@ in
             "float, class:^(nm-connection-editor)$"
 
             # Workspace-specific border colors
-            "col.active_border, rgba(${workspaceColors."1"}, 100), workspace 1"
-            "col.active_border, rgba(${workspaceColors."2"}, 100), workspace 2"
-            "col.active_border, rgba(${workspaceColors."3"}, 100), workspace 3"
-            "col.active_border, rgba(${workspaceColors."4"}, 100), workspace 4"
-            "col.active_border, rgba(${workspaceColors."5"}, 100), workspace 5"
-            "col.active_border, rgba(${workspaceColors."6"}, 100), workspace 6"
-            "col.active_border, rgba(${workspaceColors."10"}, 100), workspace 10"
+            "col.active_border = ${workspaceColors."1"}, workspace:1"
+            "col.active_border = ${workspaceColors."2"}, workspace:2"
+            "col.active_border = ${workspaceColors."3"}, workspace:3"
+            "col.active_border = ${workspaceColors."4"}, workspace:4"
+            "col.active_border = ${workspaceColors."5"}, workspace:5"
+            "col.active_border = ${workspaceColors."6"}, workspace:6"
+            "col.active_border = ${workspaceColors."10"}, workspace:10"
           ];
 
           # ── Startup ───────────────────────────────────────────────────────────
