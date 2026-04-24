@@ -239,6 +239,55 @@ microvm app microvm-browsing firefox  # Launch app via xpra
 microvm status                        # Show all VM status
 ```
 
+## Mullvad VPN
+
+The router VM supports per-bridge Mullvad VPN — each VM can exit through a different country/server.
+
+### Setup
+
+1. Log into [mullvad.net](https://mullvad.net) → Account → WireGuard configuration
+2. Select a country, city, and server — download the `.conf` file
+3. Place downloaded files in `~/hydrix-config/vpn/`:
+   ```
+   vpn/mullvad-browsing.conf   ← exit node for browsing VM
+   vpn/mullvad-pentest.conf    ← exit node for pentest VM
+   vpn/mullvad-comms.conf      ← exit node for comms VM
+   ```
+   Each VM can use a different server. They can share the same Mullvad key pair.
+4. Copy the example and fill in the bridges:
+   ```bash
+   cp vpn/mullvad.nix.example vpn/mullvad.nix
+   ```
+   ```nix
+   # vpn/mullvad.nix
+   {
+     enable = true;
+     bridges = {
+       browsing = ./mullvad-browsing.conf;
+       pentest  = ./mullvad-pentest.conf;
+       comms    = ./mullvad-comms.conf;
+     };
+   }
+   ```
+5. Rebuild the router:
+   ```bash
+   nix flake update && microvm build microvm-router && microvm restart microvm-router
+   ```
+
+The router auto-connects tunnels and routes each bridge at boot. Bridges not listed go direct (no VPN).
+
+### Runtime Management
+
+From the router console (`microvm console microvm-router`):
+
+```bash
+vpn-assign status                       # Show all bridge assignments and active tunnels
+vpn-assign browsing direct              # Bypass VPN for browsing VM
+vpn-assign browsing wg-browsing         # Re-enable VPN for browsing VM
+vpn-assign --persistent pentest direct  # Persist assignment across reboots
+vpn-assign list-mullvad                 # List configured exit nodes
+```
+
 ## Adding a New VM Profile
 
 ```bash

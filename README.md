@@ -994,6 +994,16 @@ rproc-bottom  cproc-bottom  vm-ram-bottom  vm-cpu-bottom
 vm-sync-dev-bottom  vm-sync-stg-bottom  vm-fs-bottom  vm-tun-bottom  vm-up-bottom
 ```
 
+### Polybar VM Integration
+
+**workspace-desc** - Shows current workspace label (e.g., "BROWSING", "PENTEST") read from `/etc/hydrix/vm-registry.json` at runtime. Works automatically for any VM added to your config.
+
+**focus-dynamic** - Shows which VM type is currently focused on each workspace. Uses the same vm-registry lookup.
+
+**Bottom bar modules** (vm-ram-bottom, vm-cpu-bottom, etc.) - Query running VMs by polling vm-registry, then fetch metrics via vsock from each VM's CID.
+
+For detailed runtime data flow, see `POLYBAR-VM-INTEGRATION.md` in your config directory.
+
 ### Power Management
 
 ```nix
@@ -2061,9 +2071,45 @@ Workspaces are mapped to VMs via the `ws-app` script. Pressing `Super+Return` la
 | WS7-9 | Host | Always host terminal |
 | WS10 | Router | Serial console |
 
+> **Note**: VM workspaces are dynamic — they're read from `/etc/hydrix/vm-registry.json` at runtime. Adding a new profile VM automatically adds its workspace mapping. No hardcoded workspace→VM tables in scripts.
+
+### vm-registry Integration
+
+All workspace→VM routing reads from `/etc/hydrix/vm-registry.json` at runtime:
+
+```
+ws-app (Super+Return)
+  -> get focused workspace number
+  -> query vm-registry for profile at that workspace
+  -> return "profile:select" or "host" or "router"
+  -> launch app on appropriate target
+```
+
+**polybar workspace-desc module** - Shows workspace label (e.g., "BROWSING") with colored underline:
+
+```bash
+# Runtime lookup (no hardcoded values)
+jq -r --argjson w "$ws" \
+  'to_entries[] | select(.value.workspace == $w) | .value.label' \
+  /etc/hydrix/vm-registry.json
+```
+
+**polybar focus-dynamic module** - Shows which VM type is focused on each workspace, using the same registry lookup.
+
+**focus-rofi menu** - Press `Mod+F4` to enter focus mode. The menu is built by scanning vm-registry for all profile VMs.
+
 ### Active VM Tracking
 
-For workspace types that support multiple VMs (pentest, browsing, dev), `ws-app` remembers your last-used VM in `~/.cache/hydrix/active-vms.json`. If the active VM is stopped, it auto-selects the next running VM of that type or falls back to the host.
+For workspace types that support multiple VMs (pentest, browsing, dev), `ws-app` remembers your last-used VM in `~/.cache/hydrix/active-vms.json`.
+
+**Selection logic**:
+1. If active VM is set and still running → use it
+2. If active VM stopped → find all running VMs of that type
+   - Exactly one → use it, update active
+   - Multiple → show rofi selection menu, update active
+   - None → fall back to host, clear active
+
+**Manual VM selection**: Use `ws-rofi` (or `Mod+d` on a VM workspace) to choose which VM is "active" for that type.
 
 ### Launch Flow
 
@@ -2071,16 +2117,73 @@ For workspace types that support multiple VMs (pentest, browsing, dev), `ws-app`
 Super+Return
   -> ws-app alacritty
   -> detect focused workspace (i3-msg)
-  -> map workspace to VM type
-  -> if VM workspace:
-       -> get active VM for type (or show rofi menu)
+  -> query /etc/hydrix/vm-registry.json for workspace→profile mapping
+  -> if profile found:
+       -> get active VM for type (or show menu)
        -> xpra control vsock://<CID>:14500 start -- alacritty
        -> auto-attach xpra if not attached
-  -> if host workspace:
+  -> if no profile (WS1, WS7-9, or missing registry):
        -> alacritty-dpi (DPI-aware host terminal)
+
+Super+Shift+Return
+  -> alacritty-dpi (always host, regardless of workspace)
 ```
 
-`Super+Shift+Return` always opens a host terminal regardless of workspace.
+### Adding a New Profile VM
+
+**Use the scaffold script** - it auto-discovers the next free CID/workspace, creates all files, and offers to rebuild:
+
+```bash
+# Scaffold new profile (interactive prompts for all values)
+new-profile myprofile
+
+# The script:
+# 1. Scans existing profiles to find the next free CID (starts at 107)
+# 2. Prompts for: cid, workspace, subnet, bridge, tapId, routerTap, label, colorscheme
+# 3. Copies templates/profiles/_template/ → profiles/myprofile/
+# 4. Substitutes all __PLACEHOLDER__ values in the copied files
+# 5. Stages files with git add
+# 6. Offers to run rebuild immediately (router VM needs this for new TAP interface)
+
+# After scaffold, enable in your flake.nix:
+"microvm-myprofile" = hydrix.lib.mkMicroVM {
+  profile = "myprofile";
+  hostname = "microvm-myprofile";
+  inherit userProfiles;
+};
+
+# Start VM (if you skipped rebuild during scaffold)
+rebuild
+microvm start microvm-myprofile
+```
+
+The `new-profile` script handles TAP interface naming (max 15 chars), bridge creation, and router TAP assignment automatically. Workspace routing, polybar labels, and focus menus auto-adapt without manual wiring.
+
+**What auto-adapts** (no manual wiring needed):
+- `ws-app` routes workspace → new VM (reads vm-registry at runtime)
+- polybar `workspace-desc` shows new label
+- polybar `focus-dynamic` shows new VM type
+- `focus-rofi` menu includes new VM
+
+**What you add manually**:
+- Dedicated keybindings (e.g., `Mod+Control+b` always opens browser on browsing VM)
+- App-specific shortcuts if you want them (current `Mod+b`, `Mod+a` etc. route via `ws-app` based on current workspace)
+
+See `POLYBAR-VM-INTEGRATION.md` for detailed runtime data flow.
+
+**What auto-adapts** (no manual wiring needed):
+- `ws-app` routes workspace → new VM (reads vm-registry at runtime)
+- polybar `workspace-desc` shows new label
+- polybar `focus-dynamic` shows new VM type
+- `focus-rofi` menu includes new VM
+
+**What you add manually**:
+- Dedicated keybindings (e.g., `Mod+Control+b` always opens browser on browsing VM)
+- App-specific shortcuts if you want them (current `Mod+b`, `Mod+a` etc. route via `ws-app` based on current workspace)
+
+See `POLYBAR-VM-INTEGRATION.md` for detailed runtime data flow.
+
+For detailed runtime data flow, see `POLYBAR-VM-INTEGRATION.md` in your config directory.
 
 ---
 
