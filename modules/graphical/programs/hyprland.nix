@@ -134,10 +134,10 @@ in
             # Blur (wayland-native, performant)
             blur = {
               enabled = true;
-              size = 3;
-              passes = 1;
-              vibrancy = 0.1696;
               ignoreopaque = true;
+              passes = 1;
+              size = 3;
+              vibrancy = 0.1696;
             };
 
             # Soft shadows
@@ -330,13 +330,13 @@ in
             "float, class:^(nm-connection-editor)$"
 
             # Workspace-specific border colors
-            "col.active_border = ${workspaceColors."1"}, workspace:1"
-            "col.active_border = ${workspaceColors."2"}, workspace:2"
-            "col.active_border = ${workspaceColors."3"}, workspace:3"
-            "col.active_border = ${workspaceColors."4"}, workspace:4"
-            "col.active_border = ${workspaceColors."5"}, workspace:5"
-            "col.active_border = ${workspaceColors."6"}, workspace:6"
-            "col.active_border = ${workspaceColors."10"}, workspace:10"
+            "col.active_border = rgba(${workspaceColors."1"}), workspace 1"
+            "col.active_border = rgba(${workspaceColors."2"}), workspace 2"
+            "col.active_border = rgba(${workspaceColors."3"}), workspace 3"
+            "col.active_border = rgba(${workspaceColors."4"}), workspace 4"
+            "col.active_border = rgba(${workspaceColors."5"}), workspace 5"
+            "col.active_border = rgba(${workspaceColors."6"}), workspace 6"
+            "col.active_border = rgba(${workspaceColors."10"}), workspace 10"
           ];
 
           # ── Startup ───────────────────────────────────────────────────────────
