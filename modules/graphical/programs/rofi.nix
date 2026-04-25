@@ -324,6 +324,7 @@ EOF
         local -a vm_names=()
         local microvm_base="microvm-''${vm_type}"
 
+        # First check existing microvm directories
         if [[ -d "/var/lib/microvms/''${microvm_base}" ]]; then
             display_list+="''${microvm_base}"$'\n'
             vm_names+=("$microvm_base")
@@ -337,6 +338,20 @@ EOF
             display_list+="''${vname}"$'\n'
             vm_names+=("$vname")
         done
+
+        # Also check vm-registry for declared VMs that haven't been built yet
+        local VM_REGISTRY="/etc/hydrix/vm-registry.json"
+        if [[ -f "$VM_REGISTRY" ]]; then
+            local registered_vm
+            registered_vm=$(${pkgs.jq}/bin/jq -r --arg p "$vm_type" '.[$p].vmName // empty' "$VM_REGISTRY" 2>/dev/null)
+            if [[ -n "$registered_vm" && "$registered_vm" != "null" ]]; then
+                # Only add if not already in the list (avoid duplicates)
+                if ! echo "$display_list" | ${pkgs.gnugrep}/bin/grep -q "^''${registered_vm}$"; then
+                    display_list+="''${registered_vm}"$'\n'
+                    vm_names+=("$registered_vm")
+                fi
+            fi
+        fi
 
         if [[ -z "$display_list" ]]; then
             ${pkgs.libnotify}/bin/notify-send -t 3000 "VM" "No ''${vm_type} VMs available"
@@ -413,15 +428,22 @@ EOF
         ${pkgs.coreutils}/bin/rm -f "$theme_file"
     }
 
-    # Map workspace number to VM type, or "host"
+    # Map workspace number to VM type from vm-registry, or "host"
     ws_to_vm_type() {
-        case "$1" in
-            2)  echo "pentest" ;;
-            3)  echo "browsing" ;;
-            4)  echo "comms" ;;
-            5)  echo "dev" ;;
-            *)  echo "host" ;;
-        esac
+        local ws="$1"
+        local VM_REGISTRY="/etc/hydrix/vm-registry.json"
+
+        if [[ -f "$VM_REGISTRY" ]]; then
+            local profile
+            profile=$(${pkgs.jq}/bin/jq -r --argjson w "$ws" \
+                'to_entries[] | select(.value.workspace == $w) | .key' \
+                "$VM_REGISTRY" 2>/dev/null | head -1)
+            if [[ -n "$profile" && "$profile" != "null" ]]; then
+                echo "$profile"
+                return
+            fi
+        fi
+        echo "host"
     }
 
     main() {

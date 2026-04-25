@@ -923,7 +923,7 @@ EOF
     #   2. If active VM stopped, find running VMs of same type
     #      - If exactly one, use it and update active
     #      - If multiple, show menu and update active
-    #      - If none, return empty
+    #      - If none, offer to start the VM
     get_vm_with_tracking() {
         local vm_type="$1"
         local active_vm running_vms count
@@ -940,7 +940,31 @@ EOF
         running_vms=$(find_vms_by_type "$vm_type")
 
         if [[ -z "$running_vms" ]]; then
-            # No VMs running - clear active and return empty
+            # No VMs running - check if registered in vm-registry and offer to start
+            local VM_REGISTRY="/etc/hydrix/vm-registry.json"
+            local registered_vm=""
+            if [[ -f "$VM_REGISTRY" ]]; then
+                registered_vm=$(${pkgs.jq}/bin/jq -r --arg p "$vm_type" '.[$p].vmName // empty' "$VM_REGISTRY" 2>/dev/null)
+            fi
+
+            if [[ -n "$registered_vm" && "$registered_vm" != "null" ]]; then
+                # VM is registered but not running - offer to start
+                read -p "No $vm_type VM running. Start $registered_vm now? [Y/n]: " start_vm
+                if [[ "${start_vm:-Y}" =~ ^[Yy]$ ]]; then
+                    notify "Starting $vm_type VM..."
+                    microvm start "$registered_vm" 2>/dev/null &
+                    disown
+                    # Wait for VM to initialize
+                    sleep 3
+                    if is_vm_running "$registered_vm"; then
+                        set_active_vm "$vm_type" "$registered_vm"
+                        echo "$registered_vm"
+                        return
+                    fi
+                fi
+            fi
+
+            # Clear active and return empty
             clear_active_vm "$vm_type"
             return
         fi

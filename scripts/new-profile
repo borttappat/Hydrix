@@ -92,8 +92,9 @@ next_free() {
 }
 
 SUGGESTED_CID=$(next_free 107 "${USED_CIDS[@]:-}" "${RESERVED_CIDS[@]}")
-SUGGESTED_WORKSPACE=$SUGGESTED_CID          # CID = WS by convention
-SUGGESTED_SUBNET="192.168.${SUGGESTED_CID}" # CID = subnet last octet by convention
+SUGGESTED_WORKSPACE=$((SUGGESTED_CID % 10))
+SUGGESTED_WORKSPACE=$(next_free "$SUGGESTED_WORKSPACE" "${USED_WORKSPACES[@]:-}")
+SUGGESTED_SUBNET="192.168.${SUGGESTED_CID}"
 
 # Derive interface names from profile name (max 15 chars each)
 clean="${PROFILE_NAME//-/}"                          # strip hyphens for abbreviation

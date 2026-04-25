@@ -21,6 +21,9 @@ let meta = import ./meta.nix; in
   # VM IDENTITY & COLORS
   # =========================================================================
 
+  # VM type (must match profile name for auto-include modules)
+  hydrix.vmType = "__NAME__";
+
   # Colorscheme for this VM (see colorschemes/ for options)
   hydrix.colorscheme = "__COLORSCHEME__";
 
