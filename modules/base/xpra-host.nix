@@ -950,7 +950,7 @@ EOF
             if [[ -n "$registered_vm" && "$registered_vm" != "null" ]]; then
                 # VM is registered but not running - offer to start
                 read -p "No $vm_type VM running. Start $registered_vm now? [Y/n]: " start_vm
-                if [[ "\${start_vm:-Y}" =~ ^[Yy]$ ]]; then
+                if [[ "''${start_vm:-Y}" =~ ^[Yy]$ ]]; then
                     notify "Starting $vm_type VM..."
                     microvm start "$registered_vm" 2>/dev/null &
                     disown
