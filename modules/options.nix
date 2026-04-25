@@ -58,7 +58,7 @@ in {
 
     hostname = lib.mkOption {
       type = lib.types.str;
-      default = "hydrix";
+      default = "heretix";
       description = "System hostname";
       example = "zen";
     };
