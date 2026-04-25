@@ -132,6 +132,7 @@ TAP_ID=$(ask      tapId       "mv-${PROFILE_NAME:0:12}" "max 15 chars")
 ROUTER_TAP=$(ask  routerTap   "$SUGGESTED_ROUTER_TAP"   "max 15 chars")
 LABEL=$(ask       label       "$SUGGESTED_LABEL"        "display name")
 COLORSCHEME=$(ask colorscheme "$SUGGESTED_COLORSCHEME"  "hydrix colorscheme name")
+FOCUS_COLOR=$(ask  focusBorder "orange"                  "red, orange, yellow, green, cyan, blue, purple, pink, magenta")
 
 # Validate interface name lengths
 for iface in "$BRIDGE" "$TAP_ID" "$ROUTER_TAP"; do
@@ -168,7 +169,8 @@ find "$PROFILE_DIR" -type f | while read -r f; do
         -e "s/__SUBNET__/${SUBNET}/g"           \
         -e "s/__WORKSPACE__/${WORKSPACE}/g"     \
         -e "s/__LABEL__/${LABEL}/g"             \
-        -e "s/__COLORSCHEME__/${COLORSCHEME}/g" \
+        -e "s/__COLORSCHEME__/${COLORSCHEME}/g"  \
+        -e "s/__FOCUS_COLOR__/${FOCUS_COLOR}/g" \
         "$f"
 done
 
@@ -188,6 +190,9 @@ info "Label:      $LABEL"
 echo ""
 echo "Next: edit $PROFILE_DIR/default.nix (resources, colorscheme)"
 echo "      edit $PROFILE_DIR/packages.nix (profile packages)"
+echo ""
+echo "      Enable the VM in your machine config (machines/<serial>.nix):"
+echo "        hydrix.microvmHost.vms.\"microvm-${PROFILE_NAME}\".enable = true;"
 echo ""
 
 # ---------------------------------------------------------------------------

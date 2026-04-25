@@ -27,10 +27,8 @@ let meta = import ./meta.nix; in
   # Colorscheme for this VM (see colorschemes/ for options)
   hydrix.colorscheme = "__COLORSCHEME__";
 
-  # Per-VM focus border color - simple threat-level indicator for VM windows.
-  # Supports named colors: red, orange, yellow, green, cyan, blue, purple, pink, magenta
-  # Or hex codes: #RRGGBB
-  # hydrix.vmThemeSync.focusBorder = "orange";  # red, orange, yellow, green, etc.
+  # Per-VM focus border color (named: __FOCUS_COLOR__)
+  hydrix.vmThemeSync.focusBorder = "__FOCUS_COLOR__";
 
   # Firefox user-agent: blend in or null for the real UA.
   # Presets: "edge-windows" | "chrome-windows" | "chrome-mac" | "safari-mac" | "firefox-windows"
@@ -45,7 +43,7 @@ let meta = import ./meta.nix; in
       enable = true;
       homeSize = 10240;  # 10GB — adjust as needed
     };
-    secrets.github = true;
+    secrets.github = false;  # Enable after setting up GitHub SSH key (see: gh auth login)
   };
   hydrix.networking.vmSubnet = meta.subnet;
 
