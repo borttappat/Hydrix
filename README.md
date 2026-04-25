@@ -1091,20 +1091,138 @@ Custom colorschemes in your hydrix-config take priority over framework ones:
 
 ## Colorscheme System
 
-Hydrix uses a colorscheme system based on pywal with real-time synchronization between host and VMs.
+Hydrix uses pywal-based colorschemes with real-time synchronization between the host and all running VMs. There are three independent color layers per VM, each controlling a different aspect of the visual environment.
 
-### Available Colorschemes
+### The Three Color Layers
 
-Located in `colorschemes/`:
-- `hydrix` - Default teal/cyan theme
-- `nord` - Nord blue palette
-- `nvid` - Nvidia-inspired greens
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│  Layer 1: VM internal colorscheme                                   │
+│  hydrix.colorscheme = "punk"                                        │
+│  Drives pywal palette inside the VM: alacritty, rofi, dunst, GTK   │
+│  This is the VM's own base theme, independent of the host.          │
+├─────────────────────────────────────────────────────────────────────┤
+│  Layer 2: Host wal cache inheritance (virtiofs)                     │
+│  hydrix.vmThemeSync.useHostWal = true   (default when enabled)      │
+│  VM's ~/.cache/wal → /mnt/wal-cache (host wal cache via virtiofs)  │
+│  VMs read host pywal output directly — no local pywal execution.    │
+│  colorschemeInheritance controls how host and VM colors are merged. │
+├─────────────────────────────────────────────────────────────────────┤
+│  Layer 3: Focus border color (host-side, i3 window border)          │
+│  hydrix.vmThemeSync.focusBorder = "yellow"                          │
+│  The i3 border color shown on the HOST when a VM window is focused. │
+│  Completely independent from the VM's internal colors.              │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+### Layer 1 — VM Internal Colorscheme
+
+Each VM has its own declarative colorscheme that drives pywal inside the VM:
+
+```nix
+# profiles/browsing/default.nix
+hydrix.colorscheme = "punk";   # pink/purple cyberpunk
+```
+
+This scheme is used for the VM's own terminals, rofi, dunst, GTK, and any other pywal-aware apps running inside the VM. It acts as the base palette — which colors are actually applied depends on Layer 2.
+
+**Available colorschemes** (located in `colorschemes/`):
+- `hydrix` - Default teal/cyan
+- `nord` - Nord blue
+- `nvid` - Nvidia greens
 - `punk` - Pink/purple cyberpunk
-- `modgruv` - Gruvbox-inspired warm
+- `modgruv` - Gruvbox warm
 - `zero` - Pure black minimal
 - `blues`, `dunes`, `nebula`, `perp`, `deeporange`, `mardu`
 
-### Host Commands
+User-defined colorschemes in `hydrix-config/colorschemes/` take priority over framework ones with the same name.
+
+### Layer 2 — Host Wal Cache via Virtiofs
+
+With `vmThemeSync` enabled, VMs do not run pywal locally. Instead, the host's wal cache is mounted into each VM as a virtiofs share and symlinked into place:
+
+```
+Host                                      VM
+~/.cache/wal/                             ~/.cache/wal -> /mnt/wal-cache (symlink)
+  colors.json  ──── virtiofs ──────>      /mnt/wal-cache/colors.json
+  sequences                               colors-runtime.toml (generated at boot)
+  colors                                  alacritty imports colors-runtime.toml
+
+walrgb <image>
+  -> host runs pywal, updates cache
+  -> systemd path unit detects change
+  -> sends REFRESH to VMs via vsock:14503   VM regenerates colors-runtime.toml
+                                            alacritty live-reloads colors
+```
+
+This eliminates ~500ms color flash on VM startup and keeps all VMs in sync with the host wallpaper in real time.
+
+**`useHostWal`** (default: `true` when vmThemeSync is enabled) controls whether the VM reads from the host cache or its own. Setting it to `false` restores local pywal execution and makes the VM fully independent.
+
+```nix
+# opt out of host cache sharing for this VM
+hydrix.vmThemeSync.useHostWal = false;
+```
+
+#### Inheritance Modes
+
+With the host cache shared, `colorschemeInheritance` controls how the VM blends the host's colors with its own internal colorscheme (Layer 1):
+
+| Mode | Background | Text/accent colors | Effect |
+|------|------------|-------------------|--------|
+| `full` | Host | Host | VM looks identical to host |
+| `dynamic` | Host | VM's own scheme | Shared background, distinct VM palette |
+| `none` | VM's own | VM's own | Ignores host — uses VM scheme only |
+
+Set in VM config (or per-machine override):
+```nix
+hydrix.colorschemeInheritance = "dynamic";
+```
+
+Or at runtime inside the VM:
+```bash
+set-colorscheme-mode dynamic
+get-colorscheme-mode
+```
+
+**Current default:** `dynamic` — all VMs share the host's background color (shifts with wallpaper) while keeping their own text/accent palette for visual distinction between VM types.
+
+#### Apps Updated When Colors Change
+
+Inside VMs:
+- **Alacritty** — terminal colors (via `colors-runtime.toml`, live-reloaded)
+- **Rofi** — launcher theme
+- **Dunst** — notification colors
+- **GTK** — via wal-gtk
+
+On the host:
+- **i3** — window borders
+- **Polybar** — all bar colors
+- **Dunst** — notification colors
+- **Firefox** — via pywalfox extension
+- **RGB lighting** — ASUS Aura / OpenRGB
+
+#### Fast Startup (No Color Flash)
+
+Without theme sync, VMs show default colors for ~500ms while pywal runs. This is prevented by:
+
+1. **wal-cache-link service** — creates the virtiofs symlink before xpra starts, so colors exist from the first shell
+2. **Pre-generated `colors-runtime.toml`** — built at VM boot from the shared `colors.json` via jq; available before any terminal opens
+3. **Stylix fish target disabled** — prevents OSC escape sequences from overriding colors on every shell start (`stylix.targets.fish.enable = mkForce false`)
+4. **xpra-vsock ordering** — xpra only accepts connections after `wal-cache-link` completes
+5. **Conflicting services disabled** — `vm-colorscheme`, `wal-sync` timer, and `init-wal-cache` are disabled so they cannot overwrite the shared cache
+
+#### Wal Cache Pre-population (Cold Start)
+
+On first boot the host has no wal cache yet. The `wal-cache-init` service solves this:
+
+1. Checks if `~/.cache/wal/colors.json` exists — skips if already populated
+2. If `graphical.wallpaper` is set, runs `wal -q -i <wallpaper>` to generate it
+3. Otherwise falls back to the configured `colorscheme` JSON file
+
+Without this, VMs would mount an empty virtiofs share on first boot and have no colors until the user runs `walrgb`.
+
+#### Host Commands
 
 | Command | Description |
 |---------|-------------|
@@ -1114,134 +1232,93 @@ Located in `colorschemes/`:
 | `refresh-colors` | Reload all apps with current colors |
 | `save-colorscheme <name>` | Save current colors as new scheme |
 
-### VM Commands
-
-| Command | Description |
-|---------|-------------|
-| `wal-sync` | Sync colors from host |
-| `set-colorscheme-mode <mode>` | Set inheritance mode |
-| `get-colorscheme-mode` | Show current mode |
-
-### Colorscheme Inheritance Modes
-
-VMs can inherit colors from the host in three modes:
-
-| Mode | Background | Text Colors | Use Case |
-|------|------------|-------------|----------|
-| `full` | Host | Host | VM identical to host |
-| `dynamic` | Host | VM's own | Visual distinction (default) |
-| `none` | VM's own | VM's own | Ignore host theme |
-
-Set in VM config:
-```nix
-hydrix.colorschemeInheritance = "dynamic";
-```
-
-Or at runtime:
-```bash
-set-colorscheme-mode dynamic
-```
-
-### How Colorscheme Sync Works
-
-1. **Host applies colorscheme** via `walrgb`:
-   - Extracts colors using pywal
-   - Updates Xresources, i3, polybar, dunst, Firefox, GTK
-   - Sets RGB lighting (ASUS Aura/OpenRGB)
-   - Pushes colors to running VMs via vsock
-
-2. **VMs receive colors** via:
-   - **Vsock push** (instant) - Port 14503
-   - **9p polling** (2s interval) - Fallback when no vsock
-
-3. **VM applies based on mode**:
-   - `full`: Use all host colors
-   - `dynamic`: Merge host background with VM text colors
-   - `none`: Ignore, use VM's configured scheme
-
-### Apps Updated by Colorscheme
-
-- **i3**: Focused window border color
-- **Polybar**: All bar colors
-- **Alacritty**: Terminal colors (mixed mode for VMs)
-- **Rofi**: Launcher theme
-- **Dunst**: Notification colors
-- **Firefox**: Via pywalfox extension
-- **GTK**: Via wal-gtk
-- **Zathura**: PDF viewer
-- **RGB Lighting**: ASUS Aura or OpenRGB
-
 ---
 
-## VM Theme Sync
+### Layer 3 — Focus Border Color
 
-The VM theme sync module eliminates per-VM pywal execution (~500ms) by sharing the host's wal cache directly via virtiofs.
+The focus border is the i3 window border color shown **on the host** when a VM application window is focused. It is entirely independent from what colors the VM uses internally — you can have a VM running `nord` internally while its host-side border is bright orange.
 
-### How It Works
+#### Priority Chain
+
+The focus daemon resolves the border color using this priority order:
 
 ```
-Host                                    VM
-~/.cache/wal/                           ~/.cache/wal -> /mnt/wal-cache (symlink)
-  colors.json  ──virtiofs──>            /mnt/wal-cache/colors.json
-  sequences                             colors-runtime.toml (generated at boot)
-  colors                                alacritty imports colors-runtime.toml
-
-walrgb <image>
-  -> generates wal cache
-  -> systemd path detects change
-  -> sends REFRESH to VMs via vsock     VM receives REFRESH on port 14503
-                                          -> regenerates colors-runtime.toml
-                                          -> alacritty live-reloads colors
+1. focusBorder (named color or hex, set in VM profile)   ← always wins if set
+2. focusOverrideColor (hex, legacy — only when hydrix-focus on)
+3. focus daemon mode:
+     static  → reads color4 from VM's colorscheme JSON
+     dynamic → reads a configurable key from the host's live wal cache
 ```
 
-### Fast Startup (No Color Flash)
+#### `focusBorder` — Primary Option
 
-Without theme sync, VMs would show Nord default colors for ~500ms while pywal runs. The module prevents this through:
+Set a fixed border color per VM profile. Accepts named colors or hex:
 
-1. **wal-cache-link service** creates the symlink to host cache before xpra starts, so colors exist from the first shell
-2. **Pre-generated colors-runtime.toml** built at boot from the shared `colors.json` via jq, available before any terminal launches
-3. **Stylix fish target disabled** the system-level base16 fish theme applied OSC escape sequences on every shell start, overriding config colors. Disabled with `stylix.targets.fish.enable = mkForce false`
-4. **xpra-vsock ordering** xpra only accepts connections after `wal-cache-link` completes, preventing terminals from launching before colors are ready
-5. **Conflicting services disabled** `vm-colorscheme`, `wal-sync` timer, and `init-wal-cache` are all disabled to prevent overwriting the shared cache
+```nix
+# profiles/browsing/default.nix
+hydrix.vmThemeSync.focusBorder = "yellow";
 
-### Dynamic Focus Daemon
+# profiles/pentest/default.nix
+hydrix.vmThemeSync.focusBorder = "orange";
 
-Per-VM i3 border colors that change based on which VM's window is focused. A Python i3ipc daemon listens for focus events and updates the border color.
+# Or use a hex code
+hydrix.vmThemeSync.focusBorder = "#FF5555";
+```
 
-**Modes:**
+Named colors: `red`, `orange`, `yellow`, `green`, `cyan`, `blue`, `purple`, `pink`, `magenta`, `white`, `black`, `gray`
+
+When `focusBorder` is set, it is always active — it bypasses both the static/dynamic daemon modes and the `hydrix-focus` override toggle entirely.
+
+#### Focus Daemon Modes (fallback when `focusBorder` is unset)
 
 | Mode | Color Source | Use Case |
 |------|-------------|----------|
-| `static` | VM profile's colorscheme JSON (color4) | Fixed colors per VM type |
-| `dynamic` | Host's live wal cache (configurable color key) | Colors shift with wallpaper |
+| `static` | VM profile's colorscheme JSON (`color4`) | Fixed tones per VM, shifts only when colorscheme changes |
+| `dynamic` | Host's live wal cache (configurable color key) | Border shifts with every wallpaper change |
 
 **Default dynamic color map:**
 
-| VM Type | Color Key | Typical Result |
+| VM Type | Color Key | Typical result |
 |---------|-----------|----------------|
 | pentest | color1 | Red tones |
 | browsing | color2 | Green tones |
 | comms | color3 | Yellow tones |
 | dev | color5 | Magenta tones |
 | lurking | color6 | Cyan tones |
-| host | color4 | Blue tones (reserved) |
 
-**Configuration:**
-
+Override in your machine config:
 ```nix
 hydrix.vmThemeSync = {
   enable = true;
-  focusDaemon.mode = "dynamic";    # or "static"
-  dynamicColorMap = {               # Override default mapping
+  focusDaemon.mode = "dynamic";
+  dynamicColorMap = {
     pentest = "color1";
-    browsing = "color2";
+    browsing = "color4";
   };
 };
 ```
 
-**Detection:** Windows are identified by title prefix `[<vmtype>]` (e.g., `[browsing] firefox`).
+**Window detection:** The daemon identifies VM windows by title prefix `[<vmtype>]` (e.g., `[browsing] firefox`).
 
-### Enabling
+#### `focusOverrideColor` — Legacy Option
+
+Hex-only predecessor to `focusBorder`. Only active when `hydrix-focus on` is toggled:
+
+```nix
+# profiles/pentest/default.nix
+hydrix.vmThemeSync.focusOverrideColor = "#FF5555";
+```
+
+| Command | Effect |
+|---------|--------|
+| `hydrix-focus on` | Enable override colors |
+| `hydrix-focus off` | Revert to static/dynamic mode |
+| `hydrix-focus toggle` | Toggle (default action) |
+| `hydrix-focus status` | Show current state |
+
+Prefer `focusBorder` for new profiles — it is simpler, always active, and supports named colors.
+
+#### Enabling
 
 In your machine config:
 ```nix
@@ -1249,39 +1326,7 @@ hydrix.vmThemeSync.enable = true;
 hydrix.vmThemeSync.focusDaemon.mode = "dynamic";
 ```
 
-In your flake, import `vmThemeSyncModule` for both host and all VMs.
-
-### Focus Override Colors
-
-A third color mode activated at runtime via the `hydrix-focus` CLI:
-
-| Command | Effect |
-|---------|--------|
-| `hydrix-focus on` | Enable per-VM override colors |
-| `hydrix-focus off` | Disable, revert to static/dynamic mode |
-| `hydrix-focus toggle` | Toggle override on/off (default action) |
-| `hydrix-focus status` | Show current state |
-
-**Per-VM colors** are set in profile configs:
-
-```nix
-# profiles/pentest/default.nix
-hydrix.vmThemeSync.focusOverrideColor = "#FF5555";
-```
-
-When override mode is active (`hydrix-focus on`), the focus daemon reads `focusOverrideColor` from each VM's profile file instead of using the static/dynamic color pipeline. This gives you fixed, hand-picked colors per VM type regardless of wallpaper or colorscheme.
-
-**Marker file:** `~/.cache/hydrix/focus-override-active` the daemon watches for this via SIGUSR1.
-
-### Wal Cache Pre-population
-
-The `wal-cache-init` service runs on first boot to ensure VMs have colors immediately:
-
-1. Checks if `~/.cache/wal/colors.json` exists — skips if already populated
-2. If `graphical.wallpaper` is set, runs `wal -q -i <wallpaper>` to generate cache
-3. Otherwise, falls back to the configured `colorscheme` JSON file
-
-This solves the cold-start problem where VMs mount an empty virtiofs share on first boot (host has no wal cache yet), resulting in terminals with no colors until the user runs `walrgb`.
+Import `vmThemeSyncModule` in your flake for both the host and all VMs.
 
 ---
 
