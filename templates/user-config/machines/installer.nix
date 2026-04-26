@@ -44,6 +44,10 @@
     colorscheme = "@COLORSCHEME@";
     graphical.wallpaper = "${hydrix}/wallpapers/WindowRain.png";
 
+    # Window manager selection (x = startx/i3, w = Hyprland)
+    i3.enable = true;
+    hyprland.enable = true;
+
     disko = {
       enable = true;
       device = "@DEVICE@";

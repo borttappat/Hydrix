@@ -67,11 +67,12 @@
   # Systemd optimizations
   systemd.settings.Manager.DefaultTimeoutStopSec = "10s";
 
-  # File descriptor limits
+  # File descriptor limits - nix builds and nix-daemon open many files concurrently
   security.pam.loginLimits = [
-    { domain = "*"; type = "soft"; item = "nofile"; value = "4096"; }
-    { domain = "*"; type = "hard"; item = "nofile"; value = "8192"; }
+    { domain = "*"; type = "soft"; item = "nofile"; value = "524288"; }
+    { domain = "*"; type = "hard"; item = "nofile"; value = "524288"; }
   ];
+  systemd.services.nix-daemon.serviceConfig.LimitNOFILE = lib.mkDefault 524288;
 
   # Firmware
   hardware.enableAllFirmware = true;
