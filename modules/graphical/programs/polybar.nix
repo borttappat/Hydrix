@@ -94,7 +94,7 @@
   tail = "${pkgs.coreutils}/bin/tail";
   amixer = "${pkgs.alsa-utils}/bin/amixer";
   git = "${pkgs.git}/bin/git";
-  virsh = "${pkgs.libvirt}/bin/virsh";
+  virsh = "virsh";  # Resolved from PATH at runtime — avoids pulling libvirt closure into template
   xrdb = "${pkgs.xorg.xrdb}/bin/xrdb";
   df = "${pkgs.coreutils}/bin/df";
   free = "${pkgs.procps}/bin/free";
