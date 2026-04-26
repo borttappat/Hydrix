@@ -1485,6 +1485,58 @@ microvm snapshot create <name> <snap>  # Create snapshot
 microvm snapshot list <name>           # List snapshots
 microvm snapshot revert <name> <snap>  # Revert to snapshot
 microvm purge <name>                   # Delete all data (fresh start)
+
+# Encrypted home volume
+microvm encrypt-setup <name>           # First-time setup (run once, VM must be stopped)
+microvm start <name>                   # Prompts for passphrase, then starts normally
+microvm stop <name>                    # Stops VM and locks volume automatically
+```
+
+### Encrypted Home Volumes
+
+Persistent home volumes can be LUKS-encrypted so data is locked at rest whenever the VM is not running. The passphrase is prompted as part of `microvm start` — no separate unlock step needed.
+
+**How it works:**
+
+- `microvm encrypt-setup` creates a raw LUKS2 container (`home.luks`) in `/var/lib/microvms/<name>/`
+- `microvm start` runs `cryptsetup luksOpen` before QEMU starts, presenting `/dev/mapper/vm-<name>-home` to the VM
+- `microvm stop` runs `cryptsetup luksClose` after the VM halts — data is locked immediately
+- If the host is powered off mid-session, the container is locked automatically on reboot (the mapper device never persists across boots)
+
+**Enabling encryption for a VM:**
+
+```bash
+# 1. Stop the VM if running
+microvm stop microvm-pentest
+
+# 2. Create the LUKS container (prompts for passphrase, formats ext4 inside)
+microvm encrypt-setup microvm-pentest
+
+# 3. Enable in your VM profile (hydrix-config/profiles/pentest/default.nix):
+#    hydrix.microvm.encryption.enable = true;
+
+# 4. Rebuild to point the VM at the encrypted volume
+microvm build microvm-pentest
+
+# 5. Start — passphrase prompt appears before QEMU launches
+microvm start microvm-pentest
+```
+
+**Notes:**
+
+- Any existing `home.qcow2` is **not** migrated — it remains on disk and can be mounted manually for data recovery (see below), then deleted once you've confirmed the encrypted volume is working
+- Snapshots (`microvm snapshot`) do not apply to encrypted volumes — use a filesystem-level backup of `home.luks` while the mapper is closed instead
+- On **btrfs** hosts: disable copy-on-write on the container file to prevent fragmentation: `sudo chattr +C /var/lib/microvms/<name>/home.luks` (must be set before first write)
+
+**Recovering data from the old qcow2:**
+
+```bash
+sudo modprobe nbd
+sudo qemu-nbd --connect=/dev/nbd0 /var/lib/microvms/<name>/home.qcow2
+sudo mount /dev/nbd0 /mnt
+# copy files as needed
+sudo umount /mnt
+sudo qemu-nbd --disconnect /dev/nbd0
 ```
 
 ### Profile VMs
@@ -1495,7 +1547,7 @@ Declared in `hydrix-config/profiles/<name>/meta.nix`, auto-discovered by the fla
 
 | Name | CID | WS | Bridge | Subnet | Persistence |
 |------|-----|----|--------|--------|-------------|
-| `microvm-pentest` | 102 | 2 | br-pentest | 192.168.102 | persistent |
+| `microvm-pentest` | 102 | 2 | br-pentest | 192.168.102 | persistent, LUKS-encrypted |
 | `microvm-browsing` | 103 | 3 | br-browse | 192.168.103 | 10GB home |
 | `microvm-comms` | 104 | 4 | br-comms | 192.168.104 | Ephemeral |
 | `microvm-dev` | 105 | 5 | br-dev | 192.168.105 | 50GB + 20GB docker |

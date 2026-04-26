@@ -282,6 +282,9 @@
       "[colors.primary]\n" +
       "background = \"" + (.special.background // .colors.color0) + "\"\n" +
       "foreground = \"" + (.special.foreground // .colors.color7) + "\"\n\n" +
+      "[colors.cursor]\n" +
+      "cursor = \"" + (.special.cursor // .special.foreground // .colors.color7) + "\"\n" +
+      "text = \"CellBackground\"\n\n" +
       "[colors.normal]\n" +
       "black = \"" + .colors.color0 + "\"\n" +
       "red = \"" + .colors.color1 + "\"\n" +
@@ -494,6 +497,11 @@
     mkdir -p "$(dirname "$WAL_ACTIVE")"
     touch "$WAL_ACTIVE"
 
+    # Mark wallpaper as user-set (prevents init-wal-cache from overwriting on rebuilds)
+    WALLPAPER_INIT_MARKER="$HOME/.cache/hydrix/wallpaper-initialized"
+    mkdir -p "$(dirname "$WALLPAPER_INIT_MARKER")"
+    touch "$WALLPAPER_INIT_MARKER"
+
     # RGB Control (ASUS / OpenRGB) - suppress verbose output
     HEX_CODE=$(sed -n '2p' ~/.cache/wal/colors | sed 's/#//')
 
@@ -545,6 +553,11 @@
     # Mark wal colors as active
     mkdir -p "$(dirname "$WAL_ACTIVE")"
     touch "$WAL_ACTIVE"
+
+    # Mark wallpaper as user-set (prevents init-wal-cache from overwriting on rebuilds)
+    WALLPAPER_INIT_MARKER="$HOME/.cache/hydrix/wallpaper-initialized"
+    mkdir -p "$(dirname "$WALLPAPER_INIT_MARKER")"
+    touch "$WALLPAPER_INIT_MARKER"
 
     # RGB Control (ASUS / OpenRGB) - suppress verbose output
     HEX_CODE=$(sed -n '2p' ~/.cache/wal/colors | sed 's/#//')
@@ -635,10 +648,14 @@
 
         ${lib.optionalString (!isVM) ''
       # Set wallpaper via feh so ~/.fehbg exists for i3 startup
+      # One-shot: only runs on fresh installs before user sets their own wallpaper
       ${lib.optionalString (cfg.wallpaper != null) ''
-        if [ ! -f "$HOME/.fehbg" ]; then
+        WALLPAPER_INIT_MARKER="$HOME/.cache/hydrix/wallpaper-initialized"
+        if [ ! -f "$WALLPAPER_INIT_MARKER" ]; then
             echo "Setting initial wallpaper: ${cfg.wallpaper}"
             ${pkgs.feh}/bin/feh --bg-fill "${cfg.wallpaper}" 2>/dev/null || true
+            mkdir -p "$(dirname "$WALLPAPER_INIT_MARKER")"
+            touch "$WALLPAPER_INIT_MARKER"
         fi
 
         # Pre-generate lockscreen cache so lock/lock-instant show pixelated wallpaper
