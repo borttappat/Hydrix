@@ -1046,6 +1046,15 @@ vm-sync-dev-bottom  vm-sync-stg-bottom  vm-fs-bottom  vm-tun-bottom  vm-up-botto
 
 **workspace-desc** - Shows current workspace label (e.g., "BROWSING", "PENTEST") read from `/etc/hydrix/vm-registry.json` at runtime. Works automatically for any VM added to your config.
 
+Labels can be overridden temporarily at runtime with `ws-name`:
+
+```bash
+ws-name encryption   # current workspace shows "ENCRYPTION" in polybar
+ws-name              # reset — reverts to registry label (e.g. "DEV")
+```
+
+Overrides are written to `/tmp/ws-names/<number>` and cleared automatically on reboot. The polybar module checks this directory before falling back to the vm-registry, so i3 workspace names are never changed.
+
 **focus-dynamic** - Shows which VM type is currently focused on each workspace. Uses the same vm-registry lookup.
 
 **Bottom bar modules** (vm-ram-bottom, vm-cpu-bottom, etc.) - Query running VMs by polling vm-registry, then fetch metrics via vsock from each VM's CID.

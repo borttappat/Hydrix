@@ -659,20 +659,26 @@
 
         VM_REGISTRY="/etc/hydrix/vm-registry.json"
 
-        # Look up workspace name from vm-registry
-        # Special workspaces (not in vm-registry)
+        # Runtime override: ws-name writes to /tmp/ws-names/<number>
+        # Cleared on reboot; all-caps by convention
         desc=""
-        case "$ws" in
-          1)  desc="HOST" ;;
-          10) desc="ROUTER" ;;
-          *)
-            if [[ -f "$VM_REGISTRY" ]]; then
-              desc=$(${jq} -r --argjson w "$ws" \
-                'to_entries[] | select(.value.workspace == $w) | .value.label // ""' \
-                "$VM_REGISTRY" 2>/dev/null | head -1)
-            fi
-            ;;
-        esac
+        if [[ -f "/tmp/ws-names/$ws" ]]; then
+          desc=$(cat "/tmp/ws-names/$ws")
+        else
+          # Look up workspace name from vm-registry
+          # Special workspaces (not in vm-registry)
+          case "$ws" in
+            1)  desc="HOST" ;;
+            10) desc="ROUTER" ;;
+            *)
+              if [[ -f "$VM_REGISTRY" ]]; then
+                desc=$(${jq} -r --argjson w "$ws" \
+                  'to_entries[] | select(.value.workspace == $w) | .value.label // ""' \
+                  "$VM_REGISTRY" 2>/dev/null | head -1)
+              fi
+              ;;
+          esac
+        fi
 
         if [ -n "$desc" ]; then
           ${getColorHelper}
