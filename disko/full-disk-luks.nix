@@ -76,6 +76,11 @@
                     mountpoint = "/var/lib/libvirt/bases";
                     mountOptions = [ "noatime" "space_cache=v2" "discard=async" ];
                   };
+                  # MicroVM instances - nodatacow prevents fragmentation of qcow2/luks volumes
+                  "@microvms" = {
+                    mountpoint = "/var/lib/microvms";
+                    mountOptions = [ "nodatacow" "noatime" "space_cache=v2" "discard=async" ];
+                  };
                   # BTRFS snapshots
                   "@snapshots" = {
                     mountpoint = "/.snapshots";
