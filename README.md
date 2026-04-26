@@ -111,9 +111,46 @@ The router VM has **one TAP interface per bridge**, acting as the DHCP/DNS gatew
 | `mv-router-lurk` | `br-lurking` | 192.168.107.253 | 192.168.107.0/24 | Lurking VM |
 | `mv-router-file` | `br-files` | 192.168.108.253 | 192.168.108.0/24 | Files VM |
 
-Each TAP interface is created by the host before the router VM starts, then attached to its bridge via udev rules. The router VM configures each interface with a static IP and runs `dnsmasq` to provide DHCP and DNS to all subnets simultaneously.
+Each TAP interface is created by the host before the router VM starts, then attached to its bridge via the TAP assignment system described below. The router VM configures each interface with a static IP and runs `dnsmasq` to provide DHCP and DNS to all subnets simultaneously.
 
 **Custom profiles** with `routerTap` defined automatically get new TAP interfaces added (e.g., `mv-router-<name>` → `br-<name>`).
+
+### TAP-to-Bridge Assignment
+
+All `mv-*` TAP interfaces are assigned to their correct bridge by two complementary mechanisms, both defined in `modules/base/microvm-host.nix`:
+
+**1. udev catch-all rule (primary)**
+
+A single udev rule fires whenever any `mv-*` interface is created:
+
+```
+ACTION=="add", SUBSYSTEM=="net", KERNEL=="mv-*", RUN+="tap-assign %k"
+```
+
+`tap-assign` calls a generated `tap-bridge-lookup` script that contains every known TAP→bridge mapping as a shell `case` statement. The lookup is built at Nix evaluation time from:
+- Static router TAPs (`mv-router-*`, `mv-rts-*`)
+- `infraTapBridges` from each infra VM's `meta.nix` (e.g. the files VM's per-bridge TAPs)
+- `extraNetworks` from auto-discovered profile `meta.nix` files
+
+This means a new profile added via `new-profile` is automatically included after a host rebuild — no manual rule editing required.
+
+**2. `microvm-tap-bridges` repair service (safety net)**
+
+Runs on every `nixos-rebuild switch` (`restartIfChanged = true`) and whenever bridges are recreated (`partOf = network.target`). Iterates all currently-existing `mv-*` interfaces and calls `tap-assign` on each. Corrects any TAP that was created before the current rules took effect (e.g. VMs that were running during a rebuild).
+
+**Debugging wrong bridge assignments:**
+
+```bash
+# Check what bridge a TAP is on
+bridge link show | grep mv-
+
+# Manually trigger the repair service
+sudo systemctl restart microvm-tap-bridges
+
+# Inspect the generated lookup script (path shown in udev rules)
+cat /etc/udev/rules.d/99-local.rules | grep mv-\*
+# Then: cat /nix/store/...-tap-assign  and  cat /nix/store/...-tap-bridge-lookup
+```
 
 ### Stable Fallback Router (`microvm-router-stable`)
 
@@ -471,6 +508,17 @@ The installer will:
    - `flake.nix` - Main flake importing Hydrix
    - `machines/<hostname>.nix` - Your machine configuration
    - `specialisations/` - Boot mode configurations
+5. **Pre-build infrastructure VMs**: `microvm-router`, `microvm-router-stable`, `microvm-builder`
+
+Profile VMs (`microvm-browsing`, `microvm-pentest`, `microvm-dev`, `microvm-comms`, `microvm-lurking`) are **not** built during install. Build them on demand after first boot:
+
+```bash
+microvm build microvm-browsing
+microvm build microvm-pentest
+# etc.
+```
+
+The generated `machines/<serial>.nix` uses `infrastructureOnly = true` during install, which gates both the `microvm.vms` NixOS declarations and the `hydrix-firstboot-vms` service to infrastructure VMs only. Remove this flag (or set it to `false`) on first rebuild to enable profile VM management.
 
 ### Migration from Existing NixOS
 
@@ -1104,9 +1152,9 @@ Hydrix uses pywal-based colorschemes with real-time synchronization between the 
 ├─────────────────────────────────────────────────────────────────────┤
 │  Layer 2: Host wal cache inheritance (virtiofs)                     │
 │  hydrix.vmThemeSync.useHostWal = true   (default when enabled)      │
-│  VM's ~/.cache/wal → /mnt/wal-cache (host wal cache via virtiofs)  │
-│  VMs read host pywal output directly — no local pywal execution.    │
-│  colorschemeInheritance controls how host and VM colors are merged. │
+│  Host ~/.cache/wal shared read-only via virtiofs → /mnt/wal-cache   │
+│  VM has its own isolated ~/.cache/wal copied from that mount.        │
+│  REFRESH vsock signal pulls updated colors; writes stay in VM.       │
 ├─────────────────────────────────────────────────────────────────────┤
 │  Layer 3: Focus border color (host-side, i3 window border)          │
 │  hydrix.vmThemeSync.focusBorder = "yellow"                          │
@@ -1139,23 +1187,35 @@ User-defined colorschemes in `hydrix-config/colorschemes/` take priority over fr
 
 ### Layer 2 — Host Wal Cache via Virtiofs
 
-With `vmThemeSync` enabled, VMs do not run pywal locally. Instead, the host's wal cache is mounted into each VM as a virtiofs share and symlinked into place:
+With `vmThemeSync` enabled, VMs do not run pywal locally. Instead, the host's wal cache is shared read-only via virtiofs and copied into each VM's own isolated `~/.cache/wal` at boot. VM-side writes (e.g. `restore-colorscheme`, `wal-sync`) stay inside the VM and never reach the host.
 
 ```
 Host                                      VM
-~/.cache/wal/                             ~/.cache/wal -> /mnt/wal-cache (symlink)
-  colors.json  ──── virtiofs ──────>      /mnt/wal-cache/colors.json
-  sequences                               colors-runtime.toml (generated at boot)
-  colors                                  alacritty imports colors-runtime.toml
+~/.cache/wal/  (read-only virtiofs)       /mnt/wal-cache  (read-only mount)
+  colors.json  ──── virtiofs ──────>        │  copied at boot by wal-cache-link
+  sequences                               ~/.cache/wal/  (isolated local copy)
+  colors                                    colors.json
+                                            sequences
+                                            colors-runtime.toml (generated at boot)
+                                            alacritty imports colors-runtime.toml
 
-walrgb <image>
-  -> host runs pywal, updates cache
+walrgb / randomwalrgb / restore-colorscheme (on host)
+  -> pywal updates ~/.cache/wal/colors.json
   -> systemd path unit detects change
-  -> sends REFRESH to VMs via vsock:14503   VM regenerates colors-runtime.toml
-                                            alacritty live-reloads colors
+  -> sends REFRESH to VMs via vsock:14503
+       VM handler (as root): cp /mnt/wal-cache/* ~/.cache/wal/
+                              regenerates colors-runtime.toml (new terminals)
+                              pushes sequences to all user /dev/pts/* (running terminals)
+                              sudo -u user refresh-colors (pywalfox, dunst, xsetroot)
+
+walrgb / wal-sync / restore-colorscheme (inside VM — fully contained)
+  -> updates VM's own ~/.cache/wal/ only, never touches host
+  -> refresh-colors: regenerates colors-runtime.toml
+                     pushes sequences to all owned /dev/pts/*
+                     updates pywalfox, dunst, xsetroot
 ```
 
-This eliminates ~500ms color flash on VM startup and keeps all VMs in sync with the host wallpaper in real time.
+This eliminates ~500ms color flash on VM startup, keeps all VMs in sync with the host wallpaper in real time, and ensures VM color changes are fully contained.
 
 **`useHostWal`** (default: `true` when vmThemeSync is enabled) controls whether the VM reads from the host cache or its own. Setting it to `false` restores local pywal execution and makes the VM fully independent.
 
@@ -1164,53 +1224,47 @@ This eliminates ~500ms color flash on VM startup and keeps all VMs in sync with 
 hydrix.vmThemeSync.useHostWal = false;
 ```
 
-#### Inheritance Modes
-
-With the host cache shared, `colorschemeInheritance` controls how the VM blends the host's colors with its own internal colorscheme (Layer 1):
-
-| Mode | Background | Text/accent colors | Effect |
-|------|------------|-------------------|--------|
-| `full` | Host | Host | VM looks identical to host |
-| `dynamic` | Host | VM's own scheme | Shared background, distinct VM palette |
-| `none` | VM's own | VM's own | Ignores host — uses VM scheme only |
-
-Set in VM config (or per-machine override):
-```nix
-hydrix.colorschemeInheritance = "dynamic";
-```
-
-Or at runtime inside the VM:
-```bash
-set-colorscheme-mode dynamic
-get-colorscheme-mode
-```
-
-**Current default:** `dynamic` — all VMs share the host's background color (shifts with wallpaper) while keeping their own text/accent palette for visual distinction between VM types.
-
 #### Apps Updated When Colors Change
 
-Inside VMs:
-- **Alacritty** — terminal colors (via `colors-runtime.toml`, live-reloaded)
-- **Rofi** — launcher theme
+Inside VMs (on REFRESH from host or after `walrgb`/`wal-sync` inside VM):
+- **Alacritty** — all ANSI colors + cursor color (via `colors-runtime.toml`, triggers `live_config_reload`)
+- **Running terminals** — ANSI palette + cursor updated immediately via OSC sequences pushed to all `/dev/pts/*`
+- **Starship / fastfetch** — pick up updated ANSI palette in running terminals
 - **Dunst** — notification colors
-- **GTK** — via wal-gtk
+- **Firefox** — via pywalfox
 
-On the host:
+On the host (after `walrgb` / `randomwalrgb` / `restore-colorscheme`):
 - **i3** — window borders
 - **Polybar** — all bar colors
+- **Alacritty** — all ANSI colors + cursor color (via `colors-runtime.toml`)
+- **Running terminals** — ANSI palette + cursor via sequences to all `/dev/pts/*`
 - **Dunst** — notification colors
 - **Firefox** — via pywalfox extension
 - **RGB lighting** — ASUS Aura / OpenRGB
+
+#### VM Color Commands
+
+These commands are available inside every VM with `vmThemeSync` enabled:
+
+| Command | Description |
+|---------|-------------|
+| `wal-sync` | Pull host's current colors into VM local cache and refresh |
+| `restore-colorscheme` | Restore VM's own profile colorscheme (from `/etc/hydrix-colorscheme`) |
+| `refresh-colors` | Regenerate `colors-runtime.toml` + push sequences to all open terminals |
+| `write-alacritty-colors` | Regenerate `colors-runtime.toml` only (no sequence push) |
+| `walrgb <image>` | Generate colors from image, apply fully within VM |
+
+All VM color operations are fully contained — writes never reach the host's `~/.cache/wal`.
 
 #### Fast Startup (No Color Flash)
 
 Without theme sync, VMs show default colors for ~500ms while pywal runs. This is prevented by:
 
-1. **wal-cache-link service** — creates the virtiofs symlink before xpra starts, so colors exist from the first shell
-2. **Pre-generated `colors-runtime.toml`** — built at VM boot from the shared `colors.json` via jq; available before any terminal opens
+1. **wal-cache-link service** — copies host colors into VM's local `~/.cache/wal` before xpra starts, so colors exist from the first shell
+2. **Pre-generated `colors-runtime.toml`** — built at VM boot from the copied `colors.json` via jq; available before any terminal opens
 3. **Stylix fish target disabled** — prevents OSC escape sequences from overriding colors on every shell start (`stylix.targets.fish.enable = mkForce false`)
 4. **xpra-vsock ordering** — xpra only accepts connections after `wal-cache-link` completes
-5. **Conflicting services disabled** — `vm-colorscheme`, `wal-sync` timer, and `init-wal-cache` are disabled so they cannot overwrite the shared cache
+5. **Conflicting services disabled** — `vm-colorscheme`, `wal-sync` timer, and `init-wal-cache` are disabled so they cannot overwrite the VM's local cache
 
 #### Wal Cache Pre-population (Cold Start)
 
@@ -1220,7 +1274,7 @@ On first boot the host has no wal cache yet. The `wal-cache-init` service solves
 2. If `graphical.wallpaper` is set, runs `wal -q -i <wallpaper>` to generate it
 3. Otherwise falls back to the configured `colorscheme` JSON file
 
-Without this, VMs would mount an empty virtiofs share on first boot and have no colors until the user runs `walrgb`.
+Without this, the virtiofs mount would be empty on first boot and VMs would have no colors to copy until the user runs `walrgb`.
 
 #### Host Commands
 
@@ -1826,6 +1880,76 @@ The `vm-sync pull` command automatically:
 
 ---
 
+## Mullvad VPN
+
+Each VM bridge can route through a separate Mullvad WireGuard exit node. The router VM manages all tunnels — VMs themselves have no VPN configuration.
+
+### Setup
+
+1. **Download .conf files** — mullvad.net → Account → WireGuard configuration → select server → download. One file per VM that needs VPN:
+   ```
+   ~/hydrix-config/vpn/mullvad-browsing.conf
+   ~/hydrix-config/vpn/mullvad-pentest.conf
+   ~/hydrix-config/vpn/mullvad-comms.conf
+   ```
+   Multiple VMs can share the same Mullvad key pair — just download separate .conf files pointing to different (or the same) servers.
+
+2. **Create `vpn/mullvad.nix`** — copy from the provided example:
+   ```bash
+   cp ~/hydrix-config/vpn/mullvad.nix.example ~/hydrix-config/vpn/mullvad.nix
+   ```
+   Then edit it to map bridge names to conf files:
+   ```nix
+   {
+     enable = true;
+     bridges = {
+       browsing = ./mullvad-browsing.conf;
+       pentest  = ./mullvad-pentest.conf;
+       comms    = ./mullvad-comms.conf;
+     };
+   }
+   ```
+   Bridges omitted from the map go direct (no VPN, no kill switch).
+
+3. **Wire into machine config** — uncomment in `machines/<serial>.nix`:
+   ```nix
+   router.vpn.mullvad = import ../vpn/mullvad.nix;
+   ```
+   The flake also auto-includes `vpn/mullvad.nix` if it exists — no manual wiring needed if you use the flake template as-is.
+
+4. **Rebuild the router:**
+   ```bash
+   microvm build microvm-router && microvm restart microvm-router
+   ```
+
+### How It Works
+
+At router boot, `vpn-boot-assign` brings up a `wg-<bridge>` WireGuard interface for each entry in the bridges map and routes that bridge's traffic through it. Bridges not in the map go direct. The router uses policy routing (one table per subnet, table ID = CID) so each bridge is fully isolated — a browsing VM and a pentest VM can exit through different countries simultaneously.
+
+The `Table = off`, IPv6, and DNS lines are automatically stripped from downloaded `.conf` files at build time so they don't interfere with the router's own routing.
+
+New profiles are handled automatically: add the bridge entry to `mullvad.nix` and rebuild the router — no other changes needed.
+
+### Runtime Management
+
+All commands run on the host (sent to router via vsock) or from the router console. No rebuild required.
+
+```bash
+vpn-status                                  # Show all bridge assignments and tunnel state
+vpn-assign browsing direct                  # Bypass VPN for browsing VM
+vpn-assign browsing wg-browsing             # Re-enable VPN
+vpn-assign --persistent pentest direct      # Persist assignment across reboots
+vpn-assign list-mullvad                     # List configured exit nodes
+```
+
+### Adding a New VM to VPN
+
+1. Download a `.conf` file for the new VM: `vpn/mullvad-myvm.conf`
+2. Add `myvm = ./mullvad-myvm.conf;` to the `bridges` map in `vpn/mullvad.nix`
+3. Rebuild the router: `microvm build microvm-router && microvm restart microvm-router`
+
+---
+
 ## Vsock Communication
 
 All host-VM communication uses virtio-vsock. No SSH or network access to VMs. Each VM has a unique CID (Context ID).
@@ -2378,8 +2502,12 @@ All scripts are wrapped via Nix and available in PATH after installation.
 
 | Command | Purpose |
 |---------|---------|
-| `vpn-assign <vm> <exit>` | Assign Mullvad exit node to VM bridge |
-| `vpn-status` | Show VPN status for all bridges |
+| `vpn-assign <bridge> <wg-bridge\|direct>` | Route bridge through tunnel or direct |
+| `vpn-assign --persistent <bridge> <target>` | Persist assignment across reboots |
+| `vpn-assign list-mullvad` | List configured exit nodes |
+| `vpn-status` | Show all bridge assignments and tunnel state |
+
+See [Mullvad VPN](#mullvad-vpn) for full setup instructions.
 
 ### Power
 
@@ -2405,15 +2533,14 @@ All scripts are wrapped via Nix and available in PATH after installation.
 
 **Check 1 — TAP on correct bridge:**
 ```bash
-ip link show mv-files-pent   # Should say "master br-pentest"
-ip link show mv-files-brow   # Should say "master br-browse"
-# etc.
+bridge link show | grep mv-files   # Each should say "master br-<profile>"
 ```
-If a TAP shows the wrong bridge, it has stale state from before the last host rebuild. Fix: restart the files VM so QEMU destroys and recreates the TAP — the udev rule re-fires with the current config:
+If any TAP shows the wrong bridge, trigger the repair service:
 ```bash
-microvm restart microvm-files
-ip link show mv-files-pent   # Verify correct bridge
+sudo systemctl restart microvm-tap-bridges
+bridge link show | grep mv-files   # Verify
 ```
+If that doesn't fix it, the lookup script may not know about the profile yet (host not rebuilt after adding the profile). Run `rebuild` first, then restart the repair service.
 
 **Check 2 — Profile VM has correct static IP:**
 From the files VM console (`microvm console microvm-files`), ping the target VM:

@@ -2657,6 +2657,7 @@ prebuild_microvms() {
     # Critical VMs - required for lockdown mode
     local critical_vms=(
         "microvm-router:Router VM (WiFi passthrough)"
+        "microvm-router-stable:Router stable VM (break-glass fallback)"
         "microvm-builder:Builder VM (lockdown mode builds)"
     )
 

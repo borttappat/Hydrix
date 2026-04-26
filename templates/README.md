@@ -110,7 +110,7 @@ The framework defines the infrastructure for each mode (lockdown, administrative
 2. Copies `templates/user-config/` to `/mnt/home/<user>/hydrix-config/`
 3. Generates `machines/<serial>.nix` with detected hardware
 4. Runs `nixos-install` with the generated flake
-5. Pre-builds microVMs (router, builder, browsing)
+5. Pre-builds microVMs (router, router-stable, builder)
 
 ### setup-hydrix.sh (Migrate Existing NixOS)
 1. Detects current system config (user, locale, WiFi)
