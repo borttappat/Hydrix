@@ -192,6 +192,10 @@
     # Built-in framework profiles (already have bridges/subnets in Hydrix)
     frameworkProfiles = [ "browsing" "pentest" "dev" "comms" "lurking" ];
 
+    # All profile networks — passed to router for declarative IP/DHCP config
+    allProfileNetworks = map (m: { name = m._profileName; inherit (m) subnet routerTap; })
+      discoveredMetas;
+
     # Extra networks: user-defined profiles that need new bridges + router subnets
     extraNetworks = map (m: { name = m._profileName; inherit (m) subnet routerTap; })
       (builtins.filter (m: !(builtins.elem m._profileName frameworkProfiles))
@@ -248,6 +252,7 @@
       # MicroVM Router Stable (immutable fallback — starts automatically if main router fails)
       "microvm-router-stable" = hydrix.lib.mkMicrovmRouterStable {
         inherit wifiPciAddress extraNetworks;
+        profileNetworks = allProfileNetworks;
         modules = [ ./shared/wifi.nix ];
       };
 
