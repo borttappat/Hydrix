@@ -299,14 +299,22 @@ in {
       # ===== Persistent Volumes =====
       # Home directory persistence (optional)
       # Store overlay for nix builds (always when shareStore enabled)
-      volumes = lib.optionals config.hydrix.microvm.persistence.enable ([
-        {
+      volumes = lib.optionals config.hydrix.microvm.persistence.enable (
+      let
+        encEnabled = config.hydrix.microvm.encryption.enable;
+        homeVolume = if encEnabled then {
+          image = "/dev/mapper/vm-${vmName}-home";
+          mountPoint = "/home";
+          size = config.hydrix.microvm.persistence.homeSize;
+          autoCreate = false;
+        } else {
           image = config.hydrix.microvm.persistence.volumePath;
           mountPoint = "/home";
           size = config.hydrix.microvm.persistence.homeSize;
           autoCreate = true;
-        }
-      ] ++ map (vol: {
+        };
+      in [ homeVolume ]
+      ++ map (vol: {
         image = "/var/lib/microvms/${config.networking.hostName}/${vol.name}.qcow2";
         mountPoint = vol.mountPoint;
         size = vol.size;

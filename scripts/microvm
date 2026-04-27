@@ -357,6 +357,22 @@ cmd_start() {
         sudo mount -o remount,rw /nix/store
     fi
 
+    # Unlock encrypted home volume if present
+    local luks_path="/var/lib/microvms/${vm_name}/home.luks"
+    local mapper_name="vm-${vm_name}-home"
+    if [[ -f "$luks_path" ]]; then
+        if [[ -b "/dev/mapper/${mapper_name}" ]]; then
+            log "Encrypted volume already unlocked"
+        else
+            log "Unlocking encrypted volume for ${BOLD}${vm_name}${NC}..."
+            if ! sudo cryptsetup luksOpen "$luks_path" "$mapper_name"; then
+                log_error "Failed to unlock encrypted volume"
+                return 1
+            fi
+            log_success "Volume unlocked"
+        fi
+    fi
+
     log "Starting ${BOLD}${vm_name}${NC} (CID: ${cid})..."
     local start
     start=$(timer_start)
@@ -519,6 +535,13 @@ cmd_stop() {
     local stop_time
     stop_time=$(timer_end "$start")
     log_success "Stopped in ${BOLD}${stop_time}s${NC}"
+
+    # Lock encrypted home volume if open
+    local mapper_name="vm-${vm_name}-home"
+    if [[ -b "/dev/mapper/${mapper_name}" ]]; then
+        log "Locking encrypted volume..."
+        sudo cryptsetup luksClose "$mapper_name" || log "${YELLOW}Warning: Could not lock encrypted volume${NC}"
+    fi
 
     # Deregister task pentest slots from active-vms.json
     if [[ "$vm_name" == microvm-pentest-task* ]]; then
@@ -991,6 +1014,83 @@ cmd_purge() {
     echo ""
     echo -e "  ${DIM}Rebuild with:${NC} microvm build ${vm_name}"
     echo -e "  ${DIM}The VM will start fresh with a new home volume.${NC}"
+}
+
+# Set up LUKS-encrypted home volume for a microVM (Option C encryption)
+# Creates a raw LUKS container at /var/lib/microvms/<name>/home.luks
+# microvm start/stop will open/close it automatically around the VM lifecycle
+cmd_encrypt_setup() {
+    local vm_name="$1"
+    local size_mb="${2:-}"
+
+    if [[ -z "$vm_name" ]]; then
+        log_error "Usage: microvm encrypt-setup <name> [size_mb]"
+        return 1
+    fi
+
+    local vm_dir="/var/lib/microvms/${vm_name}"
+    local luks_path="${vm_dir}/home.luks"
+    local mapper_name="vm-${vm_name}-home"
+
+    if [[ -f "$luks_path" ]]; then
+        log_error "Encrypted volume already exists at ${luks_path}"
+        log_error "Run 'microvm start ${vm_name}' — it will prompt for the passphrase"
+        return 1
+    fi
+
+    if is_running "$vm_name"; then
+        log_error "Stop ${vm_name} before setting up encryption"
+        return 1
+    fi
+
+    # Warn if a plain qcow2 exists (it won't be migrated)
+    if [[ -f "${vm_dir}/home.qcow2" ]]; then
+        echo -e "${YELLOW}Warning: existing home.qcow2 found at ${vm_dir}/home.qcow2${NC}"
+        echo -e "${YELLOW}It will NOT be migrated — data inside will be inaccessible after this.${NC}"
+        echo ""
+        read -p "Continue? [y/N]: " confirm
+        [[ "$confirm" =~ ^[Yy]$ ]] || { log "Aborted"; return 1; }
+    fi
+
+    # Determine size: prefer explicit arg, then try to read from running config, else default
+    if [[ -z "$size_mb" ]]; then
+        # Try to infer from the declared homeSize (written to config dir at build time)
+        local config_size
+        config_size=$(cat "${vm_dir}/config/home-size-mb" 2>/dev/null || echo "")
+        size_mb="${config_size:-102400}"
+        log "Using home volume size: ${BOLD}${size_mb} MB${NC} (pass explicit size to override)"
+    fi
+
+    log "Creating ${size_mb} MB LUKS container at ${luks_path}..."
+    sudo mkdir -p "$vm_dir"
+    sudo fallocate -l "${size_mb}M" "$luks_path"
+
+    log "Formatting LUKS container (you will be prompted to set a passphrase)..."
+    if ! sudo cryptsetup luksFormat --type luks2 "$luks_path"; then
+        sudo rm -f "$luks_path"
+        log_error "LUKS format failed"
+        return 1
+    fi
+
+    log "Opening container to initialise filesystem..."
+    if ! sudo cryptsetup luksOpen "$luks_path" "$mapper_name"; then
+        sudo rm -f "$luks_path"
+        log_error "Could not open freshly formatted container"
+        return 1
+    fi
+
+    log "Creating ext4 filesystem..."
+    sudo mkfs.ext4 -L "vm-${vm_name}" "/dev/mapper/${mapper_name}"
+
+    log "Closing container..."
+    sudo cryptsetup luksClose "$mapper_name"
+
+    log_success "Encrypted volume ready at ${luks_path}"
+    echo ""
+    echo -e "  ${DIM}Next steps:${NC}"
+    echo -e "  1. Add ${BOLD}hydrix.microvm.encryption.enable = true${NC} to your VM profile"
+    echo -e "  2. Run ${BOLD}microvm build ${vm_name}${NC} to rebuild with the encrypted volume"
+    echo -e "  3. Run ${BOLD}microvm start ${vm_name}${NC} — it will prompt for your passphrase"
 }
 
 # Get system toplevel path from current symlink
@@ -2693,6 +2793,10 @@ ${BOLD}COMMANDS${NC}
   ${BOLD}Task pentest VMs:${NC}
     pentest <cmd>           Manage engagement slots (see: microvm pentest help)
 
+  ${BOLD}Encryption:${NC}
+    encrypt-setup <name>    Set up LUKS-encrypted home volume (run once, VM must be stopped)
+                            Subsequent starts will prompt for passphrase; stops lock automatically
+
   ${BOLD}Utilities:${NC}
     mvm <cmd> <vm1> [...]   Multi-VM: run command on multiple VMs (see: microvm mvm help)
     test <name>             Full workflow test with timing
@@ -2739,6 +2843,12 @@ ${BOLD}EXAMPLES${NC}
     # Purge and start fresh (deletes all persistent data)
     microvm purge microvm-dev
     microvm build microvm-dev
+
+    # Encrypted home volume (pentest VM)
+    microvm encrypt-setup microvm-pentest   # First-time setup: creates LUKS container, prompts for passphrase
+    microvm build microvm-pentest           # Rebuild to point VM at encrypted volume
+    microvm start microvm-pentest           # Prompts for passphrase, then starts normally
+    microvm stop microvm-pentest            # Stops VM and locks volume automatically
 
     # Builder workflow (streamlined)
     microvm builder build browsing pentest dev  # All in one session: eval cache warm after first
@@ -2893,6 +3003,10 @@ main() {
                 cmd_purge "$vm" "$force"
                 echo ""
             done
+            ;;
+        encrypt-setup)
+            [[ $# -lt 1 ]] && { log_error "Usage: microvm encrypt-setup <name> [size_mb]"; exit 1; }
+            cmd_encrypt_setup "$@"
             ;;
         snapshot|snap)
             [[ $# -lt 1 ]] && { cmd_snapshot help; exit 0; }
