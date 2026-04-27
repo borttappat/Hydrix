@@ -133,6 +133,7 @@ declare -A INFRA_CIDS=(
     ["microvm-gitsync"]=211
     ["microvm-files"]=212
     ["microvm-vault"]=213
+    ["microvm-usb-sandbox"]=209
     # Task pentest slots (pre-declared, permanent)
     ["microvm-pentest-task1"]=115
     ["microvm-pentest-task2"]=116

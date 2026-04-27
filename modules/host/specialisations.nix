@@ -146,7 +146,14 @@ in {
 
         # Config from Nix options
         ROUTER_IP="${netCfg.routerIp}"
-        BRIDGES="${lib.concatStringsSep " " netCfg.bridges}"
+        # All bridges: built-in defaults + infra VM bridges + extra-network bridges.
+        # Computed at build time so hydrix-switch can verify/recreate them all after
+        # a mode switch without needing to know about each one individually.
+        BRIDGES="${lib.concatStringsSep " " (
+          netCfg.bridges
+          ++ lib.unique (lib.attrValues netCfg.infraTapBridges)
+          ++ map (n: "br-${n.name}") netCfg.extraNetworks
+        )}"
         MGMT_SUBNET="${netCfg.subnets.mgmt or "192.168.100"}"
         SHARED_SUBNET="${netCfg.subnets.shared or "192.168.105"}"
 
@@ -295,31 +302,16 @@ in {
         sudo ip addr add "''${SHARED_SUBNET}.1/24" dev br-shared 2>/dev/null || true
 
         # Re-attach ALL TAPs to bridges (in case switch disrupted them)
-        # This includes router TAPs — udev rules only fire on interface creation,
-        # not after a specialisation switch that may recreate bridges
-        for tap in $(ip -o link show 2>/dev/null | grep -oP 'mv-[a-z-]+(?=[@:])' | sort -u); do
-          bridge=""
-          case "$tap" in
-            mv-router-mgmt) bridge="br-mgmt" ;;
-            mv-router-pent) bridge="br-pentest" ;;
-            mv-router-comm) bridge="br-comms" ;;
-            mv-router-lurk) bridge="br-lurking" ;;
-            mv-router-brow) bridge="br-browse" ;;
-            mv-router-dev)  bridge="br-dev" ;;
-            mv-router-shar) bridge="br-shared" ;;
-            mv-router-bldr) bridge="br-builder" ;;
-            mv-router-wan)  bridge="br-wan" ;;
-            mv-browse*)  bridge="br-browse" ;;
-            mv-pentest*) bridge="br-pentest" ;;
-            mv-hack*)    bridge="br-pentest" ;;
-            mv-dev*)     bridge="br-dev" ;;
-            mv-lurk*)    bridge="br-lurking" ;;
-            mv-comms*)   bridge="br-comms" ;;
-            mv-build*)   bridge="br-builder" ;;
-            mv-gitsyn*)  bridge="br-builder" ;;
-            mv-task-*)   bridge="br-pentest" ;;
-            *)           bridge="br-browse" ;;
-          esac
+        # microvm-tap-lookup is generated at build time from all known TAP→bridge
+        # mappings (router, infra, profile, extra-network) — no hardcoded cases needed.
+        # Unknown TAPs return empty string and are silently skipped.
+        #
+        # Previously this used a hardcoded case statement with a catch-all
+        # (*) bridge="br-browse") that incorrectly assigned unknown TAPs (e.g.
+        # usb-sandbox) to br-browse. Replaced with dynamic lookup so new infra
+        # VMs are handled automatically without code changes here.
+        for tap in $(ip -o link show 2>/dev/null | grep -oP 'mv-[a-z0-9-]+(?=[@:])' | sort -u); do
+          bridge=$(microvm-tap-lookup "$tap")
           if [[ -n "''${bridge:-}" ]]; then
             sudo ip link set "$tap" master "$bridge" 2>/dev/null || true
             sudo ip link set "$tap" up 2>/dev/null || true
@@ -368,7 +360,11 @@ in {
         ''}
         echo ""
         echo "Bridges:"
-        for br in ${lib.concatStringsSep " " netCfg.bridges}; do
+        for br in ${lib.concatStringsSep " " (
+          netCfg.bridges
+          ++ lib.unique (lib.attrValues netCfg.infraTapBridges)
+          ++ map (n: "br-${n.name}") netCfg.extraNetworks
+        )}; do
           state=$(ip link show $br 2>/dev/null | grep -o 'state [A-Z]*' || echo 'NOT FOUND')
           echo "  $br: $state"
         done

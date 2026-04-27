@@ -11,9 +11,15 @@ let
   # Generate bridge config from built-in list
   bridgeConfigs = lib.genAttrs netCfg.bridges (br: { interfaces = []; });
 
-  # Extra bridges from user-defined profiles
+  # Extra bridges from user-defined profiles (those with a new subnet + routerTap)
   extraBridgeConfigs = lib.genAttrs
     (map (n: "br-${n.name}") netCfg.extraNetworks)
+    (_: { interfaces = []; });
+
+  # Bridges from infra VM tapBridges — auto-discovers usb-sandbox, files, and any
+  # future user infra VM without requiring changes to the default bridges list.
+  infraBridgeConfigs = lib.genAttrs
+    (lib.unique (lib.attrValues netCfg.infraTapBridges))
     (_: { interfaces = []; });
 
   # WAN bridge for ethernet WAN mode (macvtap): physical NIC is a member so
@@ -36,8 +42,8 @@ in {
     networking.networkmanager.enable = lib.mkForce false;
     networking.useDHCP = lib.mkForce false;
 
-    # Create bridges (built-in + user-defined extra networks + WAN if ethernet mode)
-    networking.bridges = bridgeConfigs // extraBridgeConfigs // wanBridgeConfig;
+    # Create bridges (built-in + user-defined extra networks + infra VMs + WAN if ethernet mode)
+    networking.bridges = bridgeConfigs // extraBridgeConfigs // infraBridgeConfigs // wanBridgeConfig;
 
     # Host IPs on management and shared bridges
     networking.interfaces = {
@@ -65,11 +71,12 @@ in {
     # Base config = lockdown mode (host has no internet access).
     # The 'administrative' specialisation adds the default gateway.
 
-    # Trust all bridges (built-in + extra)
+    # Trust all bridges (built-in + extra networks + infra VMs)
     networking.firewall = {
       enable = true;
       trustedInterfaces = netCfg.bridges
-        ++ map (n: "br-${n.name}") netCfg.extraNetworks;
+        ++ map (n: "br-${n.name}") netCfg.extraNetworks
+        ++ lib.unique (lib.attrValues netCfg.infraTapBridges);
     };
   };
 }

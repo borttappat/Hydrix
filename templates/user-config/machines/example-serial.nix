@@ -234,6 +234,8 @@
         "microvm-lurking"  = { enable = true; };
         "microvm-builder"  = { enable = true; /* secrets.github = true; */ };
         "microvm-gitsync"  = { enable = true; };
+        "microvm-files"    = { enable = true; };
+        "microvm-usb-sandbox" = { enable = true; };
       };
       # autostart = true  starts VM at boot (default: false — start manually)
       # secrets.github = true  requires: secrets.github.enable = true (above)

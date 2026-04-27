@@ -1562,36 +1562,93 @@ Custom profiles start at CID 107+. Use `new-profile <name>` to scaffold one.
 new-profile myprofile
 
 # Creates:
-#   profiles/myprofile/meta.nix    # CID, bridge, subnet, workspace, label
-#   profiles/myprofile/default.nix # NixOS config (imports, resources)
+#   profiles/myprofile/meta.nix     # CID, bridge, subnet, workspace, label
+#   profiles/myprofile/default.nix  # NixOS config (imports, resources, colorscheme)
 #   profiles/myprofile/packages.nix # Package declarations
+# Also runs: git add profiles/myprofile/
+```
 
-# Then enable in your flake.nix:
-"microvm-myprofile" = hydrix.lib.mkMicroVM {
-  profile = "myprofile";
-  hostname = "microvm-myprofile";
-  inherit userProfiles;
-};
+The flake auto-discovers any profile directory that contains `meta.nix` — no manual wiring in `flake.nix` required.
 
-# Rebuild and start
-rebuild
+**Then complete the integration manually:**
+
+1. Declare the VM in `machines/<serial>.nix`:
+```nix
+hydrix.microvmHost.vms."microvm-myprofile" = { enable = true; };
+```
+
+2. Customise `profiles/myprofile/default.nix` — set colorscheme, RAM/vCPUs, packages.
+
+3. If the profile needs a Mullvad VPN tunnel, add to `machines/<serial>.nix` (or `shared/graphical.nix`):
+```nix
+hydrix.router.vpn.mullvad.bridges.myprofile = ./mullvad-myprofile.conf;
+```
+
+4. Rebuild in order — router and files VM have their TAP interfaces baked into the QEMU runner at build time, so they need a full restart to pick up the new bridge:
+```bash
+rebuild                       # host: creates br-myprofile, updates tapLookupScript + vm-registry
+mvm rebuild router files      # router picks up new subnet TAP; files VM picks up new bridge leg
+microvm build microvm-myprofile
 microvm start microvm-myprofile
 ```
 
-The `new-profile` script copies from `templates/profiles/_template/`, substitutes `__PLACEHOLDER__` values, and stages the files for git.
-
-**Router VM rebuild required:** Adding a new profile creates a new TAP interface and bridge. The router VM needs its `networks` config updated via rebuild so it can configure the new TAP interface + dnsmasq for that subnet.
+**What is auto-wired after `rebuild`** (no manual action needed):
+- `br-myprofile` bridge created and firewall-trusted
+- Router gets a TAP and dnsmasq entry for the new subnet (from `routerTap` in meta.nix)
+- TAP→bridge mapping in `tapLookupScript` (the `mv-myprofile*` glob covers all TAPs)
+- `vm-registry.json` updated at activation (workspace, CID, subnet — polybar and focus daemon read from there)
+- `hydrix-switch` and `router-status` include the new bridge
 
 ### Infrastructure VMs
 
-Fixed CIDs defined in Hydrix framework modules. **Not user-configurable**, not in `profiles/`, not in the vm-registry. Do not assign these CIDs to profile VMs.
+Infrastructure VMs fall into two categories:
+
+**Framework-fixed** — defined in Hydrix modules, reserved CIDs, not in `profiles/`. Do not assign these CIDs to profile or user infra VMs.
 
 | Name | CID | Purpose |
 |------|-----|---------|
-| `microvm-files` | 212 | Encrypted inter-VM file transfer |
 | `microvm-router` | 200 | WiFi VFIO passthrough |
+| `microvm-router-stable` | 201 | Break-glass fallback router |
 | `microvm-builder` | 210 | Lockdown-mode nix builds |
 | `microvm-gitsync` | 211 | Lockdown-mode git push/pull |
+| `microvm-files` | 212 | Encrypted inter-VM file transfer |
+
+**User-configurable** — declared in `hydrix-config/infra/<name>/`, auto-discovered by the flake. These appear in the vm-registry and can be managed with `microvm` commands. Reserved CIDs: 209, 213 (do not reuse).
+
+| Name | CID | Purpose |
+|------|-----|---------|
+| `microvm-usb-sandbox` | 209 | Safe USB storage handling |
+
+**Adding a new user infra VM** (no `~/Hydrix` changes needed):
+
+1. Create `infra/<name>/meta.nix`:
+```nix
+{
+  vsockCid = 214;               # unique — avoid reserved CIDs above
+  subnet   = "192.168.214";    # unique /24 prefix
+  tapId    = "mv-myinfra";
+  tapMac   = "02:00:00:02:xx:01";  # unique MAC
+  tapBridges = { "mv-myinfra" = "br-myinfra"; };
+  # routerTap = "mv-router-myinfra";  # add if the VM needs internet via the router
+}
+```
+
+2. Create `infra/<name>/default.nix` — standard NixOS module; `mkInfraVm` provides the headless base.
+
+3. Declare in `machines/<serial>.nix`:
+```nix
+hydrix.microvmHost.vms."microvm-myinfra" = { enable = true; };
+```
+
+4. Rebuild and start:
+```bash
+rebuild                              # creates bridge, configures TAP wiring, writes registry
+mvm rebuild router                   # only needed if routerTap was declared
+microvm build microvm-myinfra
+microvm start microvm-myinfra
+```
+
+If `routerTap` is set, the flake feeds it into `extraNetworks`, which automatically wires a router TAP and routes that subnet — no changes to router config required. If omitted, the VM is isolated and only reachable from other VMs sharing its bridge (like usb-sandbox).
 
 ### TUI Launcher
 
@@ -1667,7 +1724,7 @@ microvm pentest list
 
 ### Files VM (Encrypted Inter-VM Transfer)
 
-The files VM (`microvm-files`, CID 106, fixed infra) is an encrypted jump host for moving files between VMs. It has direct L2 TAP connections to each bridge you grant it access to, so it can reach VMs without going through the router. Source and destination IPs are derived at runtime from the VM registry (`subnet + .10`).
+The files VM (`microvm-files`, CID 212, fixed infra) is an encrypted jump host for moving files between VMs. It has direct L2 TAP connections to each bridge you grant it access to, so it can reach VMs without going through the router. Source and destination IPs are derived at runtime from the VM registry (`subnet + .10`).
 
 **Security model:**
 
@@ -1752,21 +1809,24 @@ microvm files list pentest
 
 ```
 Host (passphrase, orchestration)
- │  vsock 14505 → files VM (CID 106)
- │  vsock 14506 → any regular VM (ENCRYPT/DECRYPT/SERVE/CLEANUP)
+ │  vsock 14505 → files VM (CID 212)
+ │  vsock 14506 → any regular VM or usb-sandbox (ENCRYPT/SERVE/CLEANUP)
  │
 Files VM (192.168.108.10 on br-files)
- ├── mv-files-pent → br-pentest  (192.168.101.2)  [if "pentest" in accessFrom]
- ├── mv-files-brow → br-browse   (192.168.103.2)  [if "browsing" in accessFrom]
- ├── mv-files-dev  → br-dev      (192.168.104.2)  [if "dev" in accessFrom]
- ├── mv-files-comm → br-comms    (192.168.102.2)  [if "comms" in accessFrom]
- ├── mv-files-lurk → br-lurking  (192.168.107.2)  [if "lurking" in accessFrom]
- └── mv-files      → br-files    (192.168.108.10) [always]
+ ├── mv-files      → br-files       (192.168.108.10) [always]
+ ├── mv-files-pent → br-pentest     (192.168.102.2)  [profile VMs, auto-discovered]
+ ├── mv-files-brow → br-browse      (192.168.103.2)
+ ├── mv-files-dev  → br-dev         (192.168.105.2)
+ ├── mv-files-comm → br-comms       (192.168.104.2)
+ ├── mv-files-lurk → br-lurking     (192.168.106.2)
+ └── mv-files-usb  → br-usb-sandbox (192.168.209.2)  [usb-sandbox, explicit]
 
-Regular VMs: static .10 IPs on their bridge
- port 8888: ephemeral HTTP (SERVE or RECEIVE_PREPARE), files VM IP only
- vsock 14506: vm-files-agent (receives host commands)
+Profile/infra VMs: static .10 IPs on their bridge
+ port 8888: ephemeral HTTP server (serve or receive), files VM IP only
+ vsock 14506: vm-files-agent (receives host ENCRYPT/SERVE/CLEANUP commands)
 ```
+
+The files VM's TAP list is **auto-discovered** at build time from `infra/files/meta.nix`, which reads `profiles/*/meta.nix` and includes explicit entries for infra VMs like usb-sandbox. Adding a new profile automatically adds a new TAP after rebuilding the files VM.
 
 **What the files VM stores** (`/storage/` persistent qcow2, 50GB default):
 
@@ -1793,7 +1853,30 @@ Regular VMs: static .10 IPs on their bridge
 
 ### USB Sandbox (microvm-usb-sandbox)
 
-Ephemeral VM for safely handling USB storage devices. USB drives are passed through via QEMU USB hotplug, isolated from all networks except the files VM.
+Ephemeral VM for safely handling USB storage devices. USB drives are passed through via QEMU block device hotplug, isolated from all networks except the files VM.
+
+**Network architecture:**
+
+usb-sandbox sits on a dedicated isolated bridge (`br-usb-sandbox`) that has no router leg and no internet access. The files VM has a second TAP (`mv-files-usb`) on the same bridge, giving it direct L2 access to usb-sandbox without going through the router. No other VM can reach usb-sandbox.
+
+```
+Host
+ │  vsock 14506 → usb-sandbox (CID 209)   [ENCRYPT / SERVE / CLEANUP commands]
+ │  vsock 14505 → files VM    (CID 212)   [FETCH command]
+ │
+ │  br-usb-sandbox (192.168.209.0/24, no router, no internet)
+ │   ├── usb-sandbox  (192.168.209.10)  mv-usb-sandbox TAP
+ │   └── files VM     (192.168.209.2)   mv-files-usb TAP
+```
+
+**Transfer flow (USB → VM):**
+1. Host → usb-sandbox (vsock 14506): `ENCRYPT <passphrase> usb/vdb1/file` — encrypts AES-256-CBC to `~/shared/xfer.enc`
+2. Host → usb-sandbox (vsock 14506): `SERVE` — starts HTTP server on port 8888
+3. Host → files VM (vsock 14505): `FETCH 192.168.209.10 xfer.enc` — files VM pulls ciphertext over br-usb-sandbox
+4. Host → files VM (vsock 14505): `DELIVER <dest-ip> xfer.enc` — files VM pushes to destination VM
+5. Host → dest VM (vsock 14506): `DECRYPT <passphrase> ...` — destination VM decrypts
+
+The passphrase is generated on the host and sent exclusively over vsock — it never crosses a bridge network.
 
 **Setup** in your `machines/<serial>.nix`:
 
@@ -1864,8 +1947,8 @@ Paths are relative to `/home/sandbox/` inside the VM. USB drives mount at `/home
 
 | Protection | Status |
 |------------|--------|
-| Network isolation from host | ✓ No network bridge, no internet |
-| Network isolation from other VMs | ✓ Only files VM access (port 8888) |
+| Network isolation from host | ✓ Isolated bridge, no host IP, no internet |
+| Network isolation from other VMs | ✓ Only files VM access via br-usb-sandbox (port 8888) |
 | Read-only USB access | ✓ USB passed as `/dev/vdb` read-only |
 | Encrypted file transfers | ✓ AES-256-CBC via files VM |
 | Block device hotplug | ✓ QEMU monitor socket, no libusb on host |
@@ -2361,57 +2444,35 @@ Super+Shift+Return
 
 ### Adding a New Profile VM
 
-**Use the scaffold script** - it auto-discovers the next free CID/workspace, creates all files, and offers to rebuild:
+**Use the scaffold script** — it auto-discovers the next free CID/workspace, creates all files, and stages them for git:
 
 ```bash
-# Scaffold new profile (interactive prompts for all values)
 new-profile myprofile
-
-# The script:
-# 1. Scans existing profiles to find the next free CID (starts at 107)
-# 2. Prompts for: cid, workspace, subnet, bridge, tapId, routerTap, label, colorscheme
-# 3. Copies templates/profiles/_template/ → profiles/myprofile/
-# 4. Substitutes all __PLACEHOLDER__ values in the copied files
-# 5. Stages files with git add
-# 6. Offers to run rebuild immediately (router VM needs this for new TAP interface)
-
-# After scaffold, enable in your flake.nix:
-"microvm-myprofile" = hydrix.lib.mkMicroVM {
-  profile = "myprofile";
-  hostname = "microvm-myprofile";
-  inherit userProfiles;
-};
-
-# Start VM (if you skipped rebuild during scaffold)
-rebuild
-microvm start microvm-myprofile
 ```
 
-The `new-profile` script handles TAP interface naming (max 15 chars), bridge creation, and router TAP assignment automatically. Workspace routing, polybar labels, and focus menus auto-adapt without manual wiring.
+The script scans existing profiles for the next free CID (starts at 107), prompts for any values it can't auto-derive, copies `templates/profiles/_template/`, substitutes `__PLACEHOLDER__` values, and runs `git add`. Profile VMs are **auto-discovered** by the flake — no manual wiring in `flake.nix` required.
 
-**What auto-adapts** (no manual wiring needed):
+**After scaffolding, complete integration manually:**
+
+1. Declare in `machines/<serial>.nix`: `hydrix.microvmHost.vms."microvm-myprofile" = { enable = true; };`
+2. Customise `profiles/myprofile/default.nix` — colorscheme, RAM/vCPUs, packages
+3. Add VPN if needed: `hydrix.router.vpn.mullvad.bridges.myprofile = ./conf;`
+4. Rebuild in order (router and files VM have TAPs baked into their QEMU runner):
+```bash
+rebuild                       # creates bridge, updates tapLookupScript + vm-registry
+mvm rebuild router files      # picks up new subnet TAP + new bridge leg
+microvm build microvm-myprofile && microvm start microvm-myprofile
+```
+
+**What auto-adapts after rebuild** (no manual wiring needed):
 - `ws-app` routes workspace → new VM (reads vm-registry at runtime)
-- polybar `workspace-desc` shows new label
-- polybar `focus-dynamic` shows new VM type
+- polybar `workspace-desc` shows new label; `focus-dynamic` shows new VM type
 - `focus-rofi` menu includes new VM
+- `hydrix-switch` and `router-status` include the new bridge
 
-**What you add manually**:
+**What you add manually:**
 - Dedicated keybindings (e.g., `Mod+Control+b` always opens browser on browsing VM)
-- App-specific shortcuts if you want them (current `Mod+b`, `Mod+a` etc. route via `ws-app` based on current workspace)
-
-See `POLYBAR-VM-INTEGRATION.md` for detailed runtime data flow.
-
-**What auto-adapts** (no manual wiring needed):
-- `ws-app` routes workspace → new VM (reads vm-registry at runtime)
-- polybar `workspace-desc` shows new label
-- polybar `focus-dynamic` shows new VM type
-- `focus-rofi` menu includes new VM
-
-**What you add manually**:
-- Dedicated keybindings (e.g., `Mod+Control+b` always opens browser on browsing VM)
-- App-specific shortcuts if you want them (current `Mod+b`, `Mod+a` etc. route via `ws-app` based on current workspace)
-
-See `POLYBAR-VM-INTEGRATION.md` for detailed runtime data flow.
+- App-specific shortcuts if you want them beyond workspace-routing
 
 For detailed runtime data flow, see `POLYBAR-VM-INTEGRATION.md` in your config directory.
 

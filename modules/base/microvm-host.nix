@@ -198,6 +198,10 @@ in {
       pkgs.virtiofsd
       pkgs.socat    # For microvm-router console access
       pkgs.openssl  # For microvm files passphrase generation
+      # TAP→bridge lookup — wraps the build-time generated tapLookupScript so it
+      # is on PATH. Dynamic: covers router, infra, profile, and extra-network TAPs.
+      # Used by hydrix-switch for post-mode-switch TAP reattachment.
+      (pkgs.writeShellScriptBin "microvm-tap-lookup" "exec ${tapLookupScript} \"$@\"")
       # vsock-cmd: reliable AF_VSOCK client with proper SHUT_WR half-close.
       # socat closes the whole connection on stdin EOF, racing slow handlers.
       # Usage: echo "CMD args" | vsock-cmd <cid> <port> [timeout_secs]
