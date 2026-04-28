@@ -506,9 +506,16 @@
     HEX_CODE=$(sed -n '2p' ~/.cache/wal/colors | sed 's/#//')
 
     if command -v asusctl >/dev/null 2>&1 && asusctl -v >/dev/null 2>&1; then
-      echo "Setting ASUS Aura..."
-      RUST_LOG=error asusctl aura static -c "$HEX_CODE" 2>/dev/null || true
-      RUST_LOG=error asusctl -k high 2>/dev/null || true
+      echo "ASUS hardware detected, checking for AURA support..."
+      # Check if AURA interface is available (asusctl -s outputs "No aura interface found" if not supported)
+      if ! asusctl -s 2>&1 | grep -v '^\[INFO' | grep -q "No aura interface found"; then
+        echo "AURA lighting supported, setting RGB color..."
+        asusctl aura static -c "$HEX_CODE" >/dev/null 2>&1
+        asusctl -k >/dev/null 2>&1
+        echo "ASUS backlight set"
+      else
+        echo "AURA lighting not supported on this device, skipping RGB"
+      fi
     elif command -v openrgb >/dev/null 2>&1; then
       if openrgb --list-devices 2>/dev/null | grep -q "Device"; then
         echo "Setting OpenRGB..."
@@ -563,9 +570,16 @@
     HEX_CODE=$(sed -n '2p' ~/.cache/wal/colors | sed 's/#//')
 
     if command -v asusctl >/dev/null 2>&1 && asusctl -v >/dev/null 2>&1; then
-      echo "Setting ASUS Aura..."
-      RUST_LOG=error asusctl aura static -c "$HEX_CODE" 2>/dev/null || true
-      RUST_LOG=error asusctl -k high 2>/dev/null || true
+      echo "ASUS hardware detected, checking for AURA support..."
+      # Check if AURA interface is available (asusctl -s outputs "No aura interface found" if not supported)
+      if ! asusctl -s 2>&1 | grep -v '^\[INFO' | grep -q "No aura interface found"; then
+        echo "AURA lighting supported, setting RGB color..."
+        asusctl aura static -c "$HEX_CODE" >/dev/null 2>&1
+        asusctl -k >/dev/null 2>&1
+        echo "ASUS backlight set"
+      else
+        echo "AURA lighting not supported on this device, skipping RGB"
+      fi
     elif command -v openrgb >/dev/null 2>&1; then
       if openrgb --list-devices 2>/dev/null | grep -q "Device"; then
         echo "Setting OpenRGB..."
@@ -1462,7 +1476,8 @@
   colorschemeJsonExists = builtins.pathExists colorschemeJsonPath;
 
   # Host-only: Push colors to all running VMs via vsock (replaces 9p polling)
-  wifiSyncScript = pkgs.writeShellScriptBin "wifi-sync"
+  wifiSyncScript =
+    pkgs.writeShellScriptBin "wifi-sync"
     (builtins.readFile ../../scripts/wifi-sync.sh);
 
   pushColorsToVmsScript = pkgs.writeShellScriptBin "push-colors-to-vms" ''
@@ -1540,7 +1555,7 @@ in {
       ]
       ++ lib.optionals (!isVM) [
         pushColorsToVmsScript # Push colors to VMs via vsock (instant sync)
-        wifiSyncScript        # Sync WiFi credentials from router VM
+        wifiSyncScript # Sync WiFi credentials from router VM
         pkgs.socat # For vsock communication with VMs
       ];
 
