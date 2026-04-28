@@ -26,5 +26,7 @@
     # Infra VM bridges (explicit — not profile VMs)
     # usb-sandbox's main TAP stays isolated on br-usb-sandbox
     # files VM's mv-files-usb TAP connects to br-usb-sandbox for direct VM-to-VM communication
-    { "mv-files-usb" = "br-usb-sandbox"; };
+    { "mv-files-usb" = "br-usb-sandbox"; } //
+    # hostsync: files VM delivers blobs to hostsync over br-hostsync
+    { "mv-files-hsy" = "br-hostsync"; };
 }

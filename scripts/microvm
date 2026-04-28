@@ -214,7 +214,7 @@ is_headless() {
        "$vm_name" == "microvm-builder" || "$vm_name" == "microrouter" || \
        "$vm_name" == "microbuild" || "$vm_name" == "microvm-files" || \
        "$vm_name" == "microvm-gitsync" || "$vm_name" == "microvm-vault" || \
-       "$vm_name" == "microvm-usb-sandbox" ]]
+       "$vm_name" == "microvm-usb-sandbox" || "$vm_name" == "microvm-hostsync" ]]
 }
 
 # Check if VM is the builder
@@ -2590,6 +2590,7 @@ cmd_files_transfer() {
 
     # Step 8: cleanup
     vsock_send "$src_cid" "$VM_AGENT_PORT" "CLEANUP" >/dev/null 2>&1
+    vsock_send "$dst_cid" "$VM_AGENT_PORT" "CLEANUP" >/dev/null 2>&1
     files_vm_send "CLEANUP_TMP xfer.enc" >/dev/null 2>&1
 
     # Discard passphrase (already done — was only in local var)

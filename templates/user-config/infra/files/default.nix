@@ -44,12 +44,19 @@ let
   # Infra VMs that participate in file transfer (explicit — not auto-discovered)
   # MAC 5th octet: hex(vsockCid - 100), prefixed 0 to stay in valid range
   usbSandboxMeta = import ../usb-sandbox/meta.nix;
+  hostsyncMeta   = import ../hostsync/meta.nix;
   infraIfaceMap = {
     # usb-sandbox: files VM gets a TAP on br-usb-sandbox so both VMs share that bridge
     "usb-sandbox" = {
       tap    = "mv-files-usb";
       mac    = "02:00:00:02:6d:02";  # Unique MAC on br-usb-sandbox (usb-sandbox itself uses :6d:01)
       subnet = usbSandboxMeta.subnet;
+    };
+    # hostsync: files VM gets a TAP on br-hostsync to HTTP-deliver blobs to 192.168.214.10
+    "hostsync" = {
+      tap    = "mv-files-hsy";
+      mac    = "02:00:00:02:d6:02";  # CID 214 = 0xd6; :02 = files VM side on this bridge
+      subnet = hostsyncMeta.subnet;
     };
   };
 

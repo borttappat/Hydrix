@@ -234,8 +234,9 @@
         "microvm-lurking"  = { enable = true; };
         "microvm-builder"  = { enable = true; /* secrets.github = true; */ };
         "microvm-gitsync"  = { enable = true; };
-        "microvm-files"    = { enable = true; };
+        "microvm-files"       = { enable = true; };
         "microvm-usb-sandbox" = { enable = true; };
+        "microvm-hostsync"    = { enable = true; };
       };
       # autostart = true  starts VM at boot (default: false — start manually)
       # secrets.github = true  requires: secrets.github.enable = true (above)
@@ -332,4 +333,9 @@
     # microvmFiles.enable = true;
     # microvmFiles.accessFrom = [ "pentest" "dev" "browsing" ];
   };
+
+  # Pre-create ~/vm-inbox so virtiofsd for microvm-hostsync doesn't crash on first boot
+  systemd.tmpfiles.rules = let u = config.hydrix.username; in [
+    "d /home/${u}/vm-inbox 0755 ${u} users -"
+  ];
 }

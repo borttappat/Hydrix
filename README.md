@@ -16,6 +16,7 @@ Hydrix is an options-driven NixOS framework that provides complete network isola
 - [MicroVM Management](#microvm-management)
   - [Task Pentest VMs](#task-pentest-vms-per-engagement)
   - [Files VM (Encrypted Inter-VM Transfer)](#files-vm-encrypted-inter-vm-transfer)
+  - [Hostsync VM (Host File Inbox)](#hostsync-vm-host-file-inbox)
   - [USB Sandbox](#usb-sandbox-microvm-usb-sandbox)
   - [Builder VM](#builder-vm-lockdown-mode-builds)
 - [Vsock Communication](#vsock-communication)
@@ -1613,11 +1614,12 @@ Infrastructure VMs fall into two categories:
 | `microvm-gitsync` | 211 | Lockdown-mode git push/pull |
 | `microvm-files` | 212 | Encrypted inter-VM file transfer |
 
-**User-configurable** — declared in `hydrix-config/infra/<name>/`, auto-discovered by the flake. These appear in the vm-registry and can be managed with `microvm` commands. Reserved CIDs: 209, 213 (do not reuse).
+**User-configurable** — declared in `hydrix-config/infra/<name>/`, auto-discovered by the flake. These appear in the vm-registry and can be managed with `microvm` commands. Reserved CIDs: 209, 213, 214 (do not reuse).
 
 | Name | CID | Purpose |
 |------|-----|---------|
 | `microvm-usb-sandbox` | 209 | Safe USB storage handling |
+| `microvm-hostsync` | 214 | Secure host file inbox/outbox via virtiofs |
 
 **Adding a new user infra VM** (no `~/Hydrix` changes needed):
 
@@ -1819,14 +1821,69 @@ Files VM (192.168.108.10 on br-files)
  ├── mv-files-dev  → br-dev         (192.168.105.2)
  ├── mv-files-comm → br-comms       (192.168.104.2)
  ├── mv-files-lurk → br-lurking     (192.168.106.2)
- └── mv-files-usb  → br-usb-sandbox (192.168.209.2)  [usb-sandbox, explicit]
+ ├── mv-files-usb  → br-usb-sandbox (192.168.209.2)  [usb-sandbox, explicit]
+ └── mv-files-hsy  → br-hostsync    (192.168.214.2)  [hostsync, explicit]
 
 Profile/infra VMs: static .10 IPs on their bridge
  port 8888: ephemeral HTTP server (serve or receive), files VM IP only
  vsock 14506: vm-files-agent (receives host ENCRYPT/SERVE/CLEANUP commands)
 ```
 
-The files VM's TAP list is **auto-discovered** at build time from `infra/files/meta.nix`, which reads `profiles/*/meta.nix` and includes explicit entries for infra VMs like usb-sandbox. Adding a new profile automatically adds a new TAP after rebuilding the files VM.
+The files VM's TAP list is **auto-discovered** at build time from `infra/files/meta.nix`, which reads `profiles/*/meta.nix` and includes explicit entries for infra VMs like usb-sandbox and hostsync. Adding a new profile automatically adds a new TAP after rebuilding the files VM.
+
+### Hostsync VM (Host File Inbox)
+
+`microvm-hostsync` (CID 214) is a minimal infra VM that bridges the encrypted file transfer system to the host filesystem. It has no internet access and no persistent storage of its own — its only writable surface is a virtiofs share pointing at `~/vm-inbox/` on the host.
+
+**Security model:**
+
+- Regular VMs have no direct host filesystem access whatsoever
+- Only hostsync can write to the host, and only to `~/vm-inbox/` — blast radius is one directory
+- Files arrive at hostsync already encrypted; the passphrase is released via vsock only after three-way SHA-256 verification passes
+- Port 8888 accepts connections only from the files VM (`192.168.214.2`) — enforced by nftables
+
+**VM → Host** (`microvm files transfer browsing/wallpapers/Sunset.png hostsync/wallpapers`):
+
+```
+browsing VM  →  [encrypted, br-browse]  →  files VM  →  [encrypted, br-hostsync]  →  hostsync VM
+                                                                                           │
+                                                                                     virtiofs (rw)
+                                                                                           │
+                                                                                    ~/vm-inbox/wallpapers/
+```
+
+The standard `microvm files transfer` protocol is used unmodified. hostsync's vsock agent (port 14506) is compatible with the same `RECEIVE_PREPARE` / `DECRYPT` / `CLEANUP` commands sent to any destination VM.
+
+**Host → VM** (drop a file into `~/vm-inbox/`, then transfer out):
+
+```bash
+cp ~/somefile.txt ~/vm-inbox/
+microvm files transfer hostsync/somefile.txt pentest/
+```
+
+hostsync's agent also implements `ENCRYPT` and `SERVE`, so it can act as a transfer source.
+
+**Commands:**
+
+```bash
+# VM → Host
+microvm files transfer <src-vm>/<path> hostsync/            # extract to ~/vm-inbox/
+microvm files transfer <src-vm>/<path> hostsync/<subdir>    # extract to ~/vm-inbox/<subdir>/
+
+# Host → VM (drop file into ~/vm-inbox/ first)
+microvm files transfer hostsync/<filename> <dst-vm>/<path>
+```
+
+**Enable in your machine config** (included in the default template):
+
+```nix
+hydrix.microvmHost.vms."microvm-hostsync".enable = true;
+
+# Required: pre-create the inbox before virtiofsd starts
+systemd.tmpfiles.rules = let u = config.hydrix.username; in [
+  "d /home/${u}/vm-inbox 0755 ${u} users -"
+];
+```
 
 **What the files VM stores** (`/storage/` persistent qcow2, 50GB default):
 
