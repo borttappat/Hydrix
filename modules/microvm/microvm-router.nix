@@ -738,15 +738,14 @@ in {
     # - Host manages router via console only (vsock/serial)
     systemd.services.router-firewall = {
       description = "Configure router firewall";
-      after = ["router-network-setup.service"];
+      after = ["sysinit.target"];
       wantedBy = ["multi-user.target"];
       serviceConfig = {
         Type = "oneshot";
         RemainAfterExit = true;
       };
       script = ''
-        WAN=$(cat /var/lib/hydrix-router/wan_interface 2>/dev/null || echo "eth0")
-        echo "Configuring hardened firewall (WAN: $WAN)"
+        echo "Configuring hardened firewall (LAN negation, WAN-agnostic)"
 
         ${pkgs.nftables}/bin/nft flush ruleset 2>/dev/null || true
 
