@@ -101,6 +101,19 @@
   profileNetworks = cfg.networking.profileNetworks;
   # All networks the router serves: declared profiles + user-defined extra networks
   allNetworks = profileNetworks ++ extraNetworks;
+
+  # LAN interface names — all statically known at build time via MAC→name links.
+  # Used in nftables to identify WAN/VPN egress by negation so the firewall
+  # never depends on runtime WAN detection (which can fail on fresh installs).
+  lanTaps = [
+    "mv-router-mgmt" "mv-router-pent" "mv-router-comm" "mv-router-brow"
+    "mv-router-dev"  "mv-router-shar" "mv-router-bldr" "mv-router-lurk"
+    "mv-router-file"
+  ] ++ lib.optional useEthernetWan "mv-router-wan"
+    ++ map (n: n.routerTap) extraNetworks;
+
+  # nftables set literal: { "lo", "mv-router-mgmt", ... }
+  lanTapSetNft = "{ " + lib.concatMapStringsSep ", " (t: "\"${t}\"") (["lo"] ++ lanTaps) + " }";
 in {
   imports = [
     # Central options for config access
@@ -771,8 +784,8 @@ in {
             # Log and count dropped packets for debugging
             ip saddr $VM_NETWORKS counter log prefix "ROUTER-BLOCKED: " drop
 
-            # Allow WAN interface traffic (replies, etc.)
-            iifname "$WAN" accept
+            # Allow non-LAN input (WAN, VPN interfaces — identified by negation)
+            iifname != ${lanTapSetNft} accept
           }
 
           chain forward {
@@ -806,20 +819,14 @@ in {
             ip saddr 192.168.108.0/24 ip daddr 192.168.108.0/24 accept
             ip saddr 192.168.108.0/24 ip protocol icmp accept
 
-            # Allow forwarding to WAN (external internet)
-            oifname "$WAN" accept
-            # Allow forwarding to VPN interfaces
-            oifname "mullvad-*" accept
-            oifname "wg-*" accept
-            oifname "tun*" accept
+            # Allow forwarding out to WAN/VPN (any non-LAN egress)
+            oifname != ${lanTapSetNft} accept
           }
 
           chain postrouting {
             type nat hook postrouting priority srcnat; policy accept;
-            oifname "$WAN" masquerade
-            oifname "mullvad-*" masquerade
-            oifname "wg-*" masquerade
-            oifname "tun*" masquerade
+            # Masquerade on any non-LAN egress (WiFi WAN, ethernet WAN, VPN interfaces)
+            oifname != ${lanTapSetNft} masquerade
           }
         }
         EOF
