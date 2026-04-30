@@ -112,9 +112,13 @@ The router VM has **one TAP interface per bridge**, acting as the DHCP/DNS gatew
 | `mv-router-lurk` | `br-lurking` | 192.168.107.253 | 192.168.107.0/24 | Lurking VM |
 | `mv-router-file` | `br-files` | 192.168.108.253 | 192.168.108.0/24 | Files VM |
 
-Each TAP interface is created by the host before the router VM starts, then attached to its bridge via the TAP assignment system described below. The router VM configures each interface with a static IP and runs `dnsmasq` to provide DHCP and DNS to all subnets simultaneously.
+Each TAP interface is created by the host before the router VM starts, then attached to its bridge via the TAP assignment system described below.
 
-**Custom profiles** with `routerTap` defined automatically get new TAP interfaces added (e.g., `mv-router-<name>` → `br-<name>`).
+**LAN IPs are assigned at VM boot via `systemd.network.networks`**, not after WiFi connects. `ConfigureWithoutCarrier = "yes"` means every LAN interface gets its static IP immediately when the VM starts, before any WiFi interaction. `dnsmasq` then provides DHCP and DNS to all subnets simultaneously.
+
+**WAN (WiFi) is independent of LAN setup.** NetworkManager connects to WiFi in the background. In **administrative mode** (where the host routes through the router VM), internet access on the host is available the moment NM establishes the WiFi connection — there is no sequential dependency on LAN configuration. In lockdown mode the host has no default gateway regardless; VMs always get internet through the router as soon as WiFi connects.
+
+**Custom profiles** with `routerTap` defined automatically get new TAP interfaces and `systemd.network.networks` entries added (e.g., `mv-router-<name>` → `br-<name>`). No manual wiring needed after a host rebuild.
 
 ### TAP-to-Bridge Assignment
 
@@ -168,7 +172,10 @@ A second router VM is always declared alongside the main router. It is a manual 
 | Extra profile MACs | `02:00:00:02:XX:01` | `02:00:00:04:XX:01` |
 | Autostart | configurable | `false` (manual only) |
 | VPN support | yes | no (intentionally minimal) |
-| Config generation | runtime bash scripts | fully declarative (build-time) |
+| LAN IP assignment | systemd-networkd at boot (build-time) | systemd-networkd at boot (build-time) |
+| WAN detection | runtime bash (`router-network-setup`) | none needed (LAN negation) |
+| VPN routing | runtime bash (`vpn-boot-assign`) | not supported |
+| dnsmasq config | runtime generated from build-time names | fully declarative (build-time) |
 
 **How it works:**
 
