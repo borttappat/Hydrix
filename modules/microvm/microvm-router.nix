@@ -114,6 +114,16 @@
 
   # nftables set literal: { "lo", "mv-router-mgmt", ... }
   lanTapSetNft = "{ " + lib.concatMapStringsSep ", " (t: "\"${t}\"") (["lo"] ++ lanTaps) + " }";
+
+  # All LAN segments the router serves, with their router-side IP suffix (.253).
+  # Framework infra taps (fixed subnets) ++ profile/extra-network taps (auto-discovered).
+  # A new infra VM declaring routerTap in hydrix-config automatically appears here.
+  allLans =
+    [ { tap = "mv-router-mgmt"; subnet = "192.168.100"; }
+      { tap = "mv-router-shar"; subnet = "192.168.105"; }
+      { tap = "mv-router-bldr"; subnet = "192.168.107"; }
+      { tap = "mv-router-file"; subnet = "192.168.108"; }
+    ] ++ map (n: { tap = n.routerTap; subnet = n.subnet; }) allNetworks;
 in {
   imports = [
     # Central options for config access
@@ -372,12 +382,30 @@ in {
       };
     }) extraNetworks);
 
+    # ===== LAN Interface Configuration (systemd-networkd) =====
+    # Static IPs assigned at boot — no waiting for WiFi. Mirrors microvm-router-stable.
+    # ConfigureWithoutCarrier ensures IPs come up even before TAP carrier is established,
+    # so the host can reach 192.168.100.253 as soon as the VM boots.
+    #
+    # allLans = framework infra taps (fixed) ++ profile/extra-network taps (auto-discovered).
+    # Adding a new infra VM with routerTap in hydrix-config automatically appears here.
+    systemd.network = {
+      enable = true;
+      networks = lib.listToAttrs (lib.imap0 (i: l: {
+        name = "${lib.fixedWidthString 2 "0" (toString i)}-${l.tap}";
+        value = {
+          matchConfig.Name = l.tap;
+          networkConfig = { Address = "${l.subnet}.253/24"; DHCP = "no"; LinkLocalAddressing = "no"; ConfigureWithoutCarrier = "yes"; };
+        };
+      }) allLans);
+    };
+
     # ===== Networking Configuration =====
     networking = {
       useDHCP = false;
       enableIPv6 = false;
 
-      # NetworkManager for WiFi management
+      # NetworkManager for WiFi management only — LAN TAPs are handled by systemd-networkd
       networkmanager = {
         enable = true;
         wifi.powersave = false; # Prevent missed broadcast ARP replies
@@ -426,6 +454,9 @@ in {
       };
       wireless.enable = false; # NetworkManager handles WiFi
       firewall.enable = false; # We use nftables directly
+
+      # LAN TAPs managed by systemd-networkd — tell NM to leave them alone
+      networkmanager.unmanaged = map (l: l.tap) allLans;
     };
 
     # ===== IP Forwarding and Kernel Hardening =====
@@ -478,6 +509,17 @@ in {
           lib.concatMapStrings (n:
             "${n.name}:${lib.last (lib.splitString "." n.subnet)}:${n.subnet}.0/24\n"
           ) allNetworks;
+
+        # Static interface name map — generated at build time from known TAP names.
+        # Consumed by dnsmasq-config; no runtime detection needed since names are
+        # fixed by systemd.network.links above. Variable names match what
+        # dnsmasq-config expects: profile name → IFACE_<NAME>, infra → IFACE_<TAP>.
+        "hydrix-router/interfaces".text =
+          "IFACE_MGMT=mv-router-mgmt\n"
+          + lib.concatMapStrings (n: let
+              varName = lib.toUpper (builtins.replaceStrings ["-"] ["_"] n.name);
+            in "IFACE_${varName}=${n.routerTap}\n") allNetworks
+          + "IFACE_SHAR=mv-router-shar\nIFACE_BLDR=mv-router-bldr\nIFACE_FILE=mv-router-file\n";
       }
       # Mullvad WireGuard conf files — Table=off injected, copied to /etc/wireguard/
       (lib.mkIf hasMullvad (
@@ -488,12 +530,14 @@ in {
       ))
     ];
 
-    # ===== Network Setup Service =====
-    # Configures IPs on all interfaces and detects WAN
+    # ===== WAN Detection Service =====
+    # LAN IPs are now handled by systemd-networkd at boot (see allLans above).
+    # This service only detects and records the WAN interface for vpn-boot-assign
+    # and waits for WiFi connection before declaring network-online.
     systemd.services.router-network-setup = {
-      description = "Configure router networking";
+      description = "Detect WAN interface and wait for WiFi connection";
       after = ["network.target" "local-fs.target" "systemd-tmpfiles-setup.service"];
-      before = ["dnsmasq.service" "network-online.target"];
+      before = ["network-online.target"];
       wantedBy = ["multi-user.target"];
       path = [pkgs.coreutils pkgs.gnugrep pkgs.iproute2 pkgs.networkmanager];
       serviceConfig = {
@@ -501,15 +545,10 @@ in {
         RemainAfterExit = true;
       };
       script = ''
-        #!/bin/bash
-        # Don't use set -e - we want to continue even if some commands fail
-
         STATE_DIR="/var/lib/hydrix-router"
         mkdir -p "$STATE_DIR"
 
-        echo "=== Network Setup Starting ==="
-        echo "Available interfaces:"
-        ls -la /sys/class/net/ || true
+        echo "=== WAN Detection Starting ==="
 
         # Find interface by MAC address
         find_iface_by_mac() {
@@ -517,25 +556,18 @@ in {
           for iface in $(ls /sys/class/net/ 2>/dev/null); do
             if [[ -f "/sys/class/net/$iface/address" ]]; then
               local mac=$(cat "/sys/class/net/$iface/address" 2>/dev/null)
-              if [[ "$mac" == "$target_mac" ]]; then
-                echo "$iface"
-                return
-              fi
+              [[ "$mac" == "$target_mac" ]] && { echo "$iface"; return; }
             fi
           done
           echo ""
         }
 
-        # WAN mode baked in at build time
         USE_ETHERNET_WAN="${if useEthernetWan then "true" else "false"}"
 
-        # Detect WAN interface
         detect_wan() {
           if [[ "$USE_ETHERNET_WAN" == "true" ]]; then
-            # Ethernet WAN: find by static MAC assigned to mv-router-wan TAP
             find_iface_by_mac "02:00:00:01:09:01"
           else
-            # WiFi passthrough WAN: look for wireless interfaces (wlp*, wlan*)
             for iface in $(ls /sys/class/net/ 2>/dev/null); do
               [[ "$iface" == wl* ]] && { echo "$iface"; return; }
             done
@@ -548,130 +580,49 @@ in {
 
         # Wait for WAN interface to appear
         if [[ "$USE_ETHERNET_WAN" == "true" ]]; then
-          echo "Ethernet WAN mode — waiting for mv-router-wan..."
           for i in $(seq 1 15); do
             WAN_IFACE=$(detect_wan)
             [[ -n "$WAN_IFACE" ]] && break
-            echo "  ... waiting ($i/15)"
+            echo "  waiting for ethernet WAN ($i/15)..."
             sleep 1
           done
-          if [[ -z "$WAN_IFACE" ]]; then
-            echo "WARNING: Ethernet WAN TAP not found. Check br-wan bridge and host udev rules."
-            ${pkgs.iproute2}/bin/ip link show
-            WAN_IFACE="none"
-          fi
         else
-          echo "WiFi WAN mode — waiting for WiFi interface..."
           for i in $(seq 1 30); do
             WAN_IFACE=$(detect_wan)
             [[ -n "$WAN_IFACE" ]] && break
-            echo "  ... waiting ($i/30)"
+            echo "  waiting for WiFi interface ($i/30)..."
             sleep 1
           done
-          if [[ -z "$WAN_IFACE" ]]; then
-            echo "WARNING: No WiFi interface detected! Check VFIO passthrough."
-            ${pkgs.iproute2}/bin/ip link show
-            WAN_IFACE="none"
-          fi
         fi
 
-        echo "Detected WAN interface: $WAN_IFACE"
+        if [[ -z "$WAN_IFACE" ]]; then
+          echo "WARNING: No WAN interface detected!"
+          ${pkgs.iproute2}/bin/ip link show
+          WAN_IFACE="none"
+        fi
+
+        echo "WAN interface: $WAN_IFACE"
         echo "$WAN_IFACE" > "$STATE_DIR/wan_interface"
         echo "standard" > "$STATE_DIR/mode"
 
-        # Bring up WAN interface
-        if [[ "$WAN_IFACE" != "none" ]]; then
-          if [[ "$USE_ETHERNET_WAN" == "true" ]]; then
-            echo "WAN is ethernet ($WAN_IFACE) — enabling DHCP via NetworkManager"
-            ${pkgs.networkmanager}/bin/nmcli device set "$WAN_IFACE" managed yes 2>/dev/null || true
-          elif [[ "$WAN_IFACE" == wl* ]]; then
-            echo "WAN is WiFi — NetworkManager will handle connection"
-            for i in $(seq 1 60); do
-              if ${pkgs.networkmanager}/bin/nmcli device show "$WAN_IFACE" 2>/dev/null | grep -q "connected"; then
-                echo "WiFi connected via NetworkManager"
-                break
-              fi
-              echo "  Waiting for WiFi connection ($i/60)..."
-              sleep 1
-            done
-          fi
-        fi
-
-        # Map interfaces by name (routerTap from vm-registry)
-        # Router interfaces follow pattern: mv-router-<name>
-        find_iface_by_name() {
-          local name="$1"
-          for iface in $(ls /sys/class/net/ 2>/dev/null); do
-            if [[ "$iface" == "$name" ]]; then
-              echo "$iface"
-              return 0
+        # Wait for WiFi to connect (NetworkManager handles the actual connection)
+        if [[ "$WAN_IFACE" != "none" && "$USE_ETHERNET_WAN" != "true" ]]; then
+          for i in $(seq 1 60); do
+            if ${pkgs.networkmanager}/bin/nmcli device show "$WAN_IFACE" 2>/dev/null | grep -q "connected"; then
+              echo "WiFi connected"
+              break
             fi
+            echo "  waiting for WiFi connection ($i/60)..."
+            sleep 1
           done
-          return 1
-        }
-
-        # Detect framework infra interfaces (fixed TAP names, not profile-driven)
-        IFACE_MGMT=$(find_iface_by_name "mv-router-mgmt")
-        IFACE_SHAR=$(find_iface_by_name "mv-router-shar")
-        IFACE_BLDR=$(find_iface_by_name "mv-router-bldr")
-        IFACE_FILE=$(find_iface_by_name "mv-router-file")
-
-        # Detect profile + extra network interfaces (generated from meta.nix at build time)
-        ${lib.concatStringsSep "\n        " (map (n: let
-          varName = lib.toUpper (builtins.replaceStrings ["-"] ["_"] n.name);
-        in "IFACE_${varName}=$(find_iface_by_name \"${n.routerTap}\")") allNetworks)}
-
-        echo "Detected LAN interfaces:"
-        echo "  MGMT: $IFACE_MGMT"
-        ${lib.concatStringsSep "\n        " (map (n: let
-          varName = lib.toUpper (builtins.replaceStrings ["-"] ["_"] n.name);
-        in "echo \"  ${varName}: $IFACE_${varName}\"") allNetworks)}
-        echo "  SHAR: $IFACE_SHAR"
-        echo "  BLDR: $IFACE_BLDR"
-        echo "  FILE: $IFACE_FILE"
-
-        # Save interface mapping for dnsmasq and firewall
-        echo "IFACE_MGMT=$IFACE_MGMT" > "$STATE_DIR/interfaces"
-        ${lib.concatStringsSep "\n        " (map (n: let
-          varName = lib.toUpper (builtins.replaceStrings ["-"] ["_"] n.name);
-        in "echo \"IFACE_${varName}=$IFACE_${varName}\" >> \"$STATE_DIR/interfaces\"") allNetworks)}
-        echo "IFACE_SHAR=$IFACE_SHAR" >> "$STATE_DIR/interfaces"
-        echo "IFACE_BLDR=$IFACE_BLDR" >> "$STATE_DIR/interfaces"
-        echo "IFACE_FILE=$IFACE_FILE" >> "$STATE_DIR/interfaces"
-
-        # Configure each LAN interface
-        configure_lan() {
-          local iface="$1"
-          local ip="$2"
-          local name="$3"
-          if [[ -n "$iface" ]]; then
-            echo "Configuring $name ($iface) with IP $ip"
-            ${pkgs.networkmanager}/bin/nmcli device set "$iface" managed no 2>/dev/null || true
-            ${pkgs.iproute2}/bin/ip link set "$iface" up 2>/dev/null || true
-            ${pkgs.iproute2}/bin/ip addr add "$ip/24" dev "$iface" 2>/dev/null || true
-          else
-            echo "WARNING: $name interface not found!"
-          fi
-        }
-
-        configure_lan "$IFACE_MGMT" "192.168.100.253" "mgmt"
-        ${lib.concatStringsSep "\n        " (map (n: let
-          varName = lib.toUpper (builtins.replaceStrings ["-"] ["_"] n.name);
-        in "configure_lan \"$IFACE_${varName}\" \"${n.subnet}.253\" \"${n.name}\"") allNetworks)}
-        configure_lan "$IFACE_SHAR" "192.168.105.253" "shared"
-        configure_lan "$IFACE_BLDR" "192.168.107.253" "builder"
-        configure_lan "$IFACE_FILE" "192.168.108.253" "files"
-
-        echo "=== Network Setup Complete ==="
-        echo "WAN: $WAN_IFACE"
-        ${pkgs.iproute2}/bin/ip addr show
+        fi
       '';
     };
 
     # ===== Dynamic dnsmasq Configuration =====
     systemd.services.dnsmasq-config = {
-      description = "Generate dnsmasq config based on detected interfaces";
-      after = ["router-network-setup.service"];
+      description = "Generate dnsmasq config from build-time interface names";
+      after = ["systemd-networkd.service"];
       before = ["dnsmasq.service"];
       wantedBy = ["multi-user.target"];
       serviceConfig = {
@@ -681,8 +632,8 @@ in {
       script = ''
         mkdir -p /etc/dnsmasq.d
 
-        # Load detected interface names
-        source /var/lib/hydrix-router/interfaces 2>/dev/null || true
+        # Interface names are fixed at build time via systemd.network.links
+        source /etc/hydrix-router/interfaces 2>/dev/null || true
 
         echo "Generating dnsmasq config with interfaces:"
         echo "  MGMT=$IFACE_MGMT SHAR=$IFACE_SHAR BLDR=$IFACE_BLDR FILE=$IFACE_FILE"
