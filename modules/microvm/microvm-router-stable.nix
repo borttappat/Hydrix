@@ -202,7 +202,7 @@ in {
         }
       ];
 
-      vsock.cid = 201;
+      vsock.cid = lib.mkDefault 201;
     };
 
     nix.settings.auto-optimise-store = lib.mkForce false;
