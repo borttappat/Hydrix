@@ -1,0 +1,4 @@
+# Placeholder - these will be replaced by Stylix colors during generation
+[colors.primary]
+background = "#000000"
+foreground = "#ffffff"

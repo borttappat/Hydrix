@@ -1,0 +1,479 @@
+#!/usr/bin/env bash
+# microvm-rofi - Rofi-based unified VM launcher (microVMs + libvirt)
+#
+# Press number keys (1-9) to instantly select options
+#
+set -euo pipefail
+
+readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+readonly FLAKE_DIR="$(dirname "$SCRIPT_DIR")"
+readonly SCALING_JSON="$HOME/.config/hydrix/scaling.json"
+
+get_scaling_value() {
+    local key="$1"
+    local default="$2"
+    if [[ -f "$SCALING_JSON" ]]; then
+        jq -r "$key // $default" "$SCALING_JSON" 2>/dev/null || echo "$default"
+    else
+        echo "$default"
+    fi
+}
+
+get_color() {
+    local name="$1"
+    local fallback="$2"
+    local color
+    color=$(xrdb -query 2>/dev/null | grep -E "^\*\.?${name}:" | head -1 | awk '{print $2}')
+    echo "${color:-$fallback}"
+}
+
+# Check if microVM is running
+is_microvm_running() {
+    local vm_name="$1"
+    systemctl is-active --quiet "microvm@${vm_name}.service" 2>/dev/null
+}
+
+# Check if libvirt VM is running
+is_libvirt_running() {
+    local vm_name="$1"
+    local state
+    state=$(virsh domstate "$vm_name" 2>/dev/null || echo "")
+    [[ "$state" == "running" ]]
+}
+
+# List all VMs (microVMs + libvirt) in display|fullname|type format
+list_all_vms() {
+    # List microVMs from flake
+    local microvms
+    microvms=$(nix eval "$FLAKE_DIR#nixosConfigurations" --apply 'builtins.attrNames' --json 2>/dev/null | jq -r '.[]' | grep '^microvm-' | grep -v 'router' || true)
+
+    while IFS= read -r vm; do
+        [[ -z "$vm" ]] && continue
+        local display_name="${vm#microvm-}"
+        display_name="${display_name%-test}"
+        echo "${display_name}|${vm}|microvm"
+    done <<< "$microvms"
+
+    # List libvirt VMs (pentest-*, browsing-*, etc.)
+    local libvirt_vms
+    libvirt_vms=$(virsh list --all --name 2>/dev/null | grep -E '^(pentest|browsing|comms|dev)-' || true)
+
+    while IFS= read -r vm; do
+        [[ -z "$vm" ]] && continue
+        echo "${vm}|${vm}|libvirt"
+    done <<< "$libvirt_vms"
+}
+
+build_theme() {
+    local num_items="${1:-5}"
+    local bar_gaps corner_radius font_size font_name
+    bar_gaps=$(get_scaling_value '.sizes.bar_gaps' '10')
+    corner_radius=$(get_scaling_value '.sizes.corner_radius' '8')
+    font_size=$(get_scaling_value '.fonts.rofi' '12')
+    font_name=$(get_scaling_value '.font_name' 'Iosevka')
+
+    local bg fg accent prefix
+    bg=$(get_color "color0" "#1a1b26")
+    fg=$(get_color "color7" "#c0caf5")
+    accent=$(get_color "color4" "#7aa2f7")
+    prefix=$(get_color "color3" "#e0af68")
+
+    cat <<EOF
+configuration {
+    font: "${font_name} Bold ${font_size}";
+    show-icons: false;
+    disable-history: true;
+    hover-select: true;
+    me-select-entry: "";
+    me-accept-entry: "MousePrimary";
+    kb-cancel: "Escape,q";
+    kb-accept-entry: "Return,KP_Enter";
+    kb-row-up: "Up,k";
+    kb-row-down: "Down,j";
+}
+
+* {
+    bg: ${bg}B3;
+    bg-solid: ${bg};
+    fg: ${fg};
+    accent: ${accent};
+    prefix: ${prefix};
+}
+
+window {
+    location: north;
+    anchor: north;
+    x-offset: -25%;
+    y-offset: ${bar_gaps}px;
+    width: 180px;
+    background-color: @bg;
+    border: 0px;
+    border-radius: ${corner_radius}px;
+}
+
+mainbox {
+    background-color: transparent;
+    children: [inputbar, listview];
+    padding: 4px;
+}
+
+listview {
+    lines: ${num_items};
+    fixed-height: false;
+    dynamic: true;
+    scrollbar: false;
+    background-color: transparent;
+    spacing: 2px;
+}
+
+element {
+    padding: 8px 12px;
+    background-color: transparent;
+    text-color: @fg;
+    border-radius: ${corner_radius}px;
+    cursor: pointer;
+}
+
+element selected.normal {
+    background-color: @accent;
+    text-color: @bg-solid;
+}
+
+element-text {
+    background-color: transparent;
+    text-color: inherit;
+    highlight: none;
+}
+
+inputbar {
+    enabled: true;
+    children: [entry];
+    padding: 0;
+    margin: 0;
+    background-color: transparent;
+    border: 0;
+}
+
+entry {
+    enabled: true;
+    padding: 0;
+    margin: 0;
+    background-color: transparent;
+    text-color: transparent;
+    cursor: text;
+    placeholder: "";
+}
+scrollbar { enabled: false; }
+EOF
+}
+
+build_action_theme() {
+    local vm_display="${1:-}"
+    local num_items="${2:-5}"
+    local bar_gaps corner_radius font_size font_name
+    bar_gaps=$(get_scaling_value '.sizes.bar_gaps' '10')
+    corner_radius=$(get_scaling_value '.sizes.corner_radius' '8')
+    font_size=$(get_scaling_value '.fonts.rofi' '12')
+    font_name=$(get_scaling_value '.font_name' 'Iosevka')
+
+    local bg fg accent prefix
+    bg=$(get_color "color0" "#1a1b26")
+    fg=$(get_color "color7" "#c0caf5")
+    accent=$(get_color "color4" "#7aa2f7")
+    prefix=$(get_color "color3" "#e0af68")
+
+    cat <<EOF
+configuration {
+    font: "${font_name} Bold ${font_size}";
+    show-icons: false;
+    disable-history: true;
+    hover-select: true;
+    me-select-entry: "";
+    me-accept-entry: "MousePrimary";
+    kb-cancel: "Escape,q";
+    kb-accept-entry: "Return,KP_Enter";
+    kb-row-up: "Up,k";
+    kb-row-down: "Down,j";
+}
+
+* {
+    bg: ${bg}B3;
+    bg-solid: ${bg};
+    fg: ${fg};
+    accent: ${accent};
+    prefix: ${prefix};
+}
+
+window {
+    location: north;
+    anchor: north;
+    x-offset: -25%;
+    y-offset: ${bar_gaps}px;
+    width: 140px;
+    background-color: @bg;
+    border: 0px;
+    border-radius: ${corner_radius}px;
+}
+
+mainbox {
+    background-color: transparent;
+    children: [inputbar, message, listview];
+    padding: 4px;
+}
+
+message {
+    background-color: transparent;
+    padding: 6px 10px;
+}
+
+textbox {
+    background-color: transparent;
+    text-color: @prefix;
+}
+
+listview {
+    lines: ${num_items};
+    fixed-height: false;
+    dynamic: true;
+    scrollbar: false;
+    background-color: transparent;
+    spacing: 2px;
+    padding: 4px 0 0 0;
+}
+
+element {
+    padding: 8px 12px;
+    background-color: transparent;
+    text-color: @fg;
+    border-radius: ${corner_radius}px;
+    cursor: pointer;
+}
+
+element selected.normal {
+    background-color: @accent;
+    text-color: @bg-solid;
+}
+
+element-text {
+    background-color: transparent;
+    text-color: inherit;
+}
+
+inputbar {
+    enabled: true;
+    children: [entry];
+    padding: 0;
+    margin: 0;
+    background-color: transparent;
+    border: 0;
+}
+
+entry {
+    enabled: true;
+    padding: 0;
+    margin: 0;
+    background-color: transparent;
+    text-color: transparent;
+    cursor: text;
+    placeholder: "";
+}
+scrollbar { enabled: false; }
+EOF
+}
+
+show_vm_selector() {
+    local vm_raw
+    vm_raw=$(list_all_vms)
+
+    if [[ -z "$vm_raw" ]]; then
+        notify-send -t 2000 "VM Manager" "No VMs declared"
+        exit 0
+    fi
+
+    # Build display list with numbers and status indicators
+    local display_list=""
+    local -a vm_array=()
+    local -a type_array=()
+    local i=1
+
+    while IFS='|' read -r display full vmtype; do
+        [[ -z "$display" ]] && continue
+
+        local status="○"
+        local type_indicator=""
+
+        if [[ "$vmtype" == "microvm" ]]; then
+            type_indicator="μ"
+            is_microvm_running "$full" && status="●"
+        else
+            type_indicator="♦"
+            is_libvirt_running "$full" && status="●"
+        fi
+
+        display_list+="${i}. ${status}${type_indicator} ${display}"$'\n'
+        vm_array+=("$full")
+        type_array+=("$vmtype")
+        ((i++))
+    done <<< "$vm_raw"
+
+    display_list+="q. quit"
+    local num_items=$i
+
+    local theme_file
+    theme_file=$(mktemp /tmp/microvm-rofi-XXXXXX.rasi)
+    build_theme "$num_items" > "$theme_file"
+
+    local selection
+    selection=$(echo -n "$display_list" | rofi -dmenu -theme "$theme_file" -m -4 -i -auto-select -p "" -format 'i' -selected-row 0 2>/dev/null) || true
+
+    rm -f "$theme_file"
+
+    # Empty or last item (quit) = exit
+    if [[ -z "$selection" || "$selection" -eq $((num_items - 1)) ]]; then
+        exit 0
+    fi
+
+    if [[ "$selection" -lt ${#vm_array[@]} ]]; then
+        local vm_name="${vm_array[$selection]}"
+        local vm_type="${type_array[$selection]}"
+        local display="${vm_name#microvm-}"
+        display="${display%-test}"
+        show_action_menu "$vm_name" "$display" "$vm_type"
+    fi
+}
+
+show_action_menu() {
+    local vm_name="$1"
+    local display_name="$2"
+    local vm_type="$3"
+
+    local -a actions=()
+    local display_list=""
+    local is_running=false
+
+    if [[ "$vm_type" == "microvm" ]]; then
+        is_microvm_running "$vm_name" && is_running=true
+    else
+        is_libvirt_running "$vm_name" && is_running=true
+    fi
+
+    if $is_running; then
+        if [[ "$vm_type" == "microvm" ]]; then
+            actions=("attach" "app" "stop" "restart" "rebuild")
+            display_list=$'1. attach\n2. app\n3. stop\n4. restart\n5. rebuild\nq. back'
+        else
+            actions=("attach" "app" "stop" "force-stop")
+            display_list=$'1. attach\n2. app\n3. stop\n4. force-stop\nq. back'
+        fi
+    else
+        if [[ "$vm_type" == "microvm" ]]; then
+            actions=("start" "rebuild")
+            display_list=$'1. start\n2. rebuild\nq. back'
+        else
+            actions=("start" "delete")
+            display_list=$'1. start\n2. delete\nq. back'
+        fi
+    fi
+
+    local num_items=$((${#actions[@]} + 1))
+
+    local theme_file
+    theme_file=$(mktemp /tmp/microvm-rofi-XXXXXX.rasi)
+    build_action_theme "$display_name" "$num_items" > "$theme_file"
+
+    local selection
+    selection=$(echo -n "$display_list" | rofi -dmenu -theme "$theme_file" -m -4 -i -auto-select -p "" -mesg "$display_name" -format 'i' -selected-row 0 2>/dev/null) || true
+
+    rm -f "$theme_file"
+
+    # Empty or last item (back) = go back
+    if [[ -z "$selection" || "$selection" -eq ${#actions[@]} ]]; then
+        show_vm_selector
+        return
+    fi
+
+    if [[ "$selection" -lt ${#actions[@]} ]]; then
+        execute_action "$vm_name" "${actions[$selection]}" "$vm_type"
+    fi
+}
+
+execute_action() {
+    local vm_name="$1"
+    local action="$2"
+    local vm_type="$3"
+    local display="${vm_name#microvm-}"
+    display="${display%-test}"
+
+    case "$action" in
+        start)
+            notify-send -t 2000 "VM" "Starting $display..."
+            if [[ "$vm_type" == "microvm" ]]; then
+                "$SCRIPT_DIR/microvm" start "$vm_name" &
+            else
+                virsh start "$vm_name" &
+            fi
+            ;;
+        stop)
+            notify-send -t 2000 "VM" "Stopping $display..."
+            if [[ "$vm_type" == "microvm" ]]; then
+                "$SCRIPT_DIR/microvm" stop "$vm_name" &
+            else
+                virsh shutdown "$vm_name" &
+            fi
+            ;;
+        force-stop)
+            notify-send -t 2000 "VM" "Force stopping $display..."
+            virsh destroy "$vm_name" &
+            ;;
+        restart)
+            notify-send -t 2000 "VM" "Restarting $display..."
+            "$SCRIPT_DIR/microvm" restart "$vm_name" &
+            ;;
+        rebuild)
+            notify-send -t 2000 "VM" "Rebuilding $display..."
+            alacritty -e bash -c "'$SCRIPT_DIR/microvm' build '$vm_name'; echo; read -p 'Press Enter...'" &
+            ;;
+        attach)
+            if [[ "$vm_type" == "microvm" ]]; then
+                "$SCRIPT_DIR/microvm" attach "$vm_name" &
+            else
+                virt-viewer "$vm_name" &
+            fi
+            ;;
+        app)
+            # Launch app in VM - show themed app selector
+            local app_theme_file
+            app_theme_file=$(mktemp /tmp/microvm-rofi-app-XXXXXX.rasi)
+            build_action_theme "$display" 5 > "$app_theme_file"
+            local app
+            app=$(echo -e "firefox\nalacritty\ncode\nchromium\nobsidian" | rofi -dmenu -theme "$app_theme_file" -p "" -mesg "App" -i) || true
+            rm -f "$app_theme_file"
+            if [[ -n "$app" ]]; then
+                notify-send -t 2000 "VM" "Launching $app in $display..."
+                vm-app "$vm_name" "$app" &
+            fi
+            ;;
+        delete)
+            notify-send -t 3000 "VM" "Deleting $display..."
+            virsh undefine "$vm_name" --remove-all-storage 2>/dev/null || virsh undefine "$vm_name"
+            ;;
+    esac
+    disown 2>/dev/null || true
+}
+
+main() {
+    case "${1:-}" in
+        --action)
+            [[ -n "${2:-}" ]] || { echo "Usage: microvm-rofi --action <vm-name> [microvm|libvirt]"; exit 1; }
+            local display="${2#microvm-}"
+            display="${display%-test}"
+            local vmtype="${3:-microvm}"
+            show_action_menu "$2" "$display" "$vmtype"
+            ;;
+        *)
+            show_vm_selector
+            ;;
+    esac
+}
+
+main "$@"

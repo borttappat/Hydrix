@@ -1,0 +1,6 @@
+# Secrets — only the encrypted .yaml files are safe to commit
+# The plaintext versions must NEVER be committed
+secrets/github.yaml
+secrets/*.yaml
+!secrets/*.yaml.example
+!secrets/.sops.yaml

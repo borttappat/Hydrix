@@ -1,0 +1,6 @@
+* {
+    /* Placeholder - these will be replaced by Stylix colors during generation */
+    background: #000000;
+    foreground: #ffffff;
+    /* Add other color definitions as needed by your rofi theme */
+}

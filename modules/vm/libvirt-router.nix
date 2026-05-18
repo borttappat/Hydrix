@@ -1,0 +1,753 @@
+# Libvirt Router VM Configuration
+# NixOS config that runs INSIDE the libvirt router VM
+# Simple NAT router - always uses 192.168.x.x
+#
+# This is the VM-side config. For host-side management, see:
+#   modules/host/libvirt-router-host.nix
+#
+# Build: nix build .#router (via lib.mkLibvirtRouter)
+# Deploy: Copy to /var/lib/libvirt/images/router.qcow2
+#
+# Architecture:
+#   - Host creates bridges: br-mgmt, br-pentest, br-comms, br-browse, br-dev, br-shared, br-lurking
+#   - Router VM gets WiFi NIC via PCI passthrough (wlp* = WAN, auto-detected)
+#   - Virtio interfaces: enp1s0=mgmt, enp2s0=pentest, enp3s0=comms, enp4s0=browse, enp5s0=dev, enp6s0=shared, enp7s0=lurking
+#
+# Networks (always 192.168.x.x):
+#   - br-mgmt:    192.168.100.0/24
+#   - br-pentest: 192.168.101.0/24 (isolated)
+#   - br-comms:   192.168.102.0/24 (isolated)
+#   - br-browse:  192.168.103.0/24 (isolated)
+#   - br-dev:     192.168.104.0/24 (isolated)
+#   - br-shared:  192.168.105.0/24 (crosstalk allowed)
+#   - br-lurking: 192.168.107.0/24 (fully isolated)
+#
+# WAN interface detection: Automatically finds wireless (wlp*) or first non-virtio interface
+{ config, lib, pkgs, modulesPath, ... }:
+
+with lib;
+
+let
+  cfg = config.hydrix.router;
+  hydrixCfg = config.hydrix;
+
+  # Get credentials from hydrix.router.* options (set in user's machine.nix)
+  routerUser = cfg.username;
+  routerHashedPassword = cfg.hashedPassword;
+
+  # WiFi credentials for automatic connection
+  wifiSSID = cfg.wifi.ssid;
+  wifiPassword = cfg.wifi.password;
+  hasWifiCredentials = wifiSSID != "" && wifiPassword != "";
+
+  # Mullvad/VPN config from hydrix.router.vpn.mullvad.* options
+  vpnCfg = cfg.vpn;
+  hasMullvad = vpnCfg.mullvad.enable && vpnCfg.mullvad.privateKey != "";
+
+  # Generate WireGuard config content for a Mullvad exit node
+  mkMullvadConfig = name: node: ''
+    [Interface]
+    PrivateKey = ${vpnCfg.mullvad.privateKey}
+    Address = ${vpnCfg.mullvad.address}
+    DNS = 10.64.0.1
+
+    [Peer]
+    PublicKey = ${node.publicKey}
+    Endpoint = ${node.server}:51820
+    AllowedIPs = 0.0.0.0/0
+    PersistentKeepalive = 25
+  '';
+in {
+  imports = [
+    (modulesPath + "/profiles/qemu-guest.nix")
+  ];
+
+  options.hydrix.router = {
+    mode = mkOption {
+      type = types.enum [ "auto" "standard" "lockdown" ];
+      default = "auto";
+      description = ''
+        Router operating mode:
+        - auto: Detect based on host's IP on management bridge
+        - standard: Simple NAT routing (192.168.x.x)
+        - lockdown: VPN policy routing with kill switches (10.100.x.x)
+      '';
+    };
+
+    vpnRouting = {
+      enable = mkOption {
+        type = types.bool;
+        default = true;
+        description = "Enable VPN-based policy routing (for lockdown mode)";
+      };
+
+      killSwitch = mkOption {
+        type = types.bool;
+        default = true;
+        description = "Drop traffic if assigned VPN is down";
+      };
+
+      allowInterVmTraffic = mkOption {
+        type = types.bool;
+        default = false;
+        description = "Allow traffic between different VM networks";
+      };
+    };
+  };
+
+  config = {
+    nixpkgs.config.allowUnfree = true;
+
+    boot.initrd.availableKernelModules = [
+      "virtio_balloon" "virtio_blk" "virtio_pci" "virtio_ring"
+      "virtio_net" "virtio_scsi"
+    ];
+
+    boot.kernelParams = [
+      "console=tty1"
+      "console=ttyS0,115200n8"
+    ];
+
+    boot.kernelPackages = pkgs.linuxPackages_latest;
+    # WireGuard is built into the kernel since 5.6, no external module needed
+    boot.extraModulePackages = [ ];
+
+    system.stateVersion = "25.05";
+
+    # Enable all firmware for WiFi card support (especially iwlwifi for Intel WiFi)
+    hardware.enableAllFirmware = true;
+    hardware.enableRedistributableFirmware = true;
+
+    networking = {
+      hostName = "router-vm";
+      useDHCP = false;
+      enableIPv6 = false;
+      # Use NetworkManager for WiFi - it automatically handles WiFi connections
+      # This is much simpler than wpa_supplicant which requires manual config files
+      networkmanager = {
+        enable = true;
+        # Pre-configure WiFi connection if credentials were provided during setup
+        ensureProfiles = lib.mkIf hasWifiCredentials {
+          profiles = {
+            "${wifiSSID}" = {
+              connection = {
+                id = wifiSSID;
+                type = "wifi";
+                autoconnect = "true";
+                autoconnect-priority = "100";
+              };
+              wifi = {
+                mode = "infrastructure";
+                ssid = wifiSSID;
+              };
+              wifi-security = {
+                key-mgmt = "wpa-psk";
+                psk = wifiPassword;
+              };
+              ipv4 = {
+                method = "auto";
+              };
+              ipv6 = {
+                method = "disabled";
+              };
+            };
+          };
+        };
+      };
+      wireless.enable = false;  # Disable wpa_supplicant (NetworkManager handles WiFi)
+
+      # WAN interface is detected dynamically at runtime by router-network-setup
+      # It will be either wlp* (WiFi passthrough) or a physical ethernet device
+      # NetworkManager will automatically connect to known WiFi networks
+
+      firewall.enable = false;  # We use nftables directly
+    };
+
+    # IP forwarding and kernel hardening
+    # rp_filter disabled: Required for policy routing (VPN per-bridge routing)
+    boot.kernel.sysctl = {
+      # === Routing (required) ===
+      "net.ipv4.ip_forward" = 1;
+      "net.ipv4.conf.all.forwarding" = 1;
+      "net.ipv4.conf.default.rp_filter" = 0;  # Required for policy routing
+      "net.ipv4.conf.all.rp_filter" = 0;
+
+      # === ICMP Hardening ===
+      "net.ipv4.icmp_echo_ignore_broadcasts" = 1;  # Smurf attack protection
+      "net.ipv4.icmp_ignore_bogus_error_responses" = 1;
+
+      # === TCP Hardening ===
+      "net.ipv4.tcp_syncookies" = 1;  # SYN flood protection
+      "net.ipv4.tcp_rfc1337" = 1;     # TIME-WAIT assassination protection
+
+      # === Routing Security ===
+      "net.ipv4.conf.all.accept_source_route" = 0;
+      "net.ipv4.conf.default.accept_source_route" = 0;
+      "net.ipv4.conf.all.accept_redirects" = 0;
+      "net.ipv4.conf.default.accept_redirects" = 0;
+      "net.ipv4.conf.all.send_redirects" = 0;      # Router shouldn't send redirects
+      "net.ipv4.conf.default.send_redirects" = 0;
+      "net.ipv4.conf.all.secure_redirects" = 0;
+
+      # === Logging ===
+      "net.ipv4.conf.all.log_martians" = 1;  # Log spoofed/malformed packets
+    };
+
+    # Routing tables for VPN policy routing (lockdown mode)
+    # Note: Merged with Mullvad configs below via lib.mkMerge
+    environment.etc = lib.mkMerge [
+      {
+        "iproute2/rt_tables".text = ''
+          255     local
+          254     main
+          253     default
+          0       unspec
+          # Hydrix VPN routing tables
+          100     pentest
+          101     comms
+          102     browse
+          103     dev
+          104     lurking
+        '';
+      }
+      # Mullvad WireGuard configs (if configured)
+      (lib.mkIf hasMullvad (
+        lib.mapAttrs' (name: node: {
+          name = "wireguard/mullvad-${name}.conf";
+          value = {
+            text = mkMullvadConfig name node;
+            mode = "0600";
+          };
+        }) vpnCfg.mullvad.exitNodes
+      ))
+    ];
+
+    # Dynamic network configuration based on detected mode
+    # Router VM interfaces (virtio NICs added by virt-install in order):
+    #   WAN = wlp* (WiFi passthrough) or other non-virtio interface, auto-detected
+    #   enp1s0 = br-mgmt (first virtio)
+    #   enp2s0 = br-pentest (second virtio) - isolated
+    #   enp3s0 = br-comms (third virtio) - isolated
+    #   enp4s0 = br-browse (fourth virtio) - isolated
+    #   enp5s0 = br-dev (fifth virtio) - isolated
+    #   enp6s0 = br-shared (sixth virtio) - allows crosstalk between VMs
+    #   enp7s0 = br-lurking (seventh virtio) - fully isolated
+    systemd.services.router-network-setup = {
+      description = "Configure router networking based on mode";
+      after = [ "network.target" ];
+      before = [ "dnsmasq.service" "network-online.target" ];
+      wantedBy = [ "multi-user.target" ];
+      serviceConfig = {
+        Type = "oneshot";
+        RemainAfterExit = true;
+      };
+      script = ''
+        #!/bin/bash
+        set -e
+
+        STATE_DIR="/var/lib/hydrix-router"
+        mkdir -p "$STATE_DIR"
+
+        # Detect WAN interface (WiFi passthrough or first non-virtio interface)
+        detect_wan() {
+          # First, look for wireless interfaces (wlp*, wlan*)
+          for iface in $(ls /sys/class/net/ 2>/dev/null); do
+            if [[ "$iface" == wl* ]]; then
+              echo "$iface"
+              return
+            fi
+          done
+
+          # Fallback: find first interface that's not virtio (enp*) and not lo
+          for iface in $(ls /sys/class/net/ 2>/dev/null); do
+            if [[ "$iface" != "lo" && "$iface" != enp* ]]; then
+              echo "$iface"
+              return
+            fi
+          done
+
+          # Last resort: check for any interface with carrier on physical device
+          for iface in $(ls /sys/class/net/ 2>/dev/null); do
+            if [[ -d "/sys/class/net/$iface/device" && "$iface" != enp* ]]; then
+              echo "$iface"
+              return
+            fi
+          done
+
+          # Default fallback (shouldn't happen with proper passthrough)
+          echo "eth0"
+        }
+
+        WAN_IFACE=$(detect_wan)
+        echo "Detected WAN interface: $WAN_IFACE"
+        echo "$WAN_IFACE" > "$STATE_DIR/wan_interface"
+
+        # Mode detection: determine if we're in standard or lockdown mode
+        # Legacy libvirt deployments used different VM names per mode:
+        #   - router = standard mode (192.168.x.x)
+        #   - lockdown-router = lockdown mode (10.100.x.x)
+        # Current architecture uses a single "router" VM name for all modes.
+        detect_mode() {
+          # Method 1: Check hostname - set by libvirt from VM name
+          if hostname | grep -qi "lockdown"; then
+            echo "lockdown"
+            return
+          fi
+
+          # Method 2: Check if we can detect host's IP on management bridge
+          # Give network time to come up
+          sleep 2
+
+          # Bring up enp1s0 temporarily to check for host (this is mgmt bridge)
+          ${pkgs.iproute2}/bin/ip link set enp1s0 up 2>/dev/null || true
+
+          # Check for lockdown host IP (10.100.0.1)
+          if ${pkgs.iproute2}/bin/ip neigh show dev enp1s0 2>/dev/null | grep -q "10.100.0.1"; then
+            echo "lockdown"
+            return
+          fi
+
+          # Try ARP ping to detect host IP
+          if ${pkgs.iputils}/bin/arping -c 1 -I enp1s0 10.100.0.1 >/dev/null 2>&1; then
+            echo "lockdown"
+            return
+          fi
+
+          # Method 3: Check /etc/router-mode file (can be set by cloud-init or metadata)
+          if [ -f /etc/router-mode ]; then
+            cat /etc/router-mode
+            return
+          fi
+
+          # Default to standard mode
+          echo "standard"
+        }
+
+        MODE="${cfg.mode}"
+        if [ "$MODE" = "auto" ]; then
+          MODE=$(detect_mode)
+        fi
+
+        echo "Router mode: $MODE"
+        echo "$MODE" > "$STATE_DIR/mode"
+
+        # NetworkManager handles WiFi and DHCP automatically
+        # Just mark the WAN interface as unmanaged for non-WiFi or let it manage WiFi
+        if [[ "$WAN_IFACE" == wl* ]]; then
+          echo "WAN is WiFi - NetworkManager will handle connection"
+          # NetworkManager automatically connects to known networks
+          # Wait for connection to establish
+          for i in $(seq 1 60); do
+            if ${pkgs.networkmanager}/bin/nmcli device show "$WAN_IFACE" 2>/dev/null | grep -q "connected"; then
+              echo "WiFi connected via NetworkManager"
+              break
+            fi
+            sleep 1
+          done
+        else
+          echo "WAN is ethernet - bringing up manually"
+          ${pkgs.iproute2}/bin/ip link set "$WAN_IFACE" up 2>/dev/null || true
+          ${pkgs.dhcpcd}/bin/dhcpcd -b "$WAN_IFACE" 2>/dev/null || true
+        fi
+
+        # Bring up all LAN interfaces (virtio NICs in order)
+        # Mark them as unmanaged by NetworkManager so we can configure them statically
+        for iface in enp1s0 enp2s0 enp3s0 enp4s0 enp5s0 enp6s0 enp7s0; do
+          ${pkgs.networkmanager}/bin/nmcli device set "$iface" managed no 2>/dev/null || true
+          ${pkgs.iproute2}/bin/ip link set "$iface" up 2>/dev/null || true
+        done
+
+        case "$MODE" in
+          standard)
+            # Standard mode: 192.168.x.x networks
+            ${pkgs.iproute2}/bin/ip addr add 192.168.100.253/24 dev enp1s0 2>/dev/null || true  # mgmt
+            ${pkgs.iproute2}/bin/ip addr add 192.168.101.253/24 dev enp2s0 2>/dev/null || true  # pentest (isolated)
+            ${pkgs.iproute2}/bin/ip addr add 192.168.102.253/24 dev enp3s0 2>/dev/null || true  # comms (isolated)
+            ${pkgs.iproute2}/bin/ip addr add 192.168.103.253/24 dev enp4s0 2>/dev/null || true  # browse (isolated)
+            ${pkgs.iproute2}/bin/ip addr add 192.168.104.253/24 dev enp5s0 2>/dev/null || true  # dev (isolated)
+            ${pkgs.iproute2}/bin/ip addr add 192.168.105.253/24 dev enp6s0 2>/dev/null || true  # shared (crosstalk)
+            ${pkgs.iproute2}/bin/ip addr add 192.168.107.253/24 dev enp7s0 2>/dev/null || true  # lurking (fully isolated)
+            ;;
+
+          lockdown)
+            # Lockdown mode: same 192.168.x.x networks (lockdown is host-side firewall only)
+            ${pkgs.iproute2}/bin/ip addr add 192.168.100.253/24 dev enp1s0 2>/dev/null || true  # mgmt
+            ${pkgs.iproute2}/bin/ip addr add 192.168.101.253/24 dev enp2s0 2>/dev/null || true  # pentest (isolated)
+            ${pkgs.iproute2}/bin/ip addr add 192.168.102.253/24 dev enp3s0 2>/dev/null || true  # comms (isolated)
+            ${pkgs.iproute2}/bin/ip addr add 192.168.103.253/24 dev enp4s0 2>/dev/null || true  # browse (isolated)
+            ${pkgs.iproute2}/bin/ip addr add 192.168.104.253/24 dev enp5s0 2>/dev/null || true  # dev (isolated)
+            ${pkgs.iproute2}/bin/ip addr add 192.168.105.253/24 dev enp6s0 2>/dev/null || true  # shared (crosstalk)
+            ${pkgs.iproute2}/bin/ip addr add 192.168.107.253/24 dev enp7s0 2>/dev/null || true  # lurking (fully isolated)
+
+            # Set up policy routing rules for VPN routing
+            ${pkgs.iproute2}/bin/ip rule del fwmark 100 table pentest 2>/dev/null || true
+            ${pkgs.iproute2}/bin/ip rule del fwmark 101 table comms 2>/dev/null || true
+            ${pkgs.iproute2}/bin/ip rule del fwmark 102 table browse 2>/dev/null || true
+            ${pkgs.iproute2}/bin/ip rule del fwmark 103 table dev 2>/dev/null || true
+            ${pkgs.iproute2}/bin/ip rule del fwmark 104 table lurking 2>/dev/null || true
+
+            ${pkgs.iproute2}/bin/ip rule add fwmark 100 table pentest priority 100
+            ${pkgs.iproute2}/bin/ip rule add fwmark 101 table comms priority 101
+            ${pkgs.iproute2}/bin/ip rule add fwmark 102 table browse priority 102
+            ${pkgs.iproute2}/bin/ip rule add fwmark 103 table dev priority 103
+            ${pkgs.iproute2}/bin/ip rule add fwmark 104 table lurking priority 104
+
+            # Default dev network to direct WAN access
+            WAN_GW=$(${pkgs.iproute2}/bin/ip route | grep "default.*$WAN_IFACE" | awk '{print $3}')
+            if [ -n "$WAN_GW" ]; then
+              ${pkgs.iproute2}/bin/ip route add default via "$WAN_GW" table dev 2>/dev/null || true
+            fi
+
+            # Initialize VPN assignment state (blocked by default for security)
+            mkdir -p /var/lib/hydrix-vpn
+            [ -f /var/lib/hydrix-vpn/pentest.assignment ] || echo "blocked" > /var/lib/hydrix-vpn/pentest.assignment
+            [ -f /var/lib/hydrix-vpn/comms.assignment ] || echo "blocked" > /var/lib/hydrix-vpn/comms.assignment
+            [ -f /var/lib/hydrix-vpn/browse.assignment ] || echo "blocked" > /var/lib/hydrix-vpn/browse.assignment
+            [ -f /var/lib/hydrix-vpn/dev.assignment ] || echo "direct" > /var/lib/hydrix-vpn/dev.assignment
+            [ -f /var/lib/hydrix-vpn/lurking.assignment ] || echo "blocked" > /var/lib/hydrix-vpn/lurking.assignment
+            ;;
+        esac
+
+        echo "Network setup complete for $MODE mode (WAN: $WAN_IFACE)"
+      '';
+    };
+
+    # Dynamic dnsmasq configuration with DNS privacy for Mullvad
+    systemd.services.dnsmasq-config = {
+      description = "Generate dnsmasq config based on router mode and VPN assignments";
+      after = [ "router-network-setup.service" "vpn-persistent-load.service" ];
+      before = [ "dnsmasq.service" ];
+      wantedBy = [ "multi-user.target" ];
+      serviceConfig = {
+        Type = "oneshot";
+        RemainAfterExit = true;
+      };
+      script = ''
+        MODE=$(cat /var/lib/hydrix-router/mode 2>/dev/null || echo "standard")
+        STATE_DIR="/var/lib/hydrix-vpn"
+
+        # Read VPN assignments (for DNS privacy)
+        PENTEST_VPN=$(cat "$STATE_DIR/pentest.assignment" 2>/dev/null || echo "direct")
+        COMMS_VPN=$(cat "$STATE_DIR/comms.assignment" 2>/dev/null || echo "direct")
+        BROWSE_VPN=$(cat "$STATE_DIR/browse.assignment" 2>/dev/null || echo "direct")
+        DEV_VPN=$(cat "$STATE_DIR/dev.assignment" 2>/dev/null || echo "direct")
+        LURKING_VPN=$(cat "$STATE_DIR/lurking.assignment" 2>/dev/null || echo "direct")
+
+        # DNS server selection based on VPN assignment
+        # Mullvad DNS (10.64.0.1) for Mullvad routes, router DNS for direct
+        get_dns() {
+          local assignment="$1"
+          local router_ip="$2"
+          if [[ "$assignment" == mullvad-* ]]; then
+            # Use Mullvad DNS to prevent DNS leaks
+            echo "10.64.0.1"
+          else
+            # Use router as DNS (dnsmasq will forward to upstream)
+            echo "$router_ip"
+          fi
+        }
+
+        DNS_PENTEST=$(get_dns "$PENTEST_VPN" "192.168.101.253")
+        DNS_COMMS=$(get_dns "$COMMS_VPN" "192.168.102.253")
+        DNS_BROWSE=$(get_dns "$BROWSE_VPN" "192.168.103.253")
+        DNS_DEV=$(get_dns "$DEV_VPN" "192.168.104.253")
+        DNS_LURKING=$(get_dns "$LURKING_VPN" "192.168.107.253")
+
+        cat > /etc/dnsmasq.d/hydrix.conf << EOF
+        bind-interfaces
+        log-dhcp
+        log-queries
+        server=1.1.1.1
+        server=8.8.8.8
+        EOF
+
+        # Interface mapping (virtio NICs in virt-install order):
+        #   enp1s0 = br-mgmt
+        #   enp2s0 = br-pentest (isolated)
+        #   enp3s0 = br-comms (isolated)
+        #   enp4s0 = br-browse (isolated)
+        #   enp5s0 = br-dev (isolated)
+        #   enp6s0 = br-shared (crosstalk allowed)
+
+        # Generate config (same for standard and lockdown modes)
+        cat >> /etc/dnsmasq.d/hydrix.conf << EOF
+        interface=enp1s0
+        interface=enp2s0
+        interface=enp3s0
+        interface=enp4s0
+        interface=enp5s0
+        interface=enp6s0
+        interface=enp7s0
+        dhcp-range=enp1s0,192.168.100.10,192.168.100.200,24h
+        dhcp-range=enp2s0,192.168.101.10,192.168.101.200,24h
+        dhcp-range=enp3s0,192.168.102.10,192.168.102.200,24h
+        dhcp-range=enp4s0,192.168.103.10,192.168.103.200,24h
+        dhcp-range=enp5s0,192.168.104.10,192.168.104.200,24h
+        dhcp-range=enp6s0,192.168.105.10,192.168.105.200,24h
+        dhcp-range=enp7s0,192.168.107.10,192.168.107.200,24h
+        dhcp-option=enp1s0,option:router,192.168.100.253
+        dhcp-option=enp1s0,option:dns-server,192.168.100.253
+        dhcp-option=enp2s0,option:router,192.168.101.253
+        dhcp-option=enp2s0,option:dns-server,$DNS_PENTEST
+        dhcp-option=enp3s0,option:router,192.168.102.253
+        dhcp-option=enp3s0,option:dns-server,$DNS_COMMS
+        dhcp-option=enp4s0,option:router,192.168.103.253
+        dhcp-option=enp4s0,option:dns-server,$DNS_BROWSE
+        dhcp-option=enp5s0,option:router,192.168.104.253
+        dhcp-option=enp5s0,option:dns-server,$DNS_DEV
+        dhcp-option=enp6s0,option:router,192.168.105.253
+        dhcp-option=enp6s0,option:dns-server,192.168.105.253
+        dhcp-option=enp7s0,option:router,192.168.107.253
+        dhcp-option=enp7s0,option:dns-server,$DNS_LURKING
+        EOF
+
+        echo "DNS configured: pentest=$DNS_PENTEST comms=$DNS_COMMS browse=$DNS_BROWSE dev=$DNS_DEV lurking=$DNS_LURKING"
+      '';
+    };
+
+    services.dnsmasq = {
+      enable = true;
+      resolveLocalQueries = true;
+      settings = {
+        conf-dir = "/etc/dnsmasq.d/,*.conf";
+      };
+    };
+
+    # nftables rules - dynamic based on mode
+    systemd.services.router-firewall = {
+      description = "Configure router firewall based on mode";
+      after = [ "router-network-setup.service" ];
+      wantedBy = [ "multi-user.target" ];
+      serviceConfig = {
+        Type = "oneshot";
+        RemainAfterExit = true;
+      };
+      script = ''
+        MODE=$(cat /var/lib/hydrix-router/mode 2>/dev/null || echo "standard")
+        WAN=$(cat /var/lib/hydrix-router/wan_interface 2>/dev/null || echo "eth0")
+
+        echo "Configuring firewall for $MODE mode (WAN: $WAN)"
+
+        # Flush existing rules
+        ${pkgs.nftables}/bin/nft flush ruleset 2>/dev/null || true
+
+        # Hardened firewall rules (same for standard and lockdown - lockdown is host-side only)
+        ${pkgs.nftables}/bin/nft -f - << EOF
+        table inet router {
+          chain input {
+            type filter hook input priority filter; policy drop;
+
+            # Loopback
+            iif lo accept
+
+            # Established/related connections
+            ct state established,related accept
+
+            # Drop invalid packets early (malformed, out-of-state)
+            ct state invalid drop
+
+            # DHCP requests (required for VMs to get IPs)
+            udp dport 67 accept
+
+            # DNS - from LAN networks only (dnsmasq)
+            ip saddr { 192.168.100.0/24, 192.168.101.0/24, 192.168.102.0/24,
+                       192.168.103.0/24, 192.168.104.0/24, 192.168.105.0/24, 192.168.107.0/24 }
+            udp dport 53 accept
+
+            # Allow other traffic from LAN networks
+            ip saddr { 192.168.100.0/24, 192.168.101.0/24, 192.168.102.0/24,
+                       192.168.103.0/24, 192.168.104.0/24, 192.168.105.0/24, 192.168.107.0/24 }
+            tcp dport != 22 accept
+
+            # ICMP - rate limited (ping for diagnostics, prevent flood)
+            ip protocol icmp limit rate 10/second accept
+
+            # No SSH - access via serial console only (virsh console router)
+          }
+
+          chain forward {
+            type filter hook forward priority filter; policy drop;
+
+            # Established/related connections
+            ct state established,related accept
+
+            # Drop invalid packets early
+            ct state invalid drop
+
+            # br-shared (192.168.105.x) can talk to any network - allows crosstalk
+            ip saddr 192.168.105.0/24 accept
+            ip daddr 192.168.105.0/24 accept
+
+            # Block host (br-mgmt 100) from reaching isolated bridges
+            # Host can only reach br-shared (105) and router, not isolated VMs
+            ip saddr 192.168.100.0/24 ip daddr { 192.168.101.0/24, 192.168.102.0/24,
+                                                  192.168.103.0/24, 192.168.104.0/24, 192.168.107.0/24 } drop
+
+            # Block direct traffic between isolated bridges (pentest, comms, browse, dev)
+            ip saddr 192.168.101.0/24 ip daddr { 192.168.102.0/24, 192.168.103.0/24, 192.168.104.0/24, 192.168.107.0/24 } drop
+            ip saddr 192.168.102.0/24 ip daddr { 192.168.101.0/24, 192.168.103.0/24, 192.168.104.0/24, 192.168.107.0/24 } drop
+            ip saddr 192.168.103.0/24 ip daddr { 192.168.101.0/24, 192.168.102.0/24, 192.168.104.0/24, 192.168.107.0/24 } drop
+            ip saddr 192.168.104.0/24 ip daddr { 192.168.101.0/24, 192.168.102.0/24, 192.168.103.0/24, 192.168.107.0/24 } drop
+            # Lurking is FULLY isolated - cannot reach any other VM network
+            ip saddr 192.168.107.0/24 ip daddr { 192.168.100.0/24, 192.168.101.0/24, 192.168.102.0/24, 192.168.103.0/24, 192.168.104.0/24, 192.168.105.0/24 } drop
+
+            # Allow traffic to WAN (internet access)
+            oifname "$WAN" accept
+
+            # Allow traffic to VPN interfaces (mullvad-*, wg-*, tun*)
+            oifname "mullvad-*" accept
+            oifname "wg-*" accept
+            oifname "tun*" accept
+          }
+
+          chain postrouting {
+            type nat hook postrouting priority srcnat; policy accept;
+            oifname "$WAN" masquerade
+            # Masquerade for VPN tunnels
+            oifname "mullvad-*" masquerade
+            oifname "wg-*" masquerade
+            oifname "tun*" masquerade
+          }
+        }
+        EOF
+
+        echo "Firewall configured for $MODE mode (WAN: $WAN)"
+      '';
+    };
+
+    # SSH disabled - access via serial console only (virsh console router)
+    # This eliminates SSH attack surface entirely
+    services.openssh.enable = false;
+
+    services.qemuGuest.enable = true;
+    services.getty.autologinUser = routerUser;
+
+    # Router VM user - credentials from hydrix.router.* options (set in machine.nix)
+    # Falls back to "user" with password "router" if not set
+    users.users.${routerUser} = {
+      isNormalUser = true;
+      extraGroups = [ "wheel" "networkmanager" ];
+    } // (if routerHashedPassword != null
+          then { hashedPassword = routerHashedPassword; }
+          else { password = "router"; });  # Fallback for testing only
+
+    security.sudo.wheelNeedsPassword = false;
+
+    # Packages
+    environment.systemPackages = with pkgs; [
+      wireguard-tools
+      openvpn
+      iproute2
+      iptables
+      nftables
+      tcpdump
+      nettools
+      bind.dnsutils
+      bridge-utils
+      pciutils
+      usbutils
+      htop
+      vim
+      nano
+      tmux
+      git
+      dhcpcd  # For dynamic WAN IP (though NetworkManager usually handles this)
+      iw  # WiFi diagnostics
+      wirelesstools  # Additional WiFi tools
+      networkmanager  # Ensure nmcli is available
+
+      # VPN management scripts
+      (writeShellScriptBin "vpn-assign" (builtins.readFile ../../scripts/vpn-assign.sh))
+      (writeShellScriptBin "vpn-status" (builtins.readFile ../../scripts/vpn-status.sh))
+    ];
+
+    # Config directories
+    systemd.tmpfiles.rules = [
+      "d /etc/wireguard 0700 root root -"
+      "d /etc/openvpn/client 0700 root root -"
+      "d /var/lib/hydrix-vpn 0755 root root -"
+      "d /var/lib/hydrix-router 0755 root root -"
+      "d /etc/dnsmasq.d 0755 root root -"
+    ];
+
+    # Load persistent VPN assignments on boot
+    systemd.services.vpn-persistent-load = {
+      description = "Load persistent VPN assignments";
+      after = [ "router-network-setup.service" ];
+      before = [ "dnsmasq.service" ];
+      wantedBy = [ "multi-user.target" ];
+      serviceConfig = {
+        Type = "oneshot";
+        RemainAfterExit = true;
+      };
+      script = let
+        defaultComms = if hasMullvad then "mullvad-se" else "direct";
+        defaultLurking = if hasMullvad then "mullvad-ch" else "direct";
+        defaultBrowse = if hasMullvad then "mullvad-ch" else "direct";
+      in ''
+        STATE_DIR="/var/lib/hydrix-vpn"
+        PERSISTENT_FILE="$STATE_DIR/persistent.conf"
+
+        # Create default persistent config if it doesn't exist
+        if [ ! -f "$PERSISTENT_FILE" ]; then
+          cat > "$PERSISTENT_FILE" << 'EOF'
+# Hydrix VPN Persistent Assignments
+# Format: network=target (target: direct, blocked, or mullvad-XX)
+# Edit with: vpn-assign --persistent <network> <target>
+pentest=direct
+comms=${defaultComms}
+browse=${defaultBrowse}
+dev=direct
+lurking=${defaultLurking}
+EOF
+        fi
+
+        # Load assignments from persistent file
+        while IFS='=' read -r network target; do
+          # Skip comments and empty lines
+          [[ "$network" =~ ^#.*$ || -z "$network" ]] && continue
+          # Write to assignment file (vpn-assign reads these)
+          echo "$target" > "$STATE_DIR/$network.assignment"
+          echo "Loaded: $network -> $target"
+        done < "$PERSISTENT_FILE"
+      '';
+    };
+
+    # Banner service
+    systemd.services.router-banner = {
+      description = "Display router status";
+      wantedBy = [ "multi-user.target" ];
+      after = [ "router-network-setup.service" ];
+      serviceConfig = {
+        Type = "oneshot";
+        RemainAfterExit = true;
+      };
+      script = ''
+        MODE=$(cat /var/lib/hydrix-router/mode 2>/dev/null || echo "unknown")
+        echo ""
+        echo "╔══════════════════════════════════════════════════════════╗"
+        echo "║           HYDRIX ROUTER VM - $MODE MODE"
+        echo "╠══════════════════════════════════════════════════════════╣"
+
+        echo "║  Networks: 192.168.100-107.x                             ║"
+
+        echo "╚══════════════════════════════════════════════════════════╝"
+        echo ""
+      '';
+    };
+
+    users.motd = ''
+
+    ┌─────────────────────────────────────────────────────┐
+    │  Hydrix Router VM (SSH Disabled - Serial Console)   │
+    ├─────────────────────────────────────────────────────┤
+    │  vpn-status           Network & VPN status          │
+    │  vpn-assign --help    VPN routing commands          │
+    │  vpn-assign list-mullvad   Mullvad exit nodes       │
+    ├─────────────────────────────────────────────────────┤
+    │  Access: virsh console router (from host)           │
+    └─────────────────────────────────────────────────────┘
+
+    '';
+  };
+}
