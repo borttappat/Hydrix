@@ -243,10 +243,6 @@ in {
             rb = "rebuild";
             machine = "vim ${config.hydrix.paths.configDir}/machines/${config.hydrix.hostname}.nix";
 
-            # Display switching (host hardware)
-            xrandrwide = "xrandr --output HDMI-1 --mode 3440x1440 --output eDP-1 --off && wal -R && killall polybar && polybar -q &";
-            xrandrrestore = "xrandr --output eDP-1 --mode 1920x1200 --output HDMI-1 --off && wal -R && killall polybar && polybar -q &";
-
           };
 
         functions =
