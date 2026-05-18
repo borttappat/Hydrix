@@ -13,7 +13,7 @@
 let
   meta = import ./meta.nix;
 
-  hostUsername = "traum";
+  hostUsername = config.hydrix.username;
 
   repos = [
     { name = "hydrix-config";   source = "/home/${hostUsername}/hydrix-config"; }
