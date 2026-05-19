@@ -124,6 +124,40 @@
     }
     EOF
 
+        cat > $out/python-pyproject-uv.nix << 'EOF'
+    {
+      description = "@NAME@ - tested in VM";
+      inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+      outputs = { self, nixpkgs }:
+        let
+          system = "@SYSTEM@";
+          pkgs = nixpkgs.legacyPackages.''${system};
+        in {
+          packages.''${system}.default = pkgs.python3Packages.buildPythonApplication {
+            pname = "@NAME@";
+            version = "unstable";
+            src = pkgs.fetchFromGitHub {
+              owner = "@OWNER@";
+              repo = "@REPO@";
+              rev = "@BRANCH@";
+              hash = "@HASH@";
+            };
+            postPatch = '''
+              sed -i 's|build-backend = "uv_build[^"]*"|build-backend = "setuptools.build_meta"|' pyproject.toml
+              sed -i 's|requires = \["uv[^"]*"\]|requires = ["setuptools"]|' pyproject.toml
+            ''';
+            pyproject = true;
+            build-system = with pkgs.python3Packages; [
+              setuptools
+            ];
+            propagatedBuildInputs = with pkgs.python3Packages; [
+              # runtime deps — add after inspecting the package
+            ];@META_LINE@
+          };
+        };
+    }
+    EOF
+
         cat > $out/python-setuptools.nix << 'EOF'
     {
       description = "@NAME@ - tested in VM";
@@ -1446,6 +1480,11 @@ in {
           if [ -n "$MAIN_PROGRAM" ]; then
             echo "Detected entry point: $MAIN_PROGRAM"
           fi
+          HAS_UV_BUILD="false"
+          if ${pkgs.gnugrep}/bin/grep -qP 'build-backend\s*=\s*"uv_build' "$TEMP_DIR/pyproject.toml" 2>/dev/null; then
+            HAS_UV_BUILD="true"
+            echo "  Detected uv_build backend — patching to setuptools at build time"
+          fi
         elif [ -f "$TEMP_DIR/setup.py" ]; then
           PROJECT_TYPE="python"
           HAS_PYPROJECT="false"
@@ -1675,7 +1714,7 @@ in {
         # ── Python: prepare meta line for pyproject ─────────────────────────
         META_LINE=""
         if [ "$PROJECT_TYPE" = "python" ] && [ "$HAS_PYPROJECT" = "true" ] && [ -n "$MAIN_PROGRAM" ]; then
-          META_LINE=$'\n        meta.mainProgram = "'"$MAIN_PROGRAM"'";'
+          META_LINE='\n        meta.mainProgram = "'"$MAIN_PROGRAM"'";'
         fi
 
         rm -rf "$TEMP_DIR"
@@ -1715,7 +1754,11 @@ in {
             ;;
           python)
             if [ "$HAS_PYPROJECT" = "true" ]; then
-              generate_flake "${templateDir}/python-pyproject.nix"
+              if [ "$HAS_UV_BUILD" = "true" ]; then
+                generate_flake "${templateDir}/python-pyproject-uv.nix"
+              else
+                generate_flake "${templateDir}/python-pyproject.nix"
+              fi
             else
               generate_flake "${templateDir}/python-setuptools.nix"
             fi
