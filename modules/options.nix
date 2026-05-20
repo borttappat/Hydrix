@@ -1761,6 +1761,25 @@ in {
           '';
         };
 
+        hyprInternalOutput = lib.mkOption {
+          type = lib.types.str;
+          default = "eDP-1";
+          description = "Name of the internal display output in Hyprland (from `hyprctl monitors`).";
+        };
+
+        hyprInternalScale = lib.mkOption {
+          type = lib.types.nullOr lib.types.float;
+          default = null;
+          example = 1.25;
+          description = ''
+            Scale factor for the internal display under Hyprland.
+            Higher values → fewer logical pixels; everything appears larger.
+            1.25 on 1920×1200 → 1536×960 logical. 1.5 → 1280×800 logical.
+            Only the named output (hyprInternalOutput) is affected; external
+            monitors fall back to scale 1 via the catch-all monitor rule.
+          '';
+        };
+
         standaloneScaleFactor = lib.mkOption {
           type = lib.types.float;
           default = 1.0;

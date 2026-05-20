@@ -33,6 +33,14 @@
   configDir = config.hydrix.paths.configDir;
   hostname = config.hydrix.hostname;
 
+  hyprMonitorLine =
+    let
+      out = cfg.scaling.hyprInternalOutput or "eDP-1";
+      scale = cfg.scaling.hyprInternalScale or null;
+    in
+      lib.optionalString (scale != null)
+        "monitor = ${out}, preferred, 0x0, ${toString scale}";
+
   vmRegistry = config.hydrix.networking.vmRegistry or {};
   vmWindowRules = lib.concatStringsSep "\n" (
     lib.mapAttrsToList (key: v:
@@ -76,6 +84,14 @@
     lib.mapAttrsToList (ws: color:
       "windowrulev2 = bordercolor rgba(${color}), workspace ${ws}"
     ) workspaceColors
+  );
+
+  # hydrix-focus dynamic color map: VM type → wal color key.
+  # When override is ON, the daemon reads this key from ~/.cache/wal/colors.json
+  # so each VM type gets a distinct color from the host's current wal theme.
+  dynamicColorMap = config.hydrix.vmThemeSync.focusDaemon.dynamicColorMap;
+  dynamicMapCases = lib.concatStringsSep "\n      " (
+    lib.mapAttrsToList (vm: colorKey: "${vm}) WAL_KEY=\"${colorKey}\" ;;") dynamicColorMap
   );
 
   # Gap adjuster: mirrors i3/sway — inner and outer adjusted independently.
@@ -372,13 +388,16 @@
   '';
 
   # hypr-focus-daemon: event-driven VM border color switcher.
-  # Listens on Hyprland socket2 for activewindow events. When a [profile] window
-  # is focused, applies that VM's focusBorder color via col.active_border. When a
-  # host window is focused, restores wal color4. This is more reliable than
-  # windowrulev2 bordercolor rules (which only fire at window creation) because
-  # col.active_border is re-evaluated on every focus change.
+  #
+  # Default (no marker):            focusBorder from vm-registry (per-VM defined colors)
+  # hydrix-focus on (marker exists): dynamicColorMap wal colors (host theme per VM type)
+  #
+  # 'reapply' subcommand: one-shot re-apply for the currently focused window.
+  # Called by hydrix-focus immediately after toggling so the border updates at once.
   hyprFocusDaemon = pkgs.writeShellScriptBin "hypr-focus-daemon" ''
     REGISTRY=/etc/hydrix/vm-registry.json
+    MARKER="$HOME/.cache/hydrix/focus-override-active"
+    WAL_COLORS="$HOME/.cache/wal/colors.json"
 
     _rgba() {
       case "$1" in
@@ -403,37 +422,72 @@
         | sed "s/^color4='//;s/'$//;s/#//" | head -1 | awk '{print $0 "ff"}'
     }
 
+    # Look up a VM profile's wal color key from the build-time dynamicColorMap,
+    # then read that color from ~/.cache/wal/colors.json.
+    _dynamic_color() {
+      local profile="$1" WAL_KEY=""
+      case "$profile" in
+      ${dynamicMapCases}
+      *) WAL_KEY="color4" ;;
+      esac
+      ${pkgs.jq}/bin/jq -r --arg k "$WAL_KEY" \
+        '.colors[$k] // empty' "$WAL_COLORS" 2>/dev/null \
+        | sed 's/#//' | awk '{print $0 "ff"}'
+    }
+
+    # Resolve border color for a VM profile based on current hydrix-focus state.
+    # No marker (default): focusBorder from vm-registry (per-VM defined color).
+    # Marker present:       dynamicColorMap wal color (host theme mapped per VM type).
+    _border_for_profile() {
+      local profile="$1"
+      if [ -f "$MARKER" ]; then
+        local d
+        d=$(_dynamic_color "$profile")
+        [ -n "$d" ] && { echo "$d"; return; }
+      fi
+      local c
+      c=$(${pkgs.jq}/bin/jq -r --arg p "$profile" '.[$p].focusBorder // empty' "$REGISTRY" 2>/dev/null)
+      if [ -n "$c" ]; then
+        _rgba "$c"
+        return
+      fi
+      _wal_color
+    }
+
     _apply() {
       ${pkgs.hyprland}/bin/hyprctl keyword general:col.active_border "rgba($1)" 2>/dev/null || true
     }
 
-    [ -z "''${HYPRLAND_INSTANCE_SIGNATURE:-}" ] && exit 1
+    _reapply() {
+      [ -z "''${HYPRLAND_INSTANCE_SIGNATURE:-}" ] && return
+      local title profile
+      title=$(${pkgs.hyprland}/bin/hyprctl activewindow -j 2>/dev/null \
+        | ${pkgs.jq}/bin/jq -r '.title // empty')
+      profile=$(echo "$title" | sed -n 's/^\[\([^]]*\)\].*/\1/p')
+      if [ -n "$profile" ]; then
+        _apply "$(_border_for_profile "$profile")"
+      else
+        _apply "$(_wal_color)"
+      fi
+    }
 
-    SOCKET="''${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/hypr/''${HYPRLAND_INSTANCE_SIGNATURE}/.socket2.sock"
-
-    # Reconnect loop: restart socat if the socket disconnects (e.g. after hyprctl reload).
-    # grep pre-filters to activewindow events only, avoiding >>* in case patterns.
-    while true; do
-      ${pkgs.socat}/bin/socat - "UNIX-CONNECT:$SOCKET" 2>/dev/null \
-        | ${pkgs.gnugrep}/bin/grep --line-buffered '^activewindow' \
-        | while IFS= read -r _line; do
-            title=$(${pkgs.hyprland}/bin/hyprctl activewindow -j 2>/dev/null \
-              | ${pkgs.jq}/bin/jq -r '.title // empty')
-            profile=$(echo "$title" | sed -n 's/^\[\([^]]*\)\].*/\1/p')
-            if [ -n "$profile" ]; then
-              color=$(${pkgs.jq}/bin/jq -r --arg p "$profile" \
-                '.[$p].focusBorder // empty' "$REGISTRY" 2>/dev/null)
-              if [ -n "$color" ]; then
-                _apply "$(_rgba "$color")"
-              else
-                _apply "$(_wal_color)"
-              fi
-            else
-              _apply "$(_wal_color)"
-            fi
-          done
-      sleep 1
-    done
+    case "''${1:-}" in
+      reapply)
+        _reapply
+        ;;
+      *)
+        [ -z "''${HYPRLAND_INSTANCE_SIGNATURE:-}" ] && exit 1
+        SOCKET="''${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/hypr/''${HYPRLAND_INSTANCE_SIGNATURE}/.socket2.sock"
+        # Reconnect loop: restart socat if the socket disconnects.
+        # grep pre-filters to activewindow events — avoids >>* in case patterns.
+        while true; do
+          ${pkgs.socat}/bin/socat - "UNIX-CONNECT:$SOCKET" 2>/dev/null \
+            | ${pkgs.gnugrep}/bin/grep --line-buffered '^activewindow' \
+            | while IFS= read -r _line; do _reapply; done
+          sleep 1
+        done
+        ;;
+    esac
   '';
 
 in lib.mkIf (cfg.enable && config.hydrix.hyprland.enable) {
@@ -484,6 +538,7 @@ in lib.mkIf (cfg.enable && config.hydrix.hyprland.enable) {
         source = ~/.config/hypr/colors.conf
 
         # ── Monitor ──────────────────────────────────────────────────────────
+        ${hyprMonitorLine}
         monitor = ,preferred,auto,1
 
         # ── Startup ──────────────────────────────────────────────────────────
