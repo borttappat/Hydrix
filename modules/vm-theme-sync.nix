@@ -361,6 +361,8 @@ in {
       environment.systemPackages = [
         (pkgs.writeShellScriptBin "hydrix-focus" ''
           MARKER="$HOME/.cache/hydrix/focus-override-active"
+          HB_STATE="$HOME/.config/hypr/vm-borders-enabled"
+          HB_CONF="$HOME/.config/hypr/vm-borders.conf"
           mkdir -p "$(dirname "$MARKER")"
 
           status() {
@@ -373,8 +375,26 @@ in {
             fi
           }
 
+          # i3 / sway: send SIGUSR1 to focus daemons to re-read state
           signal_daemon() {
             ${pkgs.procps}/bin/pkill -USR1 -f vm-focus-daemon 2>/dev/null || true
+            ${pkgs.procps}/bin/pkill -USR1 -f sway-focus-daemon 2>/dev/null || true
+          }
+
+          # Hyprland: sync vm-borders state then push current wal colors.
+          # hypr-apply-colors writes colors.conf ($activeBorder = wal color4),
+          # reloads Hyprland (sources vm-borders.conf), and calls hypr-vm-borders init
+          # which re-tags windows and re-applies keyword rules based on HB_STATE.
+          signal_hyprland() {
+            if [[ -n "''${HYPRLAND_INSTANCE_SIGNATURE:-}" ]]; then
+              if [ -f "$MARKER" ]; then
+                touch "$HB_STATE"
+              else
+                : > "$HB_CONF"
+                rm -f "$HB_STATE"
+              fi
+              hypr-apply-colors 2>/dev/null || true
+            fi
           }
 
           case "''${1:-toggle}" in
@@ -382,11 +402,13 @@ in {
               touch "$MARKER"
               echo "Focus override: ON"
               signal_daemon
+              signal_hyprland
               ;;
             off)
               rm -f "$MARKER"
               echo "Focus override: OFF"
               signal_daemon
+              signal_hyprland
               ;;
             toggle)
               if [ -f "$MARKER" ]; then
@@ -397,6 +419,7 @@ in {
                 echo "Focus override: ON"
               fi
               signal_daemon
+              signal_hyprland
               ;;
             status)
               status

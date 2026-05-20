@@ -39,6 +39,11 @@ in {
     ./programs/file-finder.nix  # Fuzzy file search (file-finder command)
     ./fonts                     # Per-font profiles (sizes, overrides, UI adjustments)
     ../wm/focus-mode.nix   # Focus mode (lock keybindings to single VM type)
+    # NixOS-level WM modules: system packages, portals, PAM, session scripts.
+    # Gated on hydrix.{i3,sway,hyprland}.enable inside each file.
+    ../wm/i3.nix
+    ../wm/sway.nix
+    ../wm/hyprland.nix
   ];
 
   config = lib.mkMerge [

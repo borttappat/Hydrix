@@ -120,7 +120,13 @@
         ${xrdb} -merge <<< "i3wm.color4: $COLOR4"
 
         # === Window manager reload ===
-        if [[ -n "''${WAYLAND_DISPLAY:-}" ]]; then
+        if [[ -n "''${HYPRLAND_INSTANCE_SIGNATURE:-}" ]]; then
+          # Hyprland: write colors.conf, reload compositor, re-apply VM borders
+          echo "  Applying hyprland colors..."
+          if command -v hypr-apply-colors >/dev/null 2>&1; then
+            hypr-apply-colors
+          fi
+        elif [[ -n "''${WAYLAND_DISPLAY:-}" ]]; then
           # Sway: regenerate colors.conf include and reload
           echo "  Applying sway colors..."
           if command -v sway-apply-colors >/dev/null 2>&1; then

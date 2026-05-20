@@ -39,9 +39,15 @@ let
     # ── Workspace Detection ────────────────────────────────────────────────
 
     get_current_workspace() {
-        ${pkgs.sway}/bin/swaymsg -t get_workspaces 2>/dev/null \
-            | ${pkgs.jq}/bin/jq -r '.[] | select(.focused==true) | .num' \
-            || echo "1"
+        if [[ -n "''${HYPRLAND_INSTANCE_SIGNATURE:-}" ]]; then
+            ${pkgs.hyprland}/bin/hyprctl activeworkspace -j 2>/dev/null \
+                | ${pkgs.jq}/bin/jq -r '.id' \
+                || echo "1"
+        else
+            ${pkgs.sway}/bin/swaymsg -t get_workspaces 2>/dev/null \
+                | ${pkgs.jq}/bin/jq -r '.[] | select(.focused==true) | .num' \
+                || echo "1"
+        fi
     }
 
     ws_to_vm_type() {
@@ -339,7 +345,7 @@ EOF
   '';
 
 in {
-  config = lib.mkIf (config.hydrix.graphical.enable && config.hydrix.sway.enable) {
+  config = lib.mkIf (config.hydrix.graphical.enable && (config.hydrix.sway.enable || config.hydrix.hyprland.enable)) {
     environment.systemPackages = [ wofiLauncher ];
 
     home-manager.users.${username} = { pkgs, ... }: {

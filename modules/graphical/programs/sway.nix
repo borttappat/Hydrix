@@ -24,7 +24,6 @@
   vmType = config.hydrix.vmType or null;
   isVM = vmType != null && vmType != "host";
   polybarPkg = pkgs.polybar.override { i3Support = true; pulseSupport = true; };
-
   # waypipe window routing rules — generated from vmRegistry at build time.
   # The registry key is the profile/task name (e.g. "browsing", "pentest-task1").
   # waypipe-connect sets --title-prefix "[<key>] " so windows route to the right workspace.
@@ -159,60 +158,6 @@ in
       hydrix-vibrancy-sway
       pkgs.brightnessctl
     ];
-
-    # Monitor hotplug: udev writes a trigger file; the path unit fires the restart service.
-    # display-setup is X11-only; under sway we just need to relaunch polybar.
-    # The udev rule is also provided by display-setup.nix when i3.enable — harmless duplication.
-    services.udev.extraRules = lib.mkIf (!isVM) ''
-      ACTION=="change", SUBSYSTEM=="drm", RUN+="${pkgs.writeShellScript "sway-hotplug-trigger" ''
-        echo "$(${pkgs.coreutils}/bin/date)" > /tmp/display-hotplug.trigger
-      ''}"
-    '';
-
-    systemd.user.paths.sway-polybar-hotplug = lib.mkIf (!isVM) {
-      description = "Watch for display hotplug (sway)";
-      wantedBy = ["graphical-session.target"];
-      # Only fire under Wayland — display-setup.service handles the X11 case
-      unitConfig.ConditionEnvironment = "WAYLAND_DISPLAY";
-      pathConfig = {
-        PathChanged = "/tmp/display-hotplug.trigger";
-        Unit = "sway-polybar-hotplug.service";
-      };
-    };
-
-    systemd.user.services.sway-polybar-hotplug = lib.mkIf (!isVM) {
-      description = "Restart polybar on monitor hotplug (sway)";
-      serviceConfig = {
-        Type = "oneshot";
-        ExecStart = pkgs.writeShellScript "sway-polybar-hotplug" ''
-          # Wait for sway to finish re-arranging outputs
-          ${pkgs.coreutils}/bin/sleep 2
-
-          config=/tmp/polybar-unified.ini
-          if [ ! -f "$config" ]; then
-            echo "sway-polybar-hotplug: $config not found, skipping" >&2
-            exit 0
-          fi
-
-          old_pids=$(${pkgs.procps}/bin/pgrep polybar 2>/dev/null || true)
-          monitors=$(${pkgs.sway}/bin/swaymsg -t get_outputs 2>/dev/null \
-            | ${pkgs.jq}/bin/jq -r '.[] | select(.active==true) | .name' || true)
-
-          for monitor in $monitors; do
-            I3SOCK=$SWAYSOCK MONITOR=$monitor ${polybarPkg}/bin/polybar \
-              -c "$config" main &
-            ${lib.optionalString bottomBar ''
-              I3SOCK=$SWAYSOCK MONITOR=$monitor ${polybarPkg}/bin/polybar \
-                -c "$config" bottom &
-            ''}
-          done
-
-          ${pkgs.coreutils}/bin/sleep 0.3
-          [ -n "$old_pids" ] && echo "$old_pids" | xargs -r kill 2>/dev/null || true
-        '';
-        KillMode = "none";
-      };
-    };
 
     home-manager.users.${username} = {
       pkgs,

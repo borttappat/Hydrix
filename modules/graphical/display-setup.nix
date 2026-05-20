@@ -77,6 +77,17 @@
     #   display-setup --step -1    - Use one step higher resolution than optimal
     #   display-setup --step +1    - Use one step lower resolution than optimal
 
+    # Skip if a Wayland compositor is active — polybar is X11/i3 only.
+    # Use show-environment (live systemd state) not $WAYLAND_DISPLAY (stale fork env):
+    # the service process env is snapshotted at fork time, before Hyprland's exec-once
+    # sets WAYLAND_DISPLAY; but show-environment reflects the current manager state,
+    # which is updated before the 3s wrapper delay expires.
+    if systemctl --user show-environment 2>/dev/null | grep -q '^WAYLAND_DISPLAY='; then
+      echo "$(date -u): display-setup skipped (Wayland session active)" \
+        >> /tmp/display-setup.log
+      exit 0
+    fi
+
     # Step persistence file
     STEP_FILE="/tmp/display-step"
     # Monitor order config file

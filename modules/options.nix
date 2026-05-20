@@ -805,6 +805,11 @@ in {
               default = true;
               description = "Whether this VM runs a display-mode service (waypipe/xpra). False for headless infra VMs.";
             };
+            focusBorder = lib.mkOption {
+              type = lib.types.nullOr lib.types.str;
+              default = null;
+              description = "Focus border color for this VM's windows in Hyprland. Named color (red, yellow, ...) or hex RRGGBBAA. Matches hydrix.vmThemeSync.focusBorder in the VM's own config.";
+            };
           };
         });
         default = {};
@@ -1359,6 +1364,12 @@ in {
           type = lib.types.int;
           default = 2;
           description = "Window border width";
+        };
+
+        pillRadius = lib.mkOption {
+          type = lib.types.int;
+          default = 6;
+          description = "Border radius for waybar island pills (px)";
         };
 
         barHeight = lib.mkOption {

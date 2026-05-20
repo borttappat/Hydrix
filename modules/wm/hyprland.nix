@@ -17,13 +17,23 @@ let
   lk = config.hydrix.graphical.lockscreen;
 
   hyprlandSession = pkgs.writeShellScriptBin "hyprland-session" ''
+    # Mask sway-polybar-hotplug.path for this session so polybar never auto-starts
+    # under Hyprland (including during nixos-rebuild switch daemon-reloads).
+    # --runtime means the mask lives only in /run — removed automatically on session end.
+    systemctl --user mask --runtime display-hotplug.path 2>/dev/null || true
+
     Hyprland "$@"
     EXIT=$?
+
     # Remove Wayland env vars from the persistent systemd user environment.
     # Without this, picom refuses to start (ConditionEnvironment=!WAYLAND_DISPLAY).
     systemctl --user unset-environment WAYLAND_DISPLAY DISPLAY 2>/dev/null || true
     # Restart picom so i3 gets compositing back immediately.
     systemctl --user restart picom 2>/dev/null || true
+
+    # Unmask polybar hotplug so it works again if user switches back to Sway.
+    systemctl --user unmask --runtime display-hotplug.path 2>/dev/null || true
+
     exit $EXIT
   '';
 
@@ -107,5 +117,6 @@ in {
 
     # PAM for hyprlock authentication
     security.pam.services.hyprlock.enable = true;
+
   };
 }

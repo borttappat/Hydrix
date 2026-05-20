@@ -488,10 +488,10 @@ let
 
     if pgrep -x sway >/dev/null 2>&1; then
       swaymsg exit 2>/dev/null || true
-    elif pgrep -x Hyprland >/dev/null 2>&1; then
+    elif hyprctl instances 2>/dev/null | grep -q .; then
       hyprctl dispatch exit 2>/dev/null || true
     else
-      echo "No sway or Hyprland session running" >&2
+      echo "No Wayland session running" >&2
     fi
   '';
 
