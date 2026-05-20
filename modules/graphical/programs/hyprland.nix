@@ -60,14 +60,14 @@
     };
   in table.${name} or "${lib.removePrefix "#" name}ff";
 
-  # VM identity tags: assigned at window creation via title: matching.
-  # title: works at creation time (where workspace routing also uses it), but NOT
-  # for dynamic re-evaluation — Hyprland doesn't re-match title: on focus changes.
-  # Tags ARE re-evaluated dynamically, so bordercolor rules use tag: instead.
-  vmTagRules = lib.concatStringsSep "\n" (
+  # Per-VM border colors: generated at build time from vmRegistry.focusBorder.
+  # title: rules fire at window creation for new windows.
+  vmBorderColorRules = lib.concatStringsSep "\n" (
     lib.mapAttrsToList (key: v:
-      lib.optionalString ((v.hasDisplay or true) && v.workspace != null)
-        "windowrulev2 = tag +vm-${key}, title:^\\[${key}\\]"
+      lib.optionalString (
+        (v.hasDisplay or true) && v.workspace != null &&
+        (v ? focusBorder) && v.focusBorder != null
+      ) "windowrulev2 = bordercolor rgba(${namedColorToRgba (v.focusBorder or "")}), title:^\\[${key}\\]"
     ) vmRegistry
   );
 
@@ -131,10 +131,6 @@
 
     ${pkgs.hyprland}/bin/hyprctl reload 2>/dev/null || true
     ${pkgs.procps}/bin/pkill -SIGUSR2 waybar 2>/dev/null || true
-    # Re-tag existing VM windows and re-apply bordercolor keywords.
-    # hyprctl reload clears per-window tags, so VM border colors would revert
-    # to the host wal color without this. VM colors are fixed (not wal-based).
-    hypr-vm-borders init 2>/dev/null || true
   '';
 
   # hydrix-brightness-hypr: per-monitor brightness using hyprctl for monitor detection.
@@ -375,14 +371,79 @@
       movewindowpixel "exact $CUR_X $CUR_Y,address:$ADDR" >/dev/null 2>&1 || true
   '';
 
+  # hypr-focus-daemon: event-driven VM border color switcher.
+  # Listens on Hyprland socket2 for activewindow events. When a [profile] window
+  # is focused, applies that VM's focusBorder color via col.active_border. When a
+  # host window is focused, restores wal color4. This is more reliable than
+  # windowrulev2 bordercolor rules (which only fire at window creation) because
+  # col.active_border is re-evaluated on every focus change.
+  hyprFocusDaemon = pkgs.writeShellScriptBin "hypr-focus-daemon" ''
+    REGISTRY=/etc/hydrix/vm-registry.json
+
+    _rgba() {
+      case "$1" in
+        red)       echo "ff0000ff" ;;
+        orange)    echo "ff8c00ff" ;;
+        yellow)    echo "ffff00ff" ;;
+        green)     echo "00ff00ff" ;;
+        cyan)      echo "00ffffff" ;;
+        blue)      echo "0000ffff" ;;
+        purple)    echo "800080ff" ;;
+        pink)      echo "ffc0cbff" ;;
+        magenta)   echo "ff00ffff" ;;
+        white)     echo "ffffffff" ;;
+        black)     echo "000000ff" ;;
+        gray|grey) echo "808080ff" ;;
+        *) hex="''${1#\#}"; [[ "''${#hex}" -eq 6 ]] && echo "''${hex}ff" || echo "$hex" ;;
+      esac
+    }
+
+    _wal_color() {
+      grep '^color4=' "$HOME/.cache/wal/colors.sh" 2>/dev/null \
+        | sed "s/^color4='//;s/'$//;s/#//" | head -1 | awk '{print $0 "ff"}'
+    }
+
+    _apply() {
+      ${pkgs.hyprland}/bin/hyprctl keyword general:col.active_border "rgba($1)" 2>/dev/null || true
+    }
+
+    [ -z "''${HYPRLAND_INSTANCE_SIGNATURE:-}" ] && exit 1
+
+    SOCKET="''${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/hypr/''${HYPRLAND_INSTANCE_SIGNATURE}/.socket2.sock"
+
+    # Reconnect loop: restart socat if the socket disconnects (e.g. after hyprctl reload).
+    # grep pre-filters to activewindow events only, avoiding >>* in case patterns.
+    while true; do
+      ${pkgs.socat}/bin/socat - "UNIX-CONNECT:$SOCKET" 2>/dev/null \
+        | ${pkgs.gnugrep}/bin/grep --line-buffered '^activewindow' \
+        | while IFS= read -r _line; do
+            title=$(${pkgs.hyprland}/bin/hyprctl activewindow -j 2>/dev/null \
+              | ${pkgs.jq}/bin/jq -r '.title // empty')
+            profile=$(echo "$title" | sed -n 's/^\[\([^]]*\)\].*/\1/p')
+            if [ -n "$profile" ]; then
+              color=$(${pkgs.jq}/bin/jq -r --arg p "$profile" \
+                '.[$p].focusBorder // empty' "$REGISTRY" 2>/dev/null)
+              if [ -n "$color" ]; then
+                _apply "$(_rgba "$color")"
+              else
+                _apply "$(_wal_color)"
+              fi
+            else
+              _apply "$(_wal_color)"
+            fi
+          done
+      sleep 1
+    done
+  '';
+
 in lib.mkIf (cfg.enable && config.hydrix.hyprland.enable) {
   environment.systemPackages = [
     hyprlandGapsAdjust
     hyprApplyColors
     hydrixBrightnessHypr
     hydrixVibrancyHypr
-    hyprVmBorders
     hyprFloatTerminal
+    hyprFocusDaemon
     pkgs.swayidle
     pkgs.swaybg
   ];
@@ -393,13 +454,9 @@ in lib.mkIf (cfg.enable && config.hydrix.hyprland.enable) {
     lib,
     ...
   }: {
-    # Ensure vm-borders.conf exists before Hyprland starts (source = requires the file).
-    # If Hyprland is already running, reload it so config changes take effect immediately:
-    #   writes colors.conf ($activeBorder = wal color4), hyprctl reload, re-tags VM windows.
-    home.activation.initHyprVmBorders = lib.hm.dag.entryAfter ["writeBoundary"] ''
-      CONF="$HOME/.config/hypr/vm-borders.conf"
-      mkdir -p "$(dirname "$CONF")"
-      [[ -f "$CONF" ]] || touch "$CONF"
+    # Reload Hyprland after rebuild so new config (colors, VM border rules) takes effect
+    # immediately without a manual step. No-op when Hyprland is not running.
+    home.activation.reloadHyprland = lib.hm.dag.entryAfter ["writeBoundary"] ''
       [[ -n "''${HYPRLAND_INSTANCE_SIGNATURE:-}" ]] && \
         ${hyprApplyColors}/bin/hypr-apply-colors 2>/dev/null || true
     '';
@@ -434,13 +491,12 @@ in lib.mkIf (cfg.enable && config.hydrix.hyprland.enable) {
         # so the i3 display-hotplug path unit (ConditionEnvironment=!WAYLAND_DISPLAY)
         # doesn't fire display-setup → polybar when X11 returns.
         exec-once = systemctl --user set-environment WAYLAND_DISPLAY=$WAYLAND_DISPLAY
-        # hypr-vm-borders init writes vm-borders.conf before hypr-apply-colors reloads,
-        # so the sourced bordercolor rules are populated on first load (not just keywords).
-        exec-once = sh -c 'wal -Rnq; hypr-vm-borders init; hypr-apply-colors'
+        exec-once = sh -c 'wal -Rnq; hypr-apply-colors'
         exec-once = sh -c 'WALL=$(cat "$HOME/.cache/wal/wal" 2>/dev/null); [ -n "$WALL" ] && swaybg -i "$WALL" -m fill'
         exec-once = ${pkgs.dunst}/bin/dunst
         # Start waybar after a brief delay so the Hyprland socket is ready.
         exec-once = sh -c 'sleep 2 && hypr-apply-colors && waybar'
+        exec-once = hypr-focus-daemon
         exec-once = vm-push-display-mode
         exec-once = waypipe-connect-all
         exec-once = swayidle -w timeout ${idleTimeout} 'hyprlock --force-focus' before-sleep 'hyprlock --force-focus'
@@ -660,24 +716,20 @@ in lib.mkIf (cfg.enable && config.hydrix.hyprland.enable) {
         windowrulev2 = opacity 1.0 override, class:^(alacritty)$
         windowrulev2 = opacity 1.0 override, class:^(hypr-float)$
 
-        # VM window routing + identity tagging.
-        # title: matching works at window creation (one-shot): used for both workspace
-        # assignment and tagging. Tags persist per-window and enable dynamic bordercolor
-        # matching (tag: is re-evaluated on focus; title: is not).
+        # VM window routing: title: at creation routes each [profile] window to its workspace.
         ${vmWindowRules}
-        ${vmTagRules}
 
         # Per-workspace active border color overrides (hydrix.hyprland.workspaceColors)
         ${workspaceColorRules}
 
-        # Per-VM border colors — managed by hypr-vm-borders (on/off/toggle).
-        # Sourced from ~/.config/hypr/vm-borders.conf, initialized by hypr-vm-borders init.
-        # VM rules come last so they override any workspace-wide color set above.
-        source = ~/.config/hypr/vm-borders.conf
+        # Per-VM border colors: built from vmRegistry.focusBorder at build time.
+        # Applied at window creation and re-applied on hyprctl reload.
+        # Later than workspaceColorRules so these take precedence.
+        ${vmBorderColorRules}
       '';
     };
 
-    # hyprlock — blurred screenshot lockscreen via hypr-lock script (wm/hyprland.nix)
+    # hyprlock — lockscreen, colors sourced at runtime from colors-lock.conf
     # Colors sourced at runtime from ~/.config/hypr/colors-lock.conf (written by hypr-apply-colors).
     programs.hyprlock = {
       enable = true;
