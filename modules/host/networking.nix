@@ -33,9 +33,6 @@ let
     };
   };
 
-  # Management and shared bridges get host IPs
-  mgmtSubnet = netCfg.subnets.mgmt or "192.168.100";
-  sharedSubnet = netCfg.subnets.shared or "192.168.250";
 in {
   config = lib.mkIf (cfg.vmType == "host" && cfg.router.type != "none") {
     # Disable NetworkManager - router VM handles networking
@@ -45,17 +42,12 @@ in {
     # Create bridges (built-in + user-defined extra networks + infra VMs + WAN if ethernet mode)
     networking.bridges = bridgeConfigs // extraBridgeConfigs // infraBridgeConfigs // wanBridgeConfig;
 
-    # Host IPs on management and shared bridges
+    # Host IP on br-mgmt is set in the administrative specialisation only.
+    # br-shared is VM-only — host has no L3 presence there.
+    # Ensure bridges are up with no DHCP.
     networking.interfaces = {
-      br-mgmt.ipv4.addresses = [{
-        address = "${mgmtSubnet}.1";
-        prefixLength = 24;
-      }];
-      br-shared.ipv4.addresses = [{
-        address = "${sharedSubnet}.1";
-        prefixLength = 24;
-      }];
-      # Ensure other bridges are up
+      br-mgmt.useDHCP = false;
+      br-shared.useDHCP = false;
       br-pentest.useDHCP = false;
       br-comms.useDHCP = false;
       br-lurking.useDHCP = false;
@@ -70,6 +62,15 @@ in {
     # NOTE: No default gateway in base config.
     # Base config = lockdown mode (host has no internet access).
     # The 'administrative' specialisation adds the default gateway.
+
+    # Disable IPv6 link-local on all VM bridges — host has no IPv6 VM networking
+    # and link-local addresses would otherwise make the host reachable at L3.
+    boot.kernel.sysctl = lib.genAttrs
+      (map (br: "net.ipv6.conf.${br}.disable_ipv6")
+        (netCfg.bridges
+         ++ lib.unique (lib.attrValues netCfg.infraTapBridges)
+         ++ map (n: "br-${n.name}") netCfg.extraNetworks))
+      (_: 1);
 
     # Trust all bridges (built-in + extra networks + infra VMs)
     networking.firewall = {

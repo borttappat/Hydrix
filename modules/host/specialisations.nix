@@ -60,6 +60,12 @@ in {
         VMS=enabled
       '';
 
+      # Host IP on br-mgmt — required for the default gateway route to resolve
+      networking.interfaces.br-mgmt.ipv4.addresses = [{
+        address = "${netCfg.subnets.mgmt or "192.168.100"}.1";
+        prefixLength = 24;
+      }];
+
       # Host routes through router VM
       networking.defaultGateway = {
         address = netCfg.routerIp;
@@ -155,7 +161,6 @@ in {
           ++ map (n: "br-${n.name}") netCfg.extraNetworks
         )}"
         MGMT_SUBNET="${netCfg.subnets.mgmt or "192.168.100"}"
-        SHARED_SUBNET="${netCfg.subnets.shared or "192.168.105"}"
 
         # Detect current mode
         get_current_mode() {
@@ -266,6 +271,9 @@ in {
             sudo systemctl stop nix-daemon.service nix-daemon.socket 2>/dev/null || true
           fi
 
+          # Ensure br-mgmt has host IP (required for gateway route)
+          sudo ip addr add "''${MGMT_SUBNET}.1/24" dev br-mgmt 2>/dev/null || true
+
           # Verify gateway is set
           if ! ip route show default 2>/dev/null | grep -q "$ROUTER_IP"; then
             sudo ip route add default via "$ROUTER_IP" dev br-mgmt 2>/dev/null || true
@@ -282,8 +290,9 @@ in {
             sudo systemctl stop nix-daemon.service nix-daemon.socket 2>/dev/null || true
           fi
 
-          # Ensure gateway is removed
+          # Ensure gateway and br-mgmt host IP are removed
           sudo ip route del default 2>/dev/null || true
+          sudo ip addr del "''${MGMT_SUBNET}.1/24" dev br-mgmt 2>/dev/null || true
         fi
 
         # Verify bridges are still up (switch-to-configuration can sometimes reset them)
@@ -296,10 +305,6 @@ in {
           fi
           sudo ip link set "$br" up 2>/dev/null || true
         done
-
-        # Restore host IPs on management and shared bridges
-        sudo ip addr add "''${MGMT_SUBNET}.1/24" dev br-mgmt 2>/dev/null || true
-        sudo ip addr add "''${SHARED_SUBNET}.1/24" dev br-shared 2>/dev/null || true
 
         # Re-attach ALL TAPs to bridges (in case switch disrupted them)
         # microvm-tap-lookup is generated at build time from all known TAP→bridge

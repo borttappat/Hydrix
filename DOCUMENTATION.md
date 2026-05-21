@@ -63,6 +63,8 @@ After installation, your configuration lives at `~/hydrix-config/`.
 |                         HOST (Lockdown Mode)                        |
 |   - No direct internet access                                       |
 |   - WiFi hardware passed to router VM via VFIO                      |
+|   - No L3 presence on any bridge (no IPv4 or IPv6 addresses)        |
+|   - Bridges exist as L2 plumbing only; host is invisible to VMs     |
 |   - Bridges: br-mgmt, br-pentest, br-comms, br-browse, br-dev,      |
 |              br-shared, br-builder, br-lurking, br-files            |
 +---------------------------------------------------------------------+
@@ -488,14 +490,30 @@ The files VM (`microvm-files`) bypasses this intentionally by connecting directl
 
 ### Host Isolation
 
+The host has no L3 presence on VM bridges. All bridges exist as pure L2 plumbing:
+- No IPv4 addresses on any bridge in any mode
+- IPv6 link-local auto-assignment is disabled on all VM bridges via sysctl (`net.ipv6.conf.<br>.disable_ipv6`)
+- `br-shared` is VM-only in all modes — the host never holds an address there
+
+The one exception is `br-mgmt` in **Administrative** mode, where the host needs `192.168.100.1/24` to route through the router VM as a gateway. That address is absent in Lockdown.
+
+| Bridge | Lockdown | Administrative |
+|--------|----------|----------------|
+| br-mgmt | no address | `192.168.100.1/24` (gateway route) |
+| br-shared | no address | no address |
+| all others | no address | no address |
+
 In **Lockdown** mode (default boot):
-- The host has no internet access, WiFi hardware is inside the router VM via VFIO
+- No bridge addresses — host is invisible to all VMs at L3
+- No default gateway — host has no internet access
 - Host builds happen via the builder VM, which has internet through the router
 - Git push/pull happens via the gitsync VM, which mounts repos from the host R/W
+- All VM communication uses vsock, which is independent of bridge networking
 
 In **Administrative** mode:
-- The host gains internet via the router VM as a gateway
-- All VM isolation properties remain unchanged
+- `192.168.100.1/24` assigned to `br-mgmt` for the gateway route
+- Host gains internet via the router VM (`192.168.100.253` as default gateway)
+- All VM isolation properties remain unchanged; VMs still cannot reach the host on any other bridge
 
 ### WiFi Credentials in Nix Store
 

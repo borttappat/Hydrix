@@ -26,6 +26,8 @@ For full documentation see [DOCUMENTATION.md](DOCUMENTATION.md).
 |                         HOST (Lockdown Mode)                        |
 |   - No direct internet access                                       |
 |   - WiFi hardware passed to router VM via VFIO                      |
+|   - No L3 presence on any bridge (no IPv4 or IPv6 addresses)        |
+|   - Bridges exist as L2 plumbing only; host is invisible to VMs     |
 |   - Bridges: br-mgmt, br-pentest, br-comms, br-browse, br-dev,      |
 |              br-shared, br-builder, br-lurking, br-files            |
 +---------------------------------------------------------------------+
@@ -97,11 +99,11 @@ All VM communication uses vsock. No SSH or network access to VMs. Your configura
 
 The host has three boot modes, each a NixOS specialisation:
 
-| Mode | Internet | Use Case |
-|------|----------|----------|
-| lockdown (default) | None - host has no gateway | Daily secure use; nix builds via builder VM |
-| administrative | Via router VM | Full functionality, VM management, package installs |
-| fallback | Direct WiFi, no router VM | Emergency recovery, initial setup |
+| Mode | Internet | Host bridge presence | Use Case |
+|------|----------|---------------------|----------|
+| lockdown (default) | None | No L3 addresses on any bridge | Daily secure use; nix builds via builder VM |
+| administrative | Via router VM | `192.168.100.1` on `br-mgmt` only | Full functionality, VM management, package installs |
+| fallback | Direct WiFi, no router VM | No bridges | Emergency recovery, initial setup |
 
 ```bash
 rebuild                  # lockdown (default)
