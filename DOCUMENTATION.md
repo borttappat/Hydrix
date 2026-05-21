@@ -1943,7 +1943,7 @@ microvm files list pentest
 ```
 Host (passphrase, orchestration)
  │  vsock 14505 → files VM (CID 212)
- │  vsock 14506 → any regular VM or usb-sandbox (ENCRYPT/SERVE/CLEANUP)
+ │  vsock 14506 → any regular VM or usb-sandbox (ENCRYPT/SERVE/RECEIVE_PREPARE/DECRYPT/CLEANUP)
  │
 Files VM (192.168.108.10 on br-files)
  ├── mv-files      → br-files       (192.168.108.10) [always]
@@ -1957,7 +1957,7 @@ Files VM (192.168.108.10 on br-files)
 
 Profile/infra VMs: static .10 IPs on their bridge
  port 8888: ephemeral HTTP server (serve or receive), files VM IP only
- vsock 14506: vm-files-agent (receives host ENCRYPT/SERVE/CLEANUP commands)
+ vsock 14506: vm-files-agent (receives host ENCRYPT/SERVE/RECEIVE_PREPARE/DECRYPT/CLEANUP commands)
 ```
 
 The files VM's TAP list is **auto-discovered** at build time from `infra/files/meta.nix`, which reads `profiles/*/meta.nix` and includes explicit entries for infra VMs like usb-sandbox and hostsync. Adding a new profile automatically adds a new TAP after rebuilding the files VM.
@@ -2049,7 +2049,7 @@ usb-sandbox sits on a dedicated isolated bridge (`br-usb-sandbox`) that has no r
 
 ```
 Host
- │  vsock 14506 → usb-sandbox (CID 209)   [ENCRYPT / SERVE / CLEANUP commands]
+ │  vsock 14506 → usb-sandbox (CID 209)   [ENCRYPT / SERVE / RECEIVE_PREPARE / DECRYPT / CLEANUP]
  │  vsock 14505 → files VM    (CID 212)   [FETCH command]
  │
  │  br-usb-sandbox (192.168.209.0/24, no router, no internet)

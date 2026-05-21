@@ -19,6 +19,35 @@ let
   sandboxHome = "/home/${sandboxUser}";
   vmName      = "microvm-usb-sandbox";
 
+  receiveScript = pkgs.writeShellScript "usb-files-receive" ''
+    set -euo pipefail
+    DEST_DIR="$1"
+    ${pkgs.python3}/bin/python3 - "$DEST_DIR" <<'PYEOF'
+import sys, http.server, os
+dest_dir = sys.argv[1]
+os.makedirs(dest_dir, exist_ok=True)
+dest_file = os.path.join(dest_dir, 'xfer.enc')
+class Handler(http.server.BaseHTTPRequestHandler):
+    def do_PUT(self):
+        if self.path != '/xfer.enc':
+            self.send_response(404); self.end_headers(); return
+        length = int(self.headers.get('Content-Length', 0))
+        with open(dest_file, 'wb') as f:
+            remaining = length
+            while remaining > 0:
+                chunk = self.rfile.read(min(65536, remaining))
+                if not chunk: break
+                f.write(chunk)
+                remaining -= len(chunk)
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b'OK\n')
+        raise SystemExit(0)
+    def log_message(self, *_): pass
+http.server.HTTPServer(("", 8888), Handler).handle_request()
+PYEOF
+  '';
+
   serveScript = pkgs.writeShellScript "usb-files-serve" ''
     set -euo pipefail
     XFER_FILE="${sandboxHome}/shared/xfer.enc"
@@ -99,11 +128,48 @@ PYEOF
         echo "OK"
         ;;
 
+      DECRYPT)
+        PASSPHRASE=$(echo "$REST" | cut -d' ' -f1)
+        ARCHIVE=$(echo "$REST" | cut -d' ' -f2)
+        EXTRACT_PARENT=$(echo "$REST" | cut -d' ' -f3-)
+        ARCHIVE_FULL="${sandboxHome}/$ARCHIVE"
+        if [ -z "$EXTRACT_PARENT" ]; then
+          EXTRACT_FULL="${sandboxHome}"
+        else
+          EXTRACT_FULL="${sandboxHome}/$EXTRACT_PARENT"
+        fi
+        mkdir -p "$EXTRACT_FULL"
+        ${pkgs.openssl}/bin/openssl enc -d -aes-256-cbc -pbkdf2 \
+          -pass pass:"$PASSPHRASE" -in "$ARCHIVE_FULL" \
+          | ${pkgs.gnutar}/bin/tar --use-compress-program=${pkgs.gzip}/bin/gzip -xf - -C "$EXTRACT_FULL"
+        rm -f "$ARCHIVE_FULL"
+        echo "OK"
+        ;;
+
+      RECEIVE_PREPARE)
+        ${receiveScript} "$SHARED_DIR" &
+        RECV_PID=$!
+        echo "$RECV_PID" > "$SHARED_DIR/.recv.pid"
+        echo "READY"
+        ;;
+
+      RECEIVE_STOP)
+        if [ -f "$SHARED_DIR/.recv.pid" ]; then
+          kill "$(cat "$SHARED_DIR/.recv.pid")" 2>/dev/null || true
+          rm -f "$SHARED_DIR/.recv.pid"
+        fi
+        echo "OK"
+        ;;
+
       CLEANUP)
         rm -f "$XFER_FILE"
         if [ -f "$SERVE_PID_FILE" ]; then
           kill "$(cat "$SERVE_PID_FILE")" 2>/dev/null || true
           rm -f "$SERVE_PID_FILE"
+        fi
+        if [ -f "$SHARED_DIR/.recv.pid" ]; then
+          kill "$(cat "$SHARED_DIR/.recv.pid")" 2>/dev/null || true
+          rm -f "$SHARED_DIR/.recv.pid"
         fi
         echo "OK"
         ;;
