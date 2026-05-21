@@ -126,7 +126,7 @@
     if [ -f "$WAL" ]; then
       . "$WAL"
     else
-      color0="#0c0c0c"; color1="#bf616a"; color4="#7aa2f7"; color7="#d8dee9"; color8="#4c566a"
+      color0="#0c0c0c"; color1="#bf616a"; color2="#88c0d0"; color4="#7aa2f7"; color7="#d8dee9"; color8="#4c566a"
     fi
 
     mkdir -p "$(dirname "$HYPR_OUT")"
@@ -139,6 +139,9 @@
     printf '@define-color accent     %s;\n' "$color4" >> "$BAR_OUT"
     printf '@define-color alert      %s;\n' "$color1" >> "$BAR_OUT"
     printf '@define-color color8     %s;\n' "$color8" >> "$BAR_OUT"
+    printf '@define-color color1     %s;\n' "$color1" >> "$BAR_OUT"
+    printf '@define-color color2     %s;\n' "$color2" >> "$BAR_OUT"
+    printf '@define-color color4     %s;\n' "$color4" >> "$BAR_OUT"
 
     LOCK_OUT="$HOME/.config/hypr/colors-lock.conf"
     mkdir -p "$(dirname "$LOCK_OUT")"
