@@ -126,8 +126,20 @@ let
     fi
 
     if [ -n "$json_path" ] && [ -d "$FF_PROFILE" ]; then
-        # Read scale factor from scaling.json
-        scale_factor=$(${pkgs.jq}/bin/jq -r '.scale_factor // 1.0' "$json_path" 2>/dev/null)
+        # Priority: HYDRIX_FF_SCALE env (set by host when launching in VM) >
+        #           HYPRLAND_INSTANCE_SIGNATURE (native Hyprland session) >
+        #           scaling.json (X11/xrandr path)
+        if [ -n "''${HYDRIX_FF_SCALE:-}" ]; then
+            scale_factor="$HYDRIX_FF_SCALE"
+        elif [ -n "''${HYPRLAND_INSTANCE_SIGNATURE:-}" ]; then
+            # Running directly under Hyprland — read scale from compositor
+            scale_factor=$(${pkgs.hyprland}/bin/hyprctl monitors -j 2>/dev/null \
+                | ${pkgs.jq}/bin/jq -r '[.[] | select(.focused)][0].scale // .[0].scale // 1.0' \
+                2>/dev/null || echo "1.0")
+        else
+            # X11 or VM without HYDRIX_FF_SCALE — use scaling.json
+            scale_factor=$(${pkgs.jq}/bin/jq -r '.scale_factor // 1.0' "$json_path" 2>/dev/null)
+        fi
 
         # Check if scale factor changed (avoid unnecessary writes)
         current_scale=""
