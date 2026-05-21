@@ -95,5 +95,8 @@ in {
     (lib.mkIf config.hydrix.sway.enable {
       environment.systemPackages = [ focus focus-wofi ];
     })
+    (lib.mkIf config.hydrix.hyprland.enable {
+      environment.systemPackages = [ focus focus-wofi ];
+    })
   ];
 }

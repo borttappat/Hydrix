@@ -178,10 +178,25 @@ let
       exec "$@"
     fi
 
-    VM_INFO=$(${pkgs.jq}/bin/jq -rc \
-      --argjson w "$WS" \
-      'to_entries[] | select(.value.workspace == $w) | {cid: .value.cid, name: .value.vmName}' \
-      "${VM_REGISTRY}" 2>/dev/null | head -1)
+    # Focus mode: if set, route to the focused VM type regardless of workspace
+    VM_INFO=""
+    FOCUS_TYPE=""
+    FOCUS_FILE="$HOME/.cache/hydrix/focus-mode"
+    if [[ -f "$FOCUS_FILE" ]]; then
+      FOCUS_TYPE=$(cat "$FOCUS_FILE")
+      VM_INFO=$(${pkgs.jq}/bin/jq -rc \
+        --arg t "$FOCUS_TYPE" \
+        'to_entries[] | select(.key == $t) | {cid: .value.cid, name: .value.vmName}' \
+        "${VM_REGISTRY}" 2>/dev/null | head -1)
+      [[ -n "$VM_INFO" ]] && log "Focus mode ($FOCUS_TYPE) overrides WS$WS"
+    fi
+
+    if [[ -z "$VM_INFO" ]]; then
+      VM_INFO=$(${pkgs.jq}/bin/jq -rc \
+        --argjson w "$WS" \
+        'to_entries[] | select(.value.workspace == $w) | {cid: .value.cid, name: .value.vmName}' \
+        "${VM_REGISTRY}" 2>/dev/null | head -1)
+    fi
 
     if [[ -z "$VM_INFO" ]]; then
       log "No VM mapped to WS$WS — running locally"
@@ -215,6 +230,41 @@ let
     fi
 
     log "WS$WS → $VM_NAME (CID $CID): $*"
+
+    # Check if focus mode is routing to a different VM than this workspace's native VM.
+    # If so, the windowrulev2 rule will send the new window to the VM's home workspace;
+    # poll clients for the new window and move it back to the current workspace.
+    NATIVE_VM=$(${pkgs.jq}/bin/jq -rc \
+      --argjson w "$WS" \
+      'to_entries[] | select(.value.workspace == $w) | .value.vmName' \
+      "${VM_REGISTRY}" 2>/dev/null | head -1)
+
+    if [[ -n "''${FOCUS_TYPE:-}" ]] && [[ "$VM_NAME" != "''${NATIVE_VM:-}" ]]; then
+      TARGET_WS=$WS
+      TITLE_PREFIX="[''${FOCUS_TYPE}]"
+      log "Focus mode: will relocate $TITLE_PREFIX window to WS$TARGET_WS"
+      # Snapshot existing windows with this prefix so we only act on the new one
+      EXISTING=$(${pkgs.hyprland}/bin/hyprctl clients -j 2>/dev/null \
+        | ${pkgs.jq}/bin/jq -c --arg p "$TITLE_PREFIX" \
+          '[.[] | select(.title | startswith($p)) | .address]' \
+          2>/dev/null || echo '[]')
+      (
+        for i in $(seq 1 40); do
+          sleep 0.25
+          ADDR=$(${pkgs.hyprland}/bin/hyprctl clients -j 2>/dev/null \
+            | ${pkgs.jq}/bin/jq -r \
+              --arg p "$TITLE_PREFIX" \
+              --argjson ex "$EXISTING" \
+              '[.[] | select(.title | startswith($p)) | select(.address as $a | ($ex | index($a) | not))] | first | .address // empty' \
+              2>/dev/null | head -1)
+          if [[ -n "$ADDR" ]]; then
+            ${pkgs.hyprland}/bin/hyprctl dispatch movetoworkspacesilent "$TARGET_WS,address:$ADDR" >/dev/null 2>&1 || true
+            ${pkgs.hyprland}/bin/hyprctl dispatch focuswindow "address:$ADDR" >/dev/null 2>&1 || true
+            break
+          fi
+        done
+      ) &
+    fi
 
     # Send command to VM's waypipe-launch service (vsock:14508)
     # One line: space-separated command + args
