@@ -48,8 +48,6 @@ let
     # Infrastructure TAPs — always present, not user-configurable
     {
       "mv-router-mgmt" = "br-mgmt";
-      "mv-router-shar" = "br-shared";
-      "mv-router-bldr" = "br-builder";
     }
     # Profile TAPs — generated from discovered profileNetworks.
     # profileNetworks has { name, subnet, routerTap } for every profile.
@@ -110,12 +108,8 @@ let
       # --- Framework infrastructure router TAPs (hardcoded, not user-configurable) ---
       mv-router-wan)  echo "br-wan" ;;
       mv-router-mgmt) echo "br-mgmt" ;;
-      mv-router-shar) echo "br-shared" ;;
-      mv-router-bldr) echo "br-builder" ;;
-      # Stable-router counterparts for the same infra TAPs
+      # Stable-router management TAP
       mv-rts-mgmt) echo "br-mgmt" ;;
-      mv-rts-shar) echo "br-shared" ;;
-      mv-rts-bldr) echo "br-builder" ;;
       # --- Profile router TAPs — generated from profileNetworks ---
       # Each entry covers both the primary router (mv-router-*) and the
       # stable-router counterpart (mv-rts-*).
@@ -465,8 +459,6 @@ in {
               "mv-rts-comm" = "br-comms";
               "mv-rts-brow" = "br-browse";
               "mv-rts-dev"  = "br-dev";
-              "mv-rts-shar" = "br-shared";
-              "mv-rts-bldr" = "br-builder";
               "mv-rts-lurk" = "br-lurking";
               "mv-rts-file" = "br-files";
             } // lib.listToAttrs (map (n: {
@@ -496,8 +488,6 @@ in {
               "mv-rts-comm" = "br-comms";
               "mv-rts-brow" = "br-browse";
               "mv-rts-dev"  = "br-dev";
-              "mv-rts-shar" = "br-shared";
-              "mv-rts-bldr" = "br-builder";
               "mv-rts-lurk" = "br-lurking";
               "mv-rts-file" = "br-files";
             } // lib.listToAttrs (map (n: {

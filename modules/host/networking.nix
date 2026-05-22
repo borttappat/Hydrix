@@ -43,11 +43,9 @@ in {
     networking.bridges = bridgeConfigs // extraBridgeConfigs // infraBridgeConfigs // wanBridgeConfig;
 
     # Host IP on br-mgmt is set in the administrative specialisation only.
-    # br-shared is VM-only — host has no L3 presence there.
     # Ensure bridges are up with no DHCP.
     networking.interfaces = {
       br-mgmt.useDHCP = false;
-      br-shared.useDHCP = false;
       br-pentest.useDHCP = false;
       br-comms.useDHCP = false;
       br-lurking.useDHCP = false;

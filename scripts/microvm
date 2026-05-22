@@ -2244,8 +2244,6 @@ restore_network() {
         ["mv-router-lurk"]="br-lurking"
         ["mv-router-brow"]="br-browse"
         ["mv-router-dev"]="br-dev"
-        ["mv-router-shar"]="br-shared"
-        ["mv-router-bldr"]="br-builder"
     )
     for tap in "${!router_taps[@]}"; do
         local bridge="${router_taps[$tap]}"
@@ -2275,9 +2273,8 @@ restore_network() {
         fi
     done
 
-    # Restore host IPs on management and shared bridges
+    # Restore host IP on management bridge
     sudo ip addr add 192.168.100.1/24 dev br-mgmt 2>/dev/null || true
-    sudo ip addr add 192.168.105.1/24 dev br-shared 2>/dev/null || true
 }
 
 # ===== Git-Sync Commands =====

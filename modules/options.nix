@@ -321,11 +321,11 @@ in {
         firewall = {
           sharedSubnets = lib.mkOption {
             type = lib.types.listOf lib.types.str;
-            default = [ "192.168.105.0/24" ];
+            default = [];
             description = ''
               Subnets (CIDR) whose traffic is allowed to cross bridge boundaries.
               All other subnets are fully isolated from each other.
-              Default preserves the existing br-shared behaviour.
+              Set in hydrix-config to allow inter-VM communication on specific subnets.
             '';
           };
           extraRules = lib.mkOption {
@@ -684,7 +684,7 @@ in {
     networking = {
       bridges = lib.mkOption {
         type = lib.types.listOf lib.types.str;
-        default = ["br-mgmt" "br-pentest" "br-comms" "br-browse" "br-dev" "br-shared" "br-builder" "br-lurking" "br-files"];
+        default = ["br-mgmt" "br-pentest" "br-comms" "br-browse" "br-dev" "br-builder" "br-lurking" "br-files"];
         description = "Network bridges to create";
       };
 

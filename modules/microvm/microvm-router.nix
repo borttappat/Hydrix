@@ -106,19 +106,17 @@
   # never depends on runtime WAN detection (which can fail on fresh installs).
   lanTaps = [
     "mv-router-mgmt" "mv-router-pent" "mv-router-comm" "mv-router-brow"
-    "mv-router-dev"  "mv-router-shar" "mv-router-bldr" "mv-router-lurk"
+    "mv-router-dev"  "mv-router-lurk"
   ] ++ map (n: n.routerTap) extraNetworks;
 
   # nftables set literal: { "lo", "mv-router-mgmt", ... }
   lanTapSetNft = "{ " + lib.concatMapStringsSep ", " (t: "\"${t}\"") (["lo"] ++ lanTaps) + " }";
 
   # All LAN segments the router serves, with their router-side IP suffix (.253).
-  # Framework infra taps (fixed subnets) ++ profile/extra-network taps (auto-discovered).
-  # A new infra VM declaring routerTap in hydrix-config automatically appears here.
+  # Management tap (fixed) ++ profile/extra-network taps (auto-discovered from meta.nix).
+  # Adding an infra VM with routerTap + subnet in hydrix-config automatically appears here.
   allLans =
     [ { tap = "mv-router-mgmt"; subnet = "192.168.100"; }
-      { tap = "mv-router-shar"; subnet = "192.168.105"; }
-      { tap = "mv-router-bldr"; subnet = "192.168.107"; }
     ] ++ map (n: { tap = n.routerTap; subnet = n.subnet; }) allNetworks;
 in {
   imports = [
@@ -247,16 +245,6 @@ in {
           "virtio-net-pci,netdev=net-dev,mac=02:00:00:01:04:01"
 
           "-netdev"
-          "tap,id=net-shared,ifname=mv-router-shar,script=no,downscript=no"
-          "-device"
-          "virtio-net-pci,netdev=net-shared,mac=02:00:00:01:05:01"
-
-          "-netdev"
-          "tap,id=net-builder,ifname=mv-router-bldr,script=no,downscript=no"
-          "-device"
-          "virtio-net-pci,netdev=net-builder,mac=02:00:00:01:06:01"
-
-          "-netdev"
           "tap,id=net-lurking,ifname=mv-router-lurk,script=no,downscript=no"
           "-device"
           "virtio-net-pci,netdev=net-lurking,mac=02:00:00:01:07:01"
@@ -357,8 +345,6 @@ in {
       "10-mv-router-comm" = { matchConfig.MACAddress = "02:00:00:01:02:01"; linkConfig.Name = "mv-router-comm"; };
       "10-mv-router-brow" = { matchConfig.MACAddress = "02:00:00:01:03:01"; linkConfig.Name = "mv-router-brow"; };
       "10-mv-router-dev"  = { matchConfig.MACAddress = "02:00:00:01:04:01"; linkConfig.Name = "mv-router-dev";  };
-      "10-mv-router-shar" = { matchConfig.MACAddress = "02:00:00:01:05:01"; linkConfig.Name = "mv-router-shar"; };
-      "10-mv-router-bldr" = { matchConfig.MACAddress = "02:00:00:01:06:01"; linkConfig.Name = "mv-router-bldr"; };
       "10-mv-router-lurk" = { matchConfig.MACAddress = "02:00:00:01:07:01"; linkConfig.Name = "mv-router-lurk"; };
     } // lib.optionalAttrs useEthernetWan {
       # Ethernet WAN TAP — renamed by MAC so detect_wan() can find it reliably
@@ -508,7 +494,7 @@ in {
           + lib.concatMapStrings (n: let
               varName = lib.toUpper (builtins.replaceStrings ["-"] ["_"] n.name);
             in "IFACE_${varName}=${n.routerTap}\n") allNetworks
-          + "IFACE_SHAR=mv-router-shar\nIFACE_BLDR=mv-router-bldr\n";
+          ;
       }
       # Mullvad WireGuard conf files — Table=off injected, copied to /etc/wireguard/
       (lib.mkIf hasMullvad (
@@ -625,7 +611,7 @@ in {
         source /etc/hydrix-router/interfaces 2>/dev/null || true
 
         echo "Generating dnsmasq config with interfaces:"
-        echo "  MGMT=$IFACE_MGMT SHAR=$IFACE_SHAR BLDR=$IFACE_BLDR"
+        echo "  MGMT=$IFACE_MGMT"
 
         # Generate config only for interfaces that exist
         echo "bind-interfaces" > /etc/dnsmasq.d/hydrix.conf
@@ -654,8 +640,6 @@ in {
         ${lib.concatStringsSep "\n        " (map (n: let
           varName = lib.toUpper (builtins.replaceStrings ["-"] ["_"] n.name);
         in "add_iface \"$IFACE_${varName}\" \"${n.subnet}\" \"${n.subnet}.253\"") allNetworks)}
-        add_iface "$IFACE_SHAR" "192.168.105" "192.168.105.253"
-        add_iface "$IFACE_BLDR" "192.168.107" "192.168.107.253"
 
         echo "Generated dnsmasq config:"
         cat /etc/dnsmasq.d/hydrix.conf
@@ -767,7 +751,7 @@ in {
         echo "Hardened firewall configured:"
         echo "  - VMs can use: DHCP, DNS only"
         echo "  - VMs cannot: SSH, HTTP, or access any router services"
-        echo "  - Inter-VM traffic: blocked (except br-shared)"
+        echo "  - Inter-VM traffic: blocked (use router.microvm.firewall.sharedSubnets to allow)"
       '';
     };
 
