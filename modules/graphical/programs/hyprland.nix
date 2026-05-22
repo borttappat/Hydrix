@@ -678,7 +678,7 @@ in lib.mkIf (cfg.enable && config.hydrix.hyprland.enable) {
         bind = $mod SHIFT, W, exec, wallpaper-black
 
         # Lock / Suspend / Exit
-        bind = $mod SHIFT,      E, exec, hyprlock --force-focus
+        bind = $mod SHIFT,      E, exec, hyprlock 
         bind = $mod SHIFT,      S, exec, systemctl suspend
         bind = $mod CTRL SHIFT, E, exec, exit-wayland
 
