@@ -187,26 +187,74 @@
     fi
   '';
 
-  # hydrix-vibrancy-hypr: vibrancy (DDC VCP 8A) for external monitors under Hyprland
+  # hydrix-vibrancy-hypr: vibrancy for external monitors under Hyprland.
+  # Tries DDC VCP 0x8A first; falls back to a Hyprland screen shader when
+  # the monitor doesn't support DDC saturation (e.g. Samsung C34J79x).
+  # Shader state is stored in ~/.cache/hydrix/vibrancy (integer 0–200, default 100).
   hydrixVibrancyHypr = pkgs.writeShellScriptBin "hydrix-vibrancy-hypr" ''
     STEP=5
+    STATE_DIR="$HOME/.cache/hydrix"
+    STATE_FILE="$STATE_DIR/vibrancy"
+    SHADER_FILE="$STATE_DIR/vibrancy.glsl"
+
     MONITOR=$(${pkgs.hyprland}/bin/hyprctl monitors -j \
       | ${pkgs.jq}/bin/jq -r '.[] | select(.focused) | .name')
     [ -z "$MONITOR" ] && exit 1
-    [[ "$MONITOR" == eDP-* ]] && exit 0
-    DISPLAY_NUM=$(${pkgs.ddcutil}/bin/ddcutil detect --brief 2>/dev/null \
-      | ${pkgs.gnugrep}/bin/grep -E "^Display [0-9]+" \
-      | while IFS= read -r line; do
-          NUM=$(echo "$line" | grep -oE "[0-9]+")
-          DRMSYS=$(ls /sys/class/drm/card*-"$MONITOR" 2>/dev/null | head -1 || true)
-          [ -n "$DRMSYS" ] && echo "$NUM" && break
-        done)
-    [ -z "$DISPLAY_NUM" ] && exit 1
+
+    # Try DDC saturation on external monitors first
+    if [[ "$MONITOR" != eDP-* ]]; then
+      DISPLAY_NUM=$(${pkgs.ddcutil}/bin/ddcutil detect --brief 2>/dev/null \
+        | ${pkgs.gnugrep}/bin/grep -E "^Display [0-9]+" \
+        | while IFS= read -r line; do
+            NUM=$(echo "$line" | grep -oE "[0-9]+")
+            DRMSYS=$(ls /sys/class/drm/card*-"$MONITOR" 2>/dev/null | head -1 || true)
+            [ -n "$DRMSYS" ] && echo "$NUM" && break
+          done)
+      if [ -n "$DISPLAY_NUM" ]; then
+        case "$1" in
+          +) ${pkgs.ddcutil}/bin/ddcutil --display "$DISPLAY_NUM" setvcp 8A + $STEP 2>/dev/null && exit 0 ;;
+          -) ${pkgs.ddcutil}/bin/ddcutil --display "$DISPLAY_NUM" setvcp 8A - $STEP 2>/dev/null && exit 0 ;;
+          *) exit 1 ;;
+        esac
+      fi
+    fi
+
+    # DDC saturation unavailable — use Hyprland screen shader
+    mkdir -p "$STATE_DIR"
+    CURRENT=$(cat "$STATE_FILE" 2>/dev/null)
+    : "''${CURRENT:=100}"
     case "$1" in
-      +) ${pkgs.ddcutil}/bin/ddcutil --display "$DISPLAY_NUM" setvcp 8A + $STEP ;;
-      -) ${pkgs.ddcutil}/bin/ddcutil --display "$DISPLAY_NUM" setvcp 8A - $STEP ;;
+      +) NEW=$(( CURRENT + STEP * 2 )) ;;
+      -) NEW=$(( CURRENT - STEP * 2 )) ;;
       *) exit 1 ;;
     esac
+    [ "$NEW" -lt 0   ] && NEW=0
+    [ "$NEW" -gt 200 ] && NEW=200
+    echo "$NEW" > "$STATE_FILE"
+
+    # Write shader (saturation = NEW/100.0)
+    SAT=$(${pkgs.gawk}/bin/awk "BEGIN { printf \"%.4f\", $NEW / 100.0 }")
+    cat > "$SHADER_FILE" <<'GLSL'
+#version 300 es
+precision mediump float;
+in vec2 v_texcoord;
+uniform sampler2D tex;
+out vec4 fragColor;
+void main() {
+    vec4 col = texture(tex, v_texcoord);
+    float luma = dot(col.rgb, vec3(0.299, 0.587, 0.114));
+    col.rgb = mix(vec3(luma), col.rgb, SAT_VALUE);
+    fragColor = col;
+}
+GLSL
+    ${pkgs.gnused}/bin/sed -i "s/SAT_VALUE/$SAT/" "$SHADER_FILE"
+
+    if [ "$NEW" -eq 100 ]; then
+      ${pkgs.hyprland}/bin/hyprctl keyword decoration:screen_shader "" >/dev/null 2>&1
+    else
+      ${pkgs.hyprland}/bin/hyprctl keyword decoration:screen_shader "$SHADER_FILE" >/dev/null 2>&1
+    fi
+    ${pkgs.libnotify}/bin/notify-send "Vibrancy" "Saturation: $NEW%" --urgency=low
   '';
 
   # hypr-vm-borders: toggle VM-specific border colors on/off.
