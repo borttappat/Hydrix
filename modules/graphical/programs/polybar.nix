@@ -23,6 +23,7 @@
   polybarStyle = config.hydrix.graphical.ui.polybarStyle;
   isModular = polybarStyle == "modular";
   isSway = config.hydrix.sway.enable;
+  isHyprland = (config.hydrix ? hyprland) && config.hydrix.hyprland.enable;
   hostPollInterval = config.hydrix.vmMetrics.hostPollInterval;
   staleThreshold = config.hydrix.vmMetrics.staleThreshold;
   workspaceLabels = config.hydrix.graphical.ui.workspaceLabels;
@@ -2035,7 +2036,8 @@ in {
       # VM metrics poller daemon: polls current workspace VM every hostPollInterval seconds.
       # Writes per-VM files to /tmp/hydrix-metrics-<profile> and maintains the
       # /tmp/hydrix-metrics-current symlink that all polybar VM modules read from.
-      systemd.user.services.hydrix-vm-poller = lib.mkIf (!isVM) {
+      # vm-poller only for i3/X11 — Sway and Hyprland use waybar's own poller
+      systemd.user.services.hydrix-vm-poller = lib.mkIf (!isVM && !isSway && !isHyprland) {
         Unit = {
           Description = "Hydrix VM metrics poller";
           After = [ "graphical-session.target" ];

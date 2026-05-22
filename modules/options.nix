@@ -1367,9 +1367,15 @@ in {
         };
 
         pillRadius = lib.mkOption {
-          type = lib.types.int;
-          default = 6;
-          description = "Border radius for waybar island pills (px)";
+          type = lib.types.nullOr lib.types.int;
+          default = null;
+          description = "Border radius for waybar island pills (px). null = derive from cornerRadius * pillRadiusScale";
+        };
+
+        pillRadiusScale = lib.mkOption {
+          type = lib.types.float;
+          default = 2.0;
+          description = "Multiplier applied to cornerRadius to get waybar pill radius when pillRadius is null";
         };
 
         barHeight = lib.mkOption {

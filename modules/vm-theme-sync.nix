@@ -381,19 +381,12 @@ in {
             ${pkgs.procps}/bin/pkill -USR1 -f sway-focus-daemon 2>/dev/null || true
           }
 
-          # Hyprland: sync vm-borders state then push current wal colors.
-          # hypr-apply-colors writes colors.conf ($activeBorder = wal color4),
-          # reloads Hyprland (sources vm-borders.conf), and calls hypr-vm-borders init
-          # which re-tags windows and re-applies keyword rules based on HB_STATE.
+          # Hyprland: immediately re-apply border color for the focused window
+          # using the new override state. The daemon checks the marker on every
+          # subsequent focus event, so only the current window needs a nudge.
           signal_hyprland() {
             if [[ -n "''${HYPRLAND_INSTANCE_SIGNATURE:-}" ]]; then
-              if [ -f "$MARKER" ]; then
-                touch "$HB_STATE"
-              else
-                : > "$HB_CONF"
-                rm -f "$HB_STATE"
-              fi
-              hypr-apply-colors 2>/dev/null || true
+              hypr-focus-daemon reapply 2>/dev/null || true
             fi
           }
 

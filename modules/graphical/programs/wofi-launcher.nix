@@ -15,6 +15,18 @@ let
   fontFamily = config.hydrix.graphical.font.family;
   scalingJson = "$HOME/.config/hydrix/scaling.json";
 
+  # Compute font size from Nix options — same formula as waybar.nix.
+  # Used as the fallback when scaling.json is absent (Hyprland/Wayland: hydrix-scale
+  # is X11-only, so scaling.json is not regenerated under a Wayland session).
+  wofiSize = let
+    base     = config.hydrix.graphical.font.size;
+    relation = config.hydrix.graphical.font.relations.wofi or
+               config.hydrix.graphical.font.relations.rofi or 1.0;
+    raw      = builtins.floor (base * relation);
+  in toString (if raw < 11 then 11 else raw);
+
+  wofiCornerRadius = toString (config.hydrix.graphical.ui.cornerRadius or 2);
+
   wofiLauncher = pkgs.writeShellScriptBin "wofi-launcher" ''
     set -euo pipefail
 
@@ -136,8 +148,8 @@ let
 
     build_theme() {
         local corner_radius font_size font_name
-        corner_radius=$(get_scaling_value '.sizes.corner_radius' '0')
-        font_size=$(get_scaling_value '.fonts.wofi' '12')
+        corner_radius=$(get_scaling_value '.sizes.corner_radius' '${wofiCornerRadius}')
+        font_size=$(get_scaling_value '.fonts.wofi' '${wofiSize}')
         font_name=$(get_scaling_value '.font_names.wofi' "$(get_scaling_value '.font_name' '${fontFamily}')")
 
         local bg fg accent
@@ -204,7 +216,7 @@ EOF
     # Common wofi flags used by all invocations
     wofi_args() {
         local font_size font_name width height
-        font_size=$(get_scaling_value '.fonts.wofi' '12')
+        font_size=$(get_scaling_value '.fonts.wofi' '${wofiSize}')
         font_name=$(get_scaling_value '.font_names.wofi' "$(get_scaling_value '.font_name' '${fontFamily}')")
         width=$(get_scaling_value '.sizes.rofi_width' '600')
         height=$(get_scaling_value '.sizes.rofi_height' '400')
