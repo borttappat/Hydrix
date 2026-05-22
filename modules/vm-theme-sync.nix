@@ -174,15 +174,6 @@ let
     ${pkgs.coreutils}/bin/chown $USERNAME:users "$RUNTIME_TOML"
   '';
 
-  # Known VM CIDs for vsock notification
-  vmCids = {
-    "microvm-browsing" = 103;
-    "microvm-pentest" = 102;
-    "microvm-dev" = 105;
-    "microvm-comms" = 104;
-    "microvm-lurking" = 106;
-  };
-
 in {
   options.hydrix.vmThemeSync = {
     enable = lib.mkOption {
@@ -344,14 +335,21 @@ in {
             notifyScript = pkgs.writeShellScript "notify-vms-colorscheme" ''
               PORT=14503
               LOG="/tmp/notify-vms-colorscheme.log"
+              VM_REGISTRY="/etc/hydrix/vm-registry.json"
               log() { echo "$(date '+%H:%M:%S') $*" >> "$LOG"; }
 
-              ${lib.concatStringsSep "\n" (lib.mapAttrsToList (vm: cid: ''
-                if systemctl is-active --quiet "microvm@${vm}.service" 2>/dev/null; then
-                  result=$(echo "REFRESH" | ${pkgs.socat}/bin/socat -t1 - "VSOCK-CONNECT:${toString cid}:$PORT" 2>/dev/null || echo "FAIL")
-                  log "${vm} (cid=${toString cid}): $result"
-                fi
-              '') vmCids)}
+              if [[ -f "$VM_REGISTRY" ]]; then
+                while IFS= read -r key; do
+                  [[ -z "$key" ]] && continue
+                  vm=$(${pkgs.jq}/bin/jq -r --arg k "$key" '.[$k].vmName // empty' "$VM_REGISTRY")
+                  cid=$(${pkgs.jq}/bin/jq -r --arg k "$key" '.[$k].cid // empty' "$VM_REGISTRY")
+                  [[ -z "$vm" || -z "$cid" ]] && continue
+                  if systemctl is-active --quiet "microvm@$vm.service" 2>/dev/null; then
+                    result=$(echo "REFRESH" | ${pkgs.socat}/bin/socat -t1 - "VSOCK-CONNECT:$cid:$PORT" 2>/dev/null || echo "FAIL")
+                    log "$vm (cid=$cid): $result"
+                  fi
+                done < <(${pkgs.jq}/bin/jq -r 'keys[]' "$VM_REGISTRY")
+              fi
             '';
           in notifyScript;
         };

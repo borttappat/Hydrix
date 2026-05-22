@@ -229,13 +229,7 @@ USAGE
         fi
     }
 
-    # Static CIDs for infrastructure VMs (not profile-driven, not in registry)
-    declare -A INFRA_MICROVM_CIDS=(
-        ["microvm-router"]=200
-        ["microvm-builder"]=210
-    )
-
-    # Registry file: generated at activation from profile meta.nix files
+    # Registry file: generated at activation from all VMs (profiles + infra)
     VM_REGISTRY="/etc/hydrix/vm-registry.json"
 
     get_cid() {
@@ -251,30 +245,28 @@ USAGE
 Start with: sudo systemctl start $service"
             fi
 
-            # Fast path 1: infrastructure VMs (fixed CIDs)
-            if [[ -v "INFRA_MICROVM_CIDS[$vm_name]" ]]; then
-                echo "''${INFRA_MICROVM_CIDS[$vm_name]}"
-                return
-            fi
-
-            # Fast path 2: registry file (profile-based VMs)
+            # Dynamic CID lookup from vm-registry.json (auto-discovered from infra/ and profiles/)
+            # Registry contains all VMs: profile VMs (browsing, pentest, etc.), infra VMs (router, builder, files, etc.)
+            # and task VMs (pentest-task1, etc.). Each entry has vmName, cid, bridge, subnet, workspace, label.
             if [[ -f "$VM_REGISTRY" ]]; then
-                local profile="''${vm_name#microvm-}"
                 local cid
-                cid=$(${pkgs.jq}/bin/jq -r --arg p "$profile" '.[$p].cid // empty' "$VM_REGISTRY" 2>/dev/null || echo "")
-                if [[ -n "$cid" ]]; then
+                # Try direct key lookup first (infra VMs use infra name as key)
+                cid=$(${pkgs.jq}/bin/jq -r --arg v "$vm_name" '.[$v].cid // empty' "$VM_REGISTRY" 2>/dev/null || echo "")
+                if [[ -n "$cid" && "$cid" != "null" ]]; then
                     echo "$cid"
                     return
                 fi
+                # Try stripping microvm- prefix (profile VMs use short name as key)
+                local profile="''${vm_name#microvm-}"
+                cid=$(${pkgs.jq}/bin/jq -r --arg p "$profile" '.[$p].cid // empty' "$VM_REGISTRY" 2>/dev/null || echo "")
+                if [[ -n "$cid" && "$cid" != "null" ]]; then
+                    echo "$cid"
+                    return
+                fi
+                error "VM '$vm_name' not found in vm-registry.json. Run rebuild to regenerate."
             fi
 
-            # Fallback: Get CID from the flake configuration (requires nix-daemon)
-            local cid
-            cid=$(nix eval --json ".#nixosConfigurations.''${vm_name}.config.hydrix.microvm.vsockCid" 2>/dev/null) || \
-                error "Cannot read vsock CID for microVM '$vm_name'.
-Is it defined in the flake?"
-
-            echo "$cid"
+            error "vm-registry.json not found. Run rebuild to generate."
         else
             # Libvirt VM: existing logic
             # Check VM exists and is running
