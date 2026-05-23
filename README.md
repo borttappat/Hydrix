@@ -9,7 +9,7 @@
         based on NixOS, MicroVMs and compartmentalization
   </pre>
 
-Discl**AI**mer - AI was used in setting this project up, do not use unless you feel comfortable with that piece of information
+Discl**AI**mer - **AI** was used in setting this project up, do not use unless you feel comfortable with that piece of information
 
 **Everything** seen here is still under development. Once I end up with a solid prototype that has been more battle-tested and ran on different hardware, I will try to make some sort of numbered release.
 
@@ -76,9 +76,7 @@ All VM communication uses vsock. No SSH or network access to VMs. Your configura
 
 - **MicroVM compartmentalization** - profile VMs (browsing, pentest, dev, comms, lurking) and infrastructure VMs (router, builder, gitsync, files, usb-sandbox, hostsync)
 - **WiFi VFIO passthrough** - host has no direct internet in lockdown mode; all traffic routes through the router VM
-- **Sway (Wayland) and i3 (X11)** - both supported, can coexist on separate TTYs; VM apps forwarded as native windows via waypipe or xpra over vsock
-- **Pywal colorscheme system** - three independent color layers per VM: declarative base scheme, live host wal-cache sync via virtiofs, and per-VM focus border color on the host
-- **14 built-in colorschemes** - plus user-defined schemes in `hydrix-config/colorschemes/`
+- **Sway/Hyprland (Wayland) and i3 (X11)** - Started out with i3, migrated to Wayland for Waypipe suppoert over Xpra - VM apps forwarded as native windows via waypipe or xpra over vsock
 - **VM metrics polling** - polybar bottom bar pulls live CPU, RAM, disk, uptime from each running VM via vsock
 - **vm-dev / vm-sync** (WIP) - develop packages inside VMs, stage and pull them into host profiles without a rebuild
 - **Task pentest slots** - pre-declared isolated VM slots (task1-3) assignable to named engagements without a host rebuild
@@ -86,12 +84,11 @@ All VM communication uses vsock. No SSH or network access to VMs. Your configura
 - **Encrypted inter-VM file transfer** - files VM with per-bridge TAP access and vsock passphrase delivery
 - **Builder VM** - builds host and VM closures from inside a locked-down nix environment with internet via router VM
 - **Gitsync VM** - push and pull git repos from lockdown mode without host internet
+- **Hostsync VM** - secure file inbox from VMs to host
 - **Declarative boot modes** - lockdown (default), administrative, fallback as NixOS specialisations
-- **Hardware colorscheme sync** - ASUS Aura RGB via walrgb integration
-- **Font pipeline** - DPI-aware sizing shared across host and VMs
 - **Stable fallback router** - immutable break-glass router VM for when the main router config breaks
 - **USB sandbox** - safe handling of untrusted USB storage inside an isolated VM
-- **Hostsync VM** - secure file inbox from VMs to host
+- **Pywal colorscheme system** - three independent color layers per VM: declarative base scheme, live host wal-cache sync via virtiofs, and per-VM focus border color on the host
 
 ---
 
