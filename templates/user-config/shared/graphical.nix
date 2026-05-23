@@ -4,7 +4,7 @@
 # Machine-specific overrides go in machines/<serial>.nix — plain assignment
 # there takes priority over the lib.mkDefault values here.
 #
-# Bar style and module layout → shared/polybar.nix
+# Bar style and module layout → shared/waybar.nix
 # Font packages and mappings  → shared/fonts.nix
 # Font family/size/relations  → shared/fonts.nix (or machines/<serial>.nix)
 
@@ -14,17 +14,15 @@
   hydrix.graphical = {
 
     # ─── Layout ────────────────────────────────────────────────────────
-    # ui.gaps         = lib.mkDefault 15;    # i3 inner gaps (px)
+    # ui.gaps         = lib.mkDefault 10;    # Gap size everywhere (px): screen-to-bar, bar-to-window, window-to-window
     # ui.border       = lib.mkDefault 2;     # Window border width (px)
-    # ui.cornerRadius = lib.mkDefault 2;     # Picom corner radius (px)
+    # ui.cornerRadius = lib.mkDefault 2;     # Window corner radius (px); also base for pill radius
 
-    # ─── Polybar sizing ────────────────────────────────────────────────
-    # ui.barHeight          = lib.mkDefault 23;    # Bar height (px)
-    # ui.barPadding         = lib.mkDefault 2;     # Internal bar padding
-    # ui.polybarFontOffset  = lib.mkDefault 3;     # Vertical text centering offset
-    # ui.barGaps            = lib.mkDefault null;  # Bar-to-edge margin (null = gaps/2)
-    # ui.barEdgeGapsFactor  = lib.mkDefault 1.0;   # Scale bar-to-edge spacing (0.0–1.0)
-    # ui.outerGapsMatchBar  = lib.mkDefault false; # i3 outer gaps match barGaps
+    # ─── Waybar sizing (shared/waybar.nix) ────────────────────────────
+    # ui.barHeight          = lib.mkDefault 23;    # Bar content height (px); +10 added internally for pill margins
+    # ui.barGaps            = lib.mkDefault null;  # Bar-to-edge margin (null = ui.gaps)
+    # ui.pillRadius         = lib.mkDefault null;  # Explicit pill radius (null = cornerRadius * pillRadiusScale)
+    # ui.pillRadiusScale    = lib.mkDefault 1.0;   # Scale factor applied to cornerRadius for pill radius
 
     # ─── Opacity ───────────────────────────────────────────────────────
     # ui.opacity.overlay          = lib.mkDefault 0.85;
