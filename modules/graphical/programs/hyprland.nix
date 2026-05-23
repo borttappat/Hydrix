@@ -1,17 +1,19 @@
-# Hyprland Home Manager Configuration
+# Hyprland Home Manager Configuration — Framework Layer
 #
-# All compositor config lives in extraConfig (raw hyprland.conf syntax) so it's
-# easy to read and tweak without understanding Nix attrset → conf translation.
-# User additions in hydrix-config/shared/hyprland.nix use extraConfig lib.mkAfter.
+# Config files are written as plain writable files via home.activation so the
+# user can edit them live between rebuilds. Rebuild always overwrites with the
+# current Nix values.
 #
-# Color system:
-#   hypr-apply-colors reads ~/.cache/wal/colors.sh → writes ~/.config/hypr/colors.conf
-#   hyprland.conf sources colors.conf at runtime; no rebuild needed for color changes.
+# Split:
+#   ~/.config/hypr/hydrix-generated.conf  — framework layer, always regenerated
+#       colors preamble, monitor, keyboard (from options), framework exec-once, VM rules
+#   ~/.config/hypr/hyprland.conf          — user layer, editable freely
+#       sources hydrix-generated.conf; rest written by shared/hyprland.nix
+#   ~/.config/hypr/hyprlock.conf          — lockscreen, editable freely
+#       written by shared/hyprland.nix
 #
-# VM window routing:
-#   waypipe-connect sets --title-prefix "[<profile>] " on VM windows.
-#   windowrulev2 rules route them to the correct workspace (same as sway for_window).
-#   Generated from hydrix.networking.vmRegistry at build time.
+# Keyboard layout is driven by hydrix.graphical.keyboard options — set in machines/<serial>.nix.
+# VM window routing and border colors are generated from hydrix.networking.vmRegistry at build time.
 #
 {
   config,
@@ -25,79 +27,86 @@
 
   gaps = config.hydrix.graphical.ui.gaps or 10;
 
-  borderSize = toString (sc.border_size or 2);
-  rounding   = toString (sc.cornerRadius or 0);
-  fontFamily = cfg.font.family or "Iosevka";
-  lk = config.hydrix.graphical.lockscreen;
-  idleTimeout = toString (lk.idleTimeout or 600);
-  configDir = config.hydrix.paths.configDir;
-  hostname = config.hydrix.hostname;
-
-  hyprMonitorLine =
-    let
-      out = cfg.scaling.hyprInternalOutput or "eDP-1";
-      scale = cfg.scaling.hyprInternalScale or null;
-    in
-      lib.optionalString (scale != null)
-        "monitor = ${out}, preferred, 0x0, ${toString scale}";
+  hyprMonitorLine = let
+    out = cfg.scaling.hyprInternalOutput or "eDP-1";
+    scale = cfg.scaling.hyprInternalScale or null;
+  in
+    lib.optionalString (scale != null)
+    "monitor = ${out}, preferred, 0x0, ${toString scale}";
 
   vmRegistry = config.hydrix.networking.vmRegistry or {};
   vmWindowRules = lib.concatStringsSep "\n" (
     lib.mapAttrsToList (key: v:
       lib.optionalString ((v.hasDisplay or true) && v.workspace != null)
-        "windowrulev2 = workspace ${toString v.workspace}, title:^\\[${key}\\]"
-    ) vmRegistry
+      "windowrulev2 = workspace ${toString v.workspace}, title:^\\[${key}\\]")
+    vmRegistry
   );
 
-  # Named color → RRGGBBAA (matches vm-theme-sync NAMED_COLORS table)
   namedColorToRgba = name: let
     table = {
-      "red"     = "ff0000ff";
-      "orange"  = "ff8c00ff";
-      "yellow"  = "ffff00ff";
-      "green"   = "00ff00ff";
-      "cyan"    = "00ffffff";
-      "blue"    = "0000ffff";
-      "purple"  = "800080ff";
-      "pink"    = "ffc0cbff";
-      "magenta" = "ff00ffff";
-      "white"   = "ffffffff";
-      "black"   = "000000ff";
-      "gray"    = "808080ff";
-      "grey"    = "808080ff";
+      "red" = "ff0000ff"; "orange" = "ff8c00ff"; "yellow" = "ffff00ff";
+      "green" = "00ff00ff"; "cyan" = "00ffffff"; "blue" = "0000ffff";
+      "purple" = "800080ff"; "pink" = "ffc0cbff"; "magenta" = "ff00ffff";
+      "white" = "ffffffff"; "black" = "000000ff"; "gray" = "808080ff"; "grey" = "808080ff";
     };
-  in table.${name} or "${lib.removePrefix "#" name}ff";
+  in
+    table.${name} or "${lib.removePrefix "#" name}ff";
 
-  # Per-VM border colors: generated at build time from vmRegistry.focusBorder.
-  # title: rules fire at window creation for new windows.
   vmBorderColorRules = lib.concatStringsSep "\n" (
     lib.mapAttrsToList (key: v:
       lib.optionalString (
-        (v.hasDisplay or true) && v.workspace != null &&
-        (v ? focusBorder) && v.focusBorder != null
-      ) "windowrulev2 = bordercolor rgba(${namedColorToRgba (v.focusBorder or "")}), title:^\\[${key}\\]"
-    ) vmRegistry
+        (v.hasDisplay or true)
+        && v.workspace != null
+        && (v ? focusBorder)
+        && v.focusBorder != null
+      )
+      "windowrulev2 = bordercolor rgba(${namedColorToRgba (v.focusBorder or "")}), title:^\\[${key}\\]")
+    vmRegistry
   );
 
   workspaceColors = config.hydrix.hyprland.workspaceColors;
   workspaceColorRules = lib.concatStringsSep "\n" (
     lib.mapAttrsToList (ws: color:
-      "windowrulev2 = bordercolor rgba(${color}), workspace ${ws}"
-    ) workspaceColors
+      "windowrulev2 = bordercolor rgba(${color}), workspace ${ws}")
+    workspaceColors
   );
 
-  # hydrix-focus dynamic color map: VM type → wal color key.
-  # When override is ON, the daemon reads this key from ~/.cache/wal/colors.json
-  # so each VM type gets a distinct color from the host's current wal theme.
   dynamicColorMap = config.hydrix.vmThemeSync.focusDaemon.dynamicColorMap;
   dynamicMapCases = lib.concatStringsSep "\n      " (
     lib.mapAttrsToList (vm: colorKey: "${vm}) WAL_KEY=\"${colorKey}\" ;;") dynamicColorMap
   );
 
-  # Gap adjuster: mirrors i3/sway — inner and outer adjusted independently.
-  # Tracks current values in state files to avoid relying on hyprctl getoption
-  # parsing (which varies across Hyprland versions).
-  # Usage: hyprland-gaps-adjust inner|outer plus|minus [amount]
+  # ── Generated config file (framework layer) ───────────────────────────────
+  # Always regenerated on rebuild. User should not edit this file — edit hyprland.conf instead.
+  hyprlandGeneratedConf = pkgs.writeText "hypr-hydrix-generated.conf" ''
+    # ── Colors (written at runtime by hypr-apply-colors from wal) ────────────
+    # Fallback values used on first boot before colors.conf exists.
+    $activeBorder   = rgba(7aa2f7ff)
+    $inactiveBorder = rgba(1a1b26aa)
+    source = ~/.config/hypr/colors.conf
+
+    # ── Monitor ──────────────────────────────────────────────────────────────
+    ${hyprMonitorLine}
+    monitor = ,preferred,auto,1
+
+    # ── Framework services (VM integration) ──────────────────────────────────
+    exec-once = hypr-focus-daemon
+    exec-once = vm-push-display-mode
+    exec-once = waypipe-connect-all
+    exec-once = hypr-vm-borders init
+
+    # ── VM window routing (generated from vmRegistry) ─────────────────────────
+    ${vmWindowRules}
+
+    # ── Per-workspace active border color overrides ───────────────────────────
+    ${workspaceColorRules}
+
+    # ── Per-VM border colors at window creation (from vmRegistry.focusBorder) ──
+    ${vmBorderColorRules}
+  '';
+
+  # ── Scripts ──────────────────────────────────────────────────────────────────
+
   hyprlandGapsAdjust = pkgs.writeShellScriptBin "hyprland-gaps-adjust" ''
     TYPE="$1" DIR="$2" AMT="''${3:-5}"
     case "$TYPE" in
@@ -115,9 +124,6 @@
     ${pkgs.hyprland}/bin/hyprctl keyword "$KEY" "$NEW"
   '';
 
-  # hypr-apply-colors: reads wal colors.sh → writes ~/.config/hypr/colors.conf
-  #   and ~/.config/waybar/colors.css, then reloads both Hyprland and Waybar.
-  # Called on startup (chained before waybar) and by randomwalrgb / refresh-colors.
   hyprApplyColors = pkgs.writeShellScriptBin "hypr-apply-colors" ''
     WAL="$HOME/.cache/wal/colors.sh"
     HYPR_OUT="$HOME/.config/hypr/colors.conf"
@@ -152,16 +158,11 @@
     ${pkgs.procps}/bin/pkill -SIGUSR2 waybar 2>/dev/null || true
   '';
 
-  # hydrix-brightness-hypr: per-monitor brightness using hyprctl for monitor detection.
-  # Internal (eDP-*): brightnessctl. External: ddcutil via DDC/CI.
   hydrixBrightnessHypr = pkgs.writeShellScriptBin "hydrix-brightness-hypr" ''
     STEP=10
-
     MONITOR=$(${pkgs.hyprland}/bin/hyprctl monitors -j \
       | ${pkgs.jq}/bin/jq -r '.[] | select(.focused) | .name')
-
     if [ -z "$MONITOR" ]; then exit 1; fi
-
     if [[ "$MONITOR" == eDP-* ]]; then
       case "$1" in
         +) ${pkgs.brightnessctl}/bin/brightnessctl set +''${STEP}% ;;
@@ -173,8 +174,6 @@
         | ${pkgs.gnugrep}/bin/grep -E "^Display [0-9]+" \
         | while IFS= read -r line; do
             NUM=$(echo "$line" | grep -oE "[0-9]+")
-            CONNECTOR=$(${pkgs.ddcutil}/bin/ddcutil capabilities --display "$NUM" 2>/dev/null \
-              | ${pkgs.gnugrep}/bin/grep -i "Model:" | head -1 || true)
             DRMSYS=$(ls /sys/class/drm/card*-"$MONITOR" 2>/dev/null | head -1 || true)
             [ -n "$DRMSYS" ] && echo "$NUM" && break
           done)
@@ -187,21 +186,14 @@
     fi
   '';
 
-  # hydrix-vibrancy-hypr: vibrancy for external monitors under Hyprland.
-  # Tries DDC VCP 0x8A first; falls back to a Hyprland screen shader when
-  # the monitor doesn't support DDC saturation (e.g. Samsung C34J79x).
-  # Shader state is stored in ~/.cache/hydrix/vibrancy (integer 0–200, default 100).
   hydrixVibrancyHypr = pkgs.writeShellScriptBin "hydrix-vibrancy-hypr" ''
     STEP=5
     STATE_DIR="$HOME/.cache/hydrix"
     STATE_FILE="$STATE_DIR/vibrancy"
     SHADER_FILE="$STATE_DIR/vibrancy.glsl"
-
     MONITOR=$(${pkgs.hyprland}/bin/hyprctl monitors -j \
       | ${pkgs.jq}/bin/jq -r '.[] | select(.focused) | .name')
     [ -z "$MONITOR" ] && exit 1
-
-    # Try DDC saturation on external monitors first
     if [[ "$MONITOR" != eDP-* ]]; then
       DISPLAY_NUM=$(${pkgs.ddcutil}/bin/ddcutil detect --brief 2>/dev/null \
         | ${pkgs.gnugrep}/bin/grep -E "^Display [0-9]+" \
@@ -218,21 +210,15 @@
         esac
       fi
     fi
-
-    # DDC saturation unavailable — use Hyprland screen shader
     mkdir -p "$STATE_DIR"
-    CURRENT=$(cat "$STATE_FILE" 2>/dev/null)
-    : "''${CURRENT:=100}"
+    CURRENT=$(cat "$STATE_FILE" 2>/dev/null); : "''${CURRENT:=100}"
     case "$1" in
       +) NEW=$(( CURRENT + STEP * 2 )) ;;
       -) NEW=$(( CURRENT - STEP * 2 )) ;;
       *) exit 1 ;;
     esac
-    [ "$NEW" -lt 0   ] && NEW=0
-    [ "$NEW" -gt 200 ] && NEW=200
+    [ "$NEW" -lt 0 ] && NEW=0; [ "$NEW" -gt 200 ] && NEW=200
     echo "$NEW" > "$STATE_FILE"
-
-    # Write shader (saturation = NEW/100.0)
     SAT=$(${pkgs.gawk}/bin/awk "BEGIN { printf \"%.4f\", $NEW / 100.0 }")
     cat > "$SHADER_FILE" <<'GLSL'
 #version 300 es
@@ -248,7 +234,6 @@ void main() {
 }
 GLSL
     ${pkgs.gnused}/bin/sed -i "s/SAT_VALUE/$SAT/" "$SHADER_FILE"
-
     if [ "$NEW" -eq 100 ]; then
       ${pkgs.hyprland}/bin/hyprctl keyword decoration:screen_shader "" >/dev/null 2>&1
     else
@@ -257,647 +242,202 @@ GLSL
     ${pkgs.libnotify}/bin/notify-send "Vibrancy" "Saturation: $NEW%" --urgency=low
   '';
 
-  # hypr-vm-borders: toggle VM-specific border colors on/off.
-  #
-  # Reads focusBorder and VM name from /etc/hydrix/vm-registry.json at runtime.
-  # Generates tag-based bordercolor rules (tag:vm-<name>) — tags are assigned at
-  # window creation via static title: rules in hyprland.conf and persist per-window,
-  # making them suitable for dynamic re-evaluation (unlike title: matching itself).
-  #
-  # on     — generate rules from registry, write to vm-borders.conf, apply via keyword
-  # off    — empty vm-borders.conf, reload (VM windows revert to global active border)
-  # toggle — flip current state
-  # status — print "on" or "off"
-  # init   — called at Hyprland startup: initialize on first boot, refresh + re-apply rules
   hyprVmBorders = pkgs.writeShellScriptBin "hypr-vm-borders" ''
     REGISTRY=/etc/hydrix/vm-registry.json
     CONF=$HOME/.config/hypr/vm-borders.conf
     STATE=$HOME/.config/hypr/vm-borders-enabled
-
-    # Named color or #RRGGBB → RRGGBBAA (matches Hydrix namedColorToRgba table)
     _rgba() {
       case "$1" in
-        red)       echo "ff0000ff" ;;
-        orange)    echo "ff8c00ff" ;;
-        yellow)    echo "ffff00ff" ;;
-        green)     echo "00ff00ff" ;;
-        cyan)      echo "00ffffff" ;;
-        blue)      echo "0000ffff" ;;
-        purple)    echo "800080ff" ;;
-        pink)      echo "ffc0cbff" ;;
-        magenta)   echo "ff00ffff" ;;
-        white)     echo "ffffffff" ;;
-        black)     echo "000000ff" ;;
-        gray|grey) echo "808080ff" ;;
+        red) echo "ff0000ff" ;; orange) echo "ff8c00ff" ;; yellow) echo "ffff00ff" ;;
+        green) echo "00ff00ff" ;; cyan) echo "00ffffff" ;; blue) echo "0000ffff" ;;
+        purple) echo "800080ff" ;; pink) echo "ffc0cbff" ;; magenta) echo "ff00ffff" ;;
+        white) echo "ffffffff" ;; black) echo "000000ff" ;; gray|grey) echo "808080ff" ;;
         *) hex="''${1#\#}"; [[ "''${#hex}" -eq 6 ]] && echo "''${hex}ff" || echo "$hex" ;;
       esac
     }
-
     _generate() {
       while IFS=' ' read -r key color; do
         echo "windowrulev2 = bordercolor rgba($(_rgba "$color")), tag:vm-$key"
-      done < <(${pkgs.jq}/bin/jq -r '
-        to_entries[]
-        | select(.value.focusBorder != null)
-        | "\(.key) \(.value.focusBorder)"
-      ' "$REGISTRY")
+      done < <(${pkgs.jq}/bin/jq -r 'to_entries[] | select(.value.focusBorder != null) | "\(.key) \(.value.focusBorder)"' "$REGISTRY")
     }
-
     _apply_keyword() {
       while IFS= read -r rule; do
         ${pkgs.hyprland}/bin/hyprctl keyword windowrulev2 "''${rule#windowrulev2 = }" 2>/dev/null || true
       done < <(_generate)
     }
-
-    # Tag already-open VM windows by their title prefix.
-    # windowrulev2 tag rules only fire at window creation, so existing windows
-    # (e.g. VMs that were running before Hyprland reloaded) need manual tagging.
     _tag_existing() {
       while IFS=$'\t' read -r addr name; do
         ${pkgs.hyprland}/bin/hyprctl dispatch tagwindow "+vm-$name" "address:$addr" 2>/dev/null || true
       done < <(${pkgs.hyprland}/bin/hyprctl clients -j \
-        | ${pkgs.jq}/bin/jq -r '
-            .[] | select(.title | test("^\\[[a-z]"))
-            | [.address, (.title | capture("^\\[(?<n>[^\\]]+)\\]").n)]
-            | @tsv
-          ')
+        | ${pkgs.jq}/bin/jq -r '.[] | select(.title | test("^\\[[a-z]")) | [.address, (.title | capture("^\\[(?<n>[^\\]]+)\\]").n)] | @tsv')
     }
-
     case "''${1:-toggle}" in
       init)
         mkdir -p "$(dirname "$CONF")"
-        if [[ ! -f "$CONF" ]]; then
-          _generate > "$CONF"
-          touch "$STATE"
-        elif [[ -f "$STATE" ]]; then
-          _generate > "$CONF"
-        fi
-        if [[ -f "$STATE" ]]; then
-          _tag_existing
-          _apply_keyword
-        fi
-        ;;
-      on)
-        mkdir -p "$(dirname "$CONF")"
-        _generate > "$CONF"
-        touch "$STATE"
-        _tag_existing
-        _apply_keyword
-        ;;
-      off)
-        : > "$CONF"
-        rm -f "$STATE"
-        ${pkgs.hyprland}/bin/hyprctl reload 2>/dev/null || true
-        ;;
-      toggle)
-        [[ -f "$STATE" ]] && exec "$0" off || exec "$0" on
-        ;;
-      status)
-        [[ -f "$STATE" ]] && echo "on" || echo "off"
-        ;;
-      *)
-        echo "Usage: hypr-vm-borders [on|off|toggle|status]" >&2
-        exit 1
-        ;;
+        if [[ ! -f "$CONF" ]]; then _generate > "$CONF"; touch "$STATE"
+        elif [[ -f "$STATE" ]]; then _generate > "$CONF"; fi
+        if [[ -f "$STATE" ]]; then _tag_existing; _apply_keyword; fi ;;
+      on)  mkdir -p "$(dirname "$CONF")"; _generate > "$CONF"; touch "$STATE"; _tag_existing; _apply_keyword ;;
+      off) : > "$CONF"; rm -f "$STATE"; ${pkgs.hyprland}/bin/hyprctl reload 2>/dev/null || true ;;
+      toggle) [[ -f "$STATE" ]] && exec "$0" off || exec "$0" on ;;
+      status) [[ -f "$STATE" ]] && echo "on" || echo "off" ;;
+      *) echo "Usage: hypr-vm-borders [on|off|toggle|status|init]" >&2; exit 1 ;;
     esac
   '';
 
-  # hypr-float-terminal: cascading floating alacritty windows, Hyprland-native.
-  # Mirrors hydrix-float-terminal (i3) using hyprctl instead of xrandr/xdotool/i3-msg.
-  # Tracks cascade position in /tmp/hypr_float_state; resets when no floating windows remain.
-  # Window class hypr-float is caught by windowrulev2 rules (float + size).
   hyprFloatTerminal = pkgs.writeShellScriptBin "hypr-float-terminal" ''
     STATE_FILE="/tmp/hypr_float_state"
-    X_OFFSET=50
-    Y_OFFSET=50
-    MAX_WINDOWS=5
-    WIN_W=800
-    WIN_H=550
-
-    # Cursor position → active monitor bounds
+    X_OFFSET=50; Y_OFFSET=50; MAX_WINDOWS=5; WIN_W=800; WIN_H=550
     CURSOR=$(${pkgs.hyprland}/bin/hyprctl cursorpos -j 2>/dev/null)
     CX=$(printf '%s' "$CURSOR" | ${pkgs.jq}/bin/jq '.x')
     CY=$(printf '%s' "$CURSOR" | ${pkgs.jq}/bin/jq '.y')
-
     MON=$(${pkgs.hyprland}/bin/hyprctl monitors -j 2>/dev/null \
-      | ${pkgs.jq}/bin/jq -r --argjson cx "$CX" --argjson cy "$CY" '
-          .[] | select(.x <= $cx and $cx < (.x + .width)
-                   and .y <= $cy and $cy < (.y + .height))
-          | "\(.x) \(.y) \(.width) \(.height)"
-        ' | head -1)
+      | ${pkgs.jq}/bin/jq -r --argjson cx "$CX" --argjson cy "$CY" \
+          '.[] | select(.x <= $cx and $cx < (.x + .width) and .y <= $cy and $cy < (.y + .height)) | "\(.x) \(.y) \(.width) \(.height)"' | head -1)
     read -r MON_X MON_Y MON_W MON_H <<< "''${MON:-0 0 1920 1080}"
-
     INIT_X=$(( (MON_W - WIN_W) / 2 - MAX_WINDOWS * X_OFFSET / 2 ))
     INIT_Y=$(( (MON_H - WIN_H) / 2 - MAX_WINDOWS * Y_OFFSET / 2 ))
-    [ "$INIT_X" -lt 50 ] && INIT_X=50
-    [ "$INIT_Y" -lt 50 ] && INIT_Y=50
-
-    # Count floating windows on the focused workspace
-    WS=$(${pkgs.hyprland}/bin/hyprctl activeworkspace -j 2>/dev/null \
-      | ${pkgs.jq}/bin/jq '.id')
+    [ "$INIT_X" -lt 50 ] && INIT_X=50; [ "$INIT_Y" -lt 50 ] && INIT_Y=50
+    WS=$(${pkgs.hyprland}/bin/hyprctl activeworkspace -j 2>/dev/null | ${pkgs.jq}/bin/jq '.id')
     NFLOAT=$(${pkgs.hyprland}/bin/hyprctl clients -j 2>/dev/null \
-      | ${pkgs.jq}/bin/jq --argjson ws "$WS" \
-          '[.[] | select(.workspace.id == $ws and .floating)] | length')
-
-    if [ -f "$STATE_FILE" ]; then
-      read -r saved_count CUR_X CUR_Y < "$STATE_FILE"
-    else
-      saved_count=0 CUR_X=$((MON_X + INIT_X)) CUR_Y=$((MON_Y + INIT_Y))
-    fi
-
+      | ${pkgs.jq}/bin/jq --argjson ws "$WS" '[.[] | select(.workspace.id == $ws and .floating)] | length')
+    if [ -f "$STATE_FILE" ]; then read -r saved_count CUR_X CUR_Y < "$STATE_FILE"
+    else saved_count=0 CUR_X=$((MON_X + INIT_X)) CUR_Y=$((MON_Y + INIT_Y)); fi
     if [ "''${NFLOAT:-0}" -eq 0 ]; then
       saved_count=0 CUR_X=$((MON_X + INIT_X)) CUR_Y=$((MON_Y + INIT_Y))
     else
       saved_count=$(( saved_count + 1 ))
-      NX=$(( CUR_X + X_OFFSET ))
-      NY=$(( CUR_Y + Y_OFFSET ))
-      MAX_X=$(( MON_X + MON_W - WIN_W - 50 ))
-      MAX_Y=$(( MON_Y + MON_H - WIN_H - 50 ))
+      NX=$(( CUR_X + X_OFFSET )); NY=$(( CUR_Y + Y_OFFSET ))
+      MAX_X=$(( MON_X + MON_W - WIN_W - 50 )); MAX_Y=$(( MON_Y + MON_H - WIN_H - 50 ))
       if [ "$saved_count" -gt "$MAX_WINDOWS" ] || [ "$NX" -gt "$MAX_X" ] || [ "$NY" -gt "$MAX_Y" ]; then
         saved_count=1 CUR_X=$((MON_X + INIT_X)) CUR_Y=$((MON_Y + INIT_Y))
-      else
-        CUR_X=$NX CUR_Y=$NY
-      fi
+      else CUR_X=$NX CUR_Y=$NY; fi
     fi
     printf '%s %s %s\n' "$saved_count" "$CUR_X" "$CUR_Y" > "$STATE_FILE"
-
-    # Launch with a unique title so we can find the window to position it.
-    # Float + size are handled by windowrulev2; we only need to move it here.
     TITLE="hypr-float-$$"
     alacritty --class hypr-float --title "$TITLE" &
-
     for _ in $(seq 30); do
       sleep 0.1
       ADDR=$(${pkgs.hyprland}/bin/hyprctl clients -j 2>/dev/null \
-        | ${pkgs.jq}/bin/jq -r --arg t "$TITLE" '.[] | select(.title == $t) | .address' \
-        | head -1)
+        | ${pkgs.jq}/bin/jq -r --arg t "$TITLE" '.[] | select(.title == $t) | .address' | head -1)
       [ -n "$ADDR" ] && break
     done
-
-    [ -n "$ADDR" ] && ${pkgs.hyprland}/bin/hyprctl dispatch \
-      movewindowpixel "exact $CUR_X $CUR_Y,address:$ADDR" >/dev/null 2>&1 || true
+    [ -n "$ADDR" ] && ${pkgs.hyprland}/bin/hyprctl dispatch movewindowpixel "exact $CUR_X $CUR_Y,address:$ADDR" >/dev/null 2>&1 || true
   '';
 
-  # hypr-focus-daemon: event-driven VM border color switcher.
-  #
-  # Default (no marker):            focusBorder from vm-registry (per-VM defined colors)
-  # hydrix-focus on (marker exists): dynamicColorMap wal colors (host theme per VM type)
-  #
-  # 'reapply' subcommand: one-shot re-apply for the currently focused window.
-  # Called by hydrix-focus immediately after toggling so the border updates at once.
   hyprFocusDaemon = pkgs.writeShellScriptBin "hypr-focus-daemon" ''
     REGISTRY=/etc/hydrix/vm-registry.json
     MARKER="$HOME/.cache/hydrix/focus-override-active"
     WAL_COLORS="$HOME/.cache/wal/colors.json"
-
     _rgba() {
       case "$1" in
-        red)       echo "ff0000ff" ;;
-        orange)    echo "ff8c00ff" ;;
-        yellow)    echo "ffff00ff" ;;
-        green)     echo "00ff00ff" ;;
-        cyan)      echo "00ffffff" ;;
-        blue)      echo "0000ffff" ;;
-        purple)    echo "800080ff" ;;
-        pink)      echo "ffc0cbff" ;;
-        magenta)   echo "ff00ffff" ;;
-        white)     echo "ffffffff" ;;
-        black)     echo "000000ff" ;;
-        gray|grey) echo "808080ff" ;;
+        red) echo "ff0000ff" ;; orange) echo "ff8c00ff" ;; yellow) echo "ffff00ff" ;;
+        green) echo "00ff00ff" ;; cyan) echo "00ffffff" ;; blue) echo "0000ffff" ;;
+        purple) echo "800080ff" ;; pink) echo "ffc0cbff" ;; magenta) echo "ff00ffff" ;;
+        white) echo "ffffffff" ;; black) echo "000000ff" ;; gray|grey) echo "808080ff" ;;
         *) hex="''${1#\#}"; [[ "''${#hex}" -eq 6 ]] && echo "''${hex}ff" || echo "$hex" ;;
       esac
     }
-
     _wal_color() {
       grep '^color4=' "$HOME/.cache/wal/colors.sh" 2>/dev/null \
         | sed "s/^color4='//;s/'$//;s/#//" | head -1 | awk '{print $0 "ff"}'
     }
-
-    # Look up a VM profile's wal color key from the build-time dynamicColorMap,
-    # then read that color from ~/.cache/wal/colors.json.
     _dynamic_color() {
       local profile="$1" WAL_KEY=""
       case "$profile" in
       ${dynamicMapCases}
       *) WAL_KEY="color4" ;;
       esac
-      ${pkgs.jq}/bin/jq -r --arg k "$WAL_KEY" \
-        '.colors[$k] // empty' "$WAL_COLORS" 2>/dev/null \
+      ${pkgs.jq}/bin/jq -r --arg k "$WAL_KEY" '.colors[$k] // empty' "$WAL_COLORS" 2>/dev/null \
         | sed 's/#//' | awk '{print $0 "ff"}'
     }
-
-    # Resolve border color for a VM profile based on current hydrix-focus state.
-    # No marker (default): focusBorder from vm-registry (per-VM defined color).
-    # Marker present:       dynamicColorMap wal color (host theme mapped per VM type).
     _border_for_profile() {
       local profile="$1"
       if [ -f "$MARKER" ]; then
-        local d
-        d=$(_dynamic_color "$profile")
+        local d; d=$(_dynamic_color "$profile")
         [ -n "$d" ] && { echo "$d"; return; }
       fi
-      local c
-      c=$(${pkgs.jq}/bin/jq -r --arg p "$profile" '.[$p].focusBorder // empty' "$REGISTRY" 2>/dev/null)
-      if [ -n "$c" ]; then
-        _rgba "$c"
-        return
-      fi
+      local c; c=$(${pkgs.jq}/bin/jq -r --arg p "$profile" '.[$p].focusBorder // empty' "$REGISTRY" 2>/dev/null)
+      if [ -n "$c" ]; then _rgba "$c"; return; fi
       _wal_color
     }
-
-    _apply() {
-      ${pkgs.hyprland}/bin/hyprctl keyword general:col.active_border "rgba($1)" 2>/dev/null || true
-    }
-
+    _apply() { ${pkgs.hyprland}/bin/hyprctl keyword general:col.active_border "rgba($1)" 2>/dev/null || true; }
     _reapply() {
       [ -z "''${HYPRLAND_INSTANCE_SIGNATURE:-}" ] && return
       local title profile
-      title=$(${pkgs.hyprland}/bin/hyprctl activewindow -j 2>/dev/null \
-        | ${pkgs.jq}/bin/jq -r '.title // empty')
+      title=$(${pkgs.hyprland}/bin/hyprctl activewindow -j 2>/dev/null | ${pkgs.jq}/bin/jq -r '.title // empty')
       profile=$(echo "$title" | sed -n 's/^\[\([^]]*\)\].*/\1/p')
-      if [ -n "$profile" ]; then
-        _apply "$(_border_for_profile "$profile")"
-      else
-        _apply "$(_wal_color)"
-      fi
+      if [ -n "$profile" ]; then _apply "$(_border_for_profile "$profile")"
+      else _apply "$(_wal_color)"; fi
     }
-
     case "''${1:-}" in
-      reapply)
-        _reapply
-        ;;
+      reapply) _reapply ;;
       *)
         [ -z "''${HYPRLAND_INSTANCE_SIGNATURE:-}" ] && exit 1
         SOCKET="''${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/hypr/''${HYPRLAND_INSTANCE_SIGNATURE}/.socket2.sock"
-        # Reconnect loop: restart socat if the socket disconnects.
-        # grep pre-filters to activewindow events — avoids >>* in case patterns.
         while true; do
           ${pkgs.socat}/bin/socat - "UNIX-CONNECT:$SOCKET" 2>/dev/null \
             | ${pkgs.gnugrep}/bin/grep --line-buffered '^activewindow' \
             | while IFS= read -r _line; do _reapply; done
           sleep 1
-        done
-        ;;
+        done ;;
     esac
   '';
 
-in lib.mkIf (cfg.enable && config.hydrix.hyprland.enable) {
-  environment.systemPackages = [
-    hyprlandGapsAdjust
-    hyprApplyColors
-    hydrixBrightnessHypr
-    hydrixVibrancyHypr
-    hyprFloatTerminal
-    hyprFocusDaemon
-    pkgs.swayidle
-    pkgs.swaybg
-  ];
+in
+  lib.mkIf (cfg.enable && config.hydrix.hyprland.enable) {
+    environment.systemPackages = [
+      hyprlandGapsAdjust
+      hyprApplyColors
+      hydrixBrightnessHypr
+      hydrixVibrancyHypr
+      hyprVmBorders
+      hyprFloatTerminal
+      hyprFocusDaemon
+      pkgs.swayidle
+      pkgs.swaybg
+    ];
 
-  home-manager.users.${username} = {
-    pkgs,
-    config,
-    lib,
-    ...
-  }: {
-    # Reload Hyprland after rebuild so new config (colors, VM border rules) takes effect
-    # immediately without a manual step. No-op when Hyprland is not running.
-    home.activation.reloadHyprland = lib.hm.dag.entryAfter ["writeBoundary"] ''
-      [[ -n "''${HYPRLAND_INSTANCE_SIGNATURE:-}" ]] && \
-        ${hyprApplyColors}/bin/hypr-apply-colors 2>/dev/null || true
-    '';
-
-    # Seed gap state files with configured values on first install / rebuild.
-    # hyprland-gaps-adjust reads these instead of hyprctl getoption, which
-    # returns unreliable results across Hyprland versions.
-    home.activation.initHyprGaps = lib.hm.dag.entryAfter ["writeBoundary"] ''
-      DIR="$HOME/.config/hypr"
-      mkdir -p "$DIR"
-      [[ -f "$DIR/gaps-inner" ]] || echo "${toString gaps}" > "$DIR/gaps-inner"
-      [[ -f "$DIR/gaps-outer" ]] || echo "${toString gaps}" > "$DIR/gaps-outer"
-    '';
-
-    wayland.windowManager.hyprland = {
-      enable = true;
-
-      # All config as raw hyprland.conf — easy to read and tweak.
-      # User additions in shared/hyprland.nix use extraConfig = lib.mkAfter.
-      extraConfig = ''
-        # ── Colors (written at runtime by hypr-apply-colors from wal) ────────
-        # Fallback values in case colors.conf doesn't exist yet on first boot.
-        $activeBorder   = rgba(7aa2f7ff)
-        $inactiveBorder = rgba(1a1b26aa)
-        source = ~/.config/hypr/colors.conf
-
-        # ── Monitor ──────────────────────────────────────────────────────────
-        ${hyprMonitorLine}
-        monitor = ,preferred,auto,1
-
-        # ── Startup ──────────────────────────────────────────────────────────
-        # Export WAYLAND_DISPLAY to the systemd user environment first — required
-        # so the i3 display-hotplug path unit (ConditionEnvironment=!WAYLAND_DISPLAY)
-        # doesn't fire display-setup → polybar when X11 returns.
-        exec-once = systemctl --user set-environment WAYLAND_DISPLAY=$WAYLAND_DISPLAY
-        exec-once = sh -c 'wal -Rnq; hypr-apply-colors'
-        exec-once = sh -c 'WALL=$(cat "$HOME/.cache/wal/wal" 2>/dev/null); [ -n "$WALL" ] && swaybg -i "$WALL" -m fill'
-        exec-once = ${pkgs.dunst}/bin/dunst
-        # Start waybar after a brief delay so the Hyprland socket is ready.
-        exec-once = sh -c 'sleep 2 && hypr-apply-colors && waybar'
-        exec-once = hypr-focus-daemon
-        exec-once = vm-push-display-mode
-        exec-once = waypipe-connect-all
-        exec-once = swayidle -w timeout ${idleTimeout} 'hyprlock --force-focus' before-sleep 'hyprlock --force-focus'
-
-        # ── General ──────────────────────────────────────────────────────────
-        general {
-          gaps_in  = ${toString gaps}
-          gaps_out = ${toString gaps}
-          border_size  = ${borderSize}
-          col.active_border   = $activeBorder
-          col.inactive_border = $inactiveBorder
-          layout = dwindle
-        }
-
-        # ── Decoration ───────────────────────────────────────────────────────
-        decoration {
-          rounding         = ${rounding}
-          active_opacity   = 0.95
-          inactive_opacity = 0.95
-
-          blur {
-            enabled  = true
-            passes   = 1
-            size     = 3
-            vibrancy = 0.1696
-          }
-
-          shadow {
-            enabled = true
-            range   = 10
-          }
-        }
-
-        # ── Animations ───────────────────────────────────────────────────────
-        animations {
-          enabled = true
-          bezier = easeOut, 0.25, 0.1, 0.25, 1.0
-          animation = windows,    1, 3, easeOut
-          animation = border,     1, 10, default
-          animation = fade,       1, 2, easeOut
-          animation = workspaces, 1, 4, easeOut
-        }
-
-        # ── Input ────────────────────────────────────────────────────────────
-        input {
-          kb_layout     = us
-          follow_mouse  = 0
-          sensitivity   = -0.2
-          natural_scroll = true
-
-          touchpad {
-            natural_scroll = true
-          }
-        }
-
-        # ── Layout ───────────────────────────────────────────────────────────
-        dwindle {
-          pseudotile     = false
-          preserve_split = true
-          force_split    = 2
-        }
-
-        # ── Misc ─────────────────────────────────────────────────────────────
-        misc {
-          disable_hyprland_logo    = true
-          disable_splash_rendering = true
-          focus_on_activate        = true
-        }
-
-        # ── Variables ────────────────────────────────────────────────────────
-        $mod = SUPER
-
-        # ── Keybindings ──────────────────────────────────────────────────────
-        # Terminal
-        bind = $mod,       Return, exec, hypr-ws-app alacritty
-        bind = $mod SHIFT, Return, exec, alacritty
-        bind = $mod,       S,      exec, hypr-float-terminal
-
-        # Launcher
-        bind = $mod,       Q, killactive,
-        bind = $mod,       D, exec, wofi-launcher
-        bind = $mod,       F4, exec, focus-wofi
-
-        # Browser (via VM)
-        bind = $mod, B, exec, hypr-ws-app firefox
-        bind = $mod, A, exec, hypr-ws-app firefox https://claude.ai
-        bind = $mod, T, exec, hypr-ws-app firefox https://borttappat.github.io/links.html
-        bind = $mod, G, exec, hypr-ws-app firefox https://github.com/borttappat/Hydrix
-        bind = $mod, N, exec, hypr-ws-app firefox https://search.nixos.org/packages?channel=unstable
-
-        # Applications
-        bind = $mod,       O, exec, obsidian
-        bind = $mod,       M, exec, alacritty -e hydrix-tui
-        bind = $mod SHIFT, M, exec, vm-launch
-        bind = $mod,       Z, exec, zathura
-
-        # Vault (Bitwarden)
-        bind = $mod SHIFT, P, exec, vault-rofi
-
-        # Brightness / Vibrancy (Hyprland-native monitor detection)
-        bind = $mod,       F7, exec, hydrix-brightness-hypr -
-        bind = $mod,       F8, exec, hydrix-brightness-hypr +
-        bind = $mod SHIFT, F7, exec, hydrix-vibrancy-hypr -
-        bind = $mod SHIFT, F8, exec, hydrix-vibrancy-hypr +
-
-        # Screenshot
-        bind = $mod, F12, exec, grim -g "$(slurp)" ~/screenshots/$(date +%Y%m%d_%H%M%S).png
-
-        # System monitors
-        bind = $mod SHIFT, U, exec, hypr-ws-app alacritty -e htop
-        bind = $mod SHIFT, B, exec, alacritty -e btm
-
-        # File manager (via VM)
-        bind = $mod SHIFT, F, exec, hypr-ws-app alacritty -e joshuto
-
-        # Git status
-        bind = $mod SHIFT, G, exec, alacritty -e fish -c 'clear && cd ${configDir} && git status && exec fish'
-
-        # Wallpaper
-        bind = $mod,       W, exec, randomwalrgb
-        bind = $mod SHIFT, W, exec, wallpaper-black
-
-        # Lock / Suspend / Exit
-        bind = $mod SHIFT,      E, exec, hyprlock 
-        bind = $mod SHIFT,      S, exec, systemctl suspend
-        bind = $mod CTRL SHIFT, E, exec, exit-wayland
-
-        # Focus (hjkl + arrows)
-        bind = $mod, H,     movefocus, l
-        bind = $mod, J,     movefocus, d
-        bind = $mod, K,     movefocus, u
-        bind = $mod, L,     movefocus, r
-        bind = $mod, left,  movefocus, l
-        bind = $mod, down,  movefocus, d
-        bind = $mod, up,    movefocus, u
-        bind = $mod, right, movefocus, r
-
-        # Move windows (hjkl)
-        bind = $mod SHIFT, H, movewindow, l
-        bind = $mod SHIFT, J, movewindow, d
-        bind = $mod SHIFT, K, movewindow, u
-        bind = $mod SHIFT, L, movewindow, r
-
-        # Layout
-        bind = $mod,       C,     layoutmsg, preselect d
-        bind = $mod,       V,     layoutmsg, preselect r
-        bind = $mod,       F,     fullscreen, 0
-        bind = $mod SHIFT, SPACE, togglefloating,
-        bind = $mod,       SPACE, cyclenext,
-        bind = $mod,       R,     submap, resize
-
-        # Gaps (mirrors i3/sway: Up/Down = inner, Left/Right = outer)
-        bind = $mod SHIFT, up,    exec, hyprland-gaps-adjust inner plus 5
-        bind = $mod SHIFT, down,  exec, hyprland-gaps-adjust inner minus 5
-        bind = $mod SHIFT, right, exec, hyprland-gaps-adjust outer plus 5
-        bind = $mod SHIFT, left,  exec, hyprland-gaps-adjust outer minus 5
-
-        # Scratchpad
-        bind = $mod SHIFT, minus, movetoworkspace, special
-        bind = $mod,       minus, togglespecialworkspace,
-
-        # Workspaces
-        bind = $mod, 1, workspace, 1
-        bind = $mod, 2, workspace, 2
-        bind = $mod, 3, workspace, 3
-        bind = $mod, 4, workspace, 4
-        bind = $mod, 5, workspace, 5
-        bind = $mod, 6, workspace, 6
-        bind = $mod, 7, workspace, 7
-        bind = $mod, 8, workspace, 8
-        bind = $mod, 9, workspace, 9
-        bind = $mod, 0, workspace, 10
-
-        # Move to workspace
-        bind = $mod SHIFT, 1, movetoworkspace, 1
-        bind = $mod SHIFT, 2, movetoworkspace, 2
-        bind = $mod SHIFT, 3, movetoworkspace, 3
-        bind = $mod SHIFT, 4, movetoworkspace, 4
-        bind = $mod SHIFT, 5, movetoworkspace, 5
-        bind = $mod SHIFT, 6, movetoworkspace, 6
-        bind = $mod SHIFT, 7, movetoworkspace, 7
-        bind = $mod SHIFT, 8, movetoworkspace, 8
-        bind = $mod SHIFT, 9, movetoworkspace, 9
-        bind = $mod SHIFT, 0, movetoworkspace, 10
-
-        # Mouse — move/resize windows
-        bindm = $mod, mouse:272, movewindow
-        bindm = $mod, mouse:273, resizewindow
-
-        # Mouse — scroll through workspaces
-        bind = $mod, mouse_down, workspace, e+1
-        bind = $mod, mouse_up,   workspace, e-1
-
-        # ── Resize submap ────────────────────────────────────────────────────
-        submap = resize
-        binde = , H,      resizeactive, -10 0
-        binde = , L,      resizeactive,  10 0
-        binde = , K,      resizeactive,  0 -10
-        binde = , J,      resizeactive,  0  10
-        binde = , left,   resizeactive, -10 0
-        binde = , right,  resizeactive,  10 0
-        binde = , up,     resizeactive,  0 -10
-        binde = , down,   resizeactive,  0  10
-        bind  = , escape, submap, reset
-        bind  = , Return, submap, reset
-        submap = reset
-
-        # ── Window rules ─────────────────────────────────────────────────────
-        windowrulev2 = float, class:^(pavucontrol)$
-        windowrulev2 = float, class:^(lxappearance)$
-        windowrulev2 = float, class:^(nm-connection-editor)$
-        # hypr-float-terminal windows ($mod+S) — float + fixed size; position set by script
-        windowrulev2 = float, class:^(hypr-float)$
-        windowrulev2 = size 800 550, class:^(hypr-float)$
-        # Alacritty manages its own opacity
-        windowrulev2 = opacity 1.0 override, class:^(Alacritty)$
-        windowrulev2 = opacity 1.0 override, class:^(alacritty)$
-        windowrulev2 = opacity 1.0 override, class:^(hypr-float)$
-
-        # VM window routing: title: at creation routes each [profile] window to its workspace.
-        ${vmWindowRules}
-
-        # Per-workspace active border color overrides (hydrix.hyprland.workspaceColors)
-        ${workspaceColorRules}
-
-        # Per-VM border colors: built from vmRegistry.focusBorder at build time.
-        # Applied at window creation and re-applied on hyprctl reload.
-        # Later than workspaceColorRules so these take precedence.
-        ${vmBorderColorRules}
-      '';
-    };
-
-    # hyprlock — lockscreen, colors sourced at runtime from colors-lock.conf
-    # Colors sourced at runtime from ~/.config/hypr/colors-lock.conf (written by hypr-apply-colors).
-    programs.hyprlock = {
-      enable = true;
-      settings = {
-        general = {
-          disable_loading_bar = true;
-          grace = 5;
-          hide_cursor = true;
-        };
-        background = [{
-          path = "screenshot";
-          blur_passes = 2;
-          blur_size = 5;
-          brightness = 0.5;
-          vibrancy = 0.2;
-        }];
+    home-manager.users.${username} = {
+      pkgs,
+      config,
+      lib,
+      ...
+    }: {
+      # Enable Hyprland HM module for session/systemd integration.
+      # Config file management is handled via home.activation below — not extraConfig.
+      wayland.windowManager.hyprland = {
+        enable = true;
+        # Minimal comment suppresses HM's "no configuration" warning.
+        # The actual config is written as a plain editable file by home.activation.
+        extraConfig = "# config written by home.activation — edit ~/.config/hypr/hyprland.conf";
       };
-      # source must precede the sections that reference $lockXxx variables,
-      # so input-field and label live here rather than in settings.
-      # Full path used (no tilde) — hyprlock does not expand ~ in source paths.
-      extraConfig = ''
-        source = /home/${username}/.config/hypr/colors-lock.conf
 
-        input-field {
-          size = 300, 55
-          position = 0, -80
-          monitor =
-          dots_center = true
-          fade_on_empty = false
-          placeholder_text = ${lk.text}
-          fail_text = ${lk.wrongText}
-          outer_color = $lockAccent
-          inner_color = $lockBg
-          font_color = $lockFg
-          fail_color = $lockWrong
-          check_color = $lockAccent
-          halign = center
-          valign = center
-        }
+      # Prevent HM from creating a read-only hyprland.conf symlink.
+      # Our activation writes a plain editable file instead.
+      xdg.configFile."hypr/hyprland.conf" = lib.mkForce { enable = false; };
 
-        label {
-          monitor =
-          text = cmd[update:1000] echo "$(date +"%H:%M:%S")"
-          color = $lockFg
-          font_size = ${toString lk.clockSize}
-          font_family = ${lk.font}
-          position = 0, 180
-          halign = center
-          valign = center
-        }
+      # Seed gap state files on first install / rebuild.
+      home.activation.initHyprGaps = lib.hm.dag.entryAfter ["writeBoundary"] ''
+        _dir="$HOME/.config/hypr"
+        mkdir -p "$_dir"
+        [[ -f "$_dir/gaps-inner" ]] || echo "${toString gaps}" > "$_dir/gaps-inner"
+        [[ -f "$_dir/gaps-outer" ]] || echo "${toString gaps}" > "$_dir/gaps-outer"
+      '';
 
-        label {
-          monitor =
-          text = cmd[update:1000] echo "$(date +"%A, %B %d, %Y")"
-          color = $lockFg
-          font_size = ${toString (lk.clockSize / 3)}
-          font_family = ${lk.font}
-          position = 0, 100
-          halign = center
-          valign = center
-        }
+      # Write the framework-generated config (VM routing, keyboard, monitor, colors source).
+      # Always overwritten on rebuild — do not edit this file directly.
+      home.activation.hyprlandGenerated = lib.hm.dag.entryAfter ["writeBoundary"] ''
+        _dir="$HOME/.config/hypr"
+        mkdir -p "$_dir"
+        [ -L "$_dir/hydrix-generated.conf" ] && rm -f "$_dir/hydrix-generated.conf"
+        cat ${hyprlandGeneratedConf} > "$_dir/hydrix-generated.conf"
+      '';
+
+      # Reload Hyprland after rebuild so new generated config takes effect immediately.
+      home.activation.reloadHyprland = lib.hm.dag.entryAfter ["hyprlandGenerated"] ''
+        [[ -n "''${HYPRLAND_INSTANCE_SIGNATURE:-}" ]] && \
+          ${hyprApplyColors}/bin/hypr-apply-colors 2>/dev/null || true
       '';
     };
-  };
-}
+  }

@@ -313,12 +313,21 @@ EOF
         theme_file=$(${pkgs.coreutils}/bin/mktemp /tmp/wofi-launcher-XXXXXX.css)
         build_theme > "$theme_file"
 
+        local run_cmd
+        if [[ -n "''${HYPRLAND_INSTANCE_SIGNATURE:-}" ]]; then
+            run_cmd="hypr-ws-app {cmd}"
+        elif [[ -n "''${SWAYSOCK:-}" ]]; then
+            run_cmd="sway-ws-app {cmd}"
+        else
+            run_cmd="vm-app ''${selected} {cmd}"
+        fi
+
         if [[ -n "$vm_system" && -d "''${vm_system}/sw/share/applications" ]]; then
             XDG_DATA_DIRS="''${vm_system}/sw/share:''${XDG_DATA_DIRS:-/run/current-system/sw/share}" \
                 ${pkgs.wofi}/bin/wofi --show drun \
                 --style="$theme_file" \
                 $(wofi_args) \
-                --run-command="vm-app ''${selected} {cmd}" \
+                --run-command="''${run_cmd}" \
                 2>/dev/null || true
         else
             ${pkgs.libnotify}/bin/notify-send -t 3000 "VM" "Could not locate ''${selected} system path"

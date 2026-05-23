@@ -1344,6 +1344,41 @@ in {
           '';
         };
 
+        layout = lib.mkOption {
+          type = lib.types.str;
+          default = "us";
+          description = "XKB keyboard layout for Wayland compositors (Hyprland, Sway). E.g. 'us', 'se', 'de'.";
+          example = "se";
+        };
+
+        variant = lib.mkOption {
+          type = lib.types.str;
+          default = "";
+          description = "XKB keyboard variant. Leave empty for the default variant.";
+          example = "dvorak";
+        };
+
+        xkbOptions = lib.mkOption {
+          type = lib.types.str;
+          default = "";
+          description = "XKB options string for Wayland compositors (e.g. 'caps:ctrl_modifier'). Comma-separated.";
+          example = "caps:ctrl_modifier";
+        };
+
+        xkbFile = lib.mkOption {
+          type = lib.types.nullOr lib.types.path;
+          default = null;
+          description = ''
+            Custom XKB keymap file for Wayland compositors. When set, takes precedence
+            over layout, variant, and xkbOptions. Use pkgs.writeText to generate from
+            inline content in your machine config:
+
+              hydrix.graphical.keyboard.xkbFile = pkgs.writeText "my-keymap" '''
+                xkb_keymap { xkb_symbols { include "pc+se+inet(evdev)" ... }; };
+              ''';
+          '';
+        };
+
       };
 
       # UI
