@@ -76,6 +76,8 @@
     lib.mapAttrsToList (vm: colorKey: "${vm}) WAL_KEY=\"${colorKey}\" ;;") dynamicColorMap
   );
 
+  xwaylandEnabled = config.hydrix.hyprland.xwayland.enable;
+
   # ── Generated config file (framework layer) ───────────────────────────────
   # Always regenerated on rebuild. User should not edit this file — edit hyprland.conf instead.
   hyprlandGeneratedConf = pkgs.writeText "hypr-hydrix-generated.conf" ''
@@ -103,6 +105,23 @@
 
     # ── Per-VM border colors at window creation (from vmRegistry.focusBorder) ──
     ${vmBorderColorRules}
+
+    ${lib.optionalString xwaylandEnabled ''
+    # ── XWayland (hydrix.hyprland.xwayland.enable) ───────────────────────────
+    # Render XWayland apps at physical resolution rather than logical resolution.
+    # Needed for apps (Steam, games) that work better under XWayland — without
+    # this, fractional scaling causes them to render at the lower logical size.
+    xwayland {
+      force_zero_scaling = true
+    }
+
+    # Disable blur and restore full opacity for Steam game windows and any
+    # fullscreen surface — avoids compositor overhead on those frames.
+    windowrulev2 = noblur,   class:^(steam_app_.*)$
+    windowrulev2 = opacity 1.0 override, class:^(steam_app_.*)$
+    windowrulev2 = noblur,   fullscreen:1
+    windowrulev2 = opacity 1.0 override, fullscreen:1
+    ''}
   '';
 
   # ── Scripts ──────────────────────────────────────────────────────────────────

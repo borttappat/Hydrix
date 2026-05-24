@@ -17,9 +17,9 @@ in
 {
   imports = [
     # Window manager and desktop environment
-    ./wm/i3.nix
-    ./wm/hyprland.nix
-    ./wm/sway.nix
+    ./wm/i3
+    ./wm/hyprland
+    ./wm/sway
     ./wm/focus-mode.nix
 
     # Shell configuration (fish, starship)

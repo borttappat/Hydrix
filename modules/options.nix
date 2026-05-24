@@ -2123,6 +2123,26 @@ in {
         color rules are generated. Set in your hydrix-config to taste.
       '';
     };
+
+    xwayland = {
+      enable = lib.mkOption {
+        type = lib.types.bool;
+        default = false;
+        description = ''
+          Enable optimizations for graphical apps that work better under XWayland
+          (e.g. Steam, native Linux games, older toolkits). Adds to hydrix-generated.conf:
+          - xwayland.force_zero_scaling = true: XWayland apps render at the physical display
+            resolution instead of the lower logical resolution under fractional scaling.
+            On a 1.5× scaled 1920×1200 display, this keeps XWayland apps at 1920×1200
+            rather than the 1280×800 logical resolution.
+          - Window rules that disable blur and restore opacity=1.0 for Steam game windows
+            and fullscreen windows, letting the compositor skip unnecessary rendering
+            overhead for those surfaces.
+          Enable only in specialisations where such apps are available
+          (e.g. administrative).
+        '';
+      };
+    };
   };
 
   options.hydrix.vmMetrics = {

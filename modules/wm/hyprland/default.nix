@@ -4,7 +4,9 @@
 # Gated on hydrix.hyprland.enable.
 #
 # Hyprland config (keybindings, rules, aesthetics) lives in:
-#   modules/graphical/programs/hyprland.nix
+#   modules/wm/hyprland/hyprland.nix
+# Wofi launcher lives in:
+#   modules/wm/hyprland/wofi.nix
 #
 # Use `hyprland-session` instead of `Hyprland` to start Hyprland — it cleans
 # up WAYLAND_DISPLAY from the systemd user environment on exit, allowing
@@ -37,6 +39,8 @@ let
   '';
 
 in {
+  imports = [ ./hyprland.nix ./wofi.nix ];
+
   config = lib.mkIf (cfg.enable && config.hydrix.hyprland.enable) {
     programs.hyprland = {
       enable = true;

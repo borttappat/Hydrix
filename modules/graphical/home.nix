@@ -26,14 +26,7 @@ in {
   imports = [
     ./programs/alacritty.nix
     ./programs/fish.nix
-    ./programs/i3.nix
-    ./programs/hyprland.nix
-    ./programs/sway.nix
-    ./programs/wofi-launcher.nix
-    ./programs/polybar.nix
-    ./programs/rofi.nix
     ./programs/dunst.nix
-    ./programs/picom.nix
     ./programs/zathura.nix
     ./programs/vim.nix
     ./programs/firefox.nix
