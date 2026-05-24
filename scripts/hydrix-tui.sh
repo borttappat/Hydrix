@@ -15,10 +15,6 @@ detect_flake_dir() {
         echo "$HOME/hydrix-config"
         return
     fi
-    if [[ -f "$HOME/Hydrix/flake.nix" ]]; then
-        echo "$HOME/Hydrix"
-        return
-    fi
     # Fallback: parent of script directory
     local parent
     parent="$(dirname "$SCRIPT_DIR")"
@@ -26,7 +22,7 @@ detect_flake_dir() {
         echo "$parent"
         return
     fi
-    echo "$HOME/Hydrix"  # Last resort default
+    echo "$HOME/hydrix-config"  # Default
 }
 
 readonly FLAKE_DIR="$(detect_flake_dir)"

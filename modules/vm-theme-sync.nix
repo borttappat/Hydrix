@@ -287,7 +287,6 @@ in {
           wallpaper = config.hydrix.graphical.wallpaper;
           colorscheme = config.hydrix.colorscheme;
           configDir = config.hydrix.paths.configDir;
-          hydrixDir = config.hydrix.paths.hydrixDir;
         in ''
           WAL_COLORS="/home/${username}/.cache/wal/colors.json"
           if [ -f "$WAL_COLORS" ]; then
@@ -300,12 +299,9 @@ in {
           '' else ''
             echo "Generating wal cache from colorscheme: ${colorscheme}"
             SCHEME=""
-            for dir in "${configDir}" "${hydrixDir}"; do
-              if [ -f "$dir/colorschemes/${colorscheme}.json" ]; then
-                SCHEME="$dir/colorschemes/${colorscheme}.json"
-                break
-              fi
-            done
+            if [ -f "${configDir}/colorschemes/${colorscheme}.json" ]; then
+              SCHEME="${configDir}/colorschemes/${colorscheme}.json"
+            fi
             if [ -n "$SCHEME" ]; then
               wal -q --theme "$SCHEME"
             else
@@ -450,10 +446,9 @@ DYNAMIC_COLOR_MAP = ${builtins.toJSON cfg.focusDaemon.dynamicColorMap}
 # Override marker file
 OVERRIDE_MARKER = Path.home() / ".cache/hydrix/focus-override-active"
 
-# Directories for layered lookup (user config first, then framework)
+# Colorscheme lookup directory (~/hydrix-config/colorschemes/)
 CONFIG_DIR = Path("${config.hydrix.paths.configDir}")
-FRAMEWORK_DIR = Path("${config.hydrix.paths.hydrixDir}")
-SEARCH_DIRS = [CONFIG_DIR, FRAMEWORK_DIR]
+SEARCH_DIRS = [CONFIG_DIR]
 
 # Named color lookup table (X11 standard names)
 NAMED_COLORS = {
@@ -750,10 +745,9 @@ if __name__ == "__main__":
           # Override marker file
           OVERRIDE_MARKER = Path.home() / ".cache/hydrix/focus-override-active"
 
-          # Directories for layered lookup (user config first, then framework)
+          # Colorscheme lookup directory (~/hydrix-config/colorschemes/)
           CONFIG_DIR = Path("${config.hydrix.paths.configDir}")
-          FRAMEWORK_DIR = Path("${config.hydrix.paths.hydrixDir}")
-          SEARCH_DIRS = [CONFIG_DIR, FRAMEWORK_DIR]
+          SEARCH_DIRS = [CONFIG_DIR]
 
           # Named color lookup table (X11 standard names)
           NAMED_COLORS = {

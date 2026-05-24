@@ -42,13 +42,7 @@ detect_flake_dir() {
         return
     fi
 
-    # Developer mode: ~/Hydrix (local clone)
-    if [[ -f "$home_dir/Hydrix/flake.nix" ]]; then
-        echo "$home_dir/Hydrix"
-        return
-    fi
-
-    # Fallback to script location (original behavior)
+    # Fallback to script location (for direct execution)
     dirname "$SCRIPT_DIR"
 }
 

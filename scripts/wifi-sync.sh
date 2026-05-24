@@ -17,10 +17,8 @@ if [[ -n "${HYDRIX_FLAKE_DIR:-}" && -f "$HYDRIX_FLAKE_DIR/flake.nix" ]]; then
   PROJECT_DIR="$HYDRIX_FLAKE_DIR"
 elif [[ -f "$HOME/hydrix-config/flake.nix" ]]; then
   PROJECT_DIR="$HOME/hydrix-config"
-elif [[ -f "$HOME/Hydrix/flake.nix" ]]; then
-  PROJECT_DIR="$HOME/Hydrix"
 else
-  echo "Error: No Hydrix config found" >&2
+  echo "Error: No Hydrix config found at ~/hydrix-config" >&2
   exit 1
 fi
 

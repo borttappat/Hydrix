@@ -55,14 +55,7 @@ ENCRYPT_SECRET_UUID=""
 HOST_USER="${SUDO_USER:-${USER}}"
 HOST_HOME=$(eval echo "~$HOST_USER")
 
-# Detect config directory: hydrix-config (user mode) or Hydrix (developer mode)
-if [[ -d "$HOST_HOME/hydrix-config/profiles" ]]; then
-    HYDRIX_DIR="$HOST_HOME/hydrix-config"
-elif [[ -d "$HOST_HOME/Hydrix/profiles" ]]; then
-    HYDRIX_DIR="$HOST_HOME/Hydrix"
-else
-    HYDRIX_DIR="$HOST_HOME/hydrix-config"  # Default for new setups
-fi
+HYDRIX_DIR="$HOST_HOME/hydrix-config"
 
 # Valid types and their default bridges
 declare -A TYPE_BRIDGES=(

@@ -19,10 +19,8 @@ set -euo pipefail
 if [[ -z "${HYDRIX_FLAKE_DIR:-}" ]]; then
     if [[ -f "$HOME/hydrix-config/flake.nix" ]]; then
         HYDRIX_FLAKE_DIR="$HOME/hydrix-config"
-    elif [[ -f "$HOME/Hydrix/flake.nix" ]]; then
-        HYDRIX_FLAKE_DIR="$HOME/Hydrix"
     else
-        echo "Error: no Hydrix config found at ~/hydrix-config or ~/Hydrix" >&2
+        echo "Error: no Hydrix config found at ~/hydrix-config" >&2
         exit 1
     fi
 fi

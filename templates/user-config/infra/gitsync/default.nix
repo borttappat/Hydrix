@@ -17,9 +17,9 @@ let
 
   repos = [
     { name = "hydrix-config";   source = "/home/${hostUsername}/hydrix-config"; }
-    { name = "Hydrix";          source = "/home/${hostUsername}/Hydrix"; }
-    { name = "vault";           source = "/home/${hostUsername}/vault"; }
-    { name = "borttappat-site"; source = "/home/${hostUsername}/borttappat.github.io"; }
+    # Add any other repos you want accessible from lockdown mode, e.g.:
+    # { name = "vault";           source = "/home/${hostUsername}/vault"; }
+    # { name = "borttappat-site"; source = "/home/${hostUsername}/borttappat.github.io"; }
   ];
 
   repoNames = lib.concatMapStringsSep " " (r: r.name) repos;

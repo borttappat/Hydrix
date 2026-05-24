@@ -102,31 +102,17 @@ let
     '';
   };
 
-  # Helper to create a wrapper script that auto-detects the flake location
-  # Supports both architectures:
-  #   - ~/hydrix-config (user mode - imports Hydrix from GitHub)
-  #   - ~/Hydrix (developer mode - local clone)
+  # Helper to create a script that runs from ~/hydrix-config, with an optional
+  # user override: if ~/hydrix-config/scripts/<script> exists it takes priority
+  # over the Nix store version.
   mkHydrixScript = name: script: pkgs.writeShellScriptBin name ''
-    # Auto-detect flake location
-    if [[ -f "$HOME/hydrix-config/flake.nix" ]]; then
-      HYDRIX_FLAKE_DIR="$HOME/hydrix-config"
-    elif [[ -f "$HOME/Hydrix/flake.nix" ]]; then
-      HYDRIX_FLAKE_DIR="$HOME/Hydrix"
-    else
-      echo "Error: No Hydrix config found at ~/hydrix-config or ~/Hydrix" >&2
-      exit 1
-    fi
-
+    HYDRIX_FLAKE_DIR="$HOME/hydrix-config"
     export HYDRIX_FLAKE_DIR
     cd "$HYDRIX_FLAKE_DIR"
 
-    # Run script from local flake (for development) or from Nix store (user mode)
-    # Priority: user config scripts > local Hydrix dev > Nix store
+    # User override: scripts placed in ~/hydrix-config/scripts/ take priority
     if [[ -x "$HYDRIX_FLAKE_DIR/scripts/${script}" ]]; then
       exec "$HYDRIX_FLAKE_DIR/scripts/${script}" "$@"
-    elif [[ -x "$HOME/Hydrix/scripts/${script}" ]]; then
-      # Developer mode: use local Hydrix scripts for immediate changes
-      exec "$HOME/Hydrix/scripts/${script}" "$@"
     else
       exec ${hydrixScriptsPackage}/scripts/${script} "$@"
     fi
