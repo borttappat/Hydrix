@@ -1315,6 +1315,48 @@ in {
         description = "Additional lines appended to zathurarc verbatim.";
       };
 
+      alacritty.cursor.shape = lib.mkOption {
+        type = lib.types.str;
+        default = "Underline";
+        description = "Cursor shape: Block, Underline, or Beam.";
+      };
+
+      alacritty.cursor.blinking = lib.mkOption {
+        type = lib.types.str;
+        default = "Always";
+        description = "Cursor blinking mode: Never, Off, On, Always.";
+      };
+
+      alacritty.cursor.thickness = lib.mkOption {
+        type = lib.types.float;
+        default = 0.35;
+        description = "Cursor thickness (0.0–1.0). Applies to Underline and Beam styles.";
+      };
+
+      alacritty.cursor.unfocusedHollow = lib.mkOption {
+        type = lib.types.bool;
+        default = false;
+        description = "Show a hollow cursor when the window is unfocused.";
+      };
+
+      alacritty.cursor.blinkTimeout = lib.mkOption {
+        type = lib.types.int;
+        default = 0;
+        description = "Seconds of inactivity after which blinking stops. 0 = never stop.";
+      };
+
+      alacritty.cursor.blinkInterval = lib.mkOption {
+        type = lib.types.int;
+        default = 500;
+        description = "Cursor blink interval in milliseconds.";
+      };
+
+      alacritty.selection.saveToClipboard = lib.mkOption {
+        type = lib.types.bool;
+        default = true;
+        description = "Copy selected text to the system clipboard automatically.";
+      };
+
       obsidian.hostEnable = lib.mkOption {
         type = lib.types.bool;
         default = false;

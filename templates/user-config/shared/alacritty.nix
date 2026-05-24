@@ -1,58 +1,30 @@
-# Alacritty Terminal — User Customizations
+# Alacritty Terminal — User Configuration
 #
-# The framework (alacritty.nix) handles:
-#   - Font size (DPI-scaled, don't override)
-#   - Window opacity (from hydrix.graphical.ui.opacity.* — change there, not here)
-#   - Color import via colors-runtime.toml (wal/pywal, don't override)
-#   - VM color inheritance (host bg + VM text colors)
-#   - Keyboard bindings (copy/paste/font size keys)
-#   - Cursor style (underline, blinking)
-#   - Selection copy-to-clipboard
+# The framework handles: DPI font size, window opacity, color import,
+# VM color inheritance, and keyboard bindings.
+# Set cursor and selection preferences here.
 #
-# To override framework settings use lib.mkForce.
-# Opacity is best changed via hydrix.graphical.ui.opacity.overlay in graphical.nix.
+# Framework defaults:
+#   cursor.shape           = "Underline"  (Block | Underline | Beam)
+#   cursor.blinking        = "Always"     (Never | Off | On | Always)
+#   cursor.thickness       = 0.35
+#   cursor.unfocusedHollow = false
+#   cursor.blinkTimeout    = 0            (0 = never stop blinking)
+#   cursor.blinkInterval   = 500
+#   selection.saveToClipboard = true
+#
+# Opacity is set via hydrix.graphical.ui.opacity.overlay in graphical.nix.
 
-{ config, lib, pkgs, ... }:
+{ lib, ... }:
 
-let
-  username = config.hydrix.username;
-in {
-  config = lib.mkIf config.hydrix.graphical.enable {
-    home-manager.users.${username} = { pkgs, ... }: {
-      programs.alacritty.settings = {
+{
+  # ── Cursor ────────────────────────────────────────────────────────────────
+  hydrix.graphical.alacritty.cursor.shape         = lib.mkDefault "Underline";
+  hydrix.graphical.alacritty.cursor.blinking      = lib.mkDefault "Always";
+  hydrix.graphical.alacritty.cursor.thickness     = lib.mkDefault 0.35;
+  hydrix.graphical.alacritty.cursor.blinkTimeout  = lib.mkDefault 0;
+  hydrix.graphical.alacritty.cursor.blinkInterval = lib.mkDefault 500;
 
-        # -------------------------------------------------------------------
-        # Cursor (framework default: Underline, Always blinking)
-        # -------------------------------------------------------------------
-        # cursor = {
-        #   style = {
-        #     shape    = lib.mkForce "Block";   # Block | Underline | Beam
-        #     blinking = lib.mkForce "Always";  # Never | Off | On | Always
-        #   };
-        #   blink_interval = lib.mkForce 500;
-        #   blink_timeout  = lib.mkForce 0;     # 0 = never stop
-        #   thickness      = lib.mkForce 0.15;
-        # };
-
-        # -------------------------------------------------------------------
-        # Window (framework default: dynamic_padding = true)
-        # -------------------------------------------------------------------
-        # window = {
-        #   padding = lib.mkForce { x = 4; y = 4; };
-        #   dynamic_padding = lib.mkForce false;
-        # };
-
-        # -------------------------------------------------------------------
-        # Additional keyboard bindings
-        # Framework provides: Copy, Paste, PasteSelection, font-size keys.
-        # Add new entries here — they merge with the framework list.
-        # -------------------------------------------------------------------
-        # keyboard.bindings = [
-        #   { action = "ScrollPageUp";   key = "PageUp";   mods = "Shift"; }
-        #   { action = "ScrollPageDown"; key = "PageDown"; mods = "Shift"; }
-        # ];
-
-      };
-    };
-  };
+  # ── Selection ──────────────────────────────────────────────────────────────
+  hydrix.graphical.alacritty.selection.saveToClipboard = lib.mkDefault true;
 }

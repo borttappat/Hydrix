@@ -24,6 +24,9 @@ let
   fontCfg = config.hydrix.graphical.font;
   fontSize = fontCfg.overrides.alacritty or fontCfg.size;
 
+  # User-configurable cursor + selection options
+  alCfg = config.hydrix.graphical.alacritty;
+
   # VM Colors support
   vmColorsEnabled = config.hydrix.vmColors.enable;
   vmColorscheme = config.hydrix.colorscheme;
@@ -140,7 +143,7 @@ in {
           font.size = lib.mkForce fontSize;
           # Selection
           selection = {
-            save_to_clipboard = true;
+            save_to_clipboard = alCfg.selection.saveToClipboard;
           };
 
           # General
@@ -162,13 +165,13 @@ in {
 
           # Cursor
           cursor = {
-            thickness = 0.35;
-            unfocused_hollow = false;
-            blink_timeout = 0;
-            blink_interval = 500;
+            thickness        = alCfg.cursor.thickness;
+            unfocused_hollow = alCfg.cursor.unfocusedHollow;
+            blink_timeout    = alCfg.cursor.blinkTimeout;
+            blink_interval   = alCfg.cursor.blinkInterval;
             style = {
-              shape = "Underline";
-              blinking = "Always";
+              shape    = alCfg.cursor.shape;
+              blinking = alCfg.cursor.blinking;
             };
           };
 
