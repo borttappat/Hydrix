@@ -26,64 +26,8 @@ let
     Status = "locked";
   };
 
-  # ===== Extension Registry =====
-  # Central registry of all available Firefox extensions
-  # Add new extensions with: firefox-extension-add <slug>
-  # The slug is the last part of the AMO URL: addons.mozilla.org/firefox/addon/<slug>
-  allExtensions = {
-    ublock-origin = {
-      id = "uBlock0@raymondhill.net";
-      url = "https://addons.mozilla.org/firefox/downloads/latest/ublock-origin/latest.xpi";
-      description = "Ad and tracker blocking";
-    };
-    pywalfox = {
-      id = "pywalfox@frewacom.org";
-      url = "https://addons.mozilla.org/firefox/downloads/latest/pywalfox/latest.xpi";
-      description = "Colorscheme sync with pywal";
-    };
-    vimium-ff = {
-      id = "{d7742d87-e61d-4b78-b8a1-b469842139fa}";
-      url = "https://addons.mozilla.org/firefox/downloads/latest/vimium-ff/latest.xpi";
-      description = "Vim-like keyboard navigation";
-    };
-    detach-tab = {
-      id = "claymont@mail.com_detach-tab";
-      url = "https://addons.mozilla.org/firefox/downloads/latest/detach-tab/latest.xpi";
-      description = "Detach tabs to new windows";
-    };
-    bitwarden = {
-      id = "{446900e4-71c2-419f-a6a7-df9c091e268b}";
-      url = "https://addons.mozilla.org/firefox/downloads/latest/bitwarden-password-manager/latest.xpi";
-      description = "Password manager";
-    };
-    foxyproxy = {
-      id = "foxyproxy@eric.h.jung";
-      url = "https://addons.mozilla.org/firefox/downloads/latest/foxyproxy-standard/latest.xpi";
-      description = "Proxy management for pentesting";
-    };
-    wappalyzer = {
-      id = "wappalyzer@crunchlabz.com";
-      url = "https://addons.mozilla.org/firefox/downloads/latest/wappalyzer/latest.xpi";
-      description = "Technology stack detection";
-    };
-    singlefile = {
-      id = "{531906d3-e22f-4a6c-a102-8057b88a1a63}";
-      url = "https://addons.mozilla.org/firefox/downloads/latest/single-file/latest.xpi";
-      description = "Save complete web pages";
-    };
-    darkreader = {
-      id = "addon@darkreader.org";
-      url = "https://addons.mozilla.org/firefox/downloads/latest/darkreader/latest.xpi";
-      description = "Dark mode for all websites";
-    };
-    styl-us = {
-      id = "{7a7a4a92-a2a0-41d1-9fd7-1e92480d612d}";
-      url = "https://addons.mozilla.org/firefox/downloads/latest/styl-us/latest.xpi";
-      description = "User styles manager for custom website themes";
-    };
-  };
-
-  # Extensions to install — set via hydrix.graphical.firefox.extensions in user config
+  # Extension registry — defined in options.nix, extensible from hydrix-config
+  allExtensions = ffCfg.extensionRegistry;
   currentExtensions = ffCfg.extensions;
 
   # Build ExtensionSettings from extension list
@@ -213,7 +157,7 @@ let
   firefoxExtensionAdd = pkgs.writeShellScriptBin "firefox-extension-add" ''
     set -euo pipefail
 
-    FIREFOX_NIX="$HOME/Hydrix/modules/graphical/programs/firefox.nix"
+    FIREFOX_NIX="$HOME/hydrix-config/shared/firefox.nix"
 
     usage() {
       echo "Usage: firefox-extension-add <slug> [profile1,profile2,...]"
@@ -230,7 +174,7 @@ let
       echo "  firefox-extension-add darkreader"
       echo "  firefox-extension-add privacy-badger browsing,comms"
       echo ""
-      echo "The command outputs the Nix entry to add to allExtensions in:"
+      echo "The command outputs the Nix entry to add to firefox.extensionRegistry in:"
       echo "  $FIREFOX_NIX"
       exit 1
     }
@@ -268,7 +212,7 @@ let
     echo "  ID:   $GUID"
     echo "  Desc: $SUMMARY..."
     echo ""
-    echo "Add this to allExtensions in firefox.nix:"
+    echo "Add this to firefox.extensionRegistry in $FIREFOX_NIX:"
     echo ""
     echo "    $NIX_NAME = {"
     echo "      id = \"$GUID\";"

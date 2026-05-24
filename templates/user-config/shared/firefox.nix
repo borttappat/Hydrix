@@ -11,7 +11,7 @@
 #   "firefox-windows"  — Firefox on Windows (only changes OS fingerprint)
 #   null               — Real Firefox UA (default)
 #
-# Available extensions (set per-profile in profiles/<name>/default.nix):
+# Built-in extension registry (select per-profile via firefox.extensions):
 #   ublock-origin   — ad and tracker blocking
 #   pywalfox        — colorscheme sync with pywal
 #   vimium-ff       — vim-like keyboard navigation
@@ -22,6 +22,9 @@
 #   singlefile      — save complete web pages (pentest)
 #   darkreader      — dark mode for all websites
 #   styl-us         — user styles manager
+#
+# To add a custom extension, use firefox-extension-add <slug> to get the entry,
+# then add it to firefox.extensionRegistry below and select it per-profile.
 
 { lib, ... }:
 
