@@ -1223,6 +1223,98 @@ in {
         description = "Firefox UI density: 0 = normal, 1 = compact, 2 = touch.";
       };
 
+      zathura.recolor = lib.mkOption {
+        type = lib.types.bool;
+        default = true;
+        description = "Enable document recoloring (dark mode).";
+      };
+
+      zathura.recolorReverseVideo = lib.mkOption {
+        type = lib.types.bool;
+        default = true;
+        description = "Recolor images that use reverse video.";
+      };
+
+      zathura.recolorKeepHue = lib.mkOption {
+        type = lib.types.bool;
+        default = false;
+        description = "Preserve original hue when recoloring.";
+      };
+
+      zathura.selectionClipboard = lib.mkOption {
+        type = lib.types.str;
+        default = "clipboard";
+        description = "Clipboard target for text selection: clipboard or primary.";
+      };
+
+      zathura.scrollPageAware = lib.mkOption {
+        type = lib.types.bool;
+        default = true;
+        description = "Stop scrolling at page boundaries.";
+      };
+
+      zathura.scrollFullOverlap = lib.mkOption {
+        type = lib.types.str;
+        default = "0.01";
+        description = "Overlap fraction kept visible when scrolling a full page.";
+      };
+
+      zathura.scrollStep = lib.mkOption {
+        type = lib.types.int;
+        default = 100;
+        description = "Scroll step size in pixels.";
+      };
+
+      zathura.zoomMin = lib.mkOption {
+        type = lib.types.int;
+        default = 10;
+        description = "Minimum zoom level (percent).";
+      };
+
+      zathura.zoomMax = lib.mkOption {
+        type = lib.types.int;
+        default = 400;
+        description = "Maximum zoom level (percent).";
+      };
+
+      zathura.zoomStep = lib.mkOption {
+        type = lib.types.int;
+        default = 10;
+        description = "Zoom step size (percent).";
+      };
+
+      zathura.incrementalSearch = lib.mkOption {
+        type = lib.types.bool;
+        default = true;
+        description = "Highlight matches while typing the search query.";
+      };
+
+      zathura.sandbox = lib.mkOption {
+        type = lib.types.str;
+        default = "none";
+        description = "Sandbox level: none, normal, or strict.";
+      };
+
+      zathura.mappings = lib.mkOption {
+        type = lib.types.attrsOf lib.types.str;
+        default = {
+          D = "toggle_page_mode";
+          r = "reload";
+          R = "rotate";
+          K = "zoom in";
+          J = "zoom out";
+          i = "recolor";
+          p = "print";
+        };
+        description = "Key mappings — attrset of key → command.";
+      };
+
+      zathura.extraConfig = lib.mkOption {
+        type = lib.types.lines;
+        default = "";
+        description = "Additional lines appended to zathurarc verbatim.";
+      };
+
       obsidian.hostEnable = lib.mkOption {
         type = lib.types.bool;
         default = false;

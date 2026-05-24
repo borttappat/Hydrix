@@ -1,83 +1,60 @@
 # Zathura PDF Viewer — User Configuration
 #
-# Colors come from pywal at runtime (see framework zathura.nix).
-# Scaled padding values (statusbar, page) are set by the framework at build time.
-# Override any setting here with lib.mkForce.
+# All settings use hydrix.graphical.zathura.* options.
+# Framework defaults are shown commented out — uncomment to override.
+# Colors and font are injected at runtime from the wal cache (no rebuild needed).
+#
+# Framework defaults:
+#   recolor = true, recolorReverseVideo = true, recolorKeepHue = false
+#   selectionClipboard = "clipboard"
+#   scrollPageAware = true, scrollStep = 100, scrollFullOverlap = "0.01"
+#   zoomMin = 10, zoomMax = 400, zoomStep = 10
+#   incrementalSearch = true
+#   sandbox = "none"
+#   mappings = { D=toggle_page_mode, r=reload, R=rotate, K=zoom in, J=zoom out, i=recolor, p=print }
 
-{ config, lib, pkgs, ... }:
+{ lib, ... }:
 
-let
-  username = config.hydrix.username;
-in {
-  config = lib.mkIf config.hydrix.graphical.enable {
-    home-manager.users.${username} = { pkgs, ... }: {
-      programs.zathura = {
+{
+  # ── Recolor ────────────────────────────────────────────────────────────────
+  # hydrix.graphical.zathura.recolor             = true;
+  # hydrix.graphical.zathura.recolorReverseVideo = true;
+  # hydrix.graphical.zathura.recolorKeepHue      = false;
 
-        options = {
-          # -------------------------------------------------------------------
-          # Document recoloring
-          # Default: recolor = true (dark mode), keep-hue = false.
-          # -------------------------------------------------------------------
-          # recolor               = lib.mkDefault true;
-          # recolor-reverse-video = lib.mkDefault true;
-          # recolor-keephue       = lib.mkDefault false;
+  # ── Clipboard ──────────────────────────────────────────────────────────────
+  # hydrix.graphical.zathura.selectionClipboard = "clipboard";  # or "primary"
 
-          # -------------------------------------------------------------------
-          # Clipboard
-          # Default: clipboard — middle-click pastes selection.
-          # -------------------------------------------------------------------
-          # selection-clipboard = lib.mkDefault "clipboard";
+  # ── Scroll ─────────────────────────────────────────────────────────────────
+  # hydrix.graphical.zathura.scrollPageAware  = true;
+  # hydrix.graphical.zathura.scrollStep       = 100;
+  # hydrix.graphical.zathura.scrollFullOverlap = "0.01";
 
-          # -------------------------------------------------------------------
-          # Scroll behaviour
-          # -------------------------------------------------------------------
-          # scroll-page-aware  = lib.mkDefault true;
-          # scroll-full-overlap = lib.mkDefault 0.01;
-          # scroll-step        = lib.mkDefault 100;
+  # ── Zoom ───────────────────────────────────────────────────────────────────
+  # hydrix.graphical.zathura.zoomMin  = 10;
+  # hydrix.graphical.zathura.zoomMax  = 400;
+  # hydrix.graphical.zathura.zoomStep = 10;
 
-          # -------------------------------------------------------------------
-          # Zoom
-          # -------------------------------------------------------------------
-          # zoom-min  = lib.mkDefault 10;
-          # zoom-max  = lib.mkDefault 400;
-          # zoom-step = lib.mkDefault 10;
+  # ── Search ─────────────────────────────────────────────────────────────────
+  # hydrix.graphical.zathura.incrementalSearch = true;
 
-          # -------------------------------------------------------------------
-          # Search
-          # -------------------------------------------------------------------
-          # incremental-search = lib.mkDefault true;
+  # ── Sandbox ────────────────────────────────────────────────────────────────
+  # hydrix.graphical.zathura.sandbox = "none";  # none, normal, strict
 
-          # -------------------------------------------------------------------
-          # Sandbox (none = best app compatibility)
-          # -------------------------------------------------------------------
-          # sandbox = lib.mkDefault "none";
+  # ── Key mappings ───────────────────────────────────────────────────────────
+  # Override the full mapping set (replaces framework defaults):
+  # hydrix.graphical.zathura.mappings = {
+  #   D = "toggle_page_mode";
+  #   r = "reload";
+  #   R = "rotate";
+  #   K = "zoom in";
+  #   J = "zoom out";
+  #   i = "recolor";
+  #   p = "print";
+  # };
 
-          # -------------------------------------------------------------------
-          # Initial view
-          # -------------------------------------------------------------------
-          # pages-per-row        = lib.mkDefault 1;
-          # first-page-column    = lib.mkDefault "1:2";
-          # adjust-open          = lib.mkDefault "best-fit";
-
-          # -------------------------------------------------------------------
-          # Render
-          # -------------------------------------------------------------------
-          # render-loading       = lib.mkDefault true;
-          # font                 = lib.mkDefault "monospace normal 9";
-        };
-
-        # -------------------------------------------------------------------
-        # Key mappings (merge with framework vim-like bindings)
-        # Framework provides: D=toggle_page_mode, r=reload, R=rotate,
-        # K=zoom in, J=zoom out, i=recolor, p=print.
-        # -------------------------------------------------------------------
-        # mappings = {
-        #   "+" = "zoom in";
-        #   "-" = "zoom out";
-        #   f   = "toggle_fullscreen";
-        # };
-
-      };
-    };
-  };
+  # ── Extra config ───────────────────────────────────────────────────────────
+  # hydrix.graphical.zathura.extraConfig = ''
+  #   set pages-per-row 1
+  #   set adjust-open best-fit
+  # '';
 }
