@@ -361,35 +361,6 @@ in {
           description = "Number of vCPUs for the router VM";
         };
 
-        wan = {
-          mode = lib.mkOption {
-            type = lib.types.enum ["auto" "pci-passthrough" "macvtap" "none"];
-            default = "auto";
-            description = ''
-              How to provide WAN to router VM:
-              - auto: Detect WiFi card for passthrough, fall back to macvtap on ethernet
-              - pci-passthrough: Force PCI passthrough (fails if no suitable device)
-              - macvtap: Use macvtap on physical ethernet (for desktops)
-              - none: No WAN interface (router will have no internet uplink)
-            '';
-          };
-
-          device = lib.mkOption {
-            type = lib.types.nullOr lib.types.str;
-            default = null;
-            description = ''
-              Specific device to use. If null, auto-detect.
-              For pci-passthrough: PCI address like "0000:02:00.0"
-              For macvtap: interface name like "enp3s0"
-            '';
-          };
-
-          preferWireless = lib.mkOption {
-            type = lib.types.bool;
-            default = true;
-            description = "In auto mode, prefer wireless over ethernet";
-          };
-        };
       };
 
       vpn = {
@@ -560,50 +531,6 @@ in {
           type = lib.types.bool;
           default = false;
           description = "Enable Tailscale VPN";
-        };
-      };
-
-      tor = {
-        enable = lib.mkOption {
-          type = lib.types.bool;
-          default = false;
-          description = "Enable Tor service";
-        };
-
-        client = {
-          enable = lib.mkOption {
-            type = lib.types.bool;
-            default = false;
-            description = "Enable Tor client (SOCKS proxy)";
-          };
-
-          socksPort = lib.mkOption {
-            type = lib.types.int;
-            default = 9050;
-            description = "SOCKS proxy port";
-          };
-        };
-
-        hardening = {
-          enable = lib.mkEnableOption "Tor hardening with traffic shaping";
-
-          level = lib.mkOption {
-            type = lib.types.enum ["minimal" "moderate" "paranoid"];
-            default = "minimal";
-            description = "Privacy level vs usability trade-off";
-          };
-
-          bridgeType = lib.mkOption {
-            type = lib.types.enum ["none" "obfs4" "meek-azure" "snowflake"];
-            default = "none";
-            description = "Pluggable transport for bypassing Tor blocks";
-          };
-
-          customBridges = lib.mkOption {
-            type = lib.types.lines;
-            default = "";
-            description = "Custom bridge lines (overrides bridgeType if set)";
-          };
         };
       };
 

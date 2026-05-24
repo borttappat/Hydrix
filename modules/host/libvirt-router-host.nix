@@ -123,9 +123,9 @@ let
       done
     }
 
-    WAN_MODE="${libvirtCfg.wan.mode}"
-    WAN_DEVICE="${if libvirtCfg.wan.device != null then libvirtCfg.wan.device else ""}"
-    PREFER_WIRELESS="${boolToString libvirtCfg.wan.preferWireless}"
+    WAN_MODE="${routerCfg.wan.mode}"
+    WAN_DEVICE="${if routerCfg.wan.device != null then routerCfg.wan.device else ""}"
+    PREFER_WIRELESS="${boolToString routerCfg.wan.preferWireless}"
 
     WAN_TYPE=""
     WAN_VALUE=""
