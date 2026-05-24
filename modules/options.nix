@@ -1814,6 +1814,30 @@ in {
           example = "bell.wav";
         };
 
+        dunstBrowser = lib.mkOption {
+          type = lib.types.str;
+          default = "firefox";
+          description = "Browser command dunst uses to open URLs from notifications.";
+        };
+
+        dunstUrgencyTimeout = {
+          low = lib.mkOption {
+            type = lib.types.int;
+            default = 5;
+            description = "Seconds before low-urgency notifications expire. 0 = never.";
+          };
+          normal = lib.mkOption {
+            type = lib.types.int;
+            default = 10;
+            description = "Seconds before normal-urgency notifications expire. 0 = never.";
+          };
+          critical = lib.mkOption {
+            type = lib.types.int;
+            default = 0;
+            description = "Seconds before critical-urgency notifications expire. 0 = never.";
+          };
+        };
+
         # Compositor settings
         compositor = {
           enable = lib.mkOption {

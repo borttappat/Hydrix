@@ -1,27 +1,26 @@
 # Dunst Notification Daemon — User Preferences
 #
 # Dunst config is generated at runtime by the framework (generate-dunstrc) from
-# scaling.json and xrdb colors. Most visual settings follow the colorscheme
-# automatically. The options below control dunst behaviour via hydrix.* options.
+# scaling.json and wal colors. Notifications appear top-right, below the bar.
+# Options below configure behaviour via hydrix.graphical.ui.dunst* options.
 
 { lib, ... }:
 
 {
-  # -------------------------------------------------------------------------
-  # Notification sounds
-  # Default: true — set to false to silence all notification sounds.
-  # -------------------------------------------------------------------------
-  # hydrix.graphical.ui.dunstSound = lib.mkDefault false;
+  # Enable popup display (required for Hyprland/Sway)
+  hydrix.graphical.ui.dunstEnablePopup = lib.mkDefault true;
 
-  # -------------------------------------------------------------------------
   # Notification popup width (pixels)
-  # Default: 300
-  # -------------------------------------------------------------------------
-  # hydrix.graphical.ui.dunstWidth = lib.mkDefault 300;
+  hydrix.graphical.ui.dunstWidth = lib.mkDefault 300;
 
-  # -------------------------------------------------------------------------
-  # Offset from screen edge (pixels)
-  # Default: 24 — distance of notification popup from bar/screen edge.
-  # -------------------------------------------------------------------------
-  # hydrix.graphical.ui.dunstOffset = lib.mkDefault 24;
+  # Notification sound — set to a sound file path to enable
+  # hydrix.graphical.ui.dunstSound = lib.mkDefault null;
+
+  # Browser used to open URLs from notifications
+  hydrix.graphical.ui.dunstBrowser = lib.mkDefault "firefox";
+
+  # Urgency timeouts in seconds (0 = never expire)
+  hydrix.graphical.ui.dunstUrgencyTimeout.low      = lib.mkDefault 5;
+  hydrix.graphical.ui.dunstUrgencyTimeout.normal   = lib.mkDefault 10;
+  hydrix.graphical.ui.dunstUrgencyTimeout.critical = lib.mkDefault 0;
 }

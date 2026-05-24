@@ -154,7 +154,7 @@ max_icon_size = 64
 sticky_history = true
 history_length = 20
 
-browser = firefox
+browser = ${cfg.ui.dunstBrowser}
 always_run_script = true
 title = Dunst
 class = Dunst
@@ -179,19 +179,19 @@ mouse_right_click = close_all
 background = "$BG_LOW"
 foreground = "$FG"
 frame_color = "$FRAME_LOW"
-timeout = 5
+timeout = ${toString cfg.ui.dunstUrgencyTimeout.low}
 
 [urgency_normal]
 background = "$BG"
 foreground = "$FG"
 frame_color = "$FRAME"
-timeout = 10
+timeout = ${toString cfg.ui.dunstUrgencyTimeout.normal}
 
 [urgency_critical]
 background = "$BG"
 foreground = "$FG"
 frame_color = "$FRAME_CRIT"
-timeout = 0
+timeout = ${toString cfg.ui.dunstUrgencyTimeout.critical}
 DUNSTRC_EOF
   '';
 in {
