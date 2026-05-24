@@ -52,6 +52,7 @@
   username = config.hydrix.username;
   vmType = config.hydrix.vmType;
   isVM = vmType != null && vmType != "host";
+  i3Enable = config.hydrix.i3.enable;
   colorschemeInheritance = config.hydrix.colorschemeInheritance;
   jq = "${pkgs.jq}/bin/jq";
   xrdb = "${pkgs.xorg.xrdb}/bin/xrdb";
@@ -1625,12 +1626,14 @@ in {
         initWalCacheScript
         firefoxPywalScript
         pomoScript
+        writeAlacrittyColorsScript # Generate alacritty colors TOML from wal cache
+      ]
+      ++ lib.optionals i3Enable [
         lockScript
         lockInstantScript
         generateLockscreenScript
         displayRecoverScript
         monitorRescanScript
-        writeAlacrittyColorsScript # Generate alacritty colors TOML from wal cache
       ]
       ++ lib.optionals isVM [
         walSyncScript
@@ -1697,9 +1700,9 @@ in {
         Install.WantedBy = [ "pywalfox-update.path" ];
       };
 
-      # Host-only: Post-resume display recovery (waits for i3lock to exit)
+      # Host-only, i3-only: Post-resume display recovery (waits for i3lock to exit)
       # Runs display-setup after user unlocks to fix polybar/gaps
-      systemd.user.services.post-resume-display = lib.mkIf (!isVM) {
+      systemd.user.services.post-resume-display = lib.mkIf (!isVM && i3Enable) {
         Unit = {
           Description = "Recover display after resume and unlock";
         };
@@ -1741,7 +1744,7 @@ in {
 
       # Timer to trigger post-resume service when resume is detected
       # Uses /sys/power/wakeup_count changing as trigger indicator
-      systemd.user.paths.post-resume-trigger = lib.mkIf (!isVM) {
+      systemd.user.paths.post-resume-trigger = lib.mkIf (!isVM && i3Enable) {
         Unit = {
           Description = "Watch for resume events (X11 only)";
           ConditionEnvironment = "!WAYLAND_DISPLAY";

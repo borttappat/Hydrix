@@ -77,8 +77,8 @@ in {
 
         # Pywal for color experimentation
         pywal
-      ] ++ lib.optionals (!isMicrovm) [
-        # Standalone + host: WM utilities and screenshot tools
+      ] ++ lib.optionals (!isMicrovm && config.hydrix.i3.enable) [
+        # X11/i3 utilities — not needed under Wayland
         xdotool
         unclutter
         scrot
