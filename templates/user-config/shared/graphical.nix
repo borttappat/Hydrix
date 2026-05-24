@@ -73,8 +73,8 @@
     # lockscreen.font        = lib.mkDefault "CozetteVector";
     # lockscreen.fontSize    = lib.mkDefault 143;
     # lockscreen.clockSize   = lib.mkDefault 104;
-    # lockscreen.text        = lib.mkDefault "Papers, please";
-    # lockscreen.wrongText   = lib.mkDefault "Ah ah ah! You didn't say the magic word!!";
+    # lockscreen.text        = lib.mkDefault "Locked";        # set to whatever you like
+    # lockscreen.wrongText   = lib.mkDefault "Wrong password"; # set to whatever you like
     # lockscreen.verifyText  = lib.mkDefault "Verifying...";
     # lockscreen.blur        = lib.mkDefault true;
 

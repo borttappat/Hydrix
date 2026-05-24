@@ -2099,13 +2099,13 @@ in {
 
         text = lib.mkOption {
           type = lib.types.str;
-          default = "Papers, please";
+          default = "Locked";
           description = "Lockscreen prompt text";
         };
 
         wrongText = lib.mkOption {
           type = lib.types.str;
-          default = "Ah ah ah! You didn't say the magic word!!";
+          default = "Wrong password";
           description = "Wrong password text";
         };
 
