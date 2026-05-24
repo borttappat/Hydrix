@@ -1357,6 +1357,12 @@ in {
         description = "Copy selected text to the system clipboard automatically.";
       };
 
+      fish.viKeyBindings = lib.mkOption {
+        type = lib.types.bool;
+        default = true;
+        description = "Enable vi key bindings in fish shell.";
+      };
+
       obsidian.hostEnable = lib.mkOption {
         type = lib.types.bool;
         default = false;
