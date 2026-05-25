@@ -156,6 +156,8 @@
           ./shared/wifi.nix         # WiFi credentials (shared across machines)
           ./shared/repos.nix        # Declarative git repos (add yours, or leave repos = {})
           ./shared/fonts.nix        # Font packages and profiles
+          ./shared/hyprland.nix     # Hyprland keybindings + config (user-customizable)
+          ./shared/waybar.nix       # Waybar layout and modules (user-customizable)
           ./shared/i3.nix           # i3 keybindings (user-customizable)
           ./shared/sway.nix         # sway keybindings (user-customizable)
           vmThemeSyncModule         # VM theme sync (host-side)
