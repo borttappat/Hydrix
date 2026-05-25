@@ -28,14 +28,22 @@ let
                    relation = config.hydrix.graphical.font.relations.waybar or 1.0;
                    raw      = builtins.floor (base * relation);
                in toString (if raw < 11 then 11 else raw);
-  # Island modules float with 5px margin — bar height must accommodate
-  barHeight   = (config.hydrix.graphical.ui.barHeight or 23) + 10;
   pillRadius  = let ui = config.hydrix.graphical.ui;
                 in toString (if ui.pillRadius != null
                              then ui.pillRadius
                              else builtins.floor (ui.cornerRadius * ui.pillRadiusScale));
   pillBorder  = toString (config.hydrix.graphical.ui.border or 2);
   gaps        = config.hydrix.graphical.ui.gaps or 10;
+  # pillVMargin = gaps is the key invariant that makes all gaps uniform:
+  #   screen→pill-top  = margin-top(0) + pillVMargin     = gaps
+  #   pill-bottom→win  = actual_surface - pill_bottom    = pillVMargin = gaps
+  #   screen→win-side  = gaps_out                        = gaps
+  #   screen→pill-side = margin-left + pillHMargin       = gaps
+  #   inner visual     = 2 * gaps_in ≈ gaps (exact for even gaps values)
+  pillHMargin = 2;
+  pillVMargin = gaps;
+  # Island modules float with pillVMargin on each side — bar height scales accordingly
+  barHeight   = (config.hydrix.graphical.ui.barHeight or 23) + 2 * pillVMargin;
   homeDir    = "/home/${username}";
 
   # Hydrix metrics timing
@@ -418,15 +426,15 @@ let
   # ── Bar layouts ────────────────────────────────────────────────────────────
 
   topBar = {
-    "reload_style_on_change" = true;
+    "reload_style_on_change" = false;
     layer    = "top";
     position = "top";
     height   = barHeight;
     spacing  = 0;
-    "exclusive-zone" = barHeight + gaps;
-    "margin-top"   = gaps;
-    "margin-left"  = gaps;
-    "margin-right" = gaps;
+    "exclusive-zone" = barHeight + gaps - 2 * pillVMargin;
+    "margin-top"     = gaps - pillVMargin;
+    "margin-left"    = gaps - pillHMargin;
+    "margin-right"   = gaps - pillHMargin;
 
     "modules-left"   = [
       "hyprland/workspaces"
@@ -484,15 +492,15 @@ let
   };
 
   bottomBar = {
-    "reload_style_on_change" = true;
+    "reload_style_on_change" = false;
     layer    = "top";
     position = "bottom";
     height   = barHeight;
     spacing  = 0;
-    "exclusive-zone" = barHeight + gaps;
-    "margin-bottom" = gaps;
-    "margin-left"   = gaps;
-    "margin-right"  = gaps;
+    "exclusive-zone" = barHeight + gaps - 2 * pillVMargin;
+    "margin-bottom"  = gaps - pillVMargin;
+    "margin-left"    = gaps - pillHMargin;
+    "margin-right"   = gaps - pillHMargin;
 
     "modules-left"   = [
       "custom/power-profile"
@@ -628,7 +636,7 @@ let
       border: ${pillBorder}px solid alpha(@foreground, 0.25);
       border-radius: ${pillRadius}px;
       padding: 2px 14px;
-      margin: 5px 2px;
+      margin: ${toString pillVMargin}px ${toString pillHMargin}px;
     }
 
     /* Battery — standard pill; fills on low/charging states */
@@ -638,7 +646,7 @@ let
       border: ${pillBorder}px solid alpha(@foreground, 0.25);
       border-radius: ${pillRadius}px;
       padding: 2px 14px;
-      margin: 5px 2px;
+      margin: ${toString pillVMargin}px ${toString pillHMargin}px;
     }
 
     #custom-battery.warning  { background: @color8; color: @background; border-color: @color8; }
@@ -762,6 +770,23 @@ in lib.mkIf shouldActivate {
         printf '%s' ${lib.escapeShellArg defaultColorsCSS} > "$_dir/colors.css"
       fi
     '';
+
+    # Waybar — managed by systemd so lifecycle is serialised (no pkill races).
+    # Started by hyprland-session.target; restarted by waybar-monitor-watch on monitor events.
+    systemd.user.services.waybar = lib.mkIf shouldActivate {
+      Unit = {
+        Description = "Waybar status bar";
+        After       = [ "hyprland-session.target" ];
+        PartOf      = [ "hyprland-session.target" ];
+      };
+      Service = {
+        Type       = "simple";
+        ExecStart  = "${pkgs.waybar}/bin/waybar";
+        Restart    = "on-failure";
+        RestartSec = 1;
+      };
+      Install.WantedBy = [ "hyprland-session.target" ];
+    };
 
     # VM metrics poller: polls current workspace VM and writes /tmp/hydrix-metrics-current
     # so that all VM bottom-bar modules (vm-cpu, vm-ram, rproc-bottom, etc.) have data.

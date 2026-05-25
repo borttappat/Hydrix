@@ -23,10 +23,47 @@ let
   gaps        = ui.gaps or 10;
   borderSize  = toString (sc.border or 2);
   rounding    = toString (sc.cornerRadius or 0);
+  lkRounding  = toString (if (ui.cornerRadius or 0) > 0 then ui.cornerRadius * 2 else 2);
+
   lk          = config.hydrix.graphical.lockscreen;
   idleTimeout = toString (lk.idleTimeout or 600);
   configDir   = config.hydrix.paths.configDir;
   kb          = config.hydrix.graphical.keyboard;
+
+  # Restarts waybar (via systemd) on monitor plug/unplug.
+  # Waybar picks up the transient reconfiguration state and doesn't recover once
+  # Hyprland settles — a systemctl restart after the monitors stabilise fixes it.
+  #
+  # configreloaded is intentionally NOT handled: hypr-apply-colors calls
+  # hyprctl reload on every colour change, which would restart waybar constantly.
+  # Monitor displacement fires monitoradded/monitorremoved anyway, so those suffice.
+  waybarMonitorWatch = pkgs.writeShellScript "waybar-monitor-watch" ''
+    _sock="''${XDG_RUNTIME_DIR}/hypr/''${HYPRLAND_INSTANCE_SIGNATURE}/.socket2.sock"
+    [ -S "$_sock" ] || exit 1
+    # Grace period: ignore startup monitoradded events fired for already-connected monitors.
+    _boot=$(${pkgs.coreutils}/bin/date +%s)
+    _grace=10
+    # Debounce: burst of events (monitorremoved + monitoradded) each increment a counter.
+    # Only the subshell whose counter still matches at wake-up proceeds.
+    _seq="''${XDG_RUNTIME_DIR}/waybar-monitor-watch-seq"
+    echo 0 > "$_seq"
+    ${pkgs.socat}/bin/socat -u "UNIX-CONNECT:$_sock" - | while IFS= read -r line; do
+      case "$line" in
+        monitoradded*|monitorremoved*)
+          [ "$(( $(${pkgs.coreutils}/bin/date +%s) - _boot ))" -lt "$_grace" ] && continue
+          # Stop immediately so waybar doesn't auto-spawn bars for the new output.
+          systemctl --user stop waybar 2>/dev/null || true
+          _n=$(( $(cat "$_seq") + 1 ))
+          echo "$_n" > "$_seq"
+          _my=$_n
+          ( sleep 1
+            [ "$(cat "$_seq" 2>/dev/null)" = "$_my" ] || exit 0
+            systemctl --user start waybar
+          ) &
+          ;;
+      esac
+    done
+  '';
 
   hyprlandConf = pkgs.writeText "hyprland.conf" ''
     # ── Framework layer ────────────────────────────────────────────────────────
@@ -38,13 +75,15 @@ let
     exec-once = sh -c 'wal -Rnq; hypr-apply-colors'
     exec-once = sh -c 'WALL=$(cat "$HOME/.cache/wal/wal" 2>/dev/null); [ -n "$WALL" ] && swaybg -i "$WALL" -m fill'
     exec-once = ${pkgs.dunst}/bin/dunst
-    exec-once = sh -c 'sleep 2 && hypr-apply-colors && waybar'
+    exec-once = sh -c 'sleep 2 && hypr-apply-colors'
     exec-once = swayidle -w timeout ${idleTimeout} 'hyprlock --force-focus' before-sleep 'hyprlock --force-focus'
 
     # ── General ────────────────────────────────────────────────────────────────
     general {
       gaps_in  = ${toString (gaps / 2)}
-      gaps_out = ${toString gaps}
+      # top=0,right=gaps,bottom=0,left=gaps — comma-separated (Hyprland CSS-like format).
+      # Top/bottom gap comes from the bar's exclusive zone + pill margin, not gaps_out.
+      gaps_out = 0, ${toString gaps}, 0, ${toString gaps}
       border_size  = ${borderSize}
       col.active_border   = $activeBorder
       col.inactive_border = $inactiveBorder
@@ -127,6 +166,7 @@ let
     # Launcher / Focus
     bind = $mod, Q, killactive,
     bind = $mod, D, exec, wofi-launcher
+    bind = $mod SHIFT, D, exec, wofi-launcher --host
     bind = $mod, F4, exec, focus-wofi
 
     # Browser (via VM)
@@ -163,8 +203,9 @@ let
     bind = $mod SHIFT, U, exec, hypr-ws-app alacritty -e htop
     bind = $mod SHIFT, B, exec, alacritty -e btm
 
-    # File manager (via VM)
+    # File manager / file finder (via VM)
     bind = $mod SHIFT, F, exec, hypr-ws-app alacritty -e joshuto
+    bind = $mod SHIFT, O, exec, file-finder
 
     # Git status in hydrix-config
     bind = $mod SHIFT, G, exec, alacritty -e fish -c 'clear && cd ${configDir} && git status && exec fish'
@@ -175,7 +216,7 @@ let
 
     # Lock / Suspend / Exit
     bind = $mod SHIFT,      E, exec, hyprlock
-    bind = $mod SHIFT,      S, exec, systemctl suspend
+    bind = $mod SHIFT,      S, exec, hyprlock && systemctl suspend
     bind = $mod CTRL SHIFT, E, exec, exit-wayland
 
     # Focus (hjkl + arrows)
@@ -269,13 +310,14 @@ let
     windowrulev2 = opacity 1.0 override, class:^(Alacritty)$
     windowrulev2 = opacity 1.0 override, class:^(alacritty)$
     windowrulev2 = opacity 1.0 override, class:^(hypr-float)$
+    windowrulev2 = rounding ${lkRounding}, class:^(dunst)$
   '';
 
   hyprlock_conf = pkgs.writeText "hyprlock.conf" ''
     source = /home/${username}/.config/hypr/colors-lock.conf
 
     general {
-      disable_loading_bar = true
+      disable_loading_bar = false
       grace = 5
       hide_cursor = true
     }
@@ -296,6 +338,8 @@ let
       fade_on_empty = false
       placeholder_text = ${lk.text}
       fail_text = ${lk.wrongText}
+      rounding = ${lkRounding}
+      border_size = ${borderSize}
       outer_color = $lockAccent
       inner_color = $lockBg
       font_color = $lockFg
@@ -351,5 +395,22 @@ in {
       [ -L "$_dir/hyprlock.conf" ] && rm -f "$_dir/hyprlock.conf"
       cat ${hyprlock_conf} > "$_dir/hyprlock.conf"
     '';
+
+    # Systemd user service — starts automatically with hyprland-session.target,
+    # restartable immediately after rebuild without a Hyprland restart.
+    systemd.user.services.waybar-monitor-watch = {
+      Unit = {
+        Description = "Restart waybar on Hyprland monitor/config events";
+        After = [ "hyprland-session.target" ];
+        PartOf = [ "hyprland-session.target" ];
+      };
+      Service = {
+        Type = "simple";
+        ExecStart = "${waybarMonitorWatch}";
+        Restart = "on-failure";
+        RestartSec = 2;
+      };
+      Install.WantedBy = [ "hyprland-session.target" ];
+    };
   };
 }
