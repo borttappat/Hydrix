@@ -25,7 +25,7 @@ let meta = import ./meta.nix; in
   # Per-VM focus border - simple threat-level indicator for VM windows
   # Supports named colors: red, orange, yellow, green, cyan, blue, purple, pink, magenta
   # Or hex codes: #RRGGBB
-  # hydrix.vmThemeSync.focusBorder = "yellow";  # red, orange, yellow, green, etc.
+  hydrix.vmThemeSync.focusBorder = "yellow";
 
   # Firefox user-agent: blend in with the dominant browser/OS fingerprint.
   # Presets: "edge-windows" | "chrome-windows" | "chrome-mac" | "safari-mac" | "firefox-windows"
