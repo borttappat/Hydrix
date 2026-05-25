@@ -106,7 +106,7 @@
   # never depends on runtime WAN detection (which can fail on fresh installs).
   lanTaps = [
     "mv-router-mgmt" "mv-router-pent" "mv-router-comm" "mv-router-brow"
-    "mv-router-dev"  "mv-router-lurk"
+    "mv-router-dev"  "mv-router-lurk" "mv-router-bldr"
   ] ++ map (n: n.routerTap) extraNetworks;
 
   # nftables set literal: { "lo", "mv-router-mgmt", ... }
@@ -117,6 +117,7 @@
   # Adding an infra VM with routerTap + subnet in hydrix-config automatically appears here.
   allLans =
     [ { tap = "mv-router-mgmt"; subnet = "192.168.100"; }
+      { tap = "mv-router-bldr"; subnet = "192.168.210"; }
     ] ++ map (n: { tap = n.routerTap; subnet = n.subnet; }) allNetworks;
 in {
   imports = [
@@ -249,6 +250,11 @@ in {
           "-device"
           "virtio-net-pci,netdev=net-lurking,mac=02:00:00:01:07:01"
 
+          "-netdev"
+          "tap,id=net-builder,ifname=mv-router-bldr,script=no,downscript=no"
+          "-device"
+          "virtio-net-pci,netdev=net-builder,mac=02:00:00:01:05:01"
+
         ]
         ++ lib.concatLists (lib.imap0 (i: n: [
             # Extra network: ${n.name} (${n.routerTap})
@@ -346,6 +352,7 @@ in {
       "10-mv-router-brow" = { matchConfig.MACAddress = "02:00:00:01:03:01"; linkConfig.Name = "mv-router-brow"; };
       "10-mv-router-dev"  = { matchConfig.MACAddress = "02:00:00:01:04:01"; linkConfig.Name = "mv-router-dev";  };
       "10-mv-router-lurk" = { matchConfig.MACAddress = "02:00:00:01:07:01"; linkConfig.Name = "mv-router-lurk"; };
+      "10-mv-router-bldr" = { matchConfig.MACAddress = "02:00:00:01:05:01"; linkConfig.Name = "mv-router-bldr"; };
     } // lib.optionalAttrs useEthernetWan {
       # Ethernet WAN TAP — renamed by MAC so detect_wan() can find it reliably
       "10-mv-router-wan" = { matchConfig.MACAddress = "02:00:00:01:09:01"; linkConfig.Name = "mv-router-wan"; };
@@ -491,6 +498,7 @@ in {
         # dnsmasq-config expects: profile name → IFACE_<NAME>, infra → IFACE_<TAP>.
         "hydrix-router/interfaces".text =
           "IFACE_MGMT=mv-router-mgmt\n"
+          + "IFACE_BUILDER=mv-router-bldr\n"
           + lib.concatMapStrings (n: let
               varName = lib.toUpper (builtins.replaceStrings ["-"] ["_"] n.name);
             in "IFACE_${varName}=${n.routerTap}\n") allNetworks
@@ -637,6 +645,7 @@ in {
         }
 
         add_iface "$IFACE_MGMT" "192.168.100" "192.168.100.253"
+        add_iface "$IFACE_BUILDER" "192.168.210" "192.168.210.253"
         ${lib.concatStringsSep "\n        " (map (n: let
           varName = lib.toUpper (builtins.replaceStrings ["-"] ["_"] n.name);
         in "add_iface \"$IFACE_${varName}\" \"${n.subnet}\" \"${n.subnet}.253\"") allNetworks)}

@@ -77,6 +77,7 @@
   # auto-discovered from profileNetworks + extraNetworks (meta.nix declarations).
   frameworkLans = [
     { tap = "mv-rts-mgmt"; subnet = "192.168.100"; routerIp = "192.168.100.253"; }
+    { tap = "mv-rts-bldr"; subnet = "192.168.210"; routerIp = "192.168.210.253"; }
   ];
 
   # All profile/extra network LAN interfaces — derived from meta.nix at build time.
@@ -155,6 +156,9 @@ in {
 
           "-netdev" "tap,id=net-lurking,ifname=mv-rts-lurk,script=no,downscript=no"
           "-device" "virtio-net-pci,netdev=net-lurking,mac=02:00:00:03:07:01"
+
+          "-netdev" "tap,id=net-builder,ifname=mv-rts-bldr,script=no,downscript=no"
+          "-device" "virtio-net-pci,netdev=net-builder,mac=02:00:00:03:05:01"
         ]
         # Framework profiles (pentest, browsing, comms, dev, lurking) are hardcoded above.
         # Infra VMs with routerTap (e.g. files) and user extra profiles come from extraNetworks.
@@ -228,6 +232,7 @@ in {
       "10-mv-rts-brow" = { matchConfig.MACAddress = "02:00:00:03:03:01"; linkConfig.Name = "mv-rts-brow"; };
       "10-mv-rts-dev"  = { matchConfig.MACAddress = "02:00:00:03:04:01"; linkConfig.Name = "mv-rts-dev";  };
       "10-mv-rts-lurk" = { matchConfig.MACAddress = "02:00:00:03:07:01"; linkConfig.Name = "mv-rts-lurk"; };
+      "10-mv-rts-bldr" = { matchConfig.MACAddress = "02:00:00:03:05:01"; linkConfig.Name = "mv-rts-bldr"; };
     } // lib.listToAttrs (lib.imap0 (i: n: {
       name  = "20-${stableRouterTap n}";
       value = {
