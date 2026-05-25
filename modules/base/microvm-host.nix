@@ -315,6 +315,11 @@ in {
       "d /home/${username}/.config/hydrix 0755 ${username} users -"
 
     ]
+    # hostsync virtiofs source — virtiofsd crashes if source path is missing at start.
+    # Create unconditionally when hostsync VM is enabled so first boot always works.
+    ++ lib.optionals (cfg.vms ? "microvm-hostsync" && cfg.vms."microvm-hostsync".enable) [
+      "d /home/${username}/vm-inbox 0755 ${username} users -"
+    ]
     # NOTE: Do NOT create /var/lib/microvms/<name> or subdirectories via tmpfiles.
     # The upstream microvm.nix install-microvm-<name> service uses
     # ConditionPathExists=!/var/lib/microvms/<name> to gate first-install

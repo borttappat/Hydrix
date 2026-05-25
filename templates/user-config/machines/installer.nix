@@ -94,15 +94,64 @@
 
     graphical = {
       enable = true;
-      font = { family = "Iosevka"; size = 10; };
-      ui = { gaps = 10; floatingBar = true; polybarStyle = "modular"; };
-      scaling = { internalResolution = null; standaloneScaleFactor = 1.0; };
+
+      # polarity = "dark";  # DEFAULT: "dark"
+
+      # ─── Font ──────────────────────────────────────────────────────────
+      # font.family = "Iosevka";
+      # font.size   = 10;
+      # font.overrides = { alacritty = 10.5; };
+      # font.familyOverrides = { alacritty = "Tamzen"; };
+
+      # ─── UI layout ─────────────────────────────────────────────────────
+      # ui.gaps        = 15;          # DEFAULT: 15 - window gaps (px)
+      # ui.barHeight   = 23;          # DEFAULT: 23
+      # ui.border      = 2;           # DEFAULT: 2  - window border width
+      # ui.floatingBar = true;        # DEFAULT: true - floating waybar
+      # ui.cornerRadius = 2;          # DEFAULT: 2  - corner rounding radius
+
+      # ─── Hyprland display scaling ──────────────────────────────────────
+      # scaling.hyprInternalScale  = 1.5;       # UI scale (1.5→1280×800, 1.25→1536×960 logical)
+      # scaling.hyprInternalOutput = "eDP-1";   # DEFAULT: "eDP-1" (run: hyprctl monitors)
+
+      # ─── Hyprland keyboard remapping ───────────────────────────────────
+      # Custom xkb keymap — takes precedence over layout/variant from shared/common.nix.
+      # Use for key remapping (e.g. § → ~, CapsLock → Ctrl). See example-serial.nix.
+      # keyboard.xkbFile = pkgs.writeText "my-keymap" ''
+      #   xkb_keymap {
+      #     xkb_keycodes { include "evdev+aliases(qwerty)" };
+      #     xkb_types    { include "complete" };
+      #     xkb_compat   { include "complete" };
+      #     xkb_symbols  {
+      #       include "pc+se+inet(evdev)"
+      #       key <CAPS> { [ Control_L, Control_L ] };
+      #     };
+      #     xkb_geometry { include "pc(pc105)" };
+      #   };
+      # '';
+
+      # ─── X11/i3 settings ───────────────────────────────────────────────
+      # scaling.internalResolution = "1920x1200";  # i3/xrandr standalone display mode
+      # ui.polybarStyle = "modular";               # "unibar", "modular", "pills"
       # keyboard.xmodmap = ''
       #   clear lock
       #   clear control
       #   keycode 66 = Control_L
       #   add control = Control_L Control_R
       # '';
+
+      # ─── Sway display scaling ──────────────────────────────────────────
+      # scaling.swayInternalScale  = 1.25;
+      # scaling.swayInternalOutput = "eDP-1";   # DEFAULT: "eDP-1"
+
+      # ─── Lockscreen ────────────────────────────────────────────────────
+      # lockscreen.idleTimeout = 600;   # DEFAULT: 600 seconds
+      # lockscreen.text      = "Locked";
+      # lockscreen.wrongText = "Wrong password";
+
+      # ─── Blue light filter ─────────────────────────────────────────────
+      # bluelight.enable      = true;   # DEFAULT: true
+      # bluelight.defaultTemp = 4500;   # DEFAULT: 4500K
     };
   };
 }

@@ -271,7 +271,30 @@
       # ui.opacity.active   = 1.0;    # DEFAULT: 1.0
       # ui.opacity.inactive = 1.0;    # DEFAULT: 1.0
 
-      # ─── Keyboard remapping ──────────────────────────────────────────
+      # ─── Hyprland display scaling ────────────────────────────────────
+      # scaling.hyprInternalScale  = 1.5;       # UI scale (1.5→1280×800, 1.25→1536×960 logical)
+      # scaling.hyprInternalOutput = "eDP-1";   # DEFAULT: "eDP-1" (run: hyprctl monitors)
+
+      # ─── Hyprland keyboard remapping ─────────────────────────────────
+      # Custom xkb keymap — takes precedence over layout/variant from shared/common.nix.
+      # Use for key remapping (e.g. § → ~, CapsLock → Ctrl):
+      # keyboard.xkbFile = pkgs.writeText "my-keymap" ''
+      #   xkb_keymap {
+      #     xkb_keycodes { include "evdev+aliases(qwerty)" };
+      #     xkb_types    { include "complete" };
+      #     xkb_compat   { include "complete" };
+      #     xkb_symbols  {
+      #       include "pc+se+inet(evdev)"
+      #       key <CAPS> { [ Control_L, Control_L ] };
+      #       key <TLDE> { [ asciitilde, grave ] };
+      #     };
+      #     xkb_geometry { include "pc(pc105)" };
+      #   };
+      # '';
+
+      # ─── X11/i3 settings ─────────────────────────────────────────────
+      # scaling.internalResolution = "1920x1200";  # i3/xrandr: standalone display mode
+      # ui.polybarStyle = "modular";               # "unibar", "modular", "pills"
       # keyboard.xmodmap = ''
       #   clear lock
       #   clear control
@@ -279,27 +302,19 @@
       #   add control = Control_L Control_R
       # '';
 
-      # ─── Blue light filter (blugon) ──────────────────────────────────
-      # bluelight.enable      = true;   # DEFAULT: true
-      # bluelight.defaultTemp = 4500;   # DEFAULT: 4500K
-
-      # ─── HiDPI / display scaling ─────────────────────────────────────
-      # scaling.internalResolution = "1920x1200";  # i3/xrandr: standalone display mode
-      # scaling.auto = true;           # DEFAULT: true
-      #
-      # Hyprland internal display scaling (external monitors unaffected):
-      # scaling.hyprInternalScale  = 1.5;       # UI scale (1.5→1280×800 logical, 1.25→1536×960)
-      # scaling.hyprInternalOutput = "eDP-1";   # DEFAULT: "eDP-1" (run: hyprctl monitors)
-      #
-      # Sway internal display scaling (external monitors unaffected):
-      # scaling.swayInternalScale  = 1.25;      # UI scale (1.25→1536×960, 1.5→1280×800 logical)
+      # ─── Sway display scaling ─────────────────────────────────────────
+      # scaling.swayInternalScale  = 1.25;       # UI scale (1.25→1536×960, 1.5→1280×800 logical)
       # scaling.swayInternalMode   = "1280x800"; # OR: change actual hardware resolution
       # scaling.swayInternalOutput = "eDP-1";    # DEFAULT: "eDP-1" (run: swaymsg -t get_outputs)
 
       # ─── Lockscreen ──────────────────────────────────────────────────
       # lockscreen.idleTimeout = 600;   # DEFAULT: 600 seconds
-      # lockscreen.text = "Locked";     # DEFAULT: "Locked"
-      # lockscreen.wrongText = "Wrong password";  # DEFAULT
+      # lockscreen.text      = "Locked";
+      # lockscreen.wrongText = "Wrong password";
+
+      # ─── Blue light filter (blugon) ──────────────────────────────────
+      # bluelight.enable      = true;   # DEFAULT: true
+      # bluelight.defaultTemp = 4500;   # DEFAULT: 4500K
 
       # ─── Startup splash screen ───────────────────────────────────────
       # splash.enable = false;         # DEFAULT: false
