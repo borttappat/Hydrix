@@ -81,7 +81,7 @@ let
 
     rm -f "$SHOT" "$BLUR" "$FINAL"
   '';
-in {
+in lib.mkIf config.hydrix.sway.enable {
   environment.systemPackages = [ swayLock pkgs.swaylock-effects pkgs.swayidle pkgs.grim pkgs.imagemagick ];
   # Required for swaylock to authenticate via PAM
   security.pam.services.swaylock = {};
