@@ -14,11 +14,12 @@ in {
 
       relations = lib.mkDefault {
         alacritty = 1.1;
-        polybar = 0.8;
-        rofi = 1.0;
-        dunst = 1.0;
-        firefox = 1.2;
-        gtk = 1.0;
+        waybar    = 1.28;  # floor(11 * 1.28) = 14px
+        polybar   = 0.8;
+        rofi      = 1.0;
+        dunst     = 1.0;
+        firefox   = 1.2;
+        gtk       = 1.0;
       };
     };
 
