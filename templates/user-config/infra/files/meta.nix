@@ -20,10 +20,12 @@
         (n: builtins.pathExists (profilesDir + "/${n}/meta.nix"))
         (builtins.attrNames (builtins.readDir profilesDir));
 
-      taskNames = builtins.filter
-        (n: builtins.match "task[0-9]+" n != null
-          && builtins.pathExists (tasksDir + "/${n}/meta.nix"))
-        (builtins.attrNames (builtins.readDir tasksDir));
+      taskNames = if builtins.pathExists tasksDir
+        then builtins.filter
+          (n: builtins.match "task[0-9]+" n != null
+            && builtins.pathExists (tasksDir + "/${n}/meta.nix"))
+          (builtins.attrNames (builtins.readDir tasksDir))
+        else [];
 
       # Bridges already reachable via profile TAPs — don't add redundant task TAPs
       coveredBridges = map (n: (import (profilesDir + "/${n}/meta.nix")).bridge) profileNames;

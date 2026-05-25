@@ -74,11 +74,11 @@
     colorscheme = "@COLORSCHEME@";
     graphical.wallpaper = "${hydrix}/wallpapers/WindowRain.png";
 
-    # Window manager selection — enable one or both (i3 and sway can coexist,
-    # start each from a separate TTY: startx for i3, sway-session for sway)
-    i3.enable = true;          # X11/i3/polybar/rofi/picom stack
-    # hyprland.enable = true;  # Wayland/Hyprland stack
-    sway.enable = true;        # Wayland/Sway stack — start with: sway-session
+    # Window manager selection — Hyprland is the default Wayland compositor.
+    # Enable i3 or sway alongside it if needed (each starts from a separate TTY).
+    hyprland.enable = true;   # Wayland/Hyprland stack — start with: hyprland-session
+    # sway.enable = true;     # Wayland/Sway stack — start with: sway-session
+    # i3.enable = true;       # X11/i3/polybar/rofi/picom stack — start with: startx
 
     # vmThemeSync.focusDaemon.mode = "dynamic";  # "static" or "dynamic" focus border colors
 
@@ -287,13 +287,19 @@
       # scaling.internalResolution = "1920x1200";  # i3/xrandr: standalone display mode
       # scaling.auto = true;           # DEFAULT: true
       #
+      # Hyprland internal display scaling (external monitors unaffected):
+      # scaling.hyprInternalScale  = 1.5;       # UI scale (1.5→1280×800 logical, 1.25→1536×960)
+      # scaling.hyprInternalOutput = "eDP-1";   # DEFAULT: "eDP-1" (run: hyprctl monitors)
+      #
       # Sway internal display scaling (external monitors unaffected):
-      # scaling.swayInternalScale  = 1.25;    # UI scale (1.25→1536×960, 1.5→1280×800 logical)
+      # scaling.swayInternalScale  = 1.25;      # UI scale (1.25→1536×960, 1.5→1280×800 logical)
       # scaling.swayInternalMode   = "1280x800"; # OR: change actual hardware resolution
       # scaling.swayInternalOutput = "eDP-1";    # DEFAULT: "eDP-1" (run: swaymsg -t get_outputs)
 
       # ─── Lockscreen ──────────────────────────────────────────────────
-      # lockscreen.idleTimeout = 600;  # DEFAULT: 600 seconds
+      # lockscreen.idleTimeout = 600;   # DEFAULT: 600 seconds
+      # lockscreen.text = "Locked";     # DEFAULT: "Locked"
+      # lockscreen.wrongText = "Wrong password";  # DEFAULT
 
       # ─── Startup splash screen ───────────────────────────────────────
       # splash.enable = false;         # DEFAULT: false

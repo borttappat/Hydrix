@@ -214,10 +214,12 @@
     # -------------------------------------------------------------------------
     discoveredTasks = let
       tasksDir  = ./tasks;
-      taskDirs  = builtins.filter
-        (name: builtins.match "task[0-9]+" name != null
-            && builtins.pathExists (tasksDir + "/${name}/meta.nix"))
-        (builtins.attrNames (builtins.readDir tasksDir));
+      taskDirs  = if builtins.pathExists tasksDir
+        then builtins.filter
+          (name: builtins.match "task[0-9]+" name != null
+              && builtins.pathExists (tasksDir + "/${name}/meta.nix"))
+          (builtins.attrNames (builtins.readDir tasksDir))
+        else [];
     in map (n: import (tasksDir + "/${n}/meta.nix") // { _taskName = n; }) taskDirs;
 
     taskConfigs = builtins.listToAttrs (map (m: let

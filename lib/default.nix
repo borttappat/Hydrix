@@ -103,7 +103,7 @@ in rec {
         microvm.nixosModules.host
 
         # waypipe VM forwarding (active when sway or hyprland enabled)
-        ../modules/wm/waypipe-host.nix
+        ../modules/wm/sway/waypipe.nix
 
         # Graphical environment
         ../modules/graphical
