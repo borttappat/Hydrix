@@ -44,8 +44,6 @@
     colorscheme = "@COLORSCHEME@";
     graphical.wallpaper = "${hydrix}/wallpapers/WindowRain.png";
 
-    # Window manager selection (x = startx/i3, w = Hyprland)
-    i3.enable = true;
     hyprland.enable = true;
 
     disko = {
@@ -74,10 +72,6 @@
         wifiPciAddress = "@WIFI_PCI_ADDRESS@";
       };
       grub.gfxmodeEfi = "@GRUB_GFXMODE@";
-    };
-
-    services = {
-      ssh.enable = true;
     };
 
     power = {
