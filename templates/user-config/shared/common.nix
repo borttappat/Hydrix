@@ -11,11 +11,11 @@
 {
   hydrix = {
     # ─── Window manager stack ───────────────────────────────────────────
-    # Both i3 (X11) and sway (Wayland) are available on all machines.
-    # Start i3: startx    Start sway: sway-session
-    # Override per-machine to restrict to one WM.
-    sway.enable = lib.mkDefault true;
-    i3.enable   = lib.mkDefault true;
+    # Hyprland is the default compositor. Enable i3 or sway per-machine if needed.
+    # Start hyprland: hyprland-session    Start i3: startx    Start sway: sway-session
+    hyprland.enable = lib.mkDefault true;
+    # sway.enable = lib.mkDefault false;  # Wayland/Sway — enable per machine
+    # i3.enable   = lib.mkDefault false;  # X11/i3 — enable per machine
   };
 
   # ─── Locale and timezone ─────────────────────────────────────────────
