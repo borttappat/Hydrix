@@ -81,11 +81,17 @@ let
     }
 
     # ── Input ──────────────────────────────────────────────────────────────────
-    # kb_file is written by home.activation.hyprlandKeymap from
-    # hydrix.graphical.keyboard.xkbFile (set in machines/<serial>.nix).
-    # If xkbFile is null the framework falls back to layout/variant/options.
+    # Keyboard: xkbFile (custom keymap written by home.activation.hyprlandKeymap)
+    # takes precedence when set in machines/<serial>.nix; otherwise layout/variant
+    # from hydrix.graphical.keyboard (populated from @XKB_LAYOUT@ by the installer).
     input {
-      kb_file        = ~/.config/hypr/keymap.xkb
+      ${if kb.xkbFile != null
+        then "kb_file     = ~/.config/hypr/keymap.xkb"
+        else ''
+          kb_layout   = ${kb.layout}
+          ${lib.optionalString (kb.variant != "") "kb_variant  = ${kb.variant}"}
+          ${lib.optionalString (kb.xkbOptions != "") "kb_options  = ${kb.xkbOptions}"}
+        ''}
       follow_mouse   = 0
       sensitivity    = -0.2
       natural_scroll = true

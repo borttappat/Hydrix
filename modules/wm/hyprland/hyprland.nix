@@ -440,8 +440,8 @@ in
       home.activation.initHyprGaps = lib.hm.dag.entryAfter ["writeBoundary"] ''
         _dir="$HOME/.config/hypr"
         mkdir -p "$_dir"
-        [[ -f "$_dir/gaps-inner" ]] || echo "${toString gaps}" > "$_dir/gaps-inner"
-        [[ -f "$_dir/gaps-outer" ]] || echo "${toString gaps}" > "$_dir/gaps-outer"
+        [[ -f "$_dir/gaps-inner" ]] || echo "${toString (gaps * 2)}" > "$_dir/gaps-inner"
+        [[ -f "$_dir/gaps-outer" ]] || echo "${toString (gaps * 2)}" > "$_dir/gaps-outer"
       '';
 
       # Write the framework-generated config (VM routing, keyboard, monitor, colors source).

@@ -28,6 +28,12 @@
   services.xserver.xkb.layout     = lib.mkDefault "@XKB_LAYOUT@";
   services.xserver.xkb.variant    = lib.mkDefault "@XKB_VARIANT@";
 
+  # Wire the same keyboard layout into Hyprland / Sway (Wayland compositors).
+  # Overriding hydrix.graphical.keyboard.xkbFile in machines/<serial>.nix takes
+  # precedence and is used for custom keymaps (e.g. the § → ~ remap).
+  hydrix.graphical.keyboard.layout  = lib.mkDefault "@XKB_LAYOUT@";
+  hydrix.graphical.keyboard.variant = lib.mkDefault "@XKB_VARIANT@";
+
   # ─── HiDPI / display scaling ─────────────────────────────────────────
   # 1.0 = no scaling (1080p/standard). For HiDPI: try GDK_SCALE = "1.5" + XCURSOR_SIZE = "32".
   # Override per-machine in machines/<serial>.nix to set different values per display.

@@ -158,6 +158,15 @@ in {
         };
       };
 
+      # Pointer cursor — applies to all environments (X11, Wayland/Hyprland, Sway)
+      # Without this, Hyprland shows its default cursor on installs without i3.
+      home.pointerCursor = {
+        name = "Vanilla-DMZ";
+        package = pkgs.vanilla-dmz;
+        size = 24;
+        gtk.enable = true;
+      };
+
       # GTK4 wal colors import — home-manager's gtk module doesn't expose
       # gtk4.extraCss, so manage the file directly.
       xdg.configFile."gtk-4.0/gtk.css".text = ''@import url("gtk-wal.css");'';

@@ -281,6 +281,8 @@ EOF
     }
 
     # ── VM App Launcher ────────────────────────────────────────────────────
+    # Uses --show run (not drun) because wofi only honours --run-command in
+    # run mode; drun ignores it and executes the Exec line directly on the host.
 
     show_vm_app_launcher() {
         local vm_type="$1"
@@ -307,12 +309,6 @@ EOF
             [[ -z "$selected" ]] && return
         fi
 
-        local vm_system
-        vm_system=$(get_vm_system_path "''${selected}") || true
-
-        theme_file=$(${pkgs.coreutils}/bin/mktemp /tmp/wofi-launcher-XXXXXX.css)
-        build_theme > "$theme_file"
-
         local run_cmd
         if [[ -n "''${HYPRLAND_INSTANCE_SIGNATURE:-}" ]]; then
             run_cmd="hypr-ws-app {cmd}"
@@ -322,21 +318,21 @@ EOF
             run_cmd="vm-app ''${selected} {cmd}"
         fi
 
-        if [[ -n "$vm_system" && -d "''${vm_system}/sw/share/applications" ]]; then
-            XDG_DATA_DIRS="''${vm_system}/sw/share:''${XDG_DATA_DIRS:-/run/current-system/sw/share}" \
-                ${pkgs.wofi}/bin/wofi --show drun \
-                --style="$theme_file" \
-                $(wofi_args) \
-                --run-command="''${run_cmd}" \
-                2>/dev/null || true
-        else
-            ${pkgs.libnotify}/bin/notify-send -t 3000 "VM" "Could not locate ''${selected} system path"
-        fi
+        local theme_file
+        theme_file=$(${pkgs.coreutils}/bin/mktemp /tmp/wofi-launcher-XXXXXX.css)
+        build_theme > "$theme_file"
+
+        ${pkgs.wofi}/bin/wofi --show run \
+            --style="$theme_file" \
+            $(wofi_args) \
+            --run-command="''${run_cmd}" \
+            --prompt="''${selected}" \
+            2>/dev/null || true
 
         ${pkgs.coreutils}/bin/rm -f "$theme_file"
     }
 
-    # ── Host App Launcher ──────────────────────────────────────────────────
+    # ── Host App Launcher (drun — icon picker) ─────────────────────────────
 
     show_host_launcher() {
         local theme_file
@@ -346,9 +342,25 @@ EOF
         ${pkgs.coreutils}/bin/rm -f "$theme_file"
     }
 
+    # ── Host Run Launcher (run — typed commands, like rofi -show run) ──────
+
+    show_host_run_launcher() {
+        local theme_file
+        theme_file=$(${pkgs.coreutils}/bin/mktemp /tmp/wofi-launcher-XXXXXX.css)
+        build_theme > "$theme_file"
+        ${pkgs.wofi}/bin/wofi --show run --style="$theme_file" $(wofi_args) 2>/dev/null || true
+        ${pkgs.coreutils}/bin/rm -f "$theme_file"
+    }
+
     # ── Main Entry Point ───────────────────────────────────────────────────
 
     main() {
+        # --host flag: always show host run launcher regardless of workspace
+        if [[ "''${1:-}" == "--host" ]]; then
+            show_host_run_launcher
+            return
+        fi
+
         local ws vm_type
         ws=$(get_current_workspace)
         vm_type=$(ws_to_vm_type "$ws")
