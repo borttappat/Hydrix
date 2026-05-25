@@ -48,6 +48,7 @@ let
     # Infrastructure TAPs — always present, not user-configurable
     {
       "mv-router-mgmt" = "br-mgmt";
+      "mv-router-bldr" = "br-builder";
     }
     # Profile TAPs — generated from discovered profileNetworks.
     # profileNetworks has { name, subnet, routerTap } for every profile.
@@ -108,6 +109,8 @@ let
       # --- Framework infrastructure router TAPs (hardcoded, not user-configurable) ---
       mv-router-wan)  echo "br-wan" ;;
       mv-router-mgmt) echo "br-mgmt" ;;
+      mv-router-bldr) echo "br-builder" ;;
+      mv-rts-bldr)    echo "br-builder" ;;
       # Stable-router management TAP
       mv-rts-mgmt) echo "br-mgmt" ;;
       # --- Profile router TAPs — generated from profileNetworks ---
@@ -466,6 +469,7 @@ in {
               "mv-rts-dev"  = "br-dev";
               "mv-rts-lurk" = "br-lurking";
               "mv-rts-file" = "br-files";
+              "mv-rts-bldr" = "br-builder";
             } // lib.listToAttrs (map (n: {
               name  = if lib.hasPrefix "mv-router-" n.routerTap
                       then "mv-rts-" + lib.removePrefix "mv-router-" n.routerTap
@@ -495,6 +499,7 @@ in {
               "mv-rts-dev"  = "br-dev";
               "mv-rts-lurk" = "br-lurking";
               "mv-rts-file" = "br-files";
+              "mv-rts-bldr" = "br-builder";
             } // lib.listToAttrs (map (n: {
               name  = if lib.hasPrefix "mv-router-" n.routerTap
                       then "mv-rts-" + lib.removePrefix "mv-router-" n.routerTap

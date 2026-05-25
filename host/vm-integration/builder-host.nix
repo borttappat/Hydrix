@@ -17,6 +17,14 @@ let
   cfg = config.hydrix.builder;
 in {
   config = lib.mkIf cfg.enable {
+    # Declare the builder VM so it is built on first boot (hydrix-firstboot-vms)
+    # and included in infrastructure-only builds (e.g. fresh lockdown installs).
+    # autostart = false: builder is not started automatically — only on demand.
+    hydrix.microvmHost.vms."microvm-builder" = {
+      enable = lib.mkDefault true;
+      autostart = lib.mkDefault false;
+    };
+
     # Ensure socat is available for vsock communication
     environment.systemPackages = [ pkgs.socat ];
   };

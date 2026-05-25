@@ -14,6 +14,7 @@ in {
 
       relations = lib.mkDefault {
         alacritty = 1.1;
+        waybar   = 1.28;
         polybar = 0.8;
         rofi = 1.0;
         dunst = 1.0;
