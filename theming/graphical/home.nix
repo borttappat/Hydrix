@@ -24,16 +24,16 @@ let
 
 in {
   imports = [
-    ./programs/alacritty.nix
-    ./programs/fish.nix
-    ./programs/dunst.nix
-    ./programs/zathura.nix
-    ./programs/vim.nix
-    ./programs/firefox.nix
-    ./programs/starship.nix
-    ./programs/ranger.nix
-    ./programs/obsidian.nix
-    ./programs/gtk.nix
+    ../programs/alacritty.nix
+    ../programs/fish.nix
+    ../programs/dunst.nix
+    ../programs/zathura.nix
+    ../programs/vim.nix
+    ../programs/firefox.nix
+    ../programs/starship.nix
+    ../programs/ranger.nix
+    ../programs/obsidian.nix
+    ../programs/gtk.nix
   ];
 
   config = lib.mkIf config.hydrix.graphical.enable {
