@@ -11,7 +11,7 @@
 {
   imports = [
     ./packages.nix
-    ../../modules/vm/ollama-dev.nix
+    ../../dev/ollama-dev.nix
   ];
 
   # VM identity

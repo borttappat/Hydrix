@@ -26,7 +26,7 @@ let
   isHost = vmType == "host";
 in {
   imports = [
-    # Options are in modules/options.nix (single source of truth)
+    # Options are in theming/options.nix
     ./packages.nix         # WM, X11, theming packages
     ./scaling.nix          # Compatibility layer for scaling.computed.*
     ./dynamic-scaling.nix  # Hardware DPI detection + scaling
@@ -35,9 +35,9 @@ in {
     ./xsession.nix         # X session startup
     ./home.nix             # Home Manager programs
     ./scripts.nix          # Colorscheme management scripts
-    ./programs/blugon.nix       # Blue light filter
-    ./programs/file-finder.nix  # Fuzzy file search (file-finder command)
-    ./fonts                     # Per-font profiles (sizes, overrides, UI adjustments)
+    ../programs/blugon.nix       # Blue light filter
+    ../programs/file-finder.nix  # Fuzzy file search (file-finder command)
+    ../fonts                     # Per-font profiles (sizes, overrides, UI adjustments)
     ../wm/focus-mode.nix   # Focus mode (lock keybindings to single VM type)
     # NixOS-level WM modules: system packages, portals, PAM, session scripts.
     # Gated on hydrix.{i3,sway,hyprland}.enable inside each file.

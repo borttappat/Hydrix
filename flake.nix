@@ -41,27 +41,37 @@
     # NIXOS MODULES - Import these in your config
     # =========================================================================
     nixosModules = {
-      # Core options - defines all hydrix.* options
-      options = ./modules/options.nix;
+      # Core options - defines all hydrix.* options (split by concern)
+      options         = ./shared/options.nix;
+      options-host    = ./host/options.nix;
+      options-vm      = ./vm/options.nix;
+      options-theming = ./theming/options.nix;
 
       # Module sets
-      core = ./modules/core;
-      host = ./modules/host;
-      vm = ./modules/vm;
-      graphical = ./modules/graphical;
+      core     = ./shared/core;
+      host     = ./host;
+      vm       = ./vm/base;
+      graphical = ./theming;
+
+      # Individual host modules
+      pentest-lan    = ./host/pentest-lan.nix;
+      vm-theme-sync  = ./host/vm-theme-sync.nix;
 
       # Profiles (folder-based)
-      pentest = ./profiles/pentest;
-      browsing = ./profiles/browsing;
-      dev = ./profiles/dev;
-      comms = ./profiles/comms;
-      lurking = ./profiles/lurking;
+      pentest  = ./vm/profiles/pentest;
+      browsing = ./vm/profiles/browsing;
+      dev      = ./vm/profiles/dev;
+      comms    = ./vm/profiles/comms;
+      lurking  = ./vm/profiles/lurking;
 
-      # Default = options + core (minimal)
+      # Default = shared options + core (minimal)
       default = { ... }: {
         imports = [
-          ./modules/options.nix
-          ./modules/core
+          ./shared/options.nix
+          ./host/options.nix
+          ./vm/options.nix
+          ./theming/options.nix
+          ./shared/core
         ];
       };
     };

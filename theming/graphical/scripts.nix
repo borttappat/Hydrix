@@ -62,7 +62,7 @@
   userCsDir = config.hydrix.userColorschemesDir;
   colorschemesPackage = pkgs.stdenvNoCC.mkDerivation {
     name = "hydrix-colorschemes";
-    src = ../../colorschemes;
+    src = ../colorschemes;
     installPhase =
       ''
         mkdir -p $out/colorschemes

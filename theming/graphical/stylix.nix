@@ -124,7 +124,7 @@ let
   vmType = config.hydrix.vmType;
 
   # Check for pre-converted base16 YAML
-  base16YamlPath = ../../colorschemes/base16/${colorscheme}.yaml;
+  base16YamlPath = ../colorschemes/base16/${colorscheme}.yaml;
   hasBase16Yaml = colorscheme != null && builtins.pathExists base16YamlPath;
 
   # Check for pywal JSON to convert (user colorschemes first, then framework)

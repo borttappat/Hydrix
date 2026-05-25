@@ -12,11 +12,14 @@
 
 {
   imports = [
-    # Hydrix options - MUST BE FIRST to define hydrix.* options before other modules use them
-    ../modules/options.nix
+    # Hydrix options
+    ../../shared/options.nix
+    ../../host/options.nix
+    ../../vm/options.nix
+    ../../theming/options.nix
 
     # VM base module - handles all common VM config (hardware, locale, etc.)
-    ../modules/vm/vm-base.nix
+    ../base/vm-base.nix
 
     # Unified comms profile (colorscheme, packages, graphical settings)
     # This is the single source of truth

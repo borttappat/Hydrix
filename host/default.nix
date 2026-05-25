@@ -4,9 +4,7 @@
 # No direct imports from local/ files.
 { config, lib, pkgs, ... }:
 
-let
-  cfg = config.hydrix;
-in {
+{
   imports = [
     ./users.nix
     ./vfio.nix
