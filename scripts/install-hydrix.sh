@@ -1615,13 +1615,13 @@ gather_wifi() {
 # ========== HYDRIX SOURCE SELECTION ==========
 
 select_hydrix_branch() {
-    echo ""
-    echo "  Which branch?"
-    echo ""
-    echo "  [1] main     (default — latest stable restructured layout)"
-    echo "  [2] stable   (legacy modules/ layout, pre-restructure)"
-    echo "  [3] Custom   (enter branch name manually)"
-    echo ""
+    echo "" >&2
+    echo "  Which branch?" >&2
+    echo "" >&2
+    echo "  [1] main     (default — latest stable restructured layout)" >&2
+    echo "  [2] stable   (legacy modules/ layout, pre-restructure)" >&2
+    echo "  [3] Custom   (enter branch name manually)" >&2
+    echo "" >&2
     read -p "Branch [1-3, default=1]: " branch_choice
 
     local branch
