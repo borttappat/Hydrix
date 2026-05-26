@@ -1223,27 +1223,27 @@ prompt_colorscheme() {
 
 # ========== HYDRIX SOURCE SELECTION ==========
 
+HYDRIX_BRANCH="main"
+
 select_hydrix_branch() {
-    echo "" >&2
-    echo "  Which branch?" >&2
-    echo "" >&2
-    echo "  [1] main     (default — latest stable restructured layout)" >&2
-    echo "  [2] stable   (legacy modules/ layout, pre-restructure)" >&2
-    echo "  [3] Custom   (enter branch name manually)" >&2
-    echo "" >&2
+    echo ""
+    echo "  Which branch?"
+    echo ""
+    echo "  [1] main     (default — latest stable restructured layout)"
+    echo "  [2] stable   (legacy modules/ layout, pre-restructure)"
+    echo "  [3] Custom   (enter branch name manually)"
+    echo ""
     read -p "Branch [1-3, default=1]: " branch_choice
 
-    local branch
     case "${branch_choice:-1}" in
-        1) branch="main" ;;
-        2) branch="stable" ;;
+        1) HYDRIX_BRANCH="main" ;;
+        2) HYDRIX_BRANCH="stable" ;;
         3)
-            read -p "Branch name: " branch
-            branch="${branch:-main}"
+            read -p "Branch name: " HYDRIX_BRANCH
+            HYDRIX_BRANCH="${HYDRIX_BRANCH:-main}"
             ;;
-        *) branch="main" ;;
+        *) HYDRIX_BRANCH="main" ;;
     esac
-    echo "$branch"
 }
 
 select_hydrix_source() {
@@ -1269,13 +1269,12 @@ select_hydrix_source() {
 
     case "${source_choice:-1}" in
         1)
-            local branch
-            branch=$(select_hydrix_branch)
+            select_hydrix_branch
             CONFIG[hydrixSource]="github"
-            if [[ "$branch" == "main" ]]; then
+            if [[ "$HYDRIX_BRANCH" == "main" ]]; then
                 CONFIG[hydrixUrl]="git+https://github.com/borttappat/Hydrix.git"
             else
-                CONFIG[hydrixUrl]="git+https://github.com/borttappat/Hydrix.git?ref=${branch}"
+                CONFIG[hydrixUrl]="git+https://github.com/borttappat/Hydrix.git?ref=${HYDRIX_BRANCH}"
             fi
             log "Using GitHub: ${CONFIG[hydrixUrl]}"
             ;;
