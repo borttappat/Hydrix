@@ -1223,6 +1223,29 @@ prompt_colorscheme() {
 
 # ========== HYDRIX SOURCE SELECTION ==========
 
+select_hydrix_branch() {
+    echo ""
+    echo "  Which branch?"
+    echo ""
+    echo "  [1] main     (default — latest stable restructured layout)"
+    echo "  [2] stable   (legacy modules/ layout, pre-restructure)"
+    echo "  [3] Custom   (enter branch name manually)"
+    echo ""
+    read -p "Branch [1-3, default=1]: " branch_choice
+
+    local branch
+    case "${branch_choice:-1}" in
+        1) branch="main" ;;
+        2) branch="stable" ;;
+        3)
+            read -p "Branch name: " branch
+            branch="${branch:-main}"
+            ;;
+        *) branch="main" ;;
+    esac
+    echo "$branch"
+}
+
 select_hydrix_source() {
     echo ""
     log "=== Hydrix Source Configuration ==="
@@ -1246,9 +1269,15 @@ select_hydrix_source() {
 
     case "${source_choice:-1}" in
         1)
+            local branch
+            branch=$(select_hydrix_branch)
             CONFIG[hydrixSource]="github"
-            CONFIG[hydrixUrl]="git+https://github.com/borttappat/Hydrix.git"
-            log "Using GitHub: git+https://github.com/borttappat/Hydrix.git"
+            if [[ "$branch" == "main" ]]; then
+                CONFIG[hydrixUrl]="git+https://github.com/borttappat/Hydrix.git"
+            else
+                CONFIG[hydrixUrl]="git+https://github.com/borttappat/Hydrix.git?ref=${branch}"
+            fi
+            log "Using GitHub: ${CONFIG[hydrixUrl]}"
             ;;
         2)
             configure_local_clone
