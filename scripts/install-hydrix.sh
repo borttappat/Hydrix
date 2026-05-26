@@ -1879,7 +1879,7 @@ copy_wallpapers() {
     log "Setting up wallpapers..."
     mkdir -p "$home_dir/wallpapers"
     # Copy wallpapers from Hydrix repo (bundled in nix store or local clone)
-    local hydrix_wp="$SCRIPT_DIR/../wallpapers"
+    local hydrix_wp="$SCRIPT_DIR/../theming/wallpapers"
     if [[ -d "$hydrix_wp" ]] && ls "$hydrix_wp"/*.{png,jpg} &>/dev/null; then
         cp "$hydrix_wp"/*.png "$hydrix_wp"/*.jpg "$home_dir/wallpapers/" 2>/dev/null || true
         local count

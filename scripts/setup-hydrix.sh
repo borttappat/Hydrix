@@ -78,6 +78,13 @@ declare -A CONFIG=(
     [hydrixSource]="github"
     [hydrixUrl]="git+https://github.com/borttappat/Hydrix.git"
     [hydrixLocalPath]=""
+    # WAN / VFIO — set by detect_wifi_hardware
+    [hasWifi]="false"
+    [vfioEnable]="false"
+    [vfioPciIds]="[ ]"
+    [wanMode]="auto"
+    [wanDevice]=""
+    [wanDeviceLine]=""
 )
 
 # ========== SECURE CLEANUP ==========
@@ -731,6 +738,28 @@ copy_hardware_config() {
     fi
 }
 
+detect_ethernet_interface() {
+    local iface=""
+
+    # Prefer the interface currently carrying the default route
+    iface=$(ip route show default 2>/dev/null | awk '/default/ { print $5; exit }')
+
+    if [[ -z "$iface" ]]; then
+        # Fallback: first physical ethernet (skip loopback, wireless, virtual)
+        for dir in /sys/class/net/*/; do
+            local name
+            name=$(basename "$dir")
+            [[ "$name" == "lo" ]] && continue
+            [[ "$name" =~ ^(wl|br|tap|veth|virbr|docker|dummy|bond|tun) ]] && continue
+            [[ -e "$dir/device" ]] || continue
+            iface="$name"
+            break
+        done
+    fi
+
+    echo "${iface:-}"
+}
+
 detect_wifi_hardware() {
     log "Detecting WiFi hardware..."
 
@@ -768,11 +797,30 @@ detect_wifi_hardware() {
     if [[ -n "$pci_addr" ]]; then
         CONFIG[wifiPciAddress]="${pci_addr#0000:}"
         CONFIG[wifiPciId]="$pci_id"
+        CONFIG[hasWifi]="true"
+        CONFIG[vfioEnable]="true"
+        CONFIG[vfioPciIds]='[ "'"${pci_id}"'" ]'
+        CONFIG[wanMode]="auto"
+        CONFIG[wanDeviceLine]=""
         success "WiFi: ${CONFIG[wifiPciAddress]} (${CONFIG[wifiPciId]})"
     else
-        CONFIG[wifiPciAddress]="00:14.3"
-        CONFIG[wifiPciId]="8086:0000"
-        warn "WiFi hardware not detected - using placeholder"
+        warn "WiFi hardware not detected"
+        local eth
+        eth=$(detect_ethernet_interface)
+        if [[ -n "$eth" ]]; then
+            log "  Ethernet WAN: $eth"
+        else
+            warn "  No ethernet interface detected — wan.mode will be 'none'"
+            eth=""
+        fi
+        CONFIG[wifiPciAddress]=""
+        CONFIG[wifiPciId]=""
+        CONFIG[hasWifi]="false"
+        CONFIG[vfioEnable]="false"
+        CONFIG[vfioPciIds]="[ ]"
+        CONFIG[wanMode]="macvtap"
+        CONFIG[wanDevice]="$eth"
+        CONFIG[wanDeviceLine]="${eth:+wan.device = \"${eth}\";}"
     fi
 }
 
@@ -966,10 +1014,8 @@ copy_wallpapers() {
     mkdir -p "$home_dir/wallpapers"
     # Copy wallpapers from Hydrix repo (local clone or framework)
     local hydrix_wp=""
-    if [[ -d "$HOME/Hydrix/wallpapers" ]]; then
-        hydrix_wp="$HOME/Hydrix/wallpapers"
-    elif [[ -d "$(dirname "$0")/../wallpapers" ]]; then
-        hydrix_wp="$(cd "$(dirname "$0")/.." && pwd)/wallpapers"
+    if [[ -d "$(dirname "$0")/../theming/wallpapers" ]]; then
+        hydrix_wp="$(cd "$(dirname "$0")/.." && pwd)/theming/wallpapers"
     fi
     if [[ -n "$hydrix_wp" ]] && ls "$hydrix_wp"/*.{png,jpg} &>/dev/null; then
         cp "$hydrix_wp"/*.png "$hydrix_wp"/*.jpg "$home_dir/wallpapers/" 2>/dev/null || true
@@ -1080,6 +1126,10 @@ generate_machine_nix() {
         -e "s|@IS_ASUS@|${CONFIG[isAsus]}|g" \
         -e "s|@WIFI_PCI_ID@|${CONFIG[wifiPciId]}|g" \
         -e "s|@WIFI_PCI_ADDRESS@|${CONFIG[wifiPciAddress]}|g" \
+        -e "s|@VFIO_ENABLE@|${CONFIG[vfioEnable]}|g" \
+        -e "s|@VFIO_PCI_IDS@|${CONFIG[vfioPciIds]}|g" \
+        -e "s|@WAN_MODE@|${CONFIG[wanMode]}|g" \
+        -e "s|@WAN_DEVICE_LINE@|${CONFIG[wanDeviceLine]}|g" \
         -e "s|@DISKO_DEVICE@|${CONFIG[diskoDevice]}|g" \
         "$template_file" > "$CONFIG_DIR/machines/${CONFIG[serial]}.nix"
 
@@ -1176,6 +1226,12 @@ use_existing_machine() {
 # ========== INTERACTIVE PROMPTS ==========
 
 prompt_wifi() {
+    # Skip entirely when no WiFi hardware — ethernet WAN needs no credentials
+    if [[ "${CONFIG[hasWifi]}" == "false" ]]; then
+        log "No WiFi hardware — skipping WiFi credential prompt"
+        return
+    fi
+
     # Skip if shared/wifi.nix already has real credentials (not placeholder)
     if [[ -f "$CONFIG_DIR/shared/wifi.nix" ]] && ! grep -q "@WIFI_SSID@" "$CONFIG_DIR/shared/wifi.nix" 2>/dev/null; then
         log "WiFi already configured in shared/wifi.nix, skipping"

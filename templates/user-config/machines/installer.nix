@@ -42,7 +42,7 @@
     username = "@USERNAME@";
     hostname = "hydrix";
     colorscheme = "@COLORSCHEME@";
-    graphical.wallpaper = "${hydrix}/wallpapers/WindowRain.png";
+    graphical.wallpaper = "${hydrix}/theming/wallpapers/WindowRain.png";
 
     hyprland.enable = true;
 
