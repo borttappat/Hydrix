@@ -137,7 +137,7 @@ in {
         dnsmasq = {
           servers = lib.mkOption {
             type = lib.types.listOf lib.types.str;
-            default = [ "1.1.1.1" "8.8.8.8" ];
+            default = ["1.1.1.1" "8.8.8.8"];
             description = "Upstream DNS servers passed to dnsmasq.";
           };
           enableDhcpLogging = lib.mkOption {
@@ -189,7 +189,6 @@ in {
           default = 2;
           description = "Number of vCPUs for the router VM";
         };
-
       };
 
       vpn = {
@@ -475,7 +474,7 @@ in {
 
       autoCpuFreq = lib.mkOption {
         type = lib.types.bool;
-        default = true;
+        default = false; # HWP (balance_power EPP) handles scaling — no polling daemon needed
         description = "Enable auto-cpufreq service for dynamic CPU frequency management";
       };
     };

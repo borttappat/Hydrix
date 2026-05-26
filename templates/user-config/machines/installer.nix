@@ -75,7 +75,7 @@
     };
 
     power = {
-      autoCpuFreq = true;
+      # autoCpuFreq = false;  # HWP (balance_power EPP) handles scaling - no polling daemon needed
     };
 
     secrets = {
