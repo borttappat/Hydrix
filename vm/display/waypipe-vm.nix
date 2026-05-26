@@ -105,6 +105,33 @@ in {
 
   environment.systemPackages = [ pkgs.waypipe pkgs.socat ];
 
+  # XDG desktop portal — resolves file picker D-Bus calls immediately.
+  # Without this, apps timeout (5-25s) waiting for a portal before falling back.
+  # gtk backend handles FileChooser without needing a Wayland compositor.
+  xdg.portal = {
+    enable = true;
+    extraPortals = [ pkgs.xdg-desktop-portal-gtk ];
+    config.common.default = [ "gtk" ];
+  };
+
+  # D-Bus-activated services don't inherit the user session environment,
+  # so WAYLAND_DISPLAY is unset when xdg-desktop-portal-gtk starts.
+  # GTK fails to initialize without a display → portal crashes → Firefox
+  # waits out the full D-Bus timeout (~10s) before degrading.
+  # Inject the known-fixed display name so the portal starts cleanly.
+  systemd.user.services.xdg-desktop-portal.serviceConfig.Environment =
+    [ "WAYLAND_DISPLAY=waypipe-0" "XDG_RUNTIME_DIR=/run/user/1000" ];
+  systemd.user.services.xdg-desktop-portal-gtk.serviceConfig.Environment =
+    [ "WAYLAND_DISPLAY=waypipe-0" "XDG_RUNTIME_DIR=/run/user/1000" ];
+
+  # Force Electron apps (Signal, VS Code, etc.) to use native Wayland.
+  # Without this, Electron defaults to Xwayland which bypasses waypipe's
+  # title-prefix injection, so Sway's for_window rules never match and
+  # windows land on the wrong workspace (or don't appear at all).
+  environment.sessionVariables = {
+    ELECTRON_OZONE_PLATFORM_HINT = "auto";
+  };
+
   # Neither xpra nor waypipe auto-starts — host pushes the correct mode on VM start
   systemd.services.xpra-vsock.wantedBy = lib.mkForce [];
   systemd.services.xpra-audio-reconnect.wantedBy = lib.mkForce [];
@@ -256,6 +283,7 @@ in {
             export HOME="/home/${username}"
             export USER="${username}"
             export PATH="/etc/profiles/per-user/${username}/bin:/run/current-system/sw/bin:/nix/var/nix/profiles/default/bin"
+            export ELECTRON_OZONE_PLATFORM_HINT=auto
             ${lib.optionalString audioEnabled ''export PULSE_SERVER="unix:/run/user/1000/pulse/host-native"''}
             ${pkgs.util-linux}/bin/setsid "''${ARGS[@]}" </dev/null >>/tmp/waypipe-launch.log 2>&1 &
             echo "launched: ''${ARGS[*]}"

@@ -25,7 +25,10 @@ let
     raw      = builtins.floor (base * relation);
   in toString (if raw < 11 then 11 else raw);
 
-  wofiCornerRadius = toString (config.hydrix.graphical.ui.cornerRadius or 2);
+  wofiCornerRadius = let ui = config.hydrix.graphical.ui;
+    in toString (if (ui.pillRadius or null) != null
+                 then ui.pillRadius
+                 else builtins.floor ((ui.cornerRadius or 2) * (ui.pillRadiusScale or 2.0)));
 
   wofiLauncher = pkgs.writeShellScriptBin "wofi-launcher" ''
     set -euo pipefail

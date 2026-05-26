@@ -545,25 +545,20 @@ in {
       })
 
       # Secrets Provisioning for MicroVMs
-      # For each VM with secrets = [ "github" ] in vms.<name>, create a service to:
+      # For each VM with secrets != [] in vms.<name>, create a service to:
       #   1. Ensure /run/hydrix-secrets/<name>/ssh exists before virtiofsd starts
       #      (virtiofsd crashes if its source path is missing — tmpfiles races it)
-      #   2. Copy decrypted keys from /run/secrets/github/ before the VM boots
-      # Runs unconditionally — handles missing keys gracefully so VMs start even
-      # on fresh installs before sops is configured.
+      #   2. Copy decrypted keys for each named secret before the VM boots
+      # No ConditionPathExists guard — mkdir always runs so virtiofsd never races.
+      # Key copy is guarded per-file, so fresh installs (no age key yet) are safe.
       (lib.mkIf (vmsWithSecrets != {}) (
-        lib.mapAttrs' (name: _: lib.nameValuePair "hydrix-secrets-${name}" {
+        lib.mapAttrs' (name: vmCfg: lib.nameValuePair "hydrix-secrets-${name}" {
           description = "Provision secrets for microVM ${name}";
           wantedBy = [ "microvm-virtiofsd@${name}.service" "microvm@${name}.service" ];
           before = [ "microvm-virtiofsd@${name}.service" "microvm@${name}.service" ];
-          # Wait for hydrix-github-secrets to decrypt (or gracefully fail) before copying
-          wants = [ "hydrix-github-secrets.service" ];
-          after = [ "local-fs.target" "hydrix-github-secrets.service" ];
-
-          # Skip entirely when age key is absent (fresh install / no sops configured).
-          # ConditionPathExists causes systemd to mark the service "skipped" (not failed),
-          # so it never blocks virtiofsd or the microVM from starting.
-          unitConfig.ConditionPathExists = "/var/lib/sops-nix/age-key.txt";
+          wants = lib.optionals (builtins.elem "github" vmCfg.secrets) [ "hydrix-github-secrets.service" ];
+          after = [ "local-fs.target" ]
+            ++ lib.optionals (builtins.elem "github" vmCfg.secrets) [ "hydrix-github-secrets.service" ];
 
           serviceConfig = {
             Type = "oneshot";
@@ -572,26 +567,30 @@ in {
 
           script = ''
             SECRETS_DIR="/run/hydrix-secrets/${name}/ssh"
-            GITHUB_SECRETS="/run/secrets/github"
 
-            # Create secrets directory
-            mkdir -p "$SECRETS_DIR" || true
-            chmod 700 "$SECRETS_DIR" || true
+            mkdir -p "$SECRETS_DIR"
+            chmod 700 "$SECRETS_DIR"
 
-            # Copy GitHub SSH keys if they exist
-            if [ -f "$GITHUB_SECRETS/id_ed25519" ]; then
-              cp "$GITHUB_SECRETS/id_ed25519" "$SECRETS_DIR/"
-              chmod 600 "$SECRETS_DIR/id_ed25519"
-            else
-              echo "Warning: GitHub private key not found at $GITHUB_SECRETS/id_ed25519"
-            fi
-
-            if [ -f "$GITHUB_SECRETS/id_ed25519.pub" ]; then
-              cp "$GITHUB_SECRETS/id_ed25519.pub" "$SECRETS_DIR/"
-              chmod 644 "$SECRETS_DIR/id_ed25519.pub"
-            else
-              echo "Warning: GitHub public key not found at $GITHUB_SECRETS/id_ed25519.pub"
-            fi
+            ${lib.concatMapStrings (secret:
+              if secret == "github" then ''
+                GITHUB_SECRETS="/run/secrets/github"
+                if [ -f "$GITHUB_SECRETS/id_ed25519" ]; then
+                  cp "$GITHUB_SECRETS/id_ed25519" "$SECRETS_DIR/"
+                  chmod 600 "$SECRETS_DIR/id_ed25519"
+                else
+                  echo "Warning: github id_ed25519 not found"
+                fi
+                if [ -f "$GITHUB_SECRETS/id_ed25519.pub" ]; then
+                  cp "$GITHUB_SECRETS/id_ed25519.pub" "$SECRETS_DIR/"
+                  chmod 644 "$SECRETS_DIR/id_ed25519.pub"
+                else
+                  echo "Warning: github id_ed25519.pub not found"
+                fi
+              ''
+              else ''
+                echo "Warning: unknown secret type '${secret}' — skipping"
+              ''
+            ) vmCfg.secrets}
 
             echo "Secrets provisioned for ${name}"
           '';

@@ -370,6 +370,13 @@ in {
             "browser.newtabpage.activity-stream.asrouter.userprefs.cfr.addons" = false;
             "browser.newtabpage.activity-stream.asrouter.userprefs.cfr.features" = false;
 
+            # Use XDG desktop portal for file picker dialogs.
+            # Without this, Firefox falls back to the GTK native file chooser
+            # which queries GVfs for bookmarks and times out in minimal VM environments.
+            # 0 = never, 1 = always, 2 = auto-detect (default); always-on is safe
+            # since the portal works on both host and VMs.
+            "widget.use-xdg-desktop-portal.file-picker" = 1;
+
             # Font/UI scaling for HiDPI displays
             # NOTE: layout.css.devPixelsPerPx is managed dynamically by firefox-dpi wrapper
             # It reads scale_factor from ~/.config/hydrix/scaling.json at runtime
