@@ -45,7 +45,6 @@ let meta = import ./meta.nix; in
       enable = true;
       homeSize = 10240;  # 10GB — adjust as needed
     };
-    secrets.github = false;  # Enable after setting up GitHub SSH key (see: gh auth login)
   };
   hydrix.networking.vmSubnet = meta.subnet;
 

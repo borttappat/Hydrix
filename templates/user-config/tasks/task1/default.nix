@@ -9,6 +9,5 @@
 
     # Per-engagement options:
     # encryption.enable = true;   # Encrypt home volume
-    # secrets.github = true;      # Mount GitHub SSH key from sops
   };
 }

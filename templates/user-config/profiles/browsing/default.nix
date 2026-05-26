@@ -48,7 +48,6 @@ let meta = import ./meta.nix; in
       enable = true;
       homeSize = 10240;  # 10GB
     };
-    secrets.github = true;
   };
   hydrix.networking.vmSubnet = meta.subnet;
 

@@ -33,16 +33,24 @@ let
     });
   };
 
+  # Options files (split from the monolithic modules/options.nix)
+  optionsModules = [
+    ../shared/options.nix
+    ../host/options.nix
+    ../vm/options.nix
+    ../theming/options.nix
+  ];
+
   # Common modules for ALL Hydrix systems
   commonModules = [
     { nixpkgs.config.allowUnfree = true; }
     { nixpkgs.overlays = [ overlay-unstable overlay-lkl-memory ]; }
 
-    # Hydrix options (single source of truth)
-    ../modules/options.nix
+    # Hydrix options (split by concern)
+  ] ++ optionsModules ++ [
 
     # Core modules (shared by host + VMs)
-    ../modules/core
+    ../shared/core
 
     # External modules
     home-manager.nixosModules.home-manager
@@ -77,36 +85,36 @@ in rec {
       ++ [
         { hydrix.userColorschemesDir = userColorschemesDir; }
         # Base system modules (services, virtualization)
-        ../modules/base/services.nix
-        ../modules/base/virt.nix
-        ../modules/base/sops.nix
+        ../host/base/services.nix
+        ../host/virt.nix
+        ../host/base/sops.nix
 
         # Host scripts (rebuild, microvm CLI, hydrix-tui, etc.)
-        ../modules/base/hydrix-scripts.nix
+        ../host/base/hydrix-scripts.nix
 
         # Xpra host (VM app forwarding)
-        ../modules/base/xpra-host.nix
+        ../host/vm-integration/xpra-host.nix
 
         # MicroVM host management (virtiofsd, TAP interfaces)
-        ../modules/base/microvm-host.nix
+        ../host/vm-integration/microvm-host.nix
 
         # Builder VM host integration
-        ../modules/base/builder-host.nix
+        ../host/vm-integration/builder-host.nix
 
         # Git-sync VM host integration
-        ../modules/base/gitsync-host.nix
+        ../host/vm-integration/gitsync-host.nix
 
         # Host-specific modules (networking, VFIO, specialisations, hardware)
-        ../modules/host
+        ../host
 
         # MicroVM host support
         microvm.nixosModules.host
 
         # waypipe VM forwarding (active when sway or hyprland enabled)
-        ../modules/wm/sway/waypipe.nix
+        ../theming/wm/sway/waypipe.nix
 
         # Graphical environment
-        ../modules/graphical
+        ../theming
 
         # Set vmType to host
         { hydrix.vmType = "host"; }
@@ -130,11 +138,6 @@ in rec {
     extraInputs ? {},     # User-provided inputs: nix-index-database, burpsuite-nix, etc.
     userProfiles ? null,  # Path to user's profiles directory (overlays base profile)
     hostConfig ? {},      # Host settings VMs should inherit (font family, etc.)
-    # Whether secrets/github.yaml exists in the Hydrix repo.
-    # Auto-detected at eval time — no user action needed.
-    # When false (fork with no secrets file), vm-secrets virtiofs share is omitted
-    # and VMs boot normally even if secrets.github = true is set in profiles.
-    secretsEnabled ? builtins.pathExists ../secrets/github.yaml,
     userColorschemesDir ? null,
   }:
   let
@@ -146,12 +149,11 @@ in rec {
       ++ nixpkgs.lib.optional (allInputs ? nix-index-database)
            allInputs.nix-index-database.nixosModules.nix-index
       ++ [
-      { hydrix.userColorschemesDir = userColorschemesDir;
-        hydrix.microvm.secretsEnabled = secretsEnabled; }
+      { hydrix.userColorschemesDir = userColorschemesDir; }
       microvm.nixosModules.microvm
-      ../modules/microvm/microvm-base.nix  # User setup, vsock, shares, etc.
-    ] ++ nixpkgs.lib.optionals (builtins.pathExists ../profiles/${profile}) [
-      ../profiles/${profile}               # Hydrix base profile (only if it exists)
+      ../vm/infra/microvm-base.nix  # User setup, vsock, shares, etc.
+    ] ++ nixpkgs.lib.optionals (builtins.pathExists ../vm/profiles/${profile}) [
+      ../vm/profiles/${profile}               # Hydrix base profile (only if it exists)
     ] ++ [
       {
         networking.hostName = hostname;
@@ -182,9 +184,9 @@ in rec {
     modules = [
       { nixpkgs.config.allowUnfree = true; }
       { nixpkgs.overlays = [ overlay-unstable ]; }
-      ../modules/options.nix
+    ] ++ optionsModules ++ [
       microvm.nixosModules.microvm
-      ../modules/microvm/microvm-router.nix
+      ../vm/infra/microvm-router.nix
       { networking.hostName = "microvm-router"; }
     ] ++ nixpkgs.lib.optional (wifiPciAddress != "") {
       hydrix.hardware.vfio.wifiPciAddress = wifiPciAddress;
@@ -224,9 +226,9 @@ in rec {
     modules = [
       { nixpkgs.config.allowUnfree = true; }
       { nixpkgs.overlays = [ overlay-unstable ]; }
-      ../modules/options.nix
+    ] ++ optionsModules ++ [
       microvm.nixosModules.microvm
-      ../modules/microvm/microvm-router-stable.nix
+      ../vm/infra/microvm-router-stable.nix
       { networking.hostName = "microvm-router-stable"; }
     ] ++ nixpkgs.lib.optional (wifiPciAddress != "") {
       hydrix.hardware.vfio.wifiPciAddress = wifiPciAddress;
@@ -253,9 +255,9 @@ in rec {
     modules = [
       { nixpkgs.config.allowUnfree = true; }
       { nixpkgs.overlays = [ overlay-unstable ]; }
-      ../modules/options.nix
+    ] ++ optionsModules ++ [
       microvm.nixosModules.microvm
-      ../modules/microvm/microvm-builder.nix
+      ../vm/infra/microvm-builder.nix
       {
         networking.hostName = "microvm-builder";
         # Pass host username and optional local Hydrix path to builder module
@@ -291,9 +293,9 @@ in rec {
     modules = [
       { nixpkgs.config.allowUnfree = true; }
       { nixpkgs.overlays = [ overlay-unstable ]; }
-      ../modules/options.nix
+    ] ++ optionsModules ++ [
       microvm.nixosModules.microvm
-      ../modules/microvm/microvm-infra-base.nix
+      ../vm/infra/microvm-infra-base.nix
       { networking.hostName = "microvm-${name}"; }
     ] ++ modules;
   };
@@ -315,8 +317,8 @@ in rec {
     inherit system;
     modules = commonModules ++ [
       { hydrix.userColorschemesDir = userColorschemesDir; }
-      ../modules/vm/vm-base.nix  # VM base configuration
-      ../profiles/${profile}     # Hydrix base profile (always included)
+      ../vm/base/vm-base.nix    # VM base configuration
+      ../vm/profiles/${profile} # Hydrix base profile (always included)
       "${nixpkgs}/nixos/modules/virtualisation/disk-image.nix"
       {
         image.efiSupport = false;
@@ -344,8 +346,8 @@ in rec {
     inherit system;
     modules = [
       { nixpkgs.config.allowUnfree = true; }
-      ../modules/options.nix
-      ../modules/vm/libvirt-router.nix
+    ] ++ optionsModules ++ [
+      ../vm/infra/libvirt-router.nix
       "${nixpkgs}/nixos/modules/virtualisation/disk-image.nix"
       { image.efiSupport = false; }
     ] ++ nixpkgs.lib.optional (extraNetworks != []) {
