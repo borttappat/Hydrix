@@ -353,6 +353,15 @@ in {
       github = {
         enable = lib.mkEnableOption "GitHub SSH key provisioning";
       };
+
+      githubSecretsFile = lib.mkOption {
+        type = lib.types.nullOr lib.types.path;
+        default = null;
+        description = ''
+          Path to the encrypted github.yaml file in your hydrix-config repo.
+          Set this in your machine config: hydrix.secrets.githubSecretsFile = ../secrets/github.yaml;
+        '';
+      };
     };
 
     # =========================================================================

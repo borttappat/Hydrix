@@ -197,12 +197,13 @@
     # Setup workflow:
     #   1. Rebuild once (generates /etc/ssh/ssh_host_ed25519_key)
     #   2. Run: sops-age-pubkey          (prints your age public key)
-    #   3. Add key to secrets/.sops.yaml
-    #   4. Fill secrets/github.yaml, encrypt: sops -e -i secrets/github.yaml
+    #   3. Add key to secrets/.sops.yaml in your hydrix-config
+    #   4. Fill secrets/github.yaml, encrypt: cd secrets && sops -e -i github.yaml
     #   5. Set enable = true + github.enable = true, then rebuild
     secrets = {
       enable = false;
       github.enable = false;
+      # githubSecretsFile = ../secrets/github.yaml;
     };
 
     # ─────────────────────────────────────────────────────────────────────

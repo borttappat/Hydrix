@@ -33,36 +33,36 @@ in {
   imports = [
     ../options.nix
     # Base system modules (shared with regular VMs)
-    ../base/nixos-base.nix
+    ../../host/base/nixos-base.nix
     ../base/users-vm.nix
-    ../base/networking.nix
+    ../../host/base/networking.nix
 
     # Core system (X11, fish shell, essential packages)
-    ../core.nix
+    ../../shared/core
 
     # Graphical stack (Stylix theming, HM programs, fonts, colors)
     # Sub-modules handle VM differences internally (isVM checks)
     # Also provides VM color sync scripts (wal-sync, refresh-colors, set-colorscheme-mode)
-    ../graphical
+    ../../theming/graphical
 
     # VM scaling wrappers (alacritty, firefox, rofi, obsidian)
     # Reads scaling.json from host for consistent font sizes
-    ../vm/vm-scaling.nix
+    ../theming/vm-scaling.nix
 
     # Xpra guest for seamless app forwarding (unified module for all VMs)
-    ../vm/xpra-shared.nix
+    ../display/xpra-shared.nix
 
     # waypipe display mode handler (vsock:14509); coexists with xpra
-    ../vm/waypipe-vm.nix
+    ../display/waypipe-vm.nix
 
     # vm-dev, vm-sync scripts (shared with libvirt VMs)
-    ../vm/vm-dev.nix
+    ../dev/vm-dev.nix
 
     # Auto-import packages from profiles/<vmType>/packages/
-    ../packages/auto-include.nix
+    ../base/auto-include.nix
 
     # Files transfer agent (vsock 14506) for host-orchestrated encrypted file ops
-    ../vm/files-agent.nix
+    ../dev/files-agent.nix
   ];
 
   options.hydrix.microvm = {

@@ -23,7 +23,7 @@ in
     ./wm/focus-mode.nix
 
     # Shell configuration (fish, starship)
-    ./shell/fish.nix
+    ./programs/fish.nix
   ];
 
   config = lib.mkIf cfg.enable {

@@ -35,35 +35,35 @@ in {
     ../options.nix
 
     # Base system modules
-    ../base/nixos-base.nix
+    ../../host/base/nixos-base.nix
     ../base/users-vm.nix
-    ../base/networking.nix
+    ../../host/base/networking.nix
 
     # Minimal CLI environment (always included)
     ./vm-minimal.nix
 
     # GUI apps for xpra forwarding (alacritty, firefox, obsidian, pywal)
-    ./xpra-apps.nix
+    ../display/xpra-apps.nix
 
     # VM theming scripts (wal-sync, set-colorscheme-mode, refresh-colors)
-    ./vm-theming.nix
+    ../theming/vm-theming.nix
 
     # VM-specific modules
     ./qemu-guest.nix
     ./shared-store.nix
     ./bake-config.nix
-    ./xpra-shared.nix  # Unified xpra module for all VMs
-    ./waypipe-vm.nix   # waypipe display mode handler (vsock:14509); coexists with xpra
-    ./vm-scaling.nix
-    ./vm-dev.nix       # vm-dev, vm-sync scripts for package development
+    ../display/xpra-shared.nix  # Unified xpra module for all VMs
+    ../display/waypipe-vm.nix   # waypipe display mode handler (vsock:14509); coexists with xpra
+    ../theming/vm-scaling.nix
+    ../dev/vm-dev.nix       # vm-dev, vm-sync scripts for package development
 
     # Core desktop environment (i3, X11)
     # Only activates when hydrix.graphical.enable = true
-    ../core.nix
+    ../../shared/core
 
     # Unified graphical environment (Stylix + Home Manager)
     # Only activates when hydrix.graphical.enable = true
-    ../graphical
+    ../../theming/graphical
   ];
 
   options.hydrix.vm = {

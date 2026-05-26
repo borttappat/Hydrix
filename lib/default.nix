@@ -138,11 +138,11 @@ in rec {
     extraInputs ? {},     # User-provided inputs: nix-index-database, burpsuite-nix, etc.
     userProfiles ? null,  # Path to user's profiles directory (overlays base profile)
     hostConfig ? {},      # Host settings VMs should inherit (font family, etc.)
-    # Whether secrets/github.yaml exists in the Hydrix repo.
-    # Auto-detected at eval time — no user action needed.
-    # When false (fork with no secrets file), vm-secrets virtiofs share is omitted
-    # and VMs boot normally even if secrets.github = true is set in profiles.
-    secretsEnabled ? builtins.pathExists ../secrets/github.yaml,
+    # Whether secrets/github.yaml exists in the user's hydrix-config repo.
+    # Pass builtins.pathExists ./secrets/github.yaml from your flake.nix.
+    # When false, vm-secrets virtiofs share is omitted and VMs boot normally
+    # even if secrets.github = true is set in profiles.
+    secretsEnabled ? false,
     userColorschemesDir ? null,
   }:
   let

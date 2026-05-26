@@ -236,6 +236,7 @@
           vmThemeSyncModule
           { hydrix.vmThemeSync.enable = true; }
         ];
+        secretsEnabled = builtins.pathExists ./secrets/github.yaml;
         inherit userProfiles hostConfig userColorschemesDir;
       };
     }) discoveredTasks);
@@ -324,6 +325,7 @@
         hostname = "microvm-${m._profileName}";
         extraInputs = { inherit (inputs) nix-index-database burpsuite-nix; };
         modules  = [ vmThemeSyncModule { hydrix.vmThemeSync.enable = true; } ];
+        secretsEnabled = builtins.pathExists ./secrets/github.yaml;
         inherit userProfiles hostConfig userColorschemesDir;
       };
     }) discoveredMetas);

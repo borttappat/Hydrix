@@ -15,9 +15,10 @@
 #
 # Usage:
 #   1. Enable: hydrix.secrets.enable = true;
-#   2. Rebuild to generate age key: rebuild
-#   3. Get public key: sops-age-pubkey
-#   4. Re-encrypt secrets for new key: SOPS_AGE_KEY_FILE=/var/lib/sops-nix/age-key.txt sops rotate -i secrets/github.yaml
+#   2. Set: hydrix.secrets.githubSecretsFile = ../secrets/github.yaml;
+#   3. Rebuild to generate age key: rebuild
+#   4. Get public key: sops-age-pubkey
+#   5. Re-encrypt secrets for new key: SOPS_AGE_KEY_FILE=/var/lib/sops-nix/age-key.txt sops rotate -i secrets/github.yaml
 #
 { config, lib, pkgs, ... }:
 
@@ -30,8 +31,8 @@ let
   # SSH host key to derive age key from
   sshHostKeyPath = "/etc/ssh/ssh_host_ed25519_key";
 
-  # Secrets file path (in Hydrix repo — encrypted with user's age key)
-  githubSecretsPath = toString ../../secrets/github.yaml;
+  # Secrets file path — set via hydrix.secrets.githubSecretsFile in machine config
+  githubSecretsPath = if cfg.githubSecretsFile != null then toString cfg.githubSecretsFile else null;
 
 in {
   config = lib.mkIf cfg.enable {
@@ -56,7 +57,7 @@ in {
 
     # Decrypt GitHub secrets at boot (non-fatal — fresh install safe)
     # Runs before VM provisioning services which copy from /run/secrets/github/
-    systemd.services.hydrix-github-secrets = lib.mkIf cfg.github.enable {
+    systemd.services.hydrix-github-secrets = lib.mkIf (cfg.github.enable && githubSecretsPath != null) {
       description = "Decrypt GitHub SSH secrets for MicroVM provisioning";
       wantedBy = [ "multi-user.target" ];
       after = [ "local-fs.target" ];
@@ -95,7 +96,7 @@ in {
         else
           echo "Warning: could not decrypt GitHub secrets"
           echo "On a fresh install, run 'sops-age-pubkey' after first rebuild, then:"
-          echo "  SOPS_AGE_KEY_FILE=/var/lib/sops-nix/age-key.txt sops rotate -i ${githubSecretsPath}"
+          echo "  SOPS_AGE_KEY_FILE=/var/lib/sops-nix/age-key.txt sops rotate -i <path-to-secrets/github.yaml>"
         fi
       '';
     };
