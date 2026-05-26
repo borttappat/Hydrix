@@ -80,7 +80,7 @@ ensure_hydrix_source() {
     # If SCRIPT_DIR is set and the repo tree looks intact, nothing to do
     if [[ -n "$SCRIPT_DIR" ]] \
         && [[ -d "$SCRIPT_DIR/../templates/user-config" ]] \
-        && [[ -d "$SCRIPT_DIR/../disko" ]]; then
+        && [[ -d "$SCRIPT_DIR/../host/disko" ]]; then
         return 0
     fi
 
@@ -2603,7 +2603,7 @@ partition_and_mount() {
     log "Partitioning disk with disko..."
 
     local layout="${CONFIG[layout]}"
-    local disko_file="$SCRIPT_DIR/../disko/${layout}.nix"
+    local disko_file="$SCRIPT_DIR/../host/disko/${layout}.nix"
 
     if [[ ! -f "$disko_file" ]]; then
         error "Disko layout file not found: $disko_file"
