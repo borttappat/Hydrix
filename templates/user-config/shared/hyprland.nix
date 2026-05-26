@@ -72,6 +72,7 @@ let
 
     # ── Startup ────────────────────────────────────────────────────────────────
     exec-once = systemctl --user set-environment WAYLAND_DISPLAY=$WAYLAND_DISPLAY
+    exec-once = systemctl --user start hyprland-session.target
     exec-once = sh -c 'wal -Rnq; hypr-apply-colors'
     exec-once = sh -c 'WALL=$(cat "$HOME/.cache/wal/wal" 2>/dev/null); [ -n "$WALL" ] && swaybg -i "$WALL" -m fill'
     exec-once = ${pkgs.dunst}/bin/dunst
@@ -310,7 +311,8 @@ let
     windowrulev2 = opacity 1.0 override, class:^(Alacritty)$
     windowrulev2 = opacity 1.0 override, class:^(alacritty)$
     windowrulev2 = opacity 1.0 override, class:^(hypr-float)$
-    windowrulev2 = rounding ${lkRounding}, class:^(dunst)$
+    windowrulev2 = rounding ${lkRounding}, class:^(Dunst)$
+    windowrulev2 = rounding ${lkRounding}, class:^(wofi)$
   '';
 
   hyprlock_conf = pkgs.writeText "hyprlock.conf" ''
@@ -386,7 +388,13 @@ in {
       _dir="$HOME/.config/hypr"
       # Remove stale symlink if HM previously managed this file
       [ -L "$_dir/hyprland.conf" ] && rm -f "$_dir/hyprland.conf"
-      cat ${hyprlandConf} > "$_dir/hyprland.conf"
+      # Skip write when content unchanged — nix store path is a content hash.
+      # Unconditional writes trigger an inotify-based Hyprland reload on every rebuild.
+      _stamp="$_dir/.hyprland-conf-stamp"
+      if [ "$(cat "$_stamp" 2>/dev/null)" != "${hyprlandConf}" ]; then
+        cat ${hyprlandConf} > "$_dir/hyprland.conf"
+        echo "${hyprlandConf}" > "$_stamp"
+      fi
     '';
 
     home.activation.hyprlandLockConfig = lib.hm.dag.entryAfter ["writeBoundary"] ''
@@ -395,6 +403,16 @@ in {
       [ -L "$_dir/hyprlock.conf" ] && rm -f "$_dir/hyprlock.conf"
       cat ${hyprlock_conf} > "$_dir/hyprlock.conf"
     '';
+
+    # Target activated by Hyprland exec-once; waybar and other services WantedBy this.
+    systemd.user.targets.hyprland-session = {
+      Unit = {
+        Description = "Hyprland compositor session";
+        BindsTo     = [ "graphical-session.target" ];
+        After       = [ "graphical-session-pre.target" ];
+        Wants       = [ "graphical-session-pre.target" ];
+      };
+    };
 
     # Systemd user service — starts automatically with hyprland-session.target,
     # restartable immediately after rebuild without a Hyprland restart.

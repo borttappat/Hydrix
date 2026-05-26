@@ -16,6 +16,7 @@ in {
         polybar = 1.0;
         rofi = 1.0;
         dunst = 1.0;
+        wofi = 1.2;
         firefox = 1.2;
         gtk = 1.0;
       };

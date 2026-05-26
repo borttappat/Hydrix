@@ -27,6 +27,7 @@ in {
         polybar = 1.0;
         rofi = 0.75;
         dunst = 0.75;
+        wofi = 1.2;
         firefox = 1.3;
         gtk = 1.0;
       };
@@ -36,6 +37,7 @@ in {
         polybar = 13.5;
         rofi = 11;
         dunst = 11;
+        wofi = 11;
         firefox = 17;
         gtk = 12;
       };

@@ -59,7 +59,6 @@ let meta = import ./meta.nix; in
   services.tor = {
     enable = true;
     client.enable = true;
-    settings.SOCKSPort = [ 9050 ];
   };
 
   # =========================================================================

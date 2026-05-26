@@ -130,6 +130,9 @@
       type = "@ROUTER_TYPE@";  # "microvm" (recommended), "libvirt", or "none"
       autostart = true;        # Start router VM automatically
 
+      wan.mode = "@WAN_MODE@";  # "auto" (WiFi passthrough → macvtap fallback), "pci-passthrough", "macvtap", "none"
+      @WAN_DEVICE_LINE@
+
       # ─── Mullvad VPN (optional) ────────────────────────────────────────
       # 1. mullvad.net → Account → WireGuard config → select server → download .conf
       # 2. Place downloaded files in ~/hydrix-config/vpn/
@@ -150,8 +153,6 @@
 
       # ─── libvirt router (if type = "libvirt") ──────────────────────────
       # router.libvirt.vmName  = "router";        # DEFAULT: "router"
-      # router.libvirt.wan.mode = "auto";         # DEFAULT: "auto"
-      #   # Options: "auto", "pci-passthrough", "macvtap", "none"
     };
 
     # ─────────────────────────────────────────────────────────────────────
@@ -162,9 +163,9 @@
       isAsus = @IS_ASUS@;       # true → asus-linux (asusctl, supergfxctl, ROG features)
 
       vfio = {
-        enable = true;
-        pciIds = [ "@WIFI_PCI_ID@" ];           # Your WiFi card's vendor:device ID
-        wifiPciAddress = "@WIFI_PCI_ADDRESS@";  # Your WiFi card's PCI address
+        enable = @VFIO_ENABLE@;
+        pciIds = @VFIO_PCI_IDS@;               # Your WiFi card's vendor:device ID (empty list if no WiFi)
+        wifiPciAddress = "@WIFI_PCI_ADDRESS@";  # Your WiFi card's PCI address (empty string if no WiFi)
       };
 
       # bluetooth.enable = true;     # DEFAULT: true - Bluetooth + Blueman
