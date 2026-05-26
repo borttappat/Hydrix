@@ -138,11 +138,6 @@ in rec {
     extraInputs ? {},     # User-provided inputs: nix-index-database, burpsuite-nix, etc.
     userProfiles ? null,  # Path to user's profiles directory (overlays base profile)
     hostConfig ? {},      # Host settings VMs should inherit (font family, etc.)
-    # Whether secrets/github.yaml exists in the user's hydrix-config repo.
-    # Pass builtins.pathExists ./secrets/github.yaml from your flake.nix.
-    # When false, vm-secrets virtiofs share is omitted and VMs boot normally
-    # even if secrets.github = true is set in profiles.
-    secretsEnabled ? false,
     userColorschemesDir ? null,
   }:
   let
@@ -154,8 +149,7 @@ in rec {
       ++ nixpkgs.lib.optional (allInputs ? nix-index-database)
            allInputs.nix-index-database.nixosModules.nix-index
       ++ [
-      { hydrix.userColorschemesDir = userColorschemesDir;
-        hydrix.microvm.secretsEnabled = secretsEnabled; }
+      { hydrix.userColorschemesDir = userColorschemesDir; }
       microvm.nixosModules.microvm
       ../vm/infra/microvm-base.nix  # User setup, vsock, shares, etc.
     ] ++ nixpkgs.lib.optionals (builtins.pathExists ../vm/profiles/${profile}) [

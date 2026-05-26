@@ -6,52 +6,66 @@
 # Used by hydrix.lib.mkInfraVm — not intended for direct import.
 { config, lib, ... }:
 let vmName = config.networking.hostName; in {
-  system.stateVersion = "25.05";
-  nixpkgs.hostPlatform = lib.mkDefault "x86_64-linux";
 
-  microvm = {
-    hypervisor  = "qemu";
-    qemu.machine = "pc";
-    vcpu = lib.mkDefault 1;
-    mem  = lib.mkDefault 1024;
+  config = {
+    system.stateVersion = "25.05";
+    nixpkgs.hostPlatform = lib.mkDefault "x86_64-linux";
 
-    graphics.enable = false;
-    qemu.extraArgs = [
-      "-vga"     "none"
-      "-display" "none"
-      "-chardev" "socket,id=console,path=/var/lib/microvms/${vmName}/console.sock,server=on,wait=off"
-      "-serial"  "chardev:console"
+    microvm = {
+      hypervisor  = "qemu";
+      qemu.machine = "pc";
+      vcpu = lib.mkDefault 1;
+      mem  = lib.mkDefault 1024;
+
+      graphics.enable = false;
+      qemu.extraArgs = [
+        "-vga"     "none"
+        "-display" "none"
+        "-chardev" "socket,id=console,path=/var/lib/microvms/${vmName}/console.sock,server=on,wait=off"
+        "-serial"  "chardev:console"
+      ];
+
+      shares = [
+        {
+          tag        = "nix-store";
+          source     = "/nix/store";
+          mountPoint = "/nix/.ro-store";
+          proto      = "virtiofs";
+        }
+        # Host secrets directory — always mounted; host pre-creates for all enabled VMs.
+        # Empty when no secrets are provisioned (vms.<name>.secrets = [] in machine config).
+        {
+          tag        = "vm-secrets";
+          source     = "/run/hydrix-secrets/${vmName}";
+          mountPoint = "/mnt/vm-secrets";
+          proto      = "virtiofs";
+          readOnly   = true;
+        }
+      ];
+
+      volumes = [{
+        image      = "/var/lib/microvms/${vmName}/nix-overlay.qcow2";
+        mountPoint = "/nix/.rw-store";
+        size       = 2048;
+        autoCreate = true;
+      }];
+    };
+
+    boot.initrd.availableKernelModules = [
+      "virtio_balloon" "virtio_blk" "virtio_pci" "virtio_ring"
+      "virtio_net" "virtio_scsi" "squashfs"
     ];
+    boot.kernelParams = [ "8250.nr_uarts=1" "console=tty1" "console=ttyS0,115200n8" ];
 
-    shares = [{
-      tag        = "nix-store";
-      source     = "/nix/store";
-      mountPoint = "/nix/.ro-store";
-      proto      = "virtiofs";
-    }];
+    networking = {
+      useDHCP               = true;
+      enableIPv6            = false;
+      networkmanager.enable = false;
+      firewall.enable       = false;
+    };
 
-    volumes = [{
-      image      = "/var/lib/microvms/${vmName}/nix-overlay.qcow2";
-      mountPoint = "/nix/.rw-store";
-      size       = 2048;
-      autoCreate = true;
-    }];
+    services.qemuGuest.enable = true;
+    security.sudo.wheelNeedsPassword = false;
+    nix.enable = false;
   };
-
-  boot.initrd.availableKernelModules = [
-    "virtio_balloon" "virtio_blk" "virtio_pci" "virtio_ring"
-    "virtio_net" "virtio_scsi" "squashfs"
-  ];
-  boot.kernelParams = [ "8250.nr_uarts=1" "console=tty1" "console=ttyS0,115200n8" ];
-
-  networking = {
-    useDHCP               = true;
-    enableIPv6            = false;
-    networkmanager.enable = false;
-    firewall.enable       = false;
-  };
-
-  services.qemuGuest.enable = true;
-  security.sudo.wheelNeedsPassword = false;
-  nix.enable = false;
 }

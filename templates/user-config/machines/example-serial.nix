@@ -213,19 +213,19 @@
       enable = true;
       vms = {
         "microvm-router"   = { enable = true; autostart = true; };
-        "microvm-browsing" = { enable = true; /* secrets.github = true; */ };
-        "microvm-pentest"  = { enable = true; /* secrets.github = true; */ };
-        "microvm-dev"      = { enable = true; secrets.github = true; };
-        "microvm-comms"    = { enable = true; /* secrets.github = true; */ };
+        "microvm-browsing" = { enable = true; };
+        "microvm-pentest"  = { enable = true; };
+        "microvm-dev"      = { enable = true; secrets = [ "github" ]; };
+        "microvm-comms"    = { enable = true; };
         "microvm-lurking"  = { enable = true; };
-        "microvm-builder"  = { enable = true; /* secrets.github = true; */ };
-        "microvm-gitsync"  = { enable = true; };
+        "microvm-builder"  = { enable = true; };
+        "microvm-gitsync"  = { enable = true; secrets = [ "github" ]; };
         "microvm-files"       = { enable = true; };
         "microvm-usb-sandbox" = { enable = true; };
         "microvm-hostsync"    = { enable = true; };
       };
       # autostart = true  starts VM at boot (default: false — start manually)
-      # secrets.github = true  requires: secrets.github.enable = true (above)
+      # secrets = [ "github" ]  provisions SSH key from secrets/github.yaml into the VM
     };
 
     # ─────────────────────────────────────────────────────────────────────

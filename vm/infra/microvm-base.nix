@@ -163,22 +163,6 @@ in {
     };
 
 
-    # Secrets provisioning options
-    secrets = {
-      github = lib.mkEnableOption "Provision GitHub SSH key from host";
-    };
-
-    secretsEnabled = lib.mkOption {
-      type = lib.types.bool;
-      default = false;
-      description = ''
-        Whether secrets infrastructure is available for this VM.
-        Set automatically by mkMicroVM based on whether secrets/github.yaml
-        exists in the Hydrix repo. When false, the vm-secrets virtiofs share
-        is not added and VMs boot normally without SSH keys.
-      '';
-    };
-
     # Encryption options for persistent volumes
     encryption = {
       enable = lib.mkOption {
@@ -305,10 +289,10 @@ in {
           proto = "virtiofs";
           readOnly = true;
         }
-      ] ++ lib.optionals (config.hydrix.microvm.secrets.github && config.hydrix.microvm.secretsEnabled) [
-        # Host secrets directory (provisioned by host-side hydrix-secrets service)
-        # Contains SSH keys for GitHub authentication
-        # Only added when secretsEnabled=true (secrets/github.yaml exists in Hydrix repo)
+      ] ++ [
+        # Host secrets directory — always mounted; host pre-creates for all enabled VMs.
+        # Empty when no secrets are provisioned (vms.<name>.secrets = [] in machine config).
+        # VM-side provisioning service checks for file existence before copying.
         {
           tag = "vm-secrets";
           source = "/run/hydrix-secrets/${vmName}";
@@ -891,7 +875,9 @@ EOF
     };
 
     # ===== GitHub SSH key provisioning =====
-    systemd.services.hydrix-secrets-provision = lib.mkIf (config.hydrix.microvm.secrets.github && config.hydrix.microvm.secretsEnabled) {
+    # Always runs — checks for file existence before copying.
+    # Keys are only present when vms.<name>.secrets includes "github" in machine config.
+    systemd.services.hydrix-secrets-provision = {
       description = "Provision GitHub SSH key from host secrets";
       wantedBy = [ "multi-user.target" ];
       after = [ "local-fs.target" ] ++ lib.optionals config.hydrix.microvm.persistence.enable [ "home.mount" ];

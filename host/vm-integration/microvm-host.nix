@@ -29,8 +29,8 @@ let
     then lib.filterAttrs (name: _: builtins.elem name infrastructureVMs) enabledVMs
     else enabledVMs;
 
-  # Filter VMs that need GitHub secrets
-  vmsWithGithubSecrets = lib.filterAttrs (_: v: v.enable && v.secrets.github) cfg.vms;
+  # Filter VMs that have any secrets to provision
+  vmsWithSecrets = lib.filterAttrs (_: v: v.enable && v.secrets != []) cfg.vms;
 
   # Check if router microVM is enabled
   routerEnabled =
@@ -330,16 +330,14 @@ in {
     # subdirectory) causes the condition to always fail, preventing the runner
     # symlink from being created on first boot.
     # The config subdirectory is created by hydrix-microvm-config-dirs below.
-    # Always create secrets directories for all enabled VMs.
-    # VM profiles may set hydrix.microvm.secrets.github = true (adding a
-    # virtiofs share), but the host can't see VM-side options at eval time.
-    # Virtiofsd crashes if the source path is missing, so pre-create for all.
+    # Pre-create secrets source dirs for all enabled VMs.
+    # virtiofsd crashes if the source path is missing at start — pre-creating
+    # for all enabled VMs means the share is always safe to add when secrets != [].
     ++ (lib.mapAttrsToList (name: _: "d /run/hydrix-secrets/${name}/ssh 0700 root root -")
       (lib.filterAttrs (_: v: v.enable) cfg.vms))
     # Create /run/secrets/github so the provisioning service always has a valid
-    # source directory to check, even when sops is not configured. Without this,
-    # fresh installs without sops never get the dir and virtiofsd may fail.
-    ++ lib.optionals (vmsWithGithubSecrets != {}) [
+    # source directory to check, even when sops is not configured.
+    ++ lib.optionals (vmsWithSecrets != {}) [
       "d /run/secrets/github 0700 root root -"
     ];
 
@@ -547,13 +545,13 @@ in {
       })
 
       # Secrets Provisioning for MicroVMs
-      # For each VM with secrets.github = true, create a service to:
+      # For each VM with secrets = [ "github" ] in vms.<name>, create a service to:
       #   1. Ensure /run/hydrix-secrets/<name>/ssh exists before virtiofsd starts
       #      (virtiofsd crashes if its source path is missing — tmpfiles races it)
       #   2. Copy decrypted keys from /run/secrets/github/ before the VM boots
       # Runs unconditionally — handles missing keys gracefully so VMs start even
       # on fresh installs before sops is configured.
-      (lib.mkIf (vmsWithGithubSecrets != {}) (
+      (lib.mkIf (vmsWithSecrets != {}) (
         lib.mapAttrs' (name: _: lib.nameValuePair "hydrix-secrets-${name}" {
           description = "Provision secrets for microVM ${name}";
           wantedBy = [ "microvm-virtiofsd@${name}.service" "microvm@${name}.service" ];
@@ -597,7 +595,7 @@ in {
 
             echo "Secrets provisioned for ${name}"
           '';
-        }) vmsWithGithubSecrets
+        }) vmsWithSecrets
       ))
 
       # First-boot VM builder: builds unbuilt VMs and starts autostart VMs.

@@ -568,12 +568,10 @@ in {
               default = false;
               description = "Start this microVM at boot";
             };
-            secrets = {
-              github = lib.mkOption {
-                type = lib.types.bool;
-                default = false;
-                description = "Provision GitHub SSH key";
-              };
+            secrets = lib.mkOption {
+              type = lib.types.listOf lib.types.str;
+              default = [];
+              description = "Named secrets to provision into this VM (e.g. [ \"github\" ])";
             };
           };
         });
