@@ -97,6 +97,11 @@ secure_cleanup() {
 
     # Clear SSH command override
     unset GIT_SSH_COMMAND
+
+    # Remove temp clone used for template fetching
+    if [[ -n "${HYDRIX_TEMPLATES_TMPDIR:-}" ]] && [[ -d "$HYDRIX_TEMPLATES_TMPDIR" ]]; then
+        rm -rf "$HYDRIX_TEMPLATES_TMPDIR"
+    fi
 }
 
 # Register cleanup handler for all exit paths
@@ -110,6 +115,61 @@ success() { echo "[SUCCESS] $*"; }
 warn() { echo "[WARN] $*"; }
 
 command_exists() { command -v "$1" &>/dev/null; }
+
+# Resolve the templates/user-config directory regardless of invocation method.
+# On first call when templates are not found locally (curl|bash on a fresh machine),
+# does a shallow clone of the Hydrix repo to a temp dir and caches the result.
+HYDRIX_TEMPLATES_CACHE=""
+HYDRIX_TEMPLATES_TMPDIR=""
+
+find_hydrix_templates() {
+    # Return cached result from previous call
+    if [[ -n "$HYDRIX_TEMPLATES_CACHE" ]]; then
+        echo "$HYDRIX_TEMPLATES_CACHE"; return 0
+    fi
+
+    local found=""
+
+    # 1. Explicit override
+    if [[ -n "${HYDRIX_TEMPLATES:-}" ]] && [[ -d "$HYDRIX_TEMPLATES" ]]; then
+        found="$HYDRIX_TEMPLATES"
+    # 2. Current user's ~/Hydrix
+    elif [[ -d "$HOME/Hydrix/templates/user-config" ]]; then
+        found="$HOME/Hydrix/templates/user-config"
+    # 3. Real invoking user when running under sudo (HOME=/root in that case)
+    elif [[ -n "${SUDO_USER:-}" ]]; then
+        local sudo_home
+        sudo_home=$(getent passwd "$SUDO_USER" 2>/dev/null | cut -d: -f6 || echo "")
+        if [[ -n "$sudo_home" ]] && [[ -d "$sudo_home/Hydrix/templates/user-config" ]]; then
+            found="$sudo_home/Hydrix/templates/user-config"
+        fi
+    fi
+
+    # 4. Relative to script location (direct invocation from local clone)
+    if [[ -z "$found" ]] && [[ -n "${SCRIPT_DIR:-}" ]] && [[ -d "$SCRIPT_DIR/../templates/user-config" ]]; then
+        found="$SCRIPT_DIR/../templates/user-config"
+    fi
+
+    # 5. Fetch from GitHub — covers curl|bash on a fresh machine with no local clone
+    if [[ -z "$found" ]]; then
+        log "Templates not found locally — fetching from GitHub..."
+        local clone_dir
+        clone_dir=$(mktemp -d)
+        local branch="${HYDRIX_BRANCH:-main}"
+        if git clone --depth=1 --branch "$branch" \
+            https://github.com/borttappat/Hydrix.git "$clone_dir/Hydrix" 2>&1; then
+            found="$clone_dir/Hydrix/templates/user-config"
+            HYDRIX_TEMPLATES_TMPDIR="$clone_dir"
+            success "Templates fetched from GitHub (branch: $branch)"
+        else
+            rm -rf "$clone_dir"
+            return 1
+        fi
+    fi
+
+    HYDRIX_TEMPLATES_CACHE="$found"
+    echo "$found"
+}
 
 # ========== GIT AUTHENTICATION ==========
 
@@ -848,13 +908,9 @@ copy_template_specialisations() {
 
     mkdir -p "$CONFIG_DIR/specialisations"
 
-    local template_dir=""
-
-    if [[ -d "$HOME/Hydrix/templates/user-config/specialisations" ]]; then
-        template_dir="$HOME/Hydrix/templates/user-config/specialisations"
-    elif [[ -d "$SCRIPT_DIR/../templates/user-config/specialisations" ]]; then
-        template_dir="$SCRIPT_DIR/../templates/user-config/specialisations"
-    fi
+    local tmpl_root
+    tmpl_root=$(find_hydrix_templates) || error "Could not find Hydrix templates directory"
+    local template_dir="$tmpl_root/specialisations"
 
     cp -r "$template_dir"/* "$CONFIG_DIR/specialisations/"
     log "  Copied from template"
@@ -865,15 +921,9 @@ copy_template_infra() {
 
     mkdir -p "$CONFIG_DIR/infra"
 
-    local template_dir=""
-
-    if [[ -d "$HOME/Hydrix/templates/user-config/infra" ]]; then
-        template_dir="$HOME/Hydrix/templates/user-config/infra"
-    elif [[ -d "$SCRIPT_DIR/../templates/user-config/infra" ]]; then
-        template_dir="$SCRIPT_DIR/../templates/user-config/infra"
-    fi
-
-    cp -r "$template_dir"/* "$CONFIG_DIR/infra/"
+    local tmpl_root
+    tmpl_root=$(find_hydrix_templates) || error "Could not find Hydrix templates directory"
+    cp -r "$tmpl_root/infra"/* "$CONFIG_DIR/infra/"
     log "  Copied from template"
 }
 
@@ -882,15 +932,9 @@ copy_template_profiles() {
 
     mkdir -p "$CONFIG_DIR/profiles"
 
-    local template_dir=""
-
-    if [[ -d "$HOME/Hydrix/templates/user-config/profiles" ]]; then
-        template_dir="$HOME/Hydrix/templates/user-config/profiles"
-    elif [[ -d "$SCRIPT_DIR/../templates/user-config/profiles" ]]; then
-        template_dir="$SCRIPT_DIR/../templates/user-config/profiles"
-    fi
-
-    cp -r "$template_dir"/* "$CONFIG_DIR/profiles/"
+    local tmpl_root
+    tmpl_root=$(find_hydrix_templates) || error "Could not find Hydrix templates directory"
+    cp -r "$tmpl_root/profiles"/* "$CONFIG_DIR/profiles/"
     log "  Copied from template"
 }
 
@@ -899,15 +943,9 @@ copy_template_shared() {
 
     mkdir -p "$CONFIG_DIR/shared"
 
-    local template_dir=""
-
-    if [[ -d "$HOME/Hydrix/templates/user-config/shared" ]]; then
-        template_dir="$HOME/Hydrix/templates/user-config/shared"
-    elif [[ -d "$SCRIPT_DIR/../templates/user-config/shared" ]]; then
-        template_dir="$SCRIPT_DIR/../templates/user-config/shared"
-    fi
-
-    cp -r "$template_dir"/* "$CONFIG_DIR/shared/"
+    local tmpl_root
+    tmpl_root=$(find_hydrix_templates) || error "Could not find Hydrix templates directory"
+    cp -r "$tmpl_root/shared"/* "$CONFIG_DIR/shared/"
     log "  Copied from template"
 }
 
@@ -958,15 +996,9 @@ copy_template_modules() {
 
     mkdir -p "$CONFIG_DIR/modules"
 
-    local template_dir=""
-
-    if [[ -d "$HOME/Hydrix/templates/user-config/modules" ]]; then
-        template_dir="$HOME/Hydrix/templates/user-config/modules"
-    elif [[ -d "$SCRIPT_DIR/../templates/user-config/modules" ]]; then
-        template_dir="$SCRIPT_DIR/../templates/user-config/modules"
-    fi
-
-    cp -r "$template_dir"/* "$CONFIG_DIR/modules/"
+    local tmpl_root
+    tmpl_root=$(find_hydrix_templates) || error "Could not find Hydrix templates directory"
+    cp -r "$tmpl_root/modules"/* "$CONFIG_DIR/modules/"
     log "  Copied from template"
 }
 
@@ -975,15 +1007,9 @@ copy_template_templates() {
 
     mkdir -p "$CONFIG_DIR/templates"
 
-    local template_dir=""
-
-    if [[ -d "$HOME/Hydrix/templates/user-config/templates" ]]; then
-        template_dir="$HOME/Hydrix/templates/user-config/templates"
-    elif [[ -d "$SCRIPT_DIR/../templates/user-config/templates" ]]; then
-        template_dir="$SCRIPT_DIR/../templates/user-config/templates"
-    fi
-
-    cp -r "$template_dir"/* "$CONFIG_DIR/templates/"
+    local tmpl_root
+    tmpl_root=$(find_hydrix_templates) || error "Could not find Hydrix templates directory"
+    cp -r "$tmpl_root/templates"/* "$CONFIG_DIR/templates/"
     log "  Copied from template (new-profile reads these)"
 }
 
@@ -991,14 +1017,9 @@ copy_template_configs() {
     log "Creating configs directory..."
     mkdir -p "$CONFIG_DIR/configs"
 
-    local template_dir=""
-    if [[ -d "$HOME/Hydrix/templates/user-config/configs" ]]; then
-        template_dir="$HOME/Hydrix/templates/user-config/configs"
-    elif [[ -d "$SCRIPT_DIR/../templates/user-config/configs" ]]; then
-        template_dir="$SCRIPT_DIR/../templates/user-config/configs"
-    fi
-
-    cp -r "$template_dir"/. "$CONFIG_DIR/configs/"
+    local tmpl_root
+    tmpl_root=$(find_hydrix_templates) || error "Could not find Hydrix templates directory"
+    cp -r "$tmpl_root/configs"/. "$CONFIG_DIR/configs/"
     log "  Copied program configs from template"
 }
 
@@ -1030,34 +1051,25 @@ copy_wallpapers() {
 copy_template_secrets() {
     log "Creating secrets scaffold..."
 
-    local template_dir=""
-    if [[ -d "$HOME/Hydrix/templates/user-config" ]]; then
-        template_dir="$HOME/Hydrix/templates/user-config"
-    elif [[ -d "$SCRIPT_DIR/../templates/user-config" ]]; then
-        template_dir="$SCRIPT_DIR/../templates/user-config"
-    fi
+    local tmpl_root
+    tmpl_root=$(find_hydrix_templates) || error "Could not find Hydrix templates directory"
 
     mkdir -p "$CONFIG_DIR/secrets"
-    [[ -f "$template_dir/secrets/.sops.yaml" ]] && \
-        cp "$template_dir/secrets/.sops.yaml" "$CONFIG_DIR/secrets/.sops.yaml"
-    [[ -f "$template_dir/secrets/github.yaml.example" ]] && \
-        cp "$template_dir/secrets/github.yaml.example" "$CONFIG_DIR/secrets/github.yaml.example"
-    [[ -f "$template_dir/.gitignore" ]] && \
-        cp "$template_dir/.gitignore" "$CONFIG_DIR/.gitignore"
+    [[ -f "$tmpl_root/secrets/.sops.yaml" ]] && \
+        cp "$tmpl_root/secrets/.sops.yaml" "$CONFIG_DIR/secrets/.sops.yaml"
+    [[ -f "$tmpl_root/secrets/github.yaml.example" ]] && \
+        cp "$tmpl_root/secrets/github.yaml.example" "$CONFIG_DIR/secrets/github.yaml.example"
+    [[ -f "$tmpl_root/.gitignore" ]] && \
+        cp "$tmpl_root/.gitignore" "$CONFIG_DIR/.gitignore"
     log "  secrets/ scaffold created (see secrets/.sops.yaml for setup instructions)"
 }
 
 copy_template_readme() {
-    local template_dir=""
+    local tmpl_root
+    tmpl_root=$(find_hydrix_templates) || return 0  # README is optional
 
-    if [[ -d "$HOME/Hydrix/templates/user-config" ]]; then
-        template_dir="$HOME/Hydrix/templates/user-config"
-    elif [[ -d "$SCRIPT_DIR/../templates/user-config" ]]; then
-        template_dir="$SCRIPT_DIR/../templates/user-config"
-    fi
-
-    if [[ -f "$template_dir/README.md" ]]; then
-        cp "$template_dir/README.md" "$CONFIG_DIR/README.md"
+    if [[ -f "$tmpl_root/README.md" ]]; then
+        cp "$tmpl_root/README.md" "$CONFIG_DIR/README.md"
         log "  Copied README.md from template"
     fi
 }
@@ -1067,15 +1079,10 @@ copy_template_readme() {
 generate_flake_nix() {
     log "Generating flake.nix from template..."
 
-    # Find the template file (same search order as other copy_template_* functions)
-    local template_file=""
-    if [[ -f "$HOME/Hydrix/templates/user-config/flake.nix" ]]; then
-        template_file="$HOME/Hydrix/templates/user-config/flake.nix"
-    elif [[ -f "$SCRIPT_DIR/../templates/user-config/flake.nix" ]]; then
-        template_file="$SCRIPT_DIR/../templates/user-config/flake.nix"
-    else
-        error "Could not find flake.nix template in Hydrix installation"
-    fi
+    local tmpl_root
+    tmpl_root=$(find_hydrix_templates) || error "Could not find Hydrix templates directory"
+    local template_file="$tmpl_root/flake.nix"
+    [[ -f "$template_file" ]] || error "flake.nix not found in templates: $template_file"
 
     # Substitute placeholders: use | as delimiter to avoid clashing with / in URLs
     sed \
@@ -1092,15 +1099,10 @@ generate_machine_nix() {
 
     mkdir -p "$CONFIG_DIR/machines"
 
-    # Find the example-serial.nix template (same search order as generate_flake_nix)
-    local template_file=""
-    if [[ -f "$HOME/Hydrix/templates/user-config/machines/example-serial.nix" ]]; then
-        template_file="$HOME/Hydrix/templates/user-config/machines/example-serial.nix"
-    elif [[ -f "$SCRIPT_DIR/../templates/user-config/machines/example-serial.nix" ]]; then
-        template_file="$SCRIPT_DIR/../templates/user-config/machines/example-serial.nix"
-    else
-        die "Could not find machine config template (templates/user-config/machines/example-serial.nix)"
-    fi
+    local tmpl_root
+    tmpl_root=$(find_hydrix_templates) || error "Could not find Hydrix templates directory"
+    local template_file="$tmpl_root/machines/example-serial.nix"
+    [[ -f "$template_file" ]] || error "Machine config template not found: $template_file"
 
     # Build hardware import line
     local hardware_import
