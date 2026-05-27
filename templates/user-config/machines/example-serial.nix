@@ -212,21 +212,17 @@
     # ─────────────────────────────────────────────────────────────────────
     microvmHost = {
       enable = true;
+      # All VMs are enabled by default — only declare autostart or secrets overrides.
+      # To disable a specific VM: "microvm-browsing" = { enable = false; };
       vms = {
-        "microvm-router"   = { enable = true; autostart = true; };
-        "microvm-browsing" = { enable = true; };
-        "microvm-pentest"  = { enable = true; };
-        "microvm-dev"      = { enable = true; secrets = [ "github" ]; };
-        "microvm-comms"    = { enable = true; };
-        "microvm-lurking"  = { enable = true; };
-        "microvm-builder"  = { enable = true; };
-        "microvm-gitsync"  = { enable = true; secrets = [ "github" ]; };
-        "microvm-files"       = { enable = true; };
-        "microvm-usb-sandbox" = { enable = true; };
-        "microvm-hostsync"    = { enable = true; };
+        "microvm-router" = { autostart = true; };
+        # Uncomment VMs that should receive GitHub SSH key from secrets/github.yaml:
+        # "microvm-browsing" = { secrets = [ "github" ]; };
+        # "microvm-dev"      = { secrets = [ "github" ]; };
+        # "microvm-pentest"  = { secrets = [ "github" ]; };
+        # "microvm-builder"  = { secrets = [ "github" ]; };
+        # "microvm-gitsync"  = { secrets = [ "github" ]; };
       };
-      # autostart = true  starts VM at boot (default: false — start manually)
-      # secrets = [ "github" ]  provisions SSH key from secrets/github.yaml into the VM
     };
 
     # ─────────────────────────────────────────────────────────────────────

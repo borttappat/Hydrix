@@ -85,8 +85,9 @@
 
     microvmHost = {
       enable = true;
-      # Router autostart controlled by router.autostart below
-      # Other VMs: enable in your machine config after install
+      # All VMs are enabled automatically via knownVms (populated by flake).
+      # Declare secrets or autostart overrides per-VM only when needed.
+      # Router autostart is controlled by router.autostart below.
     };
 
     builder.enable = true;

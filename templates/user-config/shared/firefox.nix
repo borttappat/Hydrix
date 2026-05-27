@@ -30,7 +30,12 @@
 
 {
   # Install Firefox on the host system (it's always on in VMs)
-  hydrix.graphical.firefox.hostEnable = lib.mkDefault false;
+  hydrix.graphical.firefox.hostEnable = lib.mkDefault true;
+
+  # Default extension set for the host — override in machines/<serial>.nix if needed
+  hydrix.graphical.firefox.extensions = lib.mkDefault [
+    "ublock-origin" "bitwarden" "vimium-ff" "darkreader" "pywalfox"
+  ];
 
   # User-agent spoofing — set per-profile, not globally
   # hydrix.graphical.firefox.userAgent = lib.mkDefault "edge-windows";

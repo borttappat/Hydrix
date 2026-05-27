@@ -23,21 +23,26 @@ let
   # VMs built/declared during a fresh install (infrastructureOnly=true)
   infrastructureVMs = [ "microvm-router" "microvm-router-stable" "microvm-builder" ];
 
+  # Merge: knownVms auto-enabled with defaults; explicit cfg.vms entries override.
+  allVms =
+    (lib.genAttrs cfg.knownVms (_: { enable = true; autostart = false; secrets = []; }))
+    // cfg.vms;
+
   # Enabled VMs, optionally filtered to infrastructure-only during first install
-  enabledVMs = lib.filterAttrs (_: v: v.enable) cfg.vms;
+  enabledVMs = lib.filterAttrs (_: v: v.enable) allVms;
   filteredVMs = if cfg.infrastructureOnly
     then lib.filterAttrs (name: _: builtins.elem name infrastructureVMs) enabledVMs
     else enabledVMs;
 
   # Filter VMs that have any secrets to provision
-  vmsWithSecrets = lib.filterAttrs (_: v: v.enable && v.secrets != []) cfg.vms;
+  vmsWithSecrets = lib.filterAttrs (_: v: v.enable && v.secrets != []) allVms;
 
   # Check if router microVM is enabled
   routerEnabled =
-    (cfg.vms ? "microvm-router" && cfg.vms."microvm-router".enable);
+    (allVms ? "microvm-router" && allVms."microvm-router".enable);
 
   stableRouterEnabled =
-    (cfg.vms ? "microvm-router-stable" && cfg.vms."microvm-router-stable".enable);
+    (allVms ? "microvm-router-stable" && allVms."microvm-router-stable".enable);
 
   # Router TAP interface to bridge mapping
   # TAP names must be max 15 chars (Linux limit)
@@ -545,57 +550,56 @@ in {
       })
 
       # Secrets Provisioning for MicroVMs
-      # For each VM with secrets != [] in vms.<name>, create a service to:
-      #   1. Ensure /run/hydrix-secrets/<name>/ssh exists before virtiofsd starts
-      #      (virtiofsd crashes if its source path is missing — tmpfiles races it)
-      #   2. Copy decrypted keys for each named secret before the VM boots
-      # No ConditionPathExists guard — mkdir always runs so virtiofsd never races.
-      # Key copy is guarded per-file, so fresh installs (no age key yet) are safe.
-      (lib.mkIf (vmsWithSecrets != {}) (
-        lib.mapAttrs' (name: vmCfg: lib.nameValuePair "hydrix-secrets-${name}" {
-          description = "Provision secrets for microVM ${name}";
-          wantedBy = [ "microvm-virtiofsd@${name}.service" "microvm@${name}.service" ];
-          before = [ "microvm-virtiofsd@${name}.service" "microvm@${name}.service" ];
-          wants = lib.optionals (builtins.elem "github" vmCfg.secrets) [ "hydrix-github-secrets.service" ];
-          after = [ "local-fs.target" ]
-            ++ lib.optionals (builtins.elem "github" vmCfg.secrets) [ "hydrix-github-secrets.service" ];
+      # Generated for ALL enabled VMs, not just those with secrets.
+      # This guarantees /run/hydrix-secrets/<name>/ssh exists before virtiofsd
+      # starts — virtiofsd crashes if its source path is missing and tmpfiles
+      # has no strict ordering guarantee relative to virtiofsd.
+      # For VMs with secrets: also copies decrypted keys.
+      # For VMs without secrets: mkdir only — VM starts cleanly, just no SSH keys.
+      # Key copy is guarded per-file, so machines without sops configured are safe.
+      (lib.mapAttrs' (name: vmCfg: lib.nameValuePair "hydrix-secrets-${name}" {
+        description = "Pre-create secrets dir and provision secrets for microVM ${name}";
+        wantedBy = [ "microvm-virtiofsd@${name}.service" "microvm@${name}.service" ];
+        before = [ "microvm-virtiofsd@${name}.service" "microvm@${name}.service" ];
+        wants = lib.optionals (builtins.elem "github" vmCfg.secrets) [ "hydrix-github-secrets.service" ];
+        after = [ "local-fs.target" ]
+          ++ lib.optionals (builtins.elem "github" vmCfg.secrets) [ "hydrix-github-secrets.service" ];
 
-          serviceConfig = {
-            Type = "oneshot";
-            RemainAfterExit = true;
-          };
+        serviceConfig = {
+          Type = "oneshot";
+          RemainAfterExit = true;
+        };
 
-          script = ''
-            SECRETS_DIR="/run/hydrix-secrets/${name}/ssh"
+        script = ''
+          SECRETS_DIR="/run/hydrix-secrets/${name}/ssh"
 
-            mkdir -p "$SECRETS_DIR"
-            chmod 700 "$SECRETS_DIR"
+          mkdir -p "$SECRETS_DIR"
+          chmod 700 "$SECRETS_DIR"
 
-            ${lib.concatMapStrings (secret:
-              if secret == "github" then ''
-                GITHUB_SECRETS="/run/secrets/github"
-                if [ -f "$GITHUB_SECRETS/id_ed25519" ]; then
-                  cp "$GITHUB_SECRETS/id_ed25519" "$SECRETS_DIR/"
-                  chmod 600 "$SECRETS_DIR/id_ed25519"
-                else
-                  echo "Warning: github id_ed25519 not found"
-                fi
-                if [ -f "$GITHUB_SECRETS/id_ed25519.pub" ]; then
-                  cp "$GITHUB_SECRETS/id_ed25519.pub" "$SECRETS_DIR/"
-                  chmod 644 "$SECRETS_DIR/id_ed25519.pub"
-                else
-                  echo "Warning: github id_ed25519.pub not found"
-                fi
-              ''
-              else ''
-                echo "Warning: unknown secret type '${secret}' — skipping"
-              ''
-            ) vmCfg.secrets}
+          ${lib.concatMapStrings (secret:
+            if secret == "github" then ''
+              GITHUB_SECRETS="/run/secrets/github"
+              if [ -f "$GITHUB_SECRETS/id_ed25519" ]; then
+                cp "$GITHUB_SECRETS/id_ed25519" "$SECRETS_DIR/"
+                chmod 600 "$SECRETS_DIR/id_ed25519"
+              else
+                echo "Warning: github id_ed25519 not found"
+              fi
+              if [ -f "$GITHUB_SECRETS/id_ed25519.pub" ]; then
+                cp "$GITHUB_SECRETS/id_ed25519.pub" "$SECRETS_DIR/"
+                chmod 644 "$SECRETS_DIR/id_ed25519.pub"
+              else
+                echo "Warning: github id_ed25519.pub not found"
+              fi
+            ''
+            else ''
+              echo "Warning: unknown secret type '${secret}' — skipping"
+            ''
+          ) vmCfg.secrets}
 
-            echo "Secrets provisioned for ${name}"
-          '';
-        }) vmsWithSecrets
-      ))
+          echo "Secrets dir ready for ${name}"
+        '';
+      }) enabledVMs)
 
       # First-boot VM builder: builds unbuilt VMs and starts autostart VMs.
       # Closures are typically cached from the installer so builds are instant.

@@ -165,7 +165,11 @@
             hydrix.networking.vmRegistry      = vmRegistry;
             hydrix.networking.profileNetworks = allProfileNetworks;
             hydrix.networking.extraNetworks   = extraNetworks;
-            hydrix.networking.infraTapBridges = infraTapBridges; }
+            hydrix.networking.infraTapBridges = infraTapBridges;
+            hydrix.microvmHost.knownVms =
+              map (m: "microvm-${m._profileName}") discoveredMetas
+              ++ map (m: "microvm-${m._infraName}") discoveredInfra
+              ++ map (m: "microvm-pentest-${m._taskName}") discoveredTasks; }
           ./shared/common.nix       # Locale + shared settings (all machines)
           ./shared/graphical.nix    # UI preferences (opacity, bluelight, etc.)
           ./shared/polybar.nix      # Polybar style, workspace labels, module layout

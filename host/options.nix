@@ -514,6 +514,12 @@ in {
         description = "Default bridge for microVM TAP interfaces";
       };
 
+      knownVms = lib.mkOption {
+        type = lib.types.listOf lib.types.str;
+        default = [];
+        description = "All VM names managed by this flake. Populated automatically by the flake — do not set manually.";
+      };
+
       # Default VM names (can be overridden by user)
       vmNames = {
         browse = lib.mkOption {
@@ -561,7 +567,11 @@ in {
       vms = lib.mkOption {
         type = lib.types.attrsOf (lib.types.submodule {
           options = {
-            enable = lib.mkEnableOption "this microVM";
+            enable = lib.mkOption {
+              type = lib.types.bool;
+              default = true;
+              description = "Enable this VM on this host. Set false to explicitly exclude a VM.";
+            };
             autostart = lib.mkOption {
               type = lib.types.bool;
               default = false;
