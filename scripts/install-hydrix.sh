@@ -2657,6 +2657,9 @@ partition_and_mount() {
 install_nixos() {
     local config_dir="/mnt/home/${CONFIG[username]}/hydrix-config"
 
+    # Raise file descriptor limit — Nix scans /mnt/nix/store and hits the default (1024) on live ISOs
+    ulimit -n 1048576 2>/dev/null || true
+
     # Copy pre-validated configuration from temp directory
     # (Config was already generated and validated before partitioning)
     log "Copying validated configuration to target..."
@@ -2770,6 +2773,9 @@ EOF
 
 prebuild_microvms() {
     local config_dir="$1"
+
+    # Raise file descriptor limit — nix build --store /mnt scans the target store
+    ulimit -n 1048576 2>/dev/null || true
 
     echo ""
     log "=== Pre-building Essential MicroVMs ==="
