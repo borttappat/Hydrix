@@ -85,12 +85,27 @@ let
         done
         echo "DONE"
         ;;
+      SYNC)
+        # Commit all changes then push — used by vault-cli sync
+        repo="$rest"
+        repo_path="/mnt/repos/$repo"
+        if [ ! -d "$repo_path/.git" ]; then echo "ERROR repo not found: $repo"; exit 0; fi
+        cd "$repo_path"
+        echo "OK syncing $repo"
+        git add -A
+        if ! git diff --cached --quiet; then
+          git commit -m "sync $(date +%Y-%m-%dT%H:%M)" 2>&1
+        else
+          echo "(nothing to commit)"
+        fi
+        if git push 2>&1; then echo "DONE"; else echo "ERROR push failed"; fi
+        ;;
       PING)
         echo "PONG"
         ;;
       *)
         echo "ERROR unknown command: $cmd"
-        echo "Commands: PUSH <repo>, PULL <repo>, FETCH <repo>, STATUS <repo>, REPOS, PING"
+        echo "Commands: PUSH <repo>, PULL <repo>, FETCH <repo>, SYNC <repo>, STATUS <repo>, REPOS, PING"
         ;;
     esac
   '';

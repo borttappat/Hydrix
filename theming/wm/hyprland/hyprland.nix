@@ -92,10 +92,11 @@
     monitor = ,preferred,auto,1
 
     # ── Framework services (VM integration) ──────────────────────────────────
-    exec-once = hypr-focus-daemon
+    # Import HYPRLAND_INSTANCE_SIGNATURE so systemd user services (hypr-focus-daemon,
+    # hypr-vm-borders-init, etc.) can call hyprctl without needing exec-once.
+    exec-once = systemctl --user set-environment HYPRLAND_INSTANCE_SIGNATURE=$HYPRLAND_INSTANCE_SIGNATURE
     exec-once = vm-push-display-mode
     exec-once = waypipe-connect-all
-    exec-once = hypr-vm-borders init
 
     # ── VM window routing (generated from vmRegistry) ─────────────────────────
     ${vmWindowRules}
@@ -358,8 +359,10 @@ GLSL
       esac
     }
     _wal_color() {
-      grep '^color4=' "$HOME/.cache/wal/colors.sh" 2>/dev/null \
-        | sed "s/^color4='//;s/'$//;s/#//" | head -1 | awk '{print $0 "ff"}'
+      local c
+      c=$(grep '^color4=' "$HOME/.cache/wal/colors.sh" 2>/dev/null \
+        | sed "s/^color4='//;s/'$//;s/#//" | head -1)
+      [ -n "$c" ] && echo "''${c}ff" || echo "7aa2f7ff"
     }
     _dynamic_color() {
       local profile="$1" WAL_KEY=""
@@ -367,8 +370,10 @@ GLSL
       ${dynamicMapCases}
       *) WAL_KEY="color4" ;;
       esac
-      ${pkgs.jq}/bin/jq -r --arg k "$WAL_KEY" '.colors[$k] // empty' "$WAL_COLORS" 2>/dev/null \
-        | sed 's/#//' | awk '{print $0 "ff"}'
+      local c
+      c=$(${pkgs.jq}/bin/jq -r --arg k "$WAL_KEY" '.colors[$k] // empty' "$WAL_COLORS" 2>/dev/null \
+        | sed 's/#//')
+      [ -n "$c" ] && echo "''${c}ff" || echo "7aa2f7ff"
     }
     _border_for_profile() {
       local profile="$1"
@@ -382,18 +387,25 @@ GLSL
     }
     _apply() { ${pkgs.hyprland}/bin/hyprctl keyword general:col.active_border "rgba($1)" 2>/dev/null || true; }
     _reapply() {
-      [ -z "''${HYPRLAND_INSTANCE_SIGNATURE:-}" ] && return
       local title profile
       title=$(${pkgs.hyprland}/bin/hyprctl activewindow -j 2>/dev/null | ${pkgs.jq}/bin/jq -r '.title // empty')
       profile=$(echo "$title" | sed -n 's/^\[\([^]]*\)\].*/\1/p')
       if [ -n "$profile" ]; then _apply "$(_border_for_profile "$profile")"
       else _apply "$(_wal_color)"; fi
     }
+    _sig() {
+      local sig="''${HYPRLAND_INSTANCE_SIGNATURE:-}"
+      if [ -z "$sig" ]; then
+        sig=$(ls "''${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/hypr/" 2>/dev/null | head -1)
+      fi
+      echo "$sig"
+    }
     case "''${1:-}" in
       reapply) _reapply ;;
       *)
-        [ -z "''${HYPRLAND_INSTANCE_SIGNATURE:-}" ] && exit 1
-        SOCKET="''${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/hypr/''${HYPRLAND_INSTANCE_SIGNATURE}/.socket2.sock"
+        SIG=$(_sig)
+        [ -z "$SIG" ] && exit 1
+        SOCKET="''${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/hypr/$SIG/.socket2.sock"
         while true; do
           ${pkgs.socat}/bin/socat - "UNIX-CONNECT:$SOCKET" 2>/dev/null \
             | ${pkgs.gnugrep}/bin/grep --line-buffered '^activewindow' \
@@ -471,5 +483,42 @@ in
           ${hyprApplyColors}/bin/hypr-apply-colors 2>/dev/null || true
         fi
       '';
+
+      # Focus border color daemon — managed by systemd so it starts even when
+      # hydrix-generated.conf wasn't present at first Hyprland launch.
+      # HYPRLAND_INSTANCE_SIGNATURE is imported into the session env by exec-once above;
+      # the daemon also falls back to socket auto-discovery if the env var is absent.
+      systemd.user.services.hypr-focus-daemon = {
+        Unit = {
+          Description = "Hyprland focus border color daemon";
+          After  = [ "hyprland-session.target" ];
+          PartOf = [ "hyprland-session.target" ];
+        };
+        Service = {
+          Type       = "simple";
+          ExecStart  = "${hyprFocusDaemon}/bin/hypr-focus-daemon";
+          Restart    = "on-failure";
+          RestartSec = 2;
+        };
+        Install.WantedBy = [ "hyprland-session.target" ];
+      };
+
+      # VM window border rules — oneshot that seeds vm-borders.conf and applies
+      # windowrulev2 keywords for all VMs that have focusBorder set.
+      systemd.user.services.hypr-vm-borders-init = {
+        Unit = {
+          Description = "Initialize Hyprland VM window border rules";
+          After  = [ "hyprland-session.target" ];
+          PartOf = [ "hyprland-session.target" ];
+        };
+        Service = {
+          Type             = "oneshot";
+          RemainAfterExit  = true;
+          ExecStart        = "${hyprVmBorders}/bin/hypr-vm-borders init";
+          Restart          = "on-failure";
+          RestartSec       = 2;
+        };
+        Install.WantedBy = [ "hyprland-session.target" ];
+      };
     };
   }

@@ -164,8 +164,11 @@
       vms = {
         "microvm-router"   = { autostart = true; };
         # hostsync requires ~/vm-inbox on the host (created automatically when enabled).
-        # Disabled by default - enable when you need secure inter-VM file transfers.
+        # Disabled by default — enable when you need secure inter-VM file transfers.
         "microvm-hostsync" = { enable = false; };
+        # vault requires setup before first use — see DOCUMENTATION.md §Vault VM.
+        # Disabled by default — enable and set autostart = true after initializing ~/vault/.
+        "microvm-vault"    = { enable = false; };
         # Uncomment VMs that should receive GitHub SSH key from secrets/github.yaml:
         # "microvm-browsing" = { secrets = [ "github" ]; };
         # "microvm-dev"      = { secrets = [ "github" ]; };

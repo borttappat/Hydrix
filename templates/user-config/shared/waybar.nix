@@ -748,6 +748,18 @@ let
     }
   '';
 
+  # Script that seeds waybar config files on first session — same content as the
+  # home.activation hook but runs as a user service before waybar starts, ensuring
+  # the files exist even when home-manager activation races with session startup.
+  waybarInitScript = pkgs.writeShellScript "waybar-init" ''
+    _dir="$HOME/.config/waybar"
+    mkdir -p "$_dir"
+    # Write only if absent — home.activation.waybarFiles owns structural updates on rebuild.
+    [ -f "$_dir/config" ]     || printf '%s' ${lib.escapeShellArg configJson} > "$_dir/config"
+    [ -f "$_dir/style.css" ]  || printf '%s' ${lib.escapeShellArg styleCSS} > "$_dir/style.css"
+    [ -f "$_dir/colors.css" ] || printf '%s' ${lib.escapeShellArg defaultColorsCSS} > "$_dir/colors.css"
+  '';
+
 in lib.mkIf shouldActivate {
   home-manager.users.${username} = { lib, ... }: {
     # All three waybar files are written as mutable regular files — not nix store symlinks.
@@ -771,12 +783,27 @@ in lib.mkIf shouldActivate {
       fi
     '';
 
+    # Seeds waybar config files before waybar starts — guards against the race where
+    # home-manager activation (system service) hasn't written configs yet on first boot.
+    systemd.user.services.waybar-init = {
+      Unit = {
+        Description = "Seed waybar config files for first session";
+        Before = [ "waybar.service" ];
+      };
+      Service = {
+        Type            = "oneshot";
+        RemainAfterExit = true;
+        ExecStart       = "${waybarInitScript}";
+      };
+      Install.WantedBy = [ "waybar.service" ];
+    };
+
     # Waybar — managed by systemd so lifecycle is serialised (no pkill races).
     # Started by hyprland-session.target; restarted by waybar-monitor-watch on monitor events.
     systemd.user.services.waybar = lib.mkIf shouldActivate {
       Unit = {
         Description = "Waybar status bar";
-        After       = [ "hyprland-session.target" ];
+        After       = [ "hyprland-session.target" "waybar-init.service" ];
         PartOf      = [ "hyprland-session.target" ];
       };
       Service = {

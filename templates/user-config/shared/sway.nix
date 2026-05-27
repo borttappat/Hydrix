@@ -103,8 +103,9 @@ in lib.mkIf config.hydrix.sway.enable {
       "${mod}+Shift+d" = null;
 
       # === Applications ===
-      "${mod}+o" = "exec obsidian";
-      "${mod}+z" = "exec zathura";
+      "${mod}+o"       = "exec obsidian";
+      "${mod}+z"       = "exec zathura";
+      "${mod}+Shift+p" = "exec vault-pick";
 
       # === Volume ===
       # Customise for your audio setup (zenaudio for ASUS cs42l43, pactl for PulseAudio, etc.)

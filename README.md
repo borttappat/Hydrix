@@ -66,6 +66,12 @@ For full documentation see [DOCUMENTATION.md](DOCUMENTATION.md).
          |   VM   |  |   VM   |  |   VM   |
          |CID:210 |  |CID:211 |  |CID:212 |
          +--------+  +--------+  +--------+
+
+         +--------+  +--------+
+         | Vault  |  |Hostsync|
+         |   VM   |  |   VM   |
+         |CID:213 |  |CID:214 |
+         +--------+  +--------+
 ```
 
 All VM communication uses vsock. No SSH or network access to VMs. Your configuration lives in a separate `~/hydrix-config/` repo that imports Hydrix as a flake input. Machine configs are named by hardware serial number for automatic detection during reinstalls.
@@ -74,7 +80,7 @@ All VM communication uses vsock. No SSH or network access to VMs. Your configura
 
 ## Features
 
-- **MicroVM compartmentalization** - profile VMs (browsing, pentest, dev, comms, lurking) and infrastructure VMs (router, builder, gitsync, files, usb-sandbox, hostsync)
+- **MicroVM compartmentalization** - profile VMs (browsing, pentest, dev, comms, lurking) and infrastructure VMs (router, builder, gitsync, files, vault, usb-sandbox, hostsync)
 - **WiFi VFIO passthrough** - host has no direct internet in lockdown mode; all traffic routes through the router VM
 - **Sway/Hyprland (Wayland) and i3 (X11)** - Started out with i3, migrated to Wayland for Waypipe suppoert over Xpra - VM apps forwarded as native windows via waypipe or xpra over vsock
 - **VM metrics polling** - polybar bottom bar pulls live CPU, RAM, disk, uptime from each running VM via vsock
@@ -85,6 +91,7 @@ All VM communication uses vsock. No SSH or network access to VMs. Your configura
 - **Builder VM** - builds host and VM closures from inside a locked-down nix environment with internet via router VM
 - **Gitsync VM** - push and pull git repos from lockdown mode without host internet
 - **Hostsync VM** - secure file inbox from VMs to host
+- **Vault VM** - isolated KeepassXC credential store with wofi picker and vsock-only access
 - **Declarative boot modes** - lockdown (default), administrative, fallback as NixOS specialisations
 - **Stable fallback router** - immutable break-glass router VM for when the main router config breaks
 - **USB sandbox** - safe handling of untrusted USB storage inside an isolated VM

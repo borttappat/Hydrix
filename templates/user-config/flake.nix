@@ -185,6 +185,7 @@
           ./shared/helix.nix
           ./shared/firefox.nix      # Host Firefox toggle + user-agent
           ./shared/obsidian.nix     # Host Obsidian toggle + vault paths
+          ./shared/vault.nix        # Vault VM credential launcher (vault-cli + vault-pick)
         ];
       };
     }) machineFiles);
