@@ -1,5 +1,19 @@
 # Virtualization configuration (for hosts, not VMs)
 { config, pkgs, lib, ... }:
+let
+  hydrixScriptsDir = ../../scripts;
+
+  mkLibvirtScript = name: script: pkgs.writeShellScriptBin name ''
+    HYDRIX_FLAKE_DIR="$HOME/hydrix-config"
+    export HYDRIX_FLAKE_DIR
+    cd "$HYDRIX_FLAKE_DIR"
+    if [[ -x "$HYDRIX_FLAKE_DIR/scripts/${script}" ]]; then
+      exec "$HYDRIX_FLAKE_DIR/scripts/${script}" "$@"
+    else
+      exec ${hydrixScriptsDir}/${script} "$@"
+    fi
+  '';
+in
 
 {
   options = {
@@ -101,8 +115,11 @@
       "kernel.unprivileged_userns_clone" = 1;
     };
 
-    # Virtualization packages
-    environment.systemPackages = with pkgs; [
+    # Virtualization packages + management scripts
+    environment.systemPackages = [
+      (mkLibvirtScript "build-base" "build-base.sh")
+      (mkLibvirtScript "deploy-vm"  "deploy-vm.sh")
+    ] ++ (with pkgs; [
       qemu_kvm
       virt-manager
       virt-viewer
@@ -119,11 +136,11 @@
       bridge-utils
       iproute2
       bind.dnsutils
-    ] ++ lib.optionals config.virtualisation.useDocker [
+    ]) ++ lib.optionals config.virtualisation.useDocker (with pkgs; [
       docker-compose
       lazydocker
-    ] ++ lib.optionals config.virtualisation.enableLookingGlass [
-      looking-glass-client
+    ]) ++ lib.optionals config.virtualisation.enableLookingGlass [
+      pkgs.looking-glass-client
     ];
 
     # Add user to virtualization groups

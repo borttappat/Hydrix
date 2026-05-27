@@ -132,9 +132,8 @@ let
     # The hydrix-tui handles libvirt VMs, not microVMs
 
     # ===== LIBVIRT VM MANAGEMENT =====
+    # build-base, deploy-vm: wired in host/virt.nix (gated on hydrix.libvirt.enable)
     hydrix-tui = "hydrix-tui.sh";
-    build-base = "build-base.sh";
-    deploy-vm = "deploy-vm.sh";
 
     # ===== PACKAGE SYNC =====
     vm-sync = "vm-sync.sh";
@@ -150,11 +149,10 @@ let
     vpn-status = "vpn-status.sh";
 
     # ===== UTILITIES =====
-    hydrix-lock = "lock.sh";
+    # hydrix-lock: wired in theming/wm/i3/scripts.nix (gated on hydrix.i3.enable)
+    # i3launch:    wired in theming/wm/i3/scripts.nix (gated on hydrix.i3.enable)
     pyenvshell = "pyenvshell.sh";
     hardware-identify = "hardware-identify.sh";
-    float-window = "float_window.sh";
-    i3launch = "i3launch.sh";
   };
 
   scriptPackages = lib.mapAttrsToList mkHydrixScript hydrixScripts;

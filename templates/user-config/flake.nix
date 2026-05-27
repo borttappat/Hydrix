@@ -182,6 +182,7 @@
           ./shared/zathura.nix      # PDF viewer settings
           ./shared/starship.nix     # Prompt env vars (config is in configs/starship/)
           ./shared/vim.nix          # Vim plugins (config is in configs/vim/)
+          ./shared/helix.nix
           ./shared/firefox.nix      # Host Firefox toggle + user-agent
           ./shared/obsidian.nix     # Host Obsidian toggle + vault paths
         ];

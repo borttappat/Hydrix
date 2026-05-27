@@ -21,6 +21,175 @@
   vmType = config.hydrix.vmType;
   isVM = vmType != null && vmType != "host";
 
+  i3LaunchScript = pkgs.writeShellScriptBin "i3launch" ''
+    # Clean up stale serverauth files older than 2 days
+    find "$HOME" -maxdepth 1 -name ".serverauth.*" -type f -mtime +2 -delete 2>/dev/null || true
+
+    # Detect VM vs physical by icon name
+    IS_VM="false"
+    _host=$(hostnamectl 2>/dev/null | grep "Icon name:" | cut -d: -f2 | xargs)
+    [[ "$_host" =~ [vV][mM] ]] && IS_VM="true"
+
+    if [[ "$IS_VM" == "true" ]]; then
+      _disp=$(${pkgs.xorg.xrandr}/bin/xrandr | grep -E "(Virtual-1|qxl-0)" | grep " connected" | cut -d' ' -f1 | head -n1)
+      if [ -n "$_disp" ]; then
+        ${pkgs.xorg.xrandr}/bin/xrandr --newmode "1920x1200" 193.25 1920 2056 2256 2592 1200 1203 1209 1245 -hsync +vsync 2>/dev/null || true
+        ${pkgs.xorg.xrandr}/bin/xrandr --newmode "2560x1440" 312.25 2560 2752 3024 3488 1440 1443 1448 1493 -hsync +vsync 2>/dev/null || true
+        ${pkgs.xorg.xrandr}/bin/xrandr --addmode "$_disp" 1920x1200 2>/dev/null || true
+        ${pkgs.xorg.xrandr}/bin/xrandr --addmode "$_disp" 2560x1440 2>/dev/null || true
+        ${pkgs.xorg.xrandr}/bin/xrandr --output "$_disp" --mode 2560x1440 2>/dev/null \
+          || ${pkgs.xorg.xrandr}/bin/xrandr --output "$_disp" --mode 1920x1200 2>/dev/null || true
+      fi
+    else
+      _int=$(${pkgs.xorg.xrandr}/bin/xrandr | grep "eDP" | cut -d' ' -f1 | head -n1)
+      if [ -n "$_int" ]; then
+        _res=$(${pkgs.xorg.xrandr}/bin/xrandr | grep "$_int" | grep -oP '\d+x\d+' | head -n1)
+        case "$_res" in
+          2880x1800) ${pkgs.xorg.xrandr}/bin/xrandr --output "$_int" --mode 1920x1200 ;;
+        esac
+      fi
+    fi
+
+    sleep 0.5
+    exec ${pkgs.i3}/bin/i3
+  '';
+
+  clickThroughScript = pkgs.writeShellScriptBin "make-click-through" ''
+    exec ${pkgs.python3}/bin/python3 ${pkgs.writeText "make-click-through.py" ''
+      #!/usr/bin/env python3
+      """Make an X11 window click-through using the X SHAPE extension."""
+      import sys
+      try:
+          from Xlib import display, X
+          from Xlib.ext import shape
+      except ImportError:
+          print("python-xlib not available", file=sys.stderr)
+          sys.exit(1)
+
+      if len(sys.argv) < 2:
+          print(f"Usage: {sys.argv[0]} <window-id>", file=sys.stderr)
+          sys.exit(1)
+
+      d = display.Display()
+      win = d.create_resource_object("window", int(sys.argv[1], 16))
+      win.shape_mask(shape.SO.Set, shape.SK.Input, 0, 0, X.NONE)
+      d.sync()
+    ''} "$@"
+  '';
+
+  microvmRofiScript = pkgs.writeShellScriptBin "microvm-rofi" ''
+    set -euo pipefail
+    SCALING_JSON="$HOME/.config/hydrix/scaling.json"
+
+    get_scaling_value() {
+      local key="$1" default="$2"
+      if [[ -f "$SCALING_JSON" ]]; then
+        ${pkgs.jq}/bin/jq -r "$key // $default" "$SCALING_JSON" 2>/dev/null || echo "$default"
+      else
+        echo "$default"
+      fi
+    }
+
+    get_color() {
+      local name="$1" fallback="$2" color
+      color=$(${pkgs.xorg.xrdb}/bin/xrdb -query 2>/dev/null | grep -E "^\*\.?''${name}:" | head -1 | awk '{print $2}')
+      echo "''${color:-$fallback}"
+    }
+
+    is_running() {
+      systemctl is-active --quiet "microvm@''${1}.service" 2>/dev/null
+    }
+
+    list_vms() {
+      systemctl list-units --type=service --all --plain --no-legend 2>/dev/null \
+        | grep "microvm@" | grep -v "router\|builder\|gitsync\|hostsync\|files\|usb-sandbox" \
+        | sed 's/microvm@\(.*\)\.service.*/\1/' | sort
+    }
+
+    build_theme() {
+      local n="''${1:-5}"
+      local bar_gaps corner_radius font_size font_name
+      bar_gaps=$(get_scaling_value '.sizes.bar_gaps' '10')
+      corner_radius=$(get_scaling_value '.sizes.corner_radius' '8')
+      font_size=$(get_scaling_value '.fonts.rofi' '12')
+      font_name=$(get_scaling_value '.font_name' 'Iosevka')
+      local bg fg accent
+      bg=$(get_color "color0" "#1a1b26")
+      fg=$(get_color "color7" "#c0caf5")
+      accent=$(get_color "color4" "#7aa2f7")
+      cat <<EOF
+    configuration { font: "$font_name Bold $font_size"; show-icons: false; disable-history: true; kb-cancel: "Escape,q"; kb-accept-entry: "Return,KP_Enter"; kb-row-up: "Up,k"; kb-row-down: "Down,j"; }
+    * { bg: ''${bg}B3; bg-solid: ''${bg}; fg: ''${fg}; accent: ''${accent}; }
+    window { location: north; anchor: north; x-offset: -25%; y-offset: ''${bar_gaps}px; width: 180px; background-color: @bg; border: 0px; border-radius: ''${corner_radius}px; }
+    mainbox { background-color: transparent; children: [inputbar, listview]; padding: 4px; }
+    listview { lines: $n; fixed-height: false; dynamic: true; scrollbar: false; background-color: transparent; spacing: 2px; }
+    element { padding: 8px 12px; background-color: transparent; text-color: @fg; border-radius: ''${corner_radius}px; }
+    element selected.normal { background-color: @accent; text-color: @bg-solid; }
+    element-text { background-color: transparent; text-color: inherit; }
+    inputbar { children: [entry]; padding: 0; background-color: transparent; border: 0; }
+    entry { padding: 0; background-color: transparent; text-color: transparent; placeholder: ""; }
+    EOF
+    }
+
+    show_selector() {
+      local vms display_list="" vm_array=() i=1
+      vms=$(list_vms)
+      [ -z "$vms" ] && { ${pkgs.libnotify}/bin/notify-send -t 2000 "VMs" "No profile VMs running"; exit 0; }
+      while IFS= read -r vm; do
+        [[ -z "$vm" ]] && continue
+        local display="''${vm#microvm-}" status="○"
+        is_running "$vm" && status="●"
+        display_list+="$i. $status $display"$'\n'
+        vm_array+=("$vm")
+        ((i++))
+      done <<< "$vms"
+      display_list+="q. quit"
+
+      local theme; theme=$(${pkgs.coreutils}/bin/mktemp /tmp/microvm-rofi-XXXXXX.rasi)
+      build_theme "$i" > "$theme"
+      local sel
+      sel=$(echo -n "$display_list" | ${pkgs.rofi}/bin/rofi -dmenu -theme "$theme" -m -4 -i -auto-select -p "" -format 'i' -selected-row 0 2>/dev/null) || true
+      rm -f "$theme"
+      [[ -z "$sel" || "$sel" -ge "''${#vm_array[@]}" ]] && exit 0
+      show_actions "''${vm_array[$sel]}" "''${vm_array[$sel]#microvm-}"
+    }
+
+    show_actions() {
+      local vm="$1" label="$2" is_running_vm=false
+      is_running "$vm" && is_running_vm=true
+
+      local actions=() display_list=""
+      if $is_running_vm; then
+        actions=(stop restart rebuild)
+        display_list=$'1. stop\n2. restart\n3. rebuild\nq. back'
+      else
+        actions=(start rebuild)
+        display_list=$'1. start\n2. rebuild\nq. back'
+      fi
+
+      local theme; theme=$(${pkgs.coreutils}/bin/mktemp /tmp/microvm-rofi-XXXXXX.rasi)
+      build_theme "''${#actions[@]}" > "$theme"
+      local sel
+      sel=$(echo -n "$display_list" | ${pkgs.rofi}/bin/rofi -dmenu -theme "$theme" -m -4 -i -auto-select -p "" -mesg "$label" -format 'i' -selected-row 0 2>/dev/null) || true
+      rm -f "$theme"
+      [[ -z "$sel" || "$sel" -ge "''${#actions[@]}" ]] && { show_selector; return; }
+
+      case "''${actions[$sel]}" in
+        start)   ${pkgs.libnotify}/bin/notify-send -t 2000 "VM" "Starting $label..."; microvm start "$vm" & ;;
+        stop)    ${pkgs.libnotify}/bin/notify-send -t 2000 "VM" "Stopping $label..."; microvm stop "$vm" & ;;
+        restart) ${pkgs.libnotify}/bin/notify-send -t 2000 "VM" "Restarting $label..."; microvm restart "$vm" & ;;
+        rebuild) ${pkgs.libnotify}/bin/notify-send -t 2000 "VM" "Rebuilding $label...";
+                 ${pkgs.alacritty}/bin/alacritty -e bash -c "microvm build '$vm'; echo; read -p 'Press Enter...'" & ;;
+      esac
+      disown 2>/dev/null || true
+    }
+
+    case "''${1:-}" in
+      --action) [[ -n "''${2:-}" ]] && show_actions "$2" "''${2#microvm-}" || show_selector ;;
+      *)        show_selector ;;
+    esac
+  '';
+
   generateLockscreenScript = pkgs.writeShellScriptBin "generate-lockscreen" ''
     #!/usr/bin/env bash
     # Pre-generate blurred lockscreen background with text overlay
@@ -454,6 +623,9 @@
 in {
   config = lib.mkIf (!isVM && config.hydrix.i3.enable) {
     environment.systemPackages = [
+      i3LaunchScript
+      clickThroughScript
+      microvmRofiScript
       lockScript
       lockInstantScript
       generateLockscreenScript
