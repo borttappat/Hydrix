@@ -2697,19 +2697,14 @@ EOF
     echo ""
     log "=== Running nixos-install (this takes 20-60 min depending on network) ==="
     echo ""
-    local mem_gb
+    local mem_gb cpu_count
     mem_gb=$(awk '/MemTotal/ {printf "%d", $2/1024/1024}' /proc/meminfo)
-    local max_jobs=1 cores=2
-    if (( mem_gb >= 32 )); then
-        max_jobs=4; cores=4
-    elif (( mem_gb >= 24 )); then
-        max_jobs=2; cores=4
-    elif (( mem_gb >= 16 )); then
-        max_jobs=2; cores=2
-    fi
-    log "  System has ${mem_gb}GB RAM — using --max-jobs $max_jobs --cores $cores"
+    cpu_count=$(nproc 2>/dev/null || echo "?")
+    log "  System has ${mem_gb}GB RAM, ${cpu_count} CPU threads — using max-jobs=auto, cores=0, http-connections=128"
     nixos-install --flake "$config_dir#${CONFIG[serial]}" --no-root-passwd \
-        --max-jobs "$max_jobs" --cores "$cores"
+        --option max-jobs auto \
+        --option cores 0 \
+        --option http-connections 128
 
     # Remove infrastructureOnly — first rebuild will build all enabled VMs
     log "Removing infrastructureOnly from machine config..."
@@ -2805,28 +2800,40 @@ prebuild_microvms() {
     local critical_failed=()
     local optional_failed=0
 
-    # Build critical VMs first
+    # Build critical VMs in parallel — independent closures, shared Nix daemon
+    # deduplicates common derivations automatically.
+    local -A build_pids build_descs
     for vm_entry in "${critical_vms[@]}"; do
         local vm_name="${vm_entry%%:*}"
         local vm_desc="${vm_entry#*:}"
 
-        log "Building ${vm_desc} [REQUIRED]..."
+        log "Launching build: ${vm_desc} [REQUIRED] (background)..."
 
         # --store /mnt ensures outputs go to the target system's nix store
         # --eval-store auto evaluates using the live ISO's daemon
-        if nix build "$config_dir#nixosConfigurations.${vm_name}.config.microvm.declaredRunner" \
+        nix build "$config_dir#nixosConfigurations.${vm_name}.config.microvm.declaredRunner" \
             --no-link \
             --store /mnt --eval-store auto \
-            --print-build-logs; then
-            success "  ${vm_name} built successfully"
-        else
-            warn "  ${vm_name} build FAILED"
-            critical_failed+=("$vm_name")
-        fi
-        echo ""
+            --print-build-logs \
+            --option max-jobs auto \
+            --option cores 0 \
+            > "/tmp/hydrix-build-${vm_name}.log" 2>&1 &
+        build_pids["$vm_name"]=$!
+        build_descs["$vm_name"]="$vm_desc"
     done
 
-    # Build optional VMs
+    log "Waiting for all critical VM builds to complete..."
+    for vm_name in "${!build_pids[@]}"; do
+        if wait "${build_pids[$vm_name]}"; then
+            success "  ${vm_name} built successfully"
+        else
+            warn "  ${vm_name} build FAILED — see /tmp/hydrix-build-${vm_name}.log"
+            critical_failed+=("$vm_name")
+        fi
+    done
+    echo ""
+
+    # Build optional VMs (sequentially — usually empty)
     for vm_entry in "${optional_vms[@]}"; do
         local vm_name="${vm_entry%%:*}"
         local vm_desc="${vm_entry#*:}"
@@ -2836,7 +2843,9 @@ prebuild_microvms() {
         if nix build "$config_dir#nixosConfigurations.${vm_name}.config.microvm.declaredRunner" \
             --no-link \
             --store /mnt --eval-store auto \
-            --print-build-logs; then
+            --print-build-logs \
+            --option max-jobs auto \
+            --option cores 0; then
             success "  ${vm_name} built successfully"
         else
             warn "  ${vm_name} build failed (can be built later)"

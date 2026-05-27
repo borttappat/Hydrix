@@ -34,9 +34,13 @@ let
         echo "OK"
         ;;
       xpra)
-        systemctl stop waypipe-vsock waypipe-launch ${lib.optionalString audioEnabled "pulse-vsock"} 2>/dev/null || true
-        systemctl start xpra-vsock
-        echo "xpra"
+        if systemctl list-unit-files xpra-vsock.service &>/dev/null; then
+          systemctl stop waypipe-vsock waypipe-launch ${lib.optionalString audioEnabled "pulse-vsock"} 2>/dev/null || true
+          systemctl start xpra-vsock
+          echo "xpra"
+        else
+          echo "xpra-unavailable"
+        fi
         ;;
       waypipe)
         systemctl stop xpra-vsock 2>/dev/null || true
@@ -132,9 +136,9 @@ in {
     ELECTRON_OZONE_PLATFORM_HINT = "auto";
   };
 
-  # Neither xpra nor waypipe auto-starts — host pushes the correct mode on VM start
-  systemd.services.xpra-vsock.wantedBy = lib.mkForce [];
-  systemd.services.xpra-audio-reconnect.wantedBy = lib.mkForce [];
+  # xpra auto-start suppression — only needed when i3.enable = true (xpra-shared.nix active)
+  systemd.services.xpra-vsock.wantedBy = lib.mkIf config.hydrix.i3.enable (lib.mkForce []);
+  systemd.services.xpra-audio-reconnect.wantedBy = lib.mkIf config.hydrix.i3.enable (lib.mkForce []);
 
   # ── display-mode (14509) ──────────────────────────────────────────────────
   # Runs as root so it can start/stop system services.

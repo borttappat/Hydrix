@@ -62,11 +62,11 @@
     colorscheme = "@COLORSCHEME@";
     graphical.wallpaper = "${hydrix}/wallpapers/WindowRain.png";
 
-    # Window manager selection — Hyprland is the default Wayland compositor.
-    # Enable i3 or sway alongside it if needed (each starts from a separate TTY).
+    # Window manager selection — all are off by default; enable exactly one here.
+    # i3.enable also gates the X11/xpra stack in all VMs (waypipe used otherwise).
     hyprland.enable = true;   # Wayland/Hyprland stack — start with: hyprland-session
-    # sway.enable = true;     # Wayland/Sway stack — start with: sway-session
-    # i3.enable = true;       # X11/i3/polybar/rofi/picom stack — start with: startx
+    # sway.enable = true;     # Wayland/Sway stack    — start with: sway-session
+    # i3.enable = true;       # X11/i3/polybar/rofi/picom + xpra in VMs — start with: startx
 
     # ── VM focus border colors ────────────────────────────────────────────
     # Controls how the active window border color changes when you switch to a VM workspace.

@@ -11,6 +11,8 @@
 #   - Uses vsock port 14500 for host connections
 #   - RGB encoding (no compression) — vsock is local kernel transport, bandwidth is free
 #
+# Gated on hydrix.i3.enable — only included when the X11/xpra stack is active.
+# Set hydrix.i3.enable = false (the default) to skip xpra entirely in this VM.
 { config, pkgs, lib, ... }:
 
 let
@@ -18,7 +20,7 @@ let
 
   # Check if this is a microVM (has microvm config) or libvirt VM
   isMicrovm = config.microvm or null != null;
-in {
+in lib.mkIf config.hydrix.i3.enable {
   # Vsock transport kernel module
   boot.kernelModules = [ "vmw_vsock_virtio_transport" ];
 
