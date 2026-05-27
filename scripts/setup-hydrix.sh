@@ -1074,7 +1074,7 @@ generate_flake_nix() {
     elif [[ -f "$SCRIPT_DIR/../templates/user-config/flake.nix" ]]; then
         template_file="$SCRIPT_DIR/../templates/user-config/flake.nix"
     else
-        die "Could not find flake.nix template in Hydrix installation"
+        echo "Could not find flake.nix template in Hydrix installation"
     fi
 
     # Substitute placeholders: use | as delimiter to avoid clashing with / in URLs
