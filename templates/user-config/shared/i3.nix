@@ -10,7 +10,7 @@
 let
   username = config.hydrix.username;
   mod = "Mod4";  # Host uses Super
-in {
+in lib.mkIf config.hydrix.i3.enable {
   home-manager.users.${username} = { lib, ... }: {
     xsession.windowManager.i3.config.keybindings = lib.mkOptionDefault {
       # === Terminal ===

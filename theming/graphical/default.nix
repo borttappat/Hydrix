@@ -63,8 +63,8 @@ in {
       # Required when any home-manager module enables xdg.portal (e.g. Hyprland)
       environment.pathsToLink = [ "/share/applications" "/share/xdg-desktop-portal" ];
 
-      # PAM service for i3lock-color authentication
-      security.pam.services.i3lock.enable = true;
+      # PAM service for i3lock-color authentication (i3 only)
+      security.pam.services.i3lock = lib.mkIf config.hydrix.i3.enable { enable = true; };
 
       # Clean up old Home Manager backups before HM activation runs
       systemd.services.hm-backup-cleanup = {

@@ -373,7 +373,7 @@ let
       valign = center
     }
   '';
-in {
+in lib.mkIf config.hydrix.hyprland.enable {
   home-manager.users.${username} = { lib, ... }: {
     home.activation.hyprlandKeymap = lib.hm.dag.entryAfter ["writeBoundary"] ''
       _dir="$HOME/.config/hypr"

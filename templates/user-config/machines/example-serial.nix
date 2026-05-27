@@ -80,7 +80,11 @@
     # sway.enable = true;     # Wayland/Sway stack — start with: sway-session
     # i3.enable = true;       # X11/i3/polybar/rofi/picom stack — start with: startx
 
-    # vmThemeSync.focusDaemon.mode = "dynamic";  # "static" or "dynamic" focus border colors
+    # ── VM focus border colors ────────────────────────────────────────────
+    # Controls how the active window border color changes when you switch to a VM workspace.
+    # Default (set by the hyprland module): "dynamic" — maps each VM type to a wal palette color.
+    # Override here to lock to the static per-VM colorscheme instead:
+    # vmThemeSync.focusDaemon.mode = "static";  # options: "dynamic" (default) | "static"
 
     # ─────────────────────────────────────────────────────────────────────
     # PATHS
@@ -216,6 +220,9 @@
       # To disable a specific VM: "microvm-browsing" = { enable = false; };
       vms = {
         "microvm-router" = { autostart = true; };
+        # hostsync requires ~/vm-inbox on the host (created automatically when enabled).
+        # Disabled by default — enable when you need secure inter-VM file transfers.
+        "microvm-hostsync" = { enable = false; };
         # Uncomment VMs that should receive GitHub SSH key from secrets/github.yaml:
         # "microvm-browsing" = { secrets = [ "github" ]; };
         # "microvm-dev"      = { secrets = [ "github" ]; };

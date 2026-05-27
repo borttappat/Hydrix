@@ -27,6 +27,14 @@
     ../shared/usb-blocking.nix
   ];
 
+  # =========================================================================
+  # SPECIALISATIONS (Boot Modes)
+  # =========================================================================
+  # The Hydrix framework defines the infrastructure for each mode:
+  #   - Base config = LOCKDOWN (no host internet, builder VM for builds)
+  #   - Administrative = adds gateway, libvirtd, full packages
+  #   - Fallback = emergency direct WiFi (requires reboot)
+  
   specialisation.administrative.configuration = {
     imports = [ ../specialisations/administrative.nix ];
   };
@@ -35,16 +43,36 @@
     imports = [ ../specialisations/fallback.nix ];
   };
 
+  # Custom modes: uncomment to add your own specialisation
+  # specialisation.leisure.configuration = {
+  #   imports = [ ../specialisations/leisure.nix ];
+  # };
+  
   users.users.@USERNAME@.hashedPassword = "@PASSWORD_HASH@";
 
+  # =========================================================================
+  # HYDRIX CONFIGURATION
+  # =========================================================================
   hydrix = {
-    vmType = "host";
+    # ─────────────────────────────────────────────────────────────────────
+    # IDENTITY
+    # ─────────────────────────────────────────────────────────────────────
     username = "@USERNAME@";
-    hostname = "hydrix";
+    hostname = "hydrix";         # Visual hostname (config file identified by serial)
     colorscheme = "@COLORSCHEME@";
-    graphical.wallpaper = "${hydrix}/theming/wallpapers/WindowRain.png";
+    graphical.wallpaper = "${hydrix}/wallpapers/WindowRain.png";
 
-    hyprland.enable = true;
+    # Window manager selection — Hyprland is the default Wayland compositor.
+    # Enable i3 or sway alongside it if needed (each starts from a separate TTY).
+    hyprland.enable = true;   # Wayland/Hyprland stack — start with: hyprland-session
+    # sway.enable = true;     # Wayland/Sway stack — start with: sway-session
+    # i3.enable = true;       # X11/i3/polybar/rofi/picom stack — start with: startx
+
+    # ── VM focus border colors ────────────────────────────────────────────
+    # Controls how the active window border color changes when you switch to a VM workspace.
+    # Default (set by the hyprland module): "dynamic" — maps each VM type to a wal palette color.
+    # Override here to lock to the static per-VM colorscheme instead:
+    # vmThemeSync.focusDaemon.mode = "static";  # options: "dynamic" (default) | "static"
 
     disko = {
       enable = true;
@@ -56,13 +84,27 @@
       efiBootloaderId = "@EFI_BOOTLOADER_ID@";
     };
 
+    # ─────────────────────────────────────────────────────────────────────
+    # ROUTER
+    # ─────────────────────────────────────────────────────────────────────
+    # WiFi credentials are in shared/wifi.nix (shared across all machines).
     router = {
       type = "@ROUTER_TYPE@";
-      autostart = true;
       wan.mode = "@WAN_MODE@";
       wan.device = if "@WAN_DEVICE@" != "" then "@WAN_DEVICE@" else null;
     };
 
+      # ─── Mullvad VPN (optional) ────────────────────────────────────────
+      # 1. mullvad.net → Account → WireGuard config → select server → download .conf
+      # 2. Place downloaded files in ~/hydrix-config/vpn/
+      # 3. Copy vpn/mullvad.nix.example → vpn/mullvad.nix, map bridges to files
+      # 4. Uncomment the line below and rebuild the router
+      #
+      # vpn.mullvad = import ../vpn/mullvad.nix;
+
+    # ─────────────────────────────────────────────────────────────────────
+    # HARDWARE
+    # ─────────────────────────────────────────────────────────────────────
     hardware = {
       platform = "@PLATFORM@";
       isAsus = @IS_ASUS@;
@@ -71,28 +113,82 @@
         pciIds = [ "@WIFI_PCI_ID@" ];
         wifiPciAddress = "@WIFI_PCI_ADDRESS@";
       };
+      
+      # bluetooth.enable = true;     # DEFAULT: true - Bluetooth + Blueman
+      # i2c.enable = true;           # DEFAULT: true - DDC/CI monitor control
+      # touchpad.enable = true;      # DEFAULT: true - libinput touchpad
+      
       grub.gfxmodeEfi = "@GRUB_GFXMODE@";
+    };
+
+    vmMetrics = {
+      # vmCollectInterval = 5;  # How often VMs collect metrics (seconds)
+      # hostPollInterval  = 5;  # How often host polls VMs (seconds)
+      # staleThreshold    = 15; # Mark VM offline after this many seconds without data
     };
 
     power = {
       # autoCpuFreq = false;  # HWP (balance_power EPP) handles scaling - no polling daemon needed
     };
 
+    # ─────────────────────────────────────────────────────────────────────
+    # SERVICES
+    # ─────────────────────────────────────────────────────────────────────
+    # services = {
+    #   tailscale.enable = true;   # DEFAULT: true  - Tailscale VPN mesh
+    #   ssh.enable = true;         # DEFAULT: true  - OpenSSH daemon
+    # };
+
+
+  # ─────────────────────────────────────────────────────────────────────
+    # SECRETS (optional - for GitHub SSH keys, etc.)
+    # ─────────────────────────────────────────────────────────────────────
+    # Setup workflow:
+    #   1. Rebuild once (generates /etc/ssh/ssh_host_ed25519_key)
+    #   2. Run: sops-age-pubkey          (prints your age public key)
+    #   3. Add key to secrets/.sops.yaml in your hydrix-config
+    #   4. Fill secrets/github.yaml, encrypt: cd secrets && sops -e -i github.yaml
+    #   5. Set enable = true + github.enable = true, then rebuild
     secrets = {
       enable = false;
       github.enable = false;
+      # githubSecretsFile = ../secrets/github.yaml;
     };
 
+  
+    # ─────────────────────────────────────────────────────────────────────
+    # MICROVM HOST
+    # ─────────────────────────────────────────────────────────────────────
     microvmHost = {
       enable = true;
-      # All VMs are enabled automatically via knownVms (populated by flake).
-      # Declare secrets or autostart overrides per-VM only when needed.
-      # Router autostart is controlled by router.autostart below.
+      vms = {
+        "microvm-router"   = { autostart = true; };
+        # hostsync requires ~/vm-inbox on the host (created automatically when enabled).
+        # Disabled by default - enable when you need secure inter-VM file transfers.
+        "microvm-hostsync" = { enable = false; };
+        # Uncomment VMs that should receive GitHub SSH key from secrets/github.yaml:
+        # "microvm-browsing" = { secrets = [ "github" ]; };
+        # "microvm-dev"      = { secrets = [ "github" ]; };
+        # "microvm-pentest"  = { secrets = [ "github" ]; };
+        # "microvm-builder"  = { secrets = [ "github" ]; };
+        # "microvm-gitsync"  = { secrets = [ "github" ]; };
+      };
     };
 
+    # ─────────────────────────────────────────────────────────────────────
+    # BUILDER (lockdown mode nix builds via microvm-builder)
+    # ─────────────────────────────────────────────────────────────────────
     builder.enable = true;
+
+    # ─────────────────────────────────────────────────────────────────────
+    # GIT-SYNC (lockdown mode git push/pull via microvm-gitsync)
+    # ─────────────────────────────────────────────────────────────────────
     gitsync.enable = true;
 
+    # ─────────────────────────────────────────────────────────────────────
+    # GRAPHICAL
+    # ─────────────────────────────────────────────────────────────────────
+    # Shared UI preferences live in shared/graphical.nix (imported for all machines).
     graphical = {
       enable = true;
 

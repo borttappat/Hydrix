@@ -173,6 +173,7 @@
           ./shared/common.nix       # Locale + shared settings (all machines)
           ./shared/graphical.nix    # UI preferences (opacity, bluelight, etc.)
           ./shared/polybar.nix      # Polybar style, workspace labels, module layout
+          ./shared/waybar.nix       # Waybar module
           ./shared/fish.nix         # Shell abbreviations + functions (user additions)
           ./shared/alacritty.nix    # Terminal cursor, keyboard overrides
           ./shared/dunst.nix        # Notification sound + size preferences

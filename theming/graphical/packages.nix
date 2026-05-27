@@ -15,6 +15,7 @@ let
   username = config.hydrix.username;
   isHost = config.hydrix.vmType == null || config.hydrix.vmType == "host";
   isMicrovm = !isHost && !cfg.standalone;
+  hasI3 = config.hydrix.i3.enable;
 in {
   config = lib.mkIf cfg.enable {
     # Fonts (populated by hydrix.graphical.font.packages option)
@@ -28,13 +29,10 @@ in {
       imagemagick
       feh
 
-      # All tiers: X11 resources (pywal color reload)
-      xorg.xrdb
-
       # All tiers: audio
       pulseaudioFull
-    ] ++ lib.optionals (!isMicrovm) [
-      # Standalone + host: full WM environment
+    ] ++ lib.optionals (hasI3 && !isMicrovm) [
+      # i3/X11: bar, launcher, compositor, screenshot, tools
       polybar
       rofi
       picom
@@ -47,12 +45,14 @@ in {
       xorg.xmessage
       xorg.xcursorthemes
       xorg.xdpyinfo
+      xorg.xrdb
     ] ++ lib.optionals isHost [
-      # Host only: lockscreen, X server, DDC/CI monitor control
-      # Note: WM-specific brightness/vibrancy tools are in their respective WM modules
+      # Host: DDC/CI monitor control (WM-agnostic)
+      ddcutil
+    ] ++ lib.optionals (hasI3 && isHost) [
+      # i3/X11 host: lockscreen, X server
       i3lock-color
       i3lock-fancy
-      ddcutil
       xorg.xinit
       xorg.xorgserver
     ];
