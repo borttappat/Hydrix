@@ -2,11 +2,15 @@
 #
 # Workspace-aware launcher that:
 # - Host workspace: shows host drun (applications)
-# - VM workspace (VM running): shows VM's applications via wofi
+# - VM workspace (VM running): shows VM executables from /nix/store sw/bin/
 # - VM workspace (VM stopped): prompts to start the VM
 #
+# VM apps are listed from the VM's nix store profile (sw/bin/), which is
+# accessible from the host without SSH. Selected app is launched inside the
+# VM via sway-ws-app / hypr-ws-app.
+#
 # Mirrors host-rofi functionality for Wayland/sway.
-# Gated on hydrix.sway.enable.
+# Gated on hydrix.sway.enable or hydrix.hyprland.enable.
 
 { config, lib, pkgs, ... }:
 
@@ -121,7 +125,7 @@ let
             "''${runner}/bin/microvm-run" 2>/dev/null \
             | head -1 | ${pkgs.gnused}/bin/sed 's|/[^/]*$||')
 
-        [[ -n "$vm_system" && -d "''${vm_system}/sw/share/applications" ]] \
+        [[ -n "$vm_system" && -d "''${vm_system}/sw/bin" ]] \
             && echo "$vm_system" || return 1
     }
 
@@ -284,8 +288,9 @@ EOF
     }
 
     # ── VM App Launcher ────────────────────────────────────────────────────
-    # Uses --show run (not drun) because wofi only honours --run-command in
-    # run mode; drun ignores it and executes the Exec line directly on the host.
+    # Lists executables from the VM's nix store profile (sw/bin/), accessible
+    # from the host since /nix/store is shared. Shows them via wofi dmenu.
+    # On selection, launches the command in the VM via sway-ws-app / hypr-ws-app.
 
     show_vm_app_launcher() {
         local vm_type="$1"
@@ -297,40 +302,52 @@ EOF
         if [[ "$vm_count" -eq 1 ]]; then
             selected=$(echo "$running_vms" | head -1)
         else
-            local theme_file
-            theme_file=$(${pkgs.coreutils}/bin/mktemp /tmp/wofi-launcher-XXXXXX.css)
-            build_theme > "$theme_file"
+            local theme_file_sel
+            theme_file_sel=$(${pkgs.coreutils}/bin/mktemp /tmp/wofi-launcher-XXXXXX.css)
+            build_theme > "$theme_file_sel"
 
             selected=$(echo "$running_vms" \
                 | ${pkgs.wofi}/bin/wofi --show dmenu \
-                  --style="$theme_file" \
+                  --style="$theme_file_sel" \
                   $(wofi_args) \
                   --prompt="Select VM" \
                   2>/dev/null) || true
 
-            ${pkgs.coreutils}/bin/rm -f "$theme_file"
+            ${pkgs.coreutils}/bin/rm -f "$theme_file_sel"
             [[ -z "$selected" ]] && return
-        fi
-
-        local run_cmd
-        if [[ -n "''${HYPRLAND_INSTANCE_SIGNATURE:-}" ]]; then
-            run_cmd="hypr-ws-app {cmd}"
-        elif [[ -n "''${SWAYSOCK:-}" ]]; then
-            run_cmd="sway-ws-app {cmd}"
-        else
-            run_cmd="vm-app ''${selected} {cmd}"
         fi
 
         local theme_file
         theme_file=$(${pkgs.coreutils}/bin/mktemp /tmp/wofi-launcher-XXXXXX.css)
         build_theme > "$theme_file"
 
-        ${pkgs.wofi}/bin/wofi --show run \
-            --style="$theme_file" \
-            $(wofi_args) \
-            --run-command="''${run_cmd}" \
-            --prompt="''${selected}" \
-            2>/dev/null || true
+        # List executables from VM's nix store profile (host-accessible via /nix/store)
+        local vm_system selected_app
+        if vm_system=$(get_vm_system_path "$selected"); then
+            selected_app=$(${pkgs.coreutils}/bin/ls -1 "''${vm_system}/sw/bin/" 2>/dev/null \
+                | ${pkgs.coreutils}/bin/sort -u \
+                | ${pkgs.wofi}/bin/wofi --show dmenu \
+                  --style="$theme_file" \
+                  $(wofi_args) \
+                  --prompt="''${selected}" \
+                  --insensitive \
+                  2>/dev/null) || true
+
+            if [[ -n "$selected_app" ]]; then
+                if [[ -n "''${HYPRLAND_INSTANCE_SIGNATURE:-}" ]]; then
+                    hypr-ws-app "$selected_app" &
+                elif [[ -n "''${SWAYSOCK:-}" ]]; then
+                    sway-ws-app "$selected_app" &
+                else
+                    microvm app "''${selected}" "$selected_app" &
+                fi
+                disown 2>/dev/null || true
+            fi
+        else
+            # Fallback: VM runner not found — notify user
+            ${pkgs.libnotify}/bin/notify-send -t 4000 "VM" \
+                "''${selected}: could not read app list (VM built?)"
+        fi
 
         ${pkgs.coreutils}/bin/rm -f "$theme_file"
     }
