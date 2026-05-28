@@ -39,12 +39,16 @@
     BAT_THEME = "ansi";
     EDITOR    = "vim";
     VISUAL    = "vim";
+    GDK_SCALE       = "1.0";
+    GDK_DPI_SCALE   = "1.0";
+    QT_SCALE_FACTOR = "1.0";
+    XCURSOR_SIZE    = "24";
   };
 
   # ─── HiDPI / display scaling ─────────────────────────────────────────
   # 1.0 = no scaling (1080p/standard). For HiDPI: try GDK_SCALE = "1.5" + XCURSOR_SIZE = "32".
   # Override per-machine in machines/<serial>.nix to set different values per display.
-  environment.variables = lib.mkDefault {
+  environment.variables =  {
     GDK_SCALE       = "1.0";
     GDK_DPI_SCALE   = "1.0";
     QT_SCALE_FACTOR = "1.0";
