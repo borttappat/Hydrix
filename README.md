@@ -1,15 +1,15 @@
   <pre>
- @@@  @@@ @@@ @@@ @@@@@@@  @@@@@@@  @@@ @@@  @@@
- @@!  @@@ @@! !@@ @@!  @@@ @@!  @@@ @@! @@!  !@@
- @!@!@!@!  !@!@!  @!@  !@! @!@!!@!  !!@  !@@!@!
- !!:  !!!   !!:   !!:  !!! !!: :!!  !!:  !: :!!
-  :   : :   .:    :: :  :   :   : : :   :::  :::
-
-        An attempt at a somewhat secure workstation framework
-        based on NixOS, MicroVMs and compartmentalization
+    __  __          __     _
+   / / / /_  ______/ /____(_)  __
+  / /_/ / / / / __  / ___/ / |/_/
+ / __  / /_/ / /_/ / /  / />  <
+/_/ /_/\__, /\__,_/_/  /_/_/|_|
+      /____/  
+                An attempt at a somewhat secure workstation framework
+                Based on NixOS, MicroVMs and compartmentalization
   </pre>
 
-Discl**AI**mer - **AI** was used in setting this project up, do not use unless you feel comfortable with that piece of information
+Discl **AI** mer - **AI** was used in setting this project up, do not use unless you feel comfortable with that piece of information
 
 **Everything** seen here is still under development. Once I end up with a solid prototype that has been more battle-tested and ran on different hardware, I will try to make some sort of numbered release.
 
