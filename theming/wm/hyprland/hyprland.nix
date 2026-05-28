@@ -92,9 +92,10 @@
     monitor = ,preferred,auto,1
 
     # ── Framework services (VM integration) ──────────────────────────────────
-    # Import HYPRLAND_INSTANCE_SIGNATURE so systemd user services (hypr-focus-daemon,
-    # hypr-vm-borders-init, etc.) can call hyprctl without needing exec-once.
+    # Export HYPRLAND_INSTANCE_SIGNATURE to systemd so hypr-vm-borders-init
+    # and other WantedBy services can call hyprctl without needing exec-once.
     exec-once = systemctl --user set-environment HYPRLAND_INSTANCE_SIGNATURE=$HYPRLAND_INSTANCE_SIGNATURE
+    exec-once = hypr-focus-daemon
     exec-once = vm-push-display-mode
     exec-once = waypipe-connect-all
 
@@ -414,8 +415,14 @@ GLSL
         SOCKET="''${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/hypr/$SIG/.socket2.sock"
         while true; do
           ${pkgs.socat}/bin/socat - "UNIX-CONNECT:$SOCKET" 2>/dev/null \
-            | ${pkgs.gnugrep}/bin/grep --line-buffered '^activewindow' \
-            | while IFS= read -r _line; do _reapply; done
+            | ${pkgs.gnugrep}/bin/grep --line-buffered '^activewindow>>' \
+            | while IFS= read -r _line; do
+                _payload="''${_line#activewindow>>}"
+                _title="''${_payload#*,}"
+                _profile=$(printf '%s' "$_title" | sed -n 's/^\[\([^]]*\)\].*/\1/p')
+                if [ -n "$_profile" ]; then _apply "$(_border_for_profile "$_profile")"
+                else _apply "$(_wal_color)"; fi
+              done
           sleep 1
         done ;;
     esac
@@ -489,25 +496,6 @@ in
           ${hyprApplyColors}/bin/hypr-apply-colors 2>/dev/null || true
         fi
       '';
-
-      # Focus border color daemon — managed by systemd so it starts even when
-      # hydrix-generated.conf wasn't present at first Hyprland launch.
-      # HYPRLAND_INSTANCE_SIGNATURE is imported into the session env by exec-once above;
-      # the daemon also falls back to socket auto-discovery if the env var is absent.
-      systemd.user.services.hypr-focus-daemon = {
-        Unit = {
-          Description = "Hyprland focus border color daemon";
-          After  = [ "hyprland-session.target" ];
-          PartOf = [ "hyprland-session.target" ];
-        };
-        Service = {
-          Type       = "simple";
-          ExecStart  = "${hyprFocusDaemon}/bin/hypr-focus-daemon";
-          Restart    = "on-failure";
-          RestartSec = 2;
-        };
-        Install.WantedBy = [ "hyprland-session.target" ];
-      };
 
       # VM window border rules — oneshot that seeds vm-borders.conf and applies
       # windowrulev2 keywords for all VMs that have focusBorder set.
