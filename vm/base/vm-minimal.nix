@@ -11,7 +11,7 @@ let
   username = config.hydrix.username;
 in {
   # Fish shell (used by all VMs)
-  programs.fish.enable = true;
+  programs.fish.enable = lib.mkDefault true;
   users.users.${username}.shell = lib.mkDefault pkgs.fish;
 
   # Fish configuration

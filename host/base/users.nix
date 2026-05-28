@@ -49,19 +49,4 @@ in {
     # To set password declaratively, use: hydrix.user.hashedPassword = "...";
   };
 
-  # Auto-login on TTY (uses dynamic username)
-  services.getty.autologinUser = username;
-
-  # Sudo without password
-  security.sudo.extraRules = [
-    {
-      users = [ username ];
-      commands = [
-        {
-          command = "ALL";
-          options = [ "NOPASSWD" ];
-        }
-      ];
-    }
-  ];
 }

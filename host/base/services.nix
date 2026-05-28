@@ -10,39 +10,39 @@
 }: let
   cfg = config.hydrix;
 in {
-  programs.dconf.enable = true;
+  programs.dconf.enable = lib.mkDefault true;
 
   # NetworkManager configuration
   systemd.services.NetworkManager-wait-online = {
-    enable = false;
+    enable = lib.mkDefault false;
   };
 
   networking = {
     networkmanager = {
-      enable = true;
+      enable = lib.mkDefault true;
     };
   };
 
   # avoid issues with #/bin/bash scripts and alike
-  services.envfs.enable = true;
+  services.envfs.enable = lib.mkDefault true;
 
   # ollama, LLM (disabled - testing in VM instead)
   # services.ollama.enable = true;
 
   # udisksctl
-  services.udisks2.enable = true; #added with udisks in packages.nix
+  services.udisks2.enable = lib.mkDefault true; #added with udisks in packages.nix
 
   # Lid and suspend/resume settings
   services.logind.settings.Login = {
-    HandleLidSwitch = "suspend"; # Suspend on lid close (default)
-    HandleLidSwitchExternalPower = "ignore"; # Ignore when on AC power
-    HandleLidSwitchDocked = "ignore"; # Ignore when docked/external display
+    HandleLidSwitch = lib.mkDefault "suspend"; # Suspend on lid close (default)
+    HandleLidSwitchExternalPower = lib.mkDefault "ignore"; # Ignore when on AC power
+    HandleLidSwitchDocked = lib.mkDefault "ignore"; # Ignore when docked/external display
   };
 
   # ACPID for explicit lid open/close events (belt-and-suspenders with systemd)
   services.acpid = {
-    enable = true;
-    lidEventCommands = ''
+    enable = lib.mkDefault true;
+    lidEventCommands = lib.mkDefault ''
       # Log lid events for debugging
       echo "[$(date)] Lid event: $1 $2 $3" >> /tmp/acpid-lid.log
 
@@ -256,8 +256,7 @@ in {
   # Intel-undervolt
   #services.undervolt.enable = true;
 
-  # Enable the OpenSSH daemon.
-  services.openssh.enable = lib.mkDefault true;
+  # SSH: disabled globally in shared/core — enable per machine with services.openssh.enable = true
 
   # Enabling tailscale VPN
   services.tailscale.enable = lib.mkIf cfg.services.tailscale.enable true;

@@ -6,15 +6,14 @@
   networking.hostName = lib.mkDefault "hydrix";
 
   # NetworkManager for easy network management
-  networking.networkmanager.enable = true;
+  networking.networkmanager.enable = lib.mkDefault true;
 
-  # Firewall settings
+  # Firewall: default-drop, no open ports.
+  # Specialisations add ports as needed (e.g. administrative adds SSH).
+  # VMs open port 8888 for files-agent via extraCommands (not here).
   networking.firewall = {
-    enable = true;
-    allowedTCPPorts = [ 22 80 8080 4444 4445 8000 ];
-    allowedUDPPorts = [ 22 53 80 4444 4445 5353 5355 5453 ];
+    enable = lib.mkDefault true;
+    allowedTCPPorts = lib.mkDefault [];
+    allowedUDPPorts = lib.mkDefault [];
   };
-
-  # Disable nftables (use iptables)
-  networking.nftables.enable = false;
 }

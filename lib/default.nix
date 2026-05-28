@@ -84,6 +84,8 @@ in rec {
            allInputs.disko.nixosModules.disko
       ++ [
         { hydrix.userColorschemesDir = userColorschemesDir; }
+        # Host-only defaults (GTK dark theme, etc.)
+        ../host/base/host-base.nix
         # Base system modules (services, virtualization)
         ../host/base/services.nix
         ../host/virt.nix

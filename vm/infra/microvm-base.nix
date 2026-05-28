@@ -32,8 +32,7 @@ let
 in {
   imports = [
     ../options.nix
-    # Base system modules (shared with regular VMs)
-    ../../host/base/nixos-base.nix
+    # Base system modules
     ../base/users-vm.nix
     ../../host/base/networking.nix
 

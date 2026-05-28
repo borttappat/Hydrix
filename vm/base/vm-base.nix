@@ -35,7 +35,6 @@ in {
     ../options.nix
 
     # Base system modules
-    ../../host/base/nixos-base.nix
     ../base/users-vm.nix
     ../../host/base/networking.nix
 

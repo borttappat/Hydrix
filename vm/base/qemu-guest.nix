@@ -42,13 +42,6 @@
     tlp.enable = false;
   };
 
-  # zram for VMs
-  zramSwap = {
-    enable = true;
-    memoryPercent = 50;
-    algorithm = "zstd";
-  };
-
   # VM tools
   environment.systemPackages = with pkgs; [
     open-vm-tools
@@ -70,11 +63,4 @@
     "console=ttyS0,115200n8"
   ];
 
-  # SSH for remote access
-  services.openssh = {
-    enable = true;
-    settings = {
-      X11Forwarding = true;
-    };
-  };
 }
