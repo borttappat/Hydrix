@@ -70,12 +70,22 @@ in {
          ++ map (n: "br-${n.name}") netCfg.extraNetworks))
       (_: 1);
 
-    # Trust all bridges (built-in + extra networks + infra VMs)
-    networking.firewall = {
-      enable = true;
-      trustedInterfaces = netCfg.bridges
+    # Explicit DROP for all VM bridge interfaces in the INPUT chain.
+    # Belt-and-suspenders beyond the empty allowedTCPPorts — ensures no VM can
+    # initiate a connection to the host regardless of other firewall settings.
+    #
+    # Note: ct state established,related accept fires BEFORE these rules, so
+    # responses to host-initiated connections (e.g. gateway responses in admin
+    # mode) are still accepted.
+    networking.firewall.extraInputRules = let
+      allBridges =
+        netCfg.bridges
+        ++ lib.unique (lib.attrValues netCfg.infraTapBridges)
         ++ map (n: "br-${n.name}") netCfg.extraNetworks
-        ++ lib.unique (lib.attrValues netCfg.infraTapBridges);
-    };
+        ++ lib.optionals ethernetWanEnabled [ "br-wan" ];
+    in lib.concatMapStringsSep "\n"
+      (br: ''iifname "${br}" drop'')
+      allBridges;
+
   };
 }

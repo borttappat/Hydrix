@@ -78,15 +78,9 @@ in {
       # Note: libvirtd is enabled in base config (modules/host/router.nix)
       # for libvirt pentest VMs in all modes
 
-      # More permissive firewall for administrative work
-      networking.firewall = {
-        enable = true;
-        allowedTCPPorts = [
-          5900 5901 5902 5903 5904  # VNC/Spice
-          22                         # SSH
-        ];
-        trustedInterfaces = netCfg.bridges;
-      };
+      # Administrative firewall: SSH + Tailscale (Tailscale manages its own rules).
+      # No VM bridge interfaces are trusted — VMs cannot reach the host over IP.
+      networking.firewall.allowedTCPPorts = [ 22 ];
 
       # Packages configured in user's hydrix-config/specialisations/administrative.nix
     };
