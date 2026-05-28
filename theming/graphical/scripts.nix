@@ -269,7 +269,7 @@
         if [ ! -e "/mnt/hydrix-config" ] && [ -d "$HYDRIX_CONFIG" ] && [ -f "$WAL_COLORS" ]; then
             echo "  Syncing wal cache to hydrix-config..."
             mkdir -p "$HYDRIX_CONFIG/wal"
-            cp "$WAL_COLORS" "$HYDRIX_CONFIG/wal/colors.json"
+            cp -n "$WAL_COLORS" "$HYDRIX_CONFIG/wal/colors.json" 2>/dev/null || true
             # Also sync the .active marker so VMs know when wal is active
             if [ -f "$WAL_ACTIVE" ]; then
                 touch "$HYDRIX_CONFIG/wal/.active"
@@ -710,7 +710,7 @@
         HYDRIX_CONFIG="$HOME/.config/hydrix"
         if [ -d "$HYDRIX_CONFIG" ] || [ ! -e "/mnt/hydrix-config" ]; then
             mkdir -p "$HYDRIX_CONFIG/wal"
-            cp "$WAL_CACHE/colors.json" "$HYDRIX_CONFIG/wal/colors.json"
+            cp -n "$WAL_CACHE/colors.json" "$HYDRIX_CONFIG/wal/colors.json" 2>/dev/null || true
             echo "Synced to hydrix-config"
         fi
 
