@@ -190,6 +190,8 @@ in {
         # "sleep infinity" keeps waypipe alive; apps connect via WAYLAND_DISPLAY=waypipe-0
         exec ${pkgs.waypipe}/bin/waypipe \
           --vsock --socket ${waypipePort} \
+          --compress none \
+          --threads 2 \
           --display waypipe-0 \
           ${titlePrefixArg} \
           server -- sleep infinity

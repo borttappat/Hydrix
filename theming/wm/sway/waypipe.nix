@@ -83,7 +83,7 @@ let
     # Correct ordering: start listening FIRST, then tell VM to connect.
     while true; do
       # 1. Start host waypipe listener in the background.
-      ${pkgs.waypipe}/bin/waypipe --vsock --socket "$PORT" client &
+      ${pkgs.waypipe}/bin/waypipe --vsock --socket "$PORT" --compress none client &
       WAYPIPE_PID=$!
 
       # 2. Poll until host vsock socket is actually open — no blind sleep.
