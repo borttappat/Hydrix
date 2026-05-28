@@ -15,6 +15,7 @@
 let
   username = config.hydrix.username;
   vmType = config.hydrix.vmType;
+  useFirefoxWrapped = config.hydrix.i3.enable;
 
   # Lock helpers for policies
   lock-false = {
@@ -329,8 +330,9 @@ in {
     # Home Manager Firefox profile configuration
     home-manager.users.${username} = { pkgs, config, ... }: {
       programs.firefox = {
-        enable = true;
-        package = firefoxWrapped;  # Use DPI/pywalfox wrapper instead of raw firefox
+        enable = lib.mkDefault true;
+        # Use DPI/pywalfox wrapper on X11 (i3); plain Firefox on Wayland (Sway/Hyprland)
+        package = lib.mkDefault (if useFirefoxWrapped then firefoxWrapped else pkgs.firefox);
 
         profiles.default = {
           id = 0;
@@ -445,20 +447,9 @@ in {
             }
 
             ${lib.optionalString ffCfg.verticalTabs ''
-            /* Hide horizontal tabs for Vertical Tabs mode */
+            /* Hide horizontal tab bar — vertical tabs are in the sidebar */
             #TabsToolbar {
               visibility: collapse !important;
-            }
-
-            /* Collapse vertical tabs sidebar to icon strip, expand on hover */
-            #sidebar-main {
-              min-width: 0px !important;
-              max-width: 40px !important;
-              overflow: hidden !important;
-              transition: max-width 0.2s ease !important;
-            }
-            #sidebar-main:hover {
-              max-width: 300px !important;
             }
             ''}
           '';
