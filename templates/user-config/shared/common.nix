@@ -39,10 +39,6 @@
     BAT_THEME = "ansi";
     EDITOR    = "vim";
     VISUAL    = "vim";
-    GDK_SCALE       = "1.0";
-    GDK_DPI_SCALE   = "1.0";
-    QT_SCALE_FACTOR = "1.0";
-    XCURSOR_SIZE    = "24";
   };
 
   # ─── HiDPI / display scaling ─────────────────────────────────────────
