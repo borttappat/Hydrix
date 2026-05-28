@@ -107,6 +107,12 @@
     # ── Per-VM border colors at window creation (from vmRegistry.focusBorder) ──
     ${vmBorderColorRules}
 
+    # ── Misc ───────────────────────────────────────────────────────────────────
+    misc {
+      disable_hyprland_logo    = true
+      disable_splash_rendering = true
+    }
+
     ${lib.optionalString xwaylandEnabled ''
     # ── XWayland (hydrix.hyprland.xwayland.enable) ───────────────────────────
     # Render XWayland apps at physical resolution rather than logical resolution.
