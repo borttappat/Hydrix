@@ -34,6 +34,13 @@
   hydrix.graphical.keyboard.layout  = lib.mkDefault "@XKB_LAYOUT@";
   hydrix.graphical.keyboard.variant = lib.mkDefault "@XKB_VARIANT@";
 
+  # ─── Editor and pager defaults ───────────────────────────────────────
+  environment.variables = {
+    BAT_THEME = "ansi";
+    EDITOR    = "vim";
+    VISUAL    = "vim";
+  };
+
   # ─── HiDPI / display scaling ─────────────────────────────────────────
   # 1.0 = no scaling (1080p/standard). For HiDPI: try GDK_SCALE = "1.5" + XCURSOR_SIZE = "32".
   # Override per-machine in machines/<serial>.nix to set different values per display.

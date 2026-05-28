@@ -135,12 +135,10 @@
     # SERVICES
     # ─────────────────────────────────────────────────────────────────────
     # services = {
-    #   tailscale.enable = true;   # DEFAULT: true  - Tailscale VPN mesh
-    #   ssh.enable = true;         # DEFAULT: true  - OpenSSH daemon
+    #   tailscale.enable = true;   # DEFAULT: false - Tailscale VPN mesh
     # };
 
-
-  # ─────────────────────────────────────────────────────────────────────
+    # ─────────────────────────────────────────────────────────────────────
     # SECRETS (optional - for GitHub SSH keys, etc.)
     # ─────────────────────────────────────────────────────────────────────
     # Setup workflow:
@@ -254,4 +252,10 @@
       # bluelight.defaultTemp = 4500;   # DEFAULT: 4500K
     };
   };
+
+  # SSH is disabled globally by default — uncomment to enable on this machine
+  # services.openssh.enable = true;
+
+  # Uncomment to enable libvirt/QEMU/virt-manager (pentest VMs, Windows VMs, etc.)
+  # hydrix.libvirt.enable = true;
 }
