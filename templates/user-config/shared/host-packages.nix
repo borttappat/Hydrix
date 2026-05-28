@@ -96,13 +96,6 @@ in {
     gsettings-desktop-schemas
   ];
 
-  # Environment variables
-  environment.variables = {
-    BAT_THEME = "ansi";
-    EDITOR = cfg.editor;
-    VISUAL = cfg.editor;
-    XCURSOR_SIZE = "32";
-  };
 
   services.dbus.enable = true;
 
