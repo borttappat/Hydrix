@@ -118,12 +118,12 @@ in {
 
       # GTK 2/3/4 Configuration
       gtk = {
-        enable = true;
+        enable = lib.mkDefault true;
 
         # Use adw-gtk3 as the base theme (Stylix would have set this)
         theme = {
-          package = pkgs.adw-gtk3;
-          name = "adw-gtk3-dark";
+          package = lib.mkDefault pkgs.adw-gtk3;
+          name = lib.mkDefault "adw-gtk3-dark";
         };
 
         gtk2.extraConfig = ''
@@ -146,15 +146,15 @@ in {
 
         # Icon theme
         iconTheme = {
-          package = pkgs.papirus-icon-theme;
-          name = "Papirus-Dark";
+          package = lib.mkDefault pkgs.papirus-icon-theme;
+          name = lib.mkDefault "Papirus-Dark";
         };
 
         # Cursor theme
         cursorTheme = {
-          package = pkgs.vanilla-dmz;
-          name = "Vanilla-DMZ";
-          size = 24;
+          package = lib.mkDefault pkgs.vanilla-dmz;
+          name = lib.mkDefault "Vanilla-DMZ";
+          size = lib.mkDefault 24;
         };
       };
 
@@ -175,7 +175,7 @@ in {
       # Qt configuration - let Stylix handle theme via qtct
       # Don't override platformTheme.name as Stylix sets it to "qtct"
       qt = {
-        enable = true;
+        enable = lib.mkDefault true;
         # style.name handled by Stylix
       };
 

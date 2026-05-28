@@ -134,7 +134,7 @@ in {
 
     home-manager.users.${username} = { pkgs, ... }: {
       programs.alacritty = {
-        enable = true;
+        enable = lib.mkDefault true;
 
         settings = {
           # Font size is now handled dynamically by the alacrittyDpi launcher

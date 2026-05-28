@@ -19,8 +19,8 @@
 
   # Sound (needed for xpra audio forwarding)
   services.pipewire = {
-    enable = true;
-    alsa.enable = true;
-    pulse.enable = true;
+    enable = lib.mkDefault true;
+    alsa.enable = lib.mkDefault true;
+    pulse.enable = lib.mkDefault true;
   };
 }

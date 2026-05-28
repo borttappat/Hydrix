@@ -78,13 +78,13 @@ in {
   config = lib.mkIf (cfg.enable && config.hydrix.sway.enable) {
     programs.sway = {
       enable = true;
-      wrapperFeatures.gtk = true;  # GTK env vars for apps launched from sway
+      wrapperFeatures.gtk = lib.mkDefault true;  # GTK env vars for apps launched from sway
     };
 
     # XDG portal for screen sharing, file pickers, etc.
     xdg.portal = {
-      enable = true;
-      wlr.enable = true;
+      enable = lib.mkDefault true;
+      wlr.enable = lib.mkDefault true;
       extraPortals = [ pkgs.xdg-desktop-portal-gtk ];
     };
 

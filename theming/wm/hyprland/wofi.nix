@@ -403,8 +403,8 @@ in {
 
     home-manager.users.${username} = { pkgs, ... }: {
       programs.wofi = {
-        enable = true;
-        package = pkgs.wofi;
+        enable = lib.mkDefault true;
+        package = lib.mkDefault pkgs.wofi;
       };
     };
   };

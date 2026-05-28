@@ -44,12 +44,12 @@ in {
   config = lib.mkIf (cfg.enable && config.hydrix.hyprland.enable) {
     programs.hyprland = {
       enable = true;
-      xwayland.enable = true;   # needed for XWayland apps (electron, etc.)
+      xwayland.enable = lib.mkDefault true;   # needed for XWayland apps (electron, etc.)
     };
 
     # XDG portal for screen sharing, file pickers, etc.
     xdg.portal = {
-      enable = true;
+      enable = lib.mkDefault true;
       extraPortals = [ pkgs.xdg-desktop-portal-hyprland ];
       config.hyprland.default = [ "hyprland" "gtk" ];
     };
@@ -79,7 +79,7 @@ in {
     security.polkit.enable = true;
 
     # PAM for hyprlock authentication
-    security.pam.services.hyprlock.enable = true;
+    security.pam.services.hyprlock.enable = lib.mkDefault true;
 
     # Dynamic focus border colors: use wal palette per VM type.
     # User can override in machines/<serial>.nix with a plain assignment.

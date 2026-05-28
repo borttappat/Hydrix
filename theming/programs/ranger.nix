@@ -10,7 +10,7 @@ in {
   config = lib.mkIf config.hydrix.graphical.enable {
     home-manager.users.${username} = { pkgs, ... }: {
       programs.ranger = {
-        enable = true;
+        enable = lib.mkDefault true;
 
         settings = {
           # Preview

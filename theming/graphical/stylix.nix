@@ -237,12 +237,12 @@ in {
 
     # System-level targets
     stylix.targets = {
-      fish.enable = true;
-      font-packages.enable = true;
-      fontconfig.enable = true;
-      gtk.enable = true;
-      gtksourceview.enable = true;
-      qt.enable = true;
+      fish.enable = lib.mkDefault true;
+      font-packages.enable = lib.mkDefault true;
+      fontconfig.enable = lib.mkDefault true;
+      gtk.enable = lib.mkDefault true;
+      gtksourceview.enable = lib.mkDefault true;
+      qt.enable = lib.mkDefault true;
     };
 
     # Console (TTY) colors - set directly from colorscheme
@@ -256,23 +256,23 @@ in {
       targets = {
         # Alacritty: disabled when vmColors enabled — colors come from
         # colors-runtime.toml (written by write-alacritty-colors on vsock push)
-        alacritty.enable = false;
-        bat.enable = true;
-        cava.enable = true;
-        feh.enable = true;
-        firefox = { enable = true; profileNames = [ "default" ]; };
-        font-packages.enable = true;
-        fontconfig.enable = true;
-        gtk.enable = true;
-        gtksourceview.enable = true;
-        mpv.enable = true;
-        obsidian.enable = true;
-        qt.enable = true;
-        starship.enable = true;
-        tmux.enable = true;
-        xresources.enable = true;
-        zathura.enable = true;
-        vim.enable = false;
+        alacritty.enable = lib.mkDefault false;
+        bat.enable = lib.mkDefault true;
+        cava.enable = lib.mkDefault true;
+        feh.enable = lib.mkDefault true;
+        firefox = { enable = lib.mkDefault true; profileNames = lib.mkDefault [ "default" ]; };
+        font-packages.enable = lib.mkDefault true;
+        fontconfig.enable = lib.mkDefault true;
+        gtk.enable = lib.mkDefault true;
+        gtksourceview.enable = lib.mkDefault true;
+        mpv.enable = lib.mkDefault true;
+        obsidian.enable = lib.mkDefault true;
+        qt.enable = lib.mkDefault true;
+        starship.enable = lib.mkDefault true;
+        tmux.enable = lib.mkDefault true;
+        xresources.enable = lib.mkDefault true;
+        zathura.enable = lib.mkDefault true;
+        vim.enable = lib.mkDefault false;
       };
     };
   };

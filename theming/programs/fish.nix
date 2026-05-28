@@ -20,7 +20,7 @@ in {
   config = lib.mkIf config.hydrix.graphical.enable {
     home-manager.users.${username} = {pkgs, ...}: {
       programs.fish = {
-        enable = true;
+        enable = lib.mkDefault true;
 
         shellInit = ''
           # Disable greeting
@@ -120,14 +120,14 @@ in {
 
       # Zoxide (smart cd)
       programs.zoxide = {
-        enable = true;
-        enableFishIntegration = true;
+        enable = lib.mkDefault true;
+        enableFishIntegration = lib.mkDefault true;
       };
 
       # FZF (fuzzy finder) — colors set dynamically from pywal in interactiveShellInit
       programs.fzf = {
-        enable = true;
-        enableFishIntegration = true;
+        enable = lib.mkDefault true;
+        enableFishIntegration = lib.mkDefault true;
       };
     };
   };

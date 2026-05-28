@@ -471,9 +471,9 @@ in {
       stylix.targets.rofi.enable = false;
 
       programs.rofi = {
-        enable = true;
-        package = pkgs.rofi;
-        terminal = "${pkgs.alacritty}/bin/alacritty";
+        enable = lib.mkDefault true;
+        package = lib.mkDefault pkgs.rofi;
+        terminal = lib.mkDefault "${pkgs.alacritty}/bin/alacritty";
       };
     };
   };

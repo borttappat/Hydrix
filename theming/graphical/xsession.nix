@@ -317,9 +317,9 @@ in {
 
       # Cursor theme (this integrates with Stylix rather than using .Xresources)
       home.pointerCursor = {
-        name = "Vanilla-DMZ";
-        package = pkgs.vanilla-dmz;
-        size = 24;
+        name = lib.mkDefault "Vanilla-DMZ";
+        package = lib.mkDefault pkgs.vanilla-dmz;
+        size = lib.mkDefault 24;
         x11.enable = true;
         gtk.enable = true;
       };

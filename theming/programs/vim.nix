@@ -10,6 +10,5 @@ let
 in {
   config = lib.mkIf config.hydrix.graphical.enable {
     environment.systemPackages = [ pkgs.vim ];
-    environment.variables.EDITOR = "vim";
   };
 }
