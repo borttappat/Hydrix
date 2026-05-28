@@ -70,8 +70,33 @@
     # Pill radius: matches waybar island pills (cornerRadius * pillRadiusScale)
     PILL_RADIUS=$((CORNER_RADIUS * ${toString (builtins.floor cfg.ui.pillRadiusScale)}))
 
-    # Offset: gaps + 5px on both axes; bar reserves its own space via exclusive zone
-    OFFSET=$((GAPS + 5))
+    # Offset: derived from gaps setting
+    # X offset = gaps + 6 (side margin from window edge)
+    # Y offset = gaps - 5 (below bar, aligned with windows)
+    # User override: edit the offset line in dunstrc - script preserves non-default values
+    if [ -n "$OFFSET_X" ] && [ -n "$OFFSET_Y" ]; then
+      : # Use env vars from home.activation
+    elif [ -f "$DUNSTRC" ]; then
+      # Read existing offset from dunstrc to preserve user customization
+      _old_offset=$(${pkgs.gnugrep}/bin/grep "^offset = " "$DUNSTRC" 2>/dev/null | ${pkgs.gnused}/bin/sed 's/offset = //' | ${pkgs.gnused}/bin/sed 's/x/ /')
+      if [ -n "$_old_offset" ]; then
+        read -r _old_x _old_y <<< "$_old_offset"
+        # Only preserve if different from current formula
+        if [ "$_old_x" != "$((GAPS + 6))" ] || [ "$_old_y" != "$((GAPS - 5))" ]; then
+          OFFSET_X=$_old_x
+          OFFSET_Y=$_old_y
+        else
+          OFFSET_X=$((GAPS + 6))
+          OFFSET_Y=$((GAPS - 5))
+        fi
+      else
+        OFFSET_X=$((GAPS + 6))
+        OFFSET_Y=$((GAPS - 5))
+      fi
+    else
+      OFFSET_X=$((GAPS + 6))
+      OFFSET_Y=$((GAPS - 5))
+    fi
 
     # Extract colors from wal cache (host and VMs)
     WAL_COLORS="$HOME/.cache/wal/colors.json"
@@ -112,7 +137,7 @@ follow = mouse
 width = $DUNST_WIDTH
 height = 300
 origin = top-right
-offset = ''${OFFSET}x''${OFFSET}
+offset = ''${OFFSET_X}x''${OFFSET_Y}
 scale = 0
 
 progress_bar = true
@@ -206,20 +231,24 @@ in {
       '')
     ];
 
-    home-manager.users.${username} = {pkgs, ...}: {
+    home-manager.users.${username} = { lib, ... }: {
       services.dunst.enable = false;
+
+      # Write dunstrc via home.activation (like hyprland.conf) - user can edit afterwards
+      home.activation.writeDunstrc = lib.hm.dag.entryAfter ["writeBoundary"] ''
+        ${generateDunstrc}
+      '';
 
       systemd.user.services.dunst = {
         Unit = {
           Description = "Dunst notification daemon (Hydrix)";
           Documentation = "man:dunst(1)";
           PartOf = ["graphical-session.target"];
-          After = ["graphical-session-pre.target" "init-wal-cache.service"];
+          After = ["graphical-session-pre.target" "home.activation"];
         };
         Service = {
           Type = "dbus";
           BusName = "org.freedesktop.Notifications";
-          ExecStartPre = "${generateDunstrc}";
           ExecStart = "${pkgs.dunst}/bin/dunst";
           Restart = "on-failure";
           RestartSec = 1;
