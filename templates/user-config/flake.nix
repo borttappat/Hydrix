@@ -77,7 +77,7 @@
     # Shares host's wal cache to VMs via virtiofs for instant color sync.
     # Imported by both host (mkHost) and each VM (mkMicroVM).
     # See modules/vm-theme-sync.nix for full documentation.
-    vmThemeSyncModule = ./modules/vm-theme-sync.nix;
+    vmThemeSyncModule = "${hydrix}/host/vm-theme-sync.nix";
 
     # =========================================================================
     # WIFI PCI ADDRESS (auto-detected from machine configs)
@@ -238,6 +238,7 @@
       value = hydrix.lib.mkMicroVM {
         profile  = "pentest";
         hostname = vmName;
+        extraInputs = { inherit (inputs) nix-index-database burpsuite-nix hydrix; };
         modules  = [
           (./tasks + "/${m._taskName}/default.nix")
           vmThemeSyncModule
@@ -289,13 +290,14 @@
       builtins.listToAttrs (map (m: {
         name  = m._profileName;
         value = {
-          vmName     = "microvm-${m._profileName}";
-          cid        = m.vsockCid;
-          bridge     = m.bridge;
-          subnet     = m.subnet;
-          workspace  = m.workspace or null;
-          label      = m.label or m._profileName;
-          hasDisplay = m.hasDisplay or true;
+          vmName      = "microvm-${m._profileName}";
+          cid         = m.vsockCid;
+          bridge      = m.bridge;
+          subnet      = m.subnet;
+          workspace   = m.workspace or null;
+          label       = m.label or m._profileName;
+          hasDisplay  = m.hasDisplay or true;
+          focusBorder = autoVMConfigs."microvm-${m._profileName}".config.hydrix.vmThemeSync.focusBorder or null;
         };
       }) discoveredMetas) //
       builtins.listToAttrs (map (m: {
@@ -329,7 +331,7 @@
       value = hydrix.lib.mkMicroVM {
         profile  = m._profileName;
         hostname = "microvm-${m._profileName}";
-        extraInputs = { inherit (inputs) nix-index-database burpsuite-nix; };
+        extraInputs = { inherit (inputs) nix-index-database burpsuite-nix hydrix; };
         modules  = [ vmThemeSyncModule { hydrix.vmThemeSync.enable = true; } ];
         inherit userProfiles hostConfig userColorschemesDir;
       };
