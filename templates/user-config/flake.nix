@@ -76,7 +76,6 @@
     # =========================================================================
     # Shares host's wal cache to VMs via virtiofs for instant color sync.
     # Imported by both host (mkHost) and each VM (mkMicroVM).
-    # See modules/vm-theme-sync.nix for full documentation.
     vmThemeSyncModule = "${hydrix}/host/vm-theme-sync.nix";
 
     # =========================================================================
