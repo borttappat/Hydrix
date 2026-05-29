@@ -500,7 +500,11 @@ in {
     # =========================================================================
 
     microvmHost = {
-      enable = lib.mkEnableOption "MicroVM host support";
+      enable = lib.mkOption {
+        type = lib.types.bool;
+        default = true;
+        description = "Enable MicroVM host support.";
+      };
 
       infrastructureOnly = lib.mkOption {
         type = lib.types.bool;
