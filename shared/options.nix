@@ -114,7 +114,7 @@ in {
 
     colorscheme = lib.mkOption {
       type = lib.types.str;
-      default = "nord";
+      default = "nvid";
       description = "Colorscheme name (from colorschemes/ directory)";
       example = "nvid";
     };

@@ -62,11 +62,11 @@
     colorscheme = "@COLORSCHEME@";
     graphical.wallpaper = "${hydrix}/wallpapers/WindowRain.png";
 
-    # Window manager selection — all are off by default; enable exactly one here.
+    # Window manager selection - all are off by default; enable exactly one here.
     # i3.enable also gates the X11/xpra stack in all VMs (waypipe used otherwise).
-    hyprland.enable = true;   # Wayland/Hyprland stack — start with: hyprland-session
-    # sway.enable = true;     # Wayland/Sway stack    — start with: sway-session
-    # i3.enable = true;       # X11/i3/polybar/rofi/picom + xpra in VMs — start with: startx
+    hyprland.enable = true;   # Wayland/Hyprland stack - start with: hyprland-session
+    # sway.enable = true;     # Wayland/Sway stack     - start with: sway-session
+    # i3.enable = true;       # X11/i3 stack           - start with: startx
 
     # ── VM focus border colors ────────────────────────────────────────────
     # Controls how the active window border color changes when you switch to a VM workspace.
@@ -95,7 +95,7 @@
     };
 
       # ─── Mullvad VPN (optional) ────────────────────────────────────────
-      # 1. mullvad.net → Account → WireGuard config → select server → download .conf
+      # 1. mullvad.net →  Account →  WireGuard config →  select server →  download .conf
       # 2. Place downloaded files in ~/hydrix-config/vpn/
       # 3. Copy vpn/mullvad.nix.example → vpn/mullvad.nix, map bridges to files
       # 4. Uncomment the line below and rebuild the router
@@ -122,9 +122,9 @@
     };
 
     vmMetrics = {
-      # vmCollectInterval = 5;  # How often VMs collect metrics (seconds)
-      # hostPollInterval  = 5;  # How often host polls VMs (seconds)
-      # staleThreshold    = 15; # Mark VM offline after this many seconds without data
+      # vmCollectInterval =  5;  # How often VMs collect metrics (seconds)
+      # hostPollInterval  =  5;  # How often host polls VMs (seconds)
+      # staleThreshold    = 15;  # Mark VM offline after this many seconds without data
     };
 
     power = {
@@ -162,10 +162,10 @@
       vms = {
         "microvm-router"   = { autostart = true; };
         # hostsync requires ~/vm-inbox on the host (created automatically when enabled).
-        # Disabled by default — enable when you need secure inter-VM file transfers.
+        # Disabled by default - enable when you need secure inter-VM file transfers.
         "microvm-hostsync" = { enable = false; };
-        # vault requires setup before first use — see DOCUMENTATION.md §Vault VM.
-        # Disabled by default — enable and set autostart = true after initializing ~/vault/.
+        # vault requires setup before first use - see DOCUMENTATION.md §Vault VM.
+        # Disabled by default - enable and set autostart = true after initializing ~/vault/.
         "microvm-vault"    = { enable = false; };
         # Uncomment VMs that should receive GitHub SSH key from secrets/github.yaml:
         # "microvm-browsing" = { secrets = [ "github" ]; };
@@ -209,12 +209,12 @@
       # ui.cornerRadius = 2;          # DEFAULT: 2  - corner rounding radius
 
       # ─── Hyprland display scaling ──────────────────────────────────────
-      # scaling.hyprInternalScale  = 1.5;       # UI scale (1.5→1280×800, 1.25→1536×960 logical)
+      # scaling.hyprInternalScale  = 1.5;       # UI scale (1.5 -> 1280×800, 1.25 -> 1536×960 logical)
       # scaling.hyprInternalOutput = "eDP-1";   # DEFAULT: "eDP-1" (run: hyprctl monitors)
 
       # ─── Hyprland keyboard remapping ───────────────────────────────────
       # Custom xkb keymap — takes precedence over layout/variant from shared/common.nix.
-      # Use for key remapping (e.g. § → ~, CapsLock → Ctrl). See example-serial.nix.
+      # Use for key remapping (e.g. § -> ~, CapsLock -> Ctrl). See example-serial.nix.
       # keyboard.xkbFile = pkgs.writeText "my-keymap" ''
       #   xkb_keymap {
       #     xkb_keycodes { include "evdev+aliases(qwerty)" };
@@ -253,7 +253,7 @@
     };
   };
 
-  # SSH is disabled globally by default — uncomment to enable on this machine
+  # SSH is disabled globally by default - uncomment to enable on this machine
   # services.openssh.enable = true;
 
   # Uncomment to enable libvirt/QEMU/virt-manager (pentest VMs, Windows VMs, etc.)
