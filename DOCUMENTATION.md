@@ -669,6 +669,8 @@ Hydrix auto-detects your config with this priority:
     };
 
     # MicroVMs with user profiles overlaid on Hydrix base
+    # hostname = the nixosConfiguration key; sets hydrix.vm.storeName (structural, do not change)
+    # To customise the in-VM hostname, set hydrix.vm.hostname in profiles/<name>/default.nix
     nixosConfigurations."microvm-browsing" = hydrix.lib.mkMicroVM {
       profile = "browsing";
       hostname = "microvm-browsing";
@@ -1672,6 +1674,15 @@ hydrix.microvmHost.vms."microvm-myprofile" = { enable = true; };
 ```
 
 2. Customise `profiles/myprofile/default.nix` — set colorscheme, RAM/vCPUs, packages.
+
+   Optionally set a custom hostname (what you see at the shell prompt inside the VM).
+   The default is the profile name suffixed with `-vm` (e.g. `myprofile-vm`).
+   This only affects the internal hostname — host scripts, window titles, and storage paths
+   always use the nixosConfiguration key (`microvm-myprofile`):
+
+   ```nix
+   hydrix.vm.hostname = "my-custom-name";
+   ```
 
 3. If the profile needs a Mullvad VPN tunnel, add to `machines/<serial>.nix` (or `shared/graphical.nix`):
 ```nix
