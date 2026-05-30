@@ -12,7 +12,7 @@ let
     #   build-base --type pentest --type comms  # Multiple
     #   build-base --all                        # All types
     #
-    set -euo pipefail
+    set -uo pipefail
 
     readonly PROJECT_DIR="''${HYDRIX_FLAKE_DIR:-$HOME/hydrix-config}"
     readonly BASE_IMAGE_DIR="/var/lib/libvirt/base-images"
@@ -68,8 +68,8 @@ let
                 *) error "Unknown option: $1" ;;
             esac
         done
-        [[ "$BUILD_ALL" == true ]] && BUILD_TYPES=("''${VALID_TYPES[@]}")
-        [[ ''${#BUILD_TYPES[@]} -eq 0 ]] && error "No types specified. Use --type or --all"
+        if [[ "$BUILD_ALL" == true ]]; then BUILD_TYPES=("''${VALID_TYPES[@]}"); fi
+        if [[ ''${#BUILD_TYPES[@]} -eq 0 ]]; then error "No types specified. Use --type or --all"; fi
     }
 
     ensure_base_dir() {
@@ -184,7 +184,7 @@ let
     #   deploy-vm --type browsing --name myvm
     #   deploy-vm --type pentest --name target1 --encrypt
     #
-    set -euo pipefail
+    set -uo pipefail
 
     readonly BASE_IMAGE_DIR="/var/lib/libvirt/base-images"
     readonly VM_IMAGE_DIR="/var/lib/libvirt/images"
@@ -306,7 +306,7 @@ let
         [[ -z "$VM_NAME" ]] && error "Missing --name"
         [[ -z "''${TYPE_BRIDGES[$VM_TYPE]:-}" ]] \
             && error "Invalid type: $VM_TYPE (valid: ''${!TYPE_BRIDGES[*]})"
-        [[ -z "$VM_BRIDGE" ]] && VM_BRIDGE="''${TYPE_BRIDGES[$VM_TYPE]}"
+        if [[ -z "$VM_BRIDGE" ]]; then VM_BRIDGE="''${TYPE_BRIDGES[$VM_TYPE]}"; fi
     }
 
     check_base_image() {
