@@ -27,7 +27,7 @@
   ];
 
   # VM hostname (can be overridden in machine config)
-  hydrix.vm.defaultHostname = "dev-vm";
+  hydrix.vm.defaultHostname = lib.mkDefault "dev-vm";
 
   # PostgreSQL for database development (libvirt-specific, persistent VMs)
   services.postgresql = {

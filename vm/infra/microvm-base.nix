@@ -16,7 +16,7 @@
 { config, lib, pkgs, modulesPath, ... }:
 
 let
-  vmName = config.networking.hostName;
+  vmName = config.hydrix.vm.storeName;
   vmCollectInterval = config.hydrix.vmMetrics.vmCollectInterval;
 
   # Compiled metrics server — zero shell/binary execs at runtime.
@@ -64,6 +64,19 @@ in {
     ../dev/files-agent.nix
   ];
 
+  options.hydrix.vm = {
+    storeName = lib.mkOption {
+      type = lib.types.str;
+      default = "unknown-vm";
+      description = "NixOS configuration key for this VM (e.g. microvm-lurking). Used for host-side paths and service names. Set by the flake — do not override.";
+    };
+    hostname = lib.mkOption {
+      type = lib.types.str;
+      default = "unknown-vm";
+      description = "Hostname visible inside the VM. Defaults to storeName. Override in profiles/<name>/default.nix.";
+    };
+  };
+
   options.hydrix.microvm = {
     audio.enable = lib.mkOption {
       type = lib.types.bool;
@@ -97,13 +110,13 @@ in {
 
     configPath = lib.mkOption {
       type = lib.types.str;
-      default = "/var/lib/microvms/${config.networking.hostName}/config";
+      default = "/var/lib/microvms/${config.hydrix.vm.storeName}/config";
       description = "Host path for VM config (read-only 9p mount)";
     };
 
     tapId = lib.mkOption {
       type = lib.types.str;
-      default = "mv-${lib.substring 0 10 config.networking.hostName}";
+      default = "mv-${lib.substring 0 10 config.hydrix.vm.storeName}";
       description = "TAP interface ID (max 15 chars on Linux)";
     };
 
@@ -128,7 +141,7 @@ in {
 
       volumePath = lib.mkOption {
         type = lib.types.str;
-        default = "/var/lib/microvms/${config.networking.hostName}/home.qcow2";
+        default = "/var/lib/microvms/${config.hydrix.vm.storeName}/home.qcow2";
         description = "Path to the qcow2 volume for home persistence";
       };
 
@@ -195,6 +208,11 @@ in {
   };
 
   config = {
+    # Drive networking.hostName from hydrix.vm.hostname so user profiles can override
+    # with a plain assignment. Priority 500: beats lib.mkDefault (1000) from networking.nix
+    # but loses to plain user assignments (priority 100).
+    networking.hostName = lib.mkOverride 500 config.hydrix.vm.hostname;
+
     # MicroVMs get full graphical theming by default (opt-out with graphical.enable = false)
     hydrix.graphical.enable = lib.mkDefault true;
 
@@ -320,14 +338,14 @@ in {
         };
       in [ homeVolume ]
       ++ map (vol: {
-        image = "/var/lib/microvms/${config.networking.hostName}/${vol.name}.qcow2";
+        image = "/var/lib/microvms/${config.hydrix.vm.storeName}/${vol.name}.qcow2";
         mountPoint = vol.mountPoint;
         size = vol.size;
         autoCreate = true;
       }) config.hydrix.microvm.persistence.extraVolumes)
       # Persistent store overlay for nix builds (thin-provisioned, starts near 0)
       ++ lib.optionals config.hydrix.microvm.shareStore [{
-        image = "/var/lib/microvms/${config.networking.hostName}/nix-overlay.qcow2";
+        image = "/var/lib/microvms/${config.hydrix.vm.storeName}/nix-overlay.qcow2";
         mountPoint = "/nix/.rw-store";
         size = config.hydrix.microvm.persistence.storeOverlaySize;
         autoCreate = true;

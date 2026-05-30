@@ -158,7 +158,10 @@ in rec {
       ../vm/profiles/${profile}               # Hydrix base profile (only if it exists)
     ] ++ [
       {
-        networking.hostName = hostname;
+        # storeName: structural identifier used for host paths/services — never override
+        hydrix.vm.storeName = nixpkgs.lib.mkForce hostname;
+        # hostname: what the VM reports — user can override in profiles/<name>/default.nix
+        hydrix.vm.hostname = nixpkgs.lib.mkDefault hostname;
       }
     ] ++ modules
     # Host settings applied after base profile, before user overrides

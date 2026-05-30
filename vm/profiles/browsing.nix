@@ -27,5 +27,5 @@
   ];
 
   # VM hostname (can be overridden in machine config)
-  hydrix.vm.defaultHostname = "browsing-vm";
+  hydrix.vm.defaultHostname = lib.mkDefault "browsing-vm";
 }

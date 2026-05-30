@@ -27,7 +27,7 @@
   ];
 
   # VM hostname (can be overridden in machine config)
-  hydrix.vm.defaultHostname = "comms-vm";
+  hydrix.vm.defaultHostname = lib.mkDefault "comms-vm";
 
   # Tor service for privacy (libvirt-specific, comms microVM is ephemeral)
   services.tor = {

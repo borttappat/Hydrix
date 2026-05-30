@@ -18,13 +18,15 @@
 
 let
   username = config.hydrix.username;
-  audioEnabled = config.hydrix.microvm.audio.enable;
-  # Derive title prefix from hostname: "microvm-lurking" → "lurking"
-  titlePrefix = lib.removePrefix "microvm-" config.networking.hostName;
+  audioEnabled = config.hydrix.microvm.audio.enable or false;
+  # Derive title prefix from storeName (not hostname): "microvm-lurking" → "lurking"
+  # Uses storeName so custom hostnames don't break Hyprland window-matching rules.
+  titlePrefix = lib.removePrefix "microvm-" config.hydrix.vm.storeName;
   titlePrefixArg = "--title-prefix \"[${titlePrefix}] \"";
   # Per-VM waypipe port derived from vsock CID: CID 106 → port 14606
   # Avoids collision when multiple VMs are connected simultaneously.
-  waypipePort = toString (14600 + config.hydrix.microvm.vsockCid - 100);
+  # Falls back to 0 (port 14500) in non-microVM contexts (waypipe unused there).
+  waypipePort = toString (14600 + (config.hydrix.microvm.vsockCid or 0) - 100);
 
   displayModeHandler = pkgs.writeShellScript "display-mode-handler" ''
     set -euo pipefail
