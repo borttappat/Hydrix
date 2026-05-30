@@ -22,6 +22,10 @@ let meta = import ./meta.nix; in
   # VM IDENTITY & COLORS
   # =========================================================================
 
+  # Custom hostname (default: lurking-vm)
+  # Note: this VM is ephemeral — no persistent volume to orphan.
+  # hydrix.vm.hostname = "my-lurking";
+
   # Colorscheme for this VM
   hydrix.colorscheme = "punk";
   # Per-VM focus border - simple threat-level indicator for VM windows

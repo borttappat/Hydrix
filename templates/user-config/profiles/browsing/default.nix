@@ -20,6 +20,10 @@ let meta = import ./meta.nix; in
   # VM IDENTITY & COLORS
   # =========================================================================
 
+  # Custom hostname (default: browsing-vm)
+  # WARNING: changing after first boot orphans the persistent volume.
+  # hydrix.vm.hostname = "my-browsing";
+
   # Colorscheme for this VM (see colorschemes/ in Hydrix repo)
   hydrix.colorscheme = "punk";
   # Per-VM focus border - simple threat-level indicator for VM windows

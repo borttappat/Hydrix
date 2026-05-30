@@ -20,6 +20,10 @@ let meta = import ./meta.nix; in
   # VM IDENTITY & COLORS
   # =========================================================================
 
+  # Custom hostname (default: dev-vm)
+  # WARNING: changing after first boot orphans the persistent volume.
+  # hydrix.vm.hostname = "my-dev";
+
   # Colorscheme for this VM
   hydrix.colorscheme = "puccy";
   # Per-VM focus border - simple threat-level indicator for VM windows
