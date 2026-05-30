@@ -347,6 +347,17 @@ in {
           the full QEMU/virt-manager closure.
         '';
       };
+
+      grabKey = lib.mkOption {
+        type = lib.types.str;
+        default = "65507,65513";
+        description = ''
+          virt-manager console grab/release key, as a comma-separated list of
+          X11 keysym decimal values. Default "65507,65513" = Left Ctrl + Left Alt.
+          Find keysym values with `xev` or the X11 keysym table.
+          Example: "65515" = Super_L.
+        '';
+      };
     };
 
     # =========================================================================

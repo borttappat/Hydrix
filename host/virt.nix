@@ -767,5 +767,12 @@ in
         </ip>
       </network>
     '';
+
+    # virt-manager grab/release key — set per-machine via hydrix.libvirt.grabKey
+    home-manager.users.${config.hydrix.username}.dconf.settings = {
+      "org/virt-manager/virt-manager/console" = {
+        grab-keys = lib.mkDefault config.hydrix.libvirt.grabKey;
+      };
+    };
   };
 }

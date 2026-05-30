@@ -200,8 +200,6 @@ in {
         };
 
         "org/virt-manager/virt-manager/console" = {
-          # Use left Super as grab key (avoids conflicting with mod key)
-          grab-keys = "65515";
           scaling = 2;  # Scale to fit
           resize-guest = 1;  # Auto-resize guest
         };

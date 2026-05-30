@@ -233,9 +233,6 @@ in {
           '' else ''
             # ===== Host-specific setup =====
 
-            # Set virt-manager grab key to Super_L
-            ${pkgs.dconf}/bin/dconf write /org/virt-manager/virt-manager/console/grab-keys "'65515'" 2>/dev/null || true
-
             # xcape: Make Super_L release VM keyboard grab when tapped alone
             ${pkgs.procps}/bin/pkill -x xcape 2>/dev/null || true
             ${pkgs.xcape}/bin/xcape -e 'Super_L=Control_L|Alt_L' &

@@ -258,4 +258,5 @@
 
   # Uncomment to enable libvirt/QEMU/virt-manager (pentest VMs, Windows VMs, etc.)
   # hydrix.libvirt.enable = true;
+  # hydrix.libvirt.grabKey = "65507,65513";  # Left Ctrl+Alt — find keysyms with `xev`
 }
