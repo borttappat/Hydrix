@@ -192,10 +192,32 @@ let
     fi
 
     if [[ -z "$VM_INFO" ]]; then
-      VM_INFO=$(${pkgs.jq}/bin/jq -rc \
-        --argjson w "$WS" \
-        'to_entries[] | select(.value.workspace == $w) | {cid: .value.cid, name: .value.vmName}' \
-        "${VM_REGISTRY}" 2>/dev/null | head -1)
+      # Check active-vms.json — if a task or alternate VM was marked active for
+      # this workspace (e.g. microvm-pentest-task1 started after microvm-pentest),
+      # prefer it over the first registry entry.
+      ACTIVE_VMS_FILE="$HOME/.cache/hydrix/active-vms.json"
+      if [[ -f "$ACTIVE_VMS_FILE" ]]; then
+        WS_VMS=$(${pkgs.jq}/bin/jq -rc --argjson w "$WS" \
+          '[to_entries[] | select(.value.workspace == $w) | .value.vmName]' \
+          "${VM_REGISTRY}" 2>/dev/null || echo '[]')
+        ACTIVE_VM=$(${pkgs.jq}/bin/jq -r --argjson vms "$WS_VMS" \
+          'to_entries[] | select((.value | type == "string") and (.value as $v | $vms | index($v) != null)) | .value' \
+          "$ACTIVE_VMS_FILE" 2>/dev/null | head -1 || true)
+        if [[ -n "$ACTIVE_VM" ]] \
+            && systemctl is-active --quiet "microvm@''${ACTIVE_VM}.service" 2>/dev/null; then
+          VM_INFO=$(${pkgs.jq}/bin/jq -rc --arg v "$ACTIVE_VM" \
+            'to_entries[] | select(.value.vmName == $v) | {cid: .value.cid, name: .value.vmName}' \
+            "${VM_REGISTRY}" 2>/dev/null | head -1)
+          [[ -n "$VM_INFO" ]] && log "active-vms: routing WS$WS to $ACTIVE_VM"
+        fi
+      fi
+      # Fall back to first registry entry for this workspace
+      if [[ -z "$VM_INFO" ]]; then
+        VM_INFO=$(${pkgs.jq}/bin/jq -rc \
+          --argjson w "$WS" \
+          'to_entries[] | select(.value.workspace == $w) | {cid: .value.cid, name: .value.vmName}' \
+          "${VM_REGISTRY}" 2>/dev/null | head -1)
+      fi
     fi
 
     if [[ -z "$VM_INFO" ]]; then
@@ -420,6 +442,151 @@ let
       | ${pkgs.socat}/bin/socat -T 10 - VSOCK-CONNECT:"$CID":14508
   '';
 
+  # ── vm-select ────────────────────────────────────────────────────────────
+  # Wofi picker to switch the active VM on the current workspace.
+  # Works on any workspace with multiple VMs (pentest+tasks, or any future
+  # workspace that declares more than one VM in the registry).
+  # Updates ~/.cache/hydrix/active-vms.json so hypr-ws-app routes to the
+  # chosen VM. Also ensures waypipe-connect is running for the selected VM.
+  #
+  # Usage: vm-select
+  #   Bind to e.g. $mod+shift+p in hyprland.nix
+  #
+  vmSelect = pkgs.writeShellScriptBin "vm-select" ''
+    set -euo pipefail
+
+    readonly VM_REGISTRY="${VM_REGISTRY}"
+    readonly ACTIVE_VMS_FILE="$HOME/.cache/hydrix/active-vms.json"
+
+    notify() { ${pkgs.libnotify}/bin/notify-send -u normal "vm-select" "$*"; }
+
+    # ── Theming (mirrors wofi-launcher) ───────────────────────────────────
+    get_wal_color() {
+      local key="$1" fallback="$2" color=""
+      local wal_json="$HOME/.cache/wal/colors.json"
+      [[ -f "$wal_json" ]] \
+        && color=$(${pkgs.jq}/bin/jq -r "$key // empty" "$wal_json" 2>/dev/null)
+      echo "''${color:-$fallback}"
+    }
+
+    build_theme() {
+      local bg fg accent corner_radius font_size
+      bg=$(get_wal_color '.colors.color0' '#0e0f17')
+      fg=$(get_wal_color '.colors.color7' '#e4d1ef')
+      accent=$(get_wal_color '.colors.color4' '#f09ea2')
+      local scaling_json="$HOME/.config/hydrix/scaling.json"
+      if [[ -f "$scaling_json" ]]; then
+        corner_radius=$(${pkgs.jq}/bin/jq -r '.sizes.corner_radius // 8' "$scaling_json")
+        font_size=$(${pkgs.jq}/bin/jq -r '.fonts.wofi // 12' "$scaling_json")
+      else
+        corner_radius=8; font_size=12
+      fi
+      cat <<EOF
+* { font-size: ''${font_size}px; color: ''${fg}; }
+#window { background-color: ''${bg}; border-radius: ''${corner_radius}px; border: 0px solid transparent; }
+#outer-box { padding: 8px; }
+#input { background-color: transparent; border: none; border-bottom: 1px solid ''${accent}; border-radius: 0; padding: 4px 8px; margin-bottom: 4px; color: ''${fg}; }
+#inner-box { padding: 4px; }
+#entry { padding: 8px 12px; background-color: transparent; border-radius: ''${corner_radius}px; }
+#entry:selected { background-color: ''${accent}; color: ''${bg}; }
+#entry-text { background-color: transparent; color: inherit; }
+EOF
+    }
+
+    # ── Get current workspace ──────────────────────────────────────────────
+    WS=$(${pkgs.hyprland}/bin/hyprctl activeworkspace -j 2>/dev/null \
+      | ${pkgs.jq}/bin/jq -r '.id' || echo "1")
+
+    if [[ ! -f "$VM_REGISTRY" ]]; then
+      notify "No VM registry found"
+      exit 0
+    fi
+
+    # ── All VM names declared for this workspace ───────────────────────────
+    WS_VMS=$(${pkgs.jq}/bin/jq -r --argjson w "$WS" \
+      'to_entries[] | select(.value.workspace == $w) | .value.vmName' \
+      "$VM_REGISTRY" 2>/dev/null)
+
+    if [[ -z "$WS_VMS" ]]; then
+      notify "No VMs declared for workspace $WS"
+      exit 0
+    fi
+
+    # ── Filter to running ones ─────────────────────────────────────────────
+    RUNNING=""
+    while IFS= read -r vm; do
+      [[ -z "$vm" ]] && continue
+      systemctl is-active --quiet "microvm@''${vm}.service" 2>/dev/null \
+        && RUNNING+="$vm"$'\n' || true
+    done <<< "$WS_VMS"
+    RUNNING=$(echo "$RUNNING" | ${pkgs.gnugrep}/bin/grep -v '^$' || true)
+
+    if [[ -z "$RUNNING" ]]; then
+      notify "No VMs running on workspace $WS"
+      exit 0
+    fi
+
+    # ── Get the base type key for active-vms.json ──────────────────────────
+    # The base type is the shortest registry key for this workspace
+    # (e.g. "pentest" rather than "pentest-task1").
+    WS_TYPE=$(${pkgs.jq}/bin/jq -r --argjson w "$WS" \
+      '[to_entries[] | select(.value.workspace == $w) | .key] | sort_by(length) | first // empty' \
+      "$VM_REGISTRY" 2>/dev/null || true)
+
+    # ── Get current active VM ──────────────────────────────────────────────
+    mkdir -p "$(dirname "$ACTIVE_VMS_FILE")"
+    [[ ! -f "$ACTIVE_VMS_FILE" ]] && echo '{}' > "$ACTIVE_VMS_FILE"
+    CURRENT=$(${pkgs.jq}/bin/jq -r \
+      --argjson vms "$(echo "$RUNNING" | ${pkgs.jq}/bin/jq -Rn '[inputs]')" \
+      'to_entries[] | select((.value | type == "string") and (.value as $v | $vms | index($v) != null)) | .value' \
+      "$ACTIVE_VMS_FILE" 2>/dev/null | head -1 || true)
+
+    # ── Build display list (★ for active) ─────────────────────────────────
+    DISPLAY_LIST=""
+    while IFS= read -r vm; do
+      [[ -z "$vm" ]] && continue
+      if [[ "$vm" == "$CURRENT" ]]; then
+        DISPLAY_LIST+="★ $vm"$'\n'
+      else
+        DISPLAY_LIST+="  $vm"$'\n'
+      fi
+    done <<< "$RUNNING"
+
+    # ── Show wofi picker ───────────────────────────────────────────────────
+    THEME=$(${pkgs.coreutils}/bin/mktemp /tmp/vm-select-XXXXXX.css)
+    build_theme > "$THEME"
+    VM_COUNT=$(echo "$RUNNING" | ${pkgs.gnugrep}/bin/grep -c '.' || echo 1)
+    SELECTED=$(echo -n "$DISPLAY_LIST" \
+      | ${pkgs.wofi}/bin/wofi --show dmenu \
+          --style="$THEME" \
+          --prompt="WS$WS vm" \
+          --lines="$VM_COUNT" \
+          --width=320 \
+          --no-actions \
+          2>/dev/null || true)
+    ${pkgs.coreutils}/bin/rm -f "$THEME"
+
+    [[ -z "$SELECTED" ]] && exit 0
+
+    # Strip marker prefix
+    SELECTED=$(echo "$SELECTED" | ${pkgs.gnused}/bin/sed 's/^★ //; s/^  //')
+
+    # ── Update active-vms.json ─────────────────────────────────────────────
+    TMP=$(${pkgs.coreutils}/bin/mktemp)
+    ${pkgs.jq}/bin/jq --arg type "$WS_TYPE" --arg vm "$SELECTED" \
+      '.[$type] = $vm' "$ACTIVE_VMS_FILE" > "$TMP" \
+      && mv "$TMP" "$ACTIVE_VMS_FILE"
+
+    # ── Ensure waypipe-connect is running for the selected VM ─────────────
+    if ! pgrep -f "waypipe-connect ''${SELECTED}$" >/dev/null 2>&1; then
+      setsid ${waypipeConnect}/bin/waypipe-connect "$SELECTED" \
+        </dev/null >"/tmp/waypipe-connect-''${SELECTED}.log" 2>&1 &
+      notify "Switched to $SELECTED — connecting waypipe..."
+    else
+      notify "Switched to $SELECTED"
+    fi
+  '';
+
   # ── vm-push-display-mode ──────────────────────────────────────────────────
   # Pushes a display mode to all running profile VMs, or a specific VM.
   # Mode is auto-detected from the environment unless given explicitly.
@@ -563,7 +730,7 @@ let
 
 in lib.mkIf (config.hydrix.sway.enable || config.hydrix.hyprland.enable) {
   environment.systemPackages = [
-    waypipeConnect waypipeConnectAll hyprWsApp swayWsApp vmPushDisplayMode exitI3 exitWayland
+    waypipeConnect waypipeConnectAll hyprWsApp swayWsApp vmSelect vmPushDisplayMode exitI3 exitWayland
     pkgs.waypipe pkgs.socat  # socat still needed for vm-push-display-mode (vsock:14509)
   ];
 
