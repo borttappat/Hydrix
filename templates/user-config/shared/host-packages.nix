@@ -26,11 +26,8 @@ in {
 
     # Media
     mpv
-    zathura
-    feh
 
     # VPN
-    mullvad-vpn
 
     # File management
     ranger
