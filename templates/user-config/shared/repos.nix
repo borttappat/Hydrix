@@ -1,12 +1,12 @@
 # Declarative Git Repositories
 #
 # Repos listed here are cloned on activation if they don't already exist.
-# Runs as the user (not root), non-blocking — failures are logged to journal,
+# Runs as the user (not root), non-blocking - failures are logged to journal,
 # never to the console, and never break a rebuild.
 #
 # Authentication (tried in order):
-#   1. gh CLI  — run `gh auth login` once after first boot
-#   2. SSH key — ~/.ssh/id_ed25519 or ~/.ssh/id_rsa
+#   1. gh CLI  - run `gh auth login` once after first boot
+#   2. SSH key - ~/.ssh/id_ed25519 or ~/.ssh/id_rsa
 #   3. Warning logged, repo skipped (no error thrown)
 #
 # No gh auth or sops setup required to import this file safely.

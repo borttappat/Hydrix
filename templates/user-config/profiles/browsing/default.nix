@@ -44,9 +44,12 @@ let meta = import ./meta.nix; in
   ];
 
   # MicroVM resources (must match CID in host scripts)
+  # On lower-spec machines, or for single-tasked VMs like browsing, you can cap
+  # the virtiofsd thread pool to reduce idle host threads (default = host CPU count):
+  # microvm.virtiofsd.threadPoolSize = lib.mkForce 1;
   hydrix.microvm = {
-    vcpu = 2;
-    mem = 2304;  # 2.25GB (avoid QEMU 2GB-exact hang bug)
+    vcpu = 3;
+    mem = 3072;  # 3GB
     inherit (meta) vsockCid bridge tapId;
     persistence = {
       enable = true;
