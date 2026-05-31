@@ -65,6 +65,17 @@ let
     done
   '';
 
+  toggleMouseFocus = pkgs.writeShellScript "toggle-mouse-focus" ''
+    cur=$(${pkgs.hyprland}/bin/hyprctl getoption input:follow_mouse -j | ${pkgs.jq}/bin/jq -r '.int')
+    if [ "$cur" = "0" ]; then
+      ${pkgs.hyprland}/bin/hyprctl keyword input:follow_mouse 1
+      ${pkgs.libnotify}/bin/notify-send -t 1500 "Mouse focus: on"
+    else
+      ${pkgs.hyprland}/bin/hyprctl keyword input:follow_mouse 0
+      ${pkgs.libnotify}/bin/notify-send -t 1500 "Mouse focus: off"
+    fi
+  '';
+
   hyprlandConf = pkgs.writeText "hyprland.conf" ''
     # ── Framework layer ────────────────────────────────────────────────────────
     # Colors, monitor, keyboard, VM routing — always regenerated on rebuild.
@@ -132,13 +143,18 @@ let
           ${lib.optionalString (kb.variant != "") "kb_variant  = ${kb.variant}"}
           ${lib.optionalString (kb.xkbOptions != "") "kb_options  = ${kb.xkbOptions}"}
         ''}
-      follow_mouse   = 0
+      follow_mouse   = 1
       sensitivity    = -0.2
       natural_scroll = true
 
       touchpad {
         natural_scroll = true
       }
+    }
+
+    # ── Cursor ─────────────────────────────────────────────────────────────────
+    cursor {
+      inactive_timeout = 3
     }
 
     # ── Layout ─────────────────────────────────────────────────────────────────
@@ -196,6 +212,9 @@ let
     # bind = $mod, F1, exec, zenaudio mute
     # bind = $mod, F2, exec, zenaudio volume -
     # bind = $mod, F3, exec, zenaudio volume +
+
+    # Toggle mouse focus follow
+    bind = $mod CTRL, M, exec, ${toggleMouseFocus}
 
     # Screenshot
     bind = $mod, F12, exec, grim -g "$(slurp)" ~/screenshots/$(date +%Y%m%d_%H%M%S).png
