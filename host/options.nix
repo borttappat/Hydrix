@@ -579,6 +579,21 @@ in {
         };
       };
 
+      profileOverrides = lib.mkOption {
+        type = lib.types.attrsOf lib.types.deferredModule;
+        default = {};
+        description = ''
+          Per-machine NixOS module overrides for profile VMs, keyed by profile name.
+          Applied only to that VM's config on this machine — not on other machines in the flake.
+          Useful for machine-specific VM tuning: USB passthrough, virtiofsd thread counts, etc.
+
+          Example:
+            hydrix.microvmHost.profileOverrides.browsing = { lib, ... }: {
+              microvm.virtiofsd.threadPoolSize = lib.mkForce 1;
+            };
+        '';
+      };
+
       vms = lib.mkOption {
         type = lib.types.attrsOf (lib.types.submodule {
           options = {

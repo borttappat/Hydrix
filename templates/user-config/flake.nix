@@ -336,12 +336,36 @@
       };
     }) discoveredMetas);
 
+    # Per-machine profile overrides — extracted from machine configs AFTER machineConfigs
+    # is defined. autoVMConfigs (used for vmRegistry focusBorder) must NOT use this helper
+    # to avoid a cycle: autoVMConfigsWithOverrides -> machineConfigs -> vmRegistry ->
+    # autoVMConfigs. autoVMConfigs stays pure; only the final nixosConfigurations output
+    # uses autoVMConfigsWithOverrides.
+    getProfileModules = profileName:
+      builtins.concatMap (mc:
+        let overrides = mc.config.hydrix.microvmHost.profileOverrides;
+        in nixpkgs.lib.optional (overrides ? ${profileName}) overrides.${profileName}
+      ) (builtins.attrValues machineConfigs);
+
+    # VM configs with per-machine profileOverrides applied
+    autoVMConfigsWithOverrides = builtins.listToAttrs (map (m: {
+      name  = "microvm-${m._profileName}";
+      value = hydrix.lib.mkMicroVM {
+        profile  = m._profileName;
+        hostname = "microvm-${m._profileName}";
+        extraInputs = { inherit (inputs) nix-index-database burpsuite-nix hydrix; };
+        modules  = [ vmThemeSyncModule { hydrix.vmThemeSync.enable = true; } ]
+          ++ getProfileModules m._profileName;
+        inherit userProfiles hostConfig userColorschemesDir;
+      };
+    }) discoveredMetas);
+
   in {
     # =========================================================================
     # HOST CONFIGURATIONS
     # =========================================================================
     # Machines are auto-discovered from machines/*.nix
-    nixosConfigurations = machineConfigs // taskConfigs // autoVMConfigs // infraVMConfigs // {
+    nixosConfigurations = machineConfigs // taskConfigs // autoVMConfigsWithOverrides // infraVMConfigs // {
 
       # MicroVM Router (WiFi PCI address auto-detected from machine configs)
       # extraNetworks flows from profile meta.nix files automatically

@@ -570,6 +570,24 @@ To customize VMs per-machine, edit `machines/<serial>.nix`:
 }
 ```
 
+To apply NixOS options to a specific VM only on this machine (without affecting other machines in the flake), use `profileOverrides`:
+
+```nix
+hydrix.microvmHost.profileOverrides = {
+  # Cap virtiofsd threads on lower-spec machines
+  browsing = { lib, ... }: {
+    microvm.virtiofsd.threadPoolSize = lib.mkForce 1;
+  };
+  # Pass through a webcam to the comms VM
+  comms = { ... }: {
+    microvm.qemu.extraArgs = [
+      "-device" "qemu-xhci,id=usb-ctrl"
+      "-device" "usb-host,vendorid=0x046d,productid=0x0825"
+    ];
+  };
+};
+```
+
 ### Migration from Existing NixOS
 
 ```bash

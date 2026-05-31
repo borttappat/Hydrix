@@ -710,6 +710,39 @@ Per-VM configuration: `{ enable, autostart, secrets }`.
 
 ---
 
+#### `hydrix.microvmHost.profileOverrides`
+| | |
+|---|---|
+| Type | `attrsOf deferredModule` |
+| Default | `{}` |
+| Template | ✓ commented examples in `machines/installer.nix` |
+
+Per-machine NixOS module overrides for profile VMs, keyed by profile name. Applied only on the machine where they are declared — not on other machines sharing the same flake.
+
+Use cases:
+- Tuning `microvm.virtiofsd.threadPoolSize` on lower-spec machines
+- USB/webcam passthrough via `microvm.qemu.extraArgs`
+- Any VM option that should differ per machine, not per profile
+
+```nix
+# machines/<serial>.nix
+hydrix.microvmHost.profileOverrides = {
+  browsing = { lib, ... }: {
+    microvm.virtiofsd.threadPoolSize = lib.mkForce 1;
+  };
+  comms = { ... }: {
+    microvm.qemu.extraArgs = [
+      "-device" "qemu-xhci,id=usb-ctrl"
+      "-device" "usb-host,vendorid=0x046d,productid=0x0825"
+    ];
+  };
+};
+```
+
+Multiple modules for the same profile (e.g. from a helper module and the machine config directly) are merged by the NixOS module system.
+
+---
+
 ### Builder / Git-Sync
 
 #### `hydrix.builder.enable`

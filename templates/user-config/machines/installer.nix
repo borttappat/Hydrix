@@ -174,6 +174,21 @@
         # "microvm-builder"  = { secrets = [ "github" ]; };
         # "microvm-gitsync"  = { secrets = [ "github" ]; };
       };
+
+      # ─── Per-machine VM overrides ─────────────────────────────────────
+      # Apply machine-specific NixOS options to a VM profile - without affecting
+      # that profile on other machines in the same flake.
+      # Use cases: virtiofsd tuning for lower-spec machines, webcam passthrough, USB passthrough.
+      #
+      # profileOverrides.browsing = { lib, ... }: {
+      #   microvm.virtiofsd.threadPoolSize = lib.mkForce 1;  # Cap idle threads on low-spec machines
+      # };
+      # profileOverrides.comms = { ... }: {
+      #   microvm.qemu.extraArgs = [
+      #     "-device" "qemu-xhci,id=usb-ctrl"
+      #     "-device" "usb-host,vendorid=0x046d,productid=0x0825"  # Webcam passthrough
+      #   ];
+      # };
     };
 
     # ─────────────────────────────────────────────────────────────────────
