@@ -18,5 +18,6 @@
     ./hardware/intel.nix
     ./hardware/amd.nix
     ./hardware/asus.nix
+    ./webcam-passthrough.nix
   ];
 }

@@ -121,6 +121,17 @@
       grub.gfxmodeEfi = "@GRUB_GFXMODE@";
     };
 
+    # ─────────────────────────────────────────────────────────────────────
+    # WEBCAM PASSTHROUGH (optional)
+    # ─────────────────────────────────────────────────────────────────────
+    # Passes a USB webcam to a profile VM. Find vendorId/productId with lsusb.
+    # webcamPassthrough = {
+    #   enable        = true;
+    #   vendorId      = "046d";   # e.g. Logitech
+    #   productId     = "0825";
+    #   targetProfile = "comms";  # default
+    # };
+
     vmMetrics = {
       # vmCollectInterval =  5;  # How often VMs collect metrics (seconds)
       # hostPollInterval  =  5;  # How often host polls VMs (seconds)
