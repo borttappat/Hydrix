@@ -798,6 +798,42 @@ The installer detects and populates these from your current system during a fres
 }
 ```
 
+### Webcam Passthrough
+
+Passes a USB webcam exclusively to a profile VM. Find your webcam's IDs with `lsusb`:
+
+```
+Bus 003 Device 002: ID 3277:0059 Shinetech ASUS FHD webcam
+                       ^^^^:^^^^
+                       vid  pid
+```
+
+```nix
+# machines/<serial>.nix
+hydrix.webcamPassthrough = {
+  enable        = true;
+  vendorId      = "3277";
+  productId     = "0059";
+  targetProfile = "comms";  # default - omit if using comms VM
+};
+```
+
+This sets a udev rule granting `kvm` group ownership of the device node and injects QEMU USB passthrough args into the target VM via `microvmHost.profileOverrides`.
+
+**The passthrough is exclusive.** The webcam is unavailable on the host while the VM is running. To temporarily restore host access:
+
+```bash
+microvm stop microvm-comms   # host reclaims webcam
+microvm start microvm-comms  # webcam returns to VM
+```
+
+After enabling, rebuild the host (applies udev rule), then rebuild the VM:
+
+```bash
+rebuild
+mvm rebuild comms
+```
+
 ### Router
 
 ```nix

@@ -556,6 +556,53 @@ GRUB EFI graphics mode. Set to your display's native resolution.
 
 ---
 
+### Webcam Passthrough
+
+#### `hydrix.webcamPassthrough.enable`
+| | |
+|---|---|
+| Type | `bool` |
+| Default | `false` |
+| Template | ✓ commented example in `machines/installer.nix` |
+
+Pass a USB webcam through to a profile VM via QEMU USB host passthrough. The host's udev rules are updated automatically to grant the `kvm` group ownership of the device node. QEMU args are injected into the target profile VM via `microvmHost.profileOverrides` - only on this machine.
+
+The passthrough is exclusive: the webcam is unavailable on the host while the VM is running. Stop the VM to release it back to the host (`microvm stop microvm-comms`).
+
+---
+
+#### `hydrix.webcamPassthrough.vendorId`
+| | |
+|---|---|
+| Type | `str` |
+| Default | — (required) |
+| Example | `"046d"` |
+
+USB vendor ID of the webcam (4 hex digits). Find it with `lsusb`.
+
+---
+
+#### `hydrix.webcamPassthrough.productId`
+| | |
+|---|---|
+| Type | `str` |
+| Default | — (required) |
+| Example | `"0825"` |
+
+USB product ID of the webcam (4 hex digits). Find it with `lsusb`.
+
+---
+
+#### `hydrix.webcamPassthrough.targetProfile`
+| | |
+|---|---|
+| Type | `str` |
+| Default | `"comms"` |
+
+Profile VM to pass the webcam into. Must match a profile name under `profiles/` (e.g. `"comms"`, `"dev"`).
+
+---
+
 ### Disk Layout (disko)
 
 #### `hydrix.disko.enable`
