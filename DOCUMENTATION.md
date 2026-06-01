@@ -882,22 +882,31 @@ mvm rebuild comms
 
 ### Networking
 
+Built-in bridges (`br-mgmt`, `br-pentest`, `br-comms`, `br-browse`, `br-dev`, `br-builder`, `br-lurking`, `br-files`) are created automatically — no configuration needed for the default set.
+
+To add a custom bridge beyond the built-in set, use `extraNetworks`. Each entry creates a host bridge (`br-<name>`), TAP attachment rules, and a DHCP subnet in the router VM. Declare it once; it is injected into both the host and router VM configs automatically.
+
+```nix
+{
+  hydrix.networking.extraNetworks = [
+    {
+      name      = "office";          # creates br-office
+      subnet    = "192.168.109";     # /24 prefix — .253 becomes the router gateway
+      routerTap = "mv-router-offi";  # router-side TAP name (max 15 chars)
+    }
+  ];
+}
+```
+
+Profile and infra VMs that declare `routerTap` in their `meta.nix` are wired into `extraNetworks` automatically by the flake — you only need to set `extraNetworks` manually for bridges not tied to a profile or infra VM.
+
+Advanced networking options (rarely needed):
+
 ```nix
 {
   hydrix.networking = {
-    bridges = [ "br-mgmt" "br-pentest" "br-comms" "br-browse" "br-dev" "br-shared" "br-builder" "br-lurking" ];
-    hostIp = "192.168.100.1";
-    routerIp = "192.168.100.253";
-    subnets = {
-      mgmt = "192.168.100";
-      pentest = "192.168.101";
-      comms = "192.168.102";
-      browse = "192.168.103";
-      dev = "192.168.104";
-      shared = "192.168.105";
-      builder = "192.168.106";
-      lurking = "192.168.107";
-    };
+    hostIp   = "192.168.100.1";    # DEFAULT: host IP on br-mgmt
+    routerIp = "192.168.100.253";  # DEFAULT: router VM IP on br-mgmt
   };
 }
 ```

@@ -166,6 +166,18 @@
 
   
     # ─────────────────────────────────────────────────────────────────────
+    # NETWORKING (optional)
+    # ─────────────────────────────────────────────────────────────────────
+    # Built-in bridges (br-mgmt, br-pentest, br-browse, etc.) are created
+    # automatically. Use extraNetworks to add custom bridges beyond the
+    # built-in set. Each entry creates a host bridge, TAP attachment rules,
+    # and a DHCP subnet in the router VM.
+    #
+    # networking.extraNetworks = [
+    #   { name = "office"; subnet = "192.168.109"; routerTap = "mv-router-offi"; }
+    # ];
+
+    # ─────────────────────────────────────────────────────────────────────
     # MICROVM HOST
     # ─────────────────────────────────────────────────────────────────────
     microvmHost = {
