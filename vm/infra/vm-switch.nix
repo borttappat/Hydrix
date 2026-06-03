@@ -5,6 +5,10 @@
 #
 # Imported by all VM base modules so every VM supports live rebuild.
 { pkgs, ... }: {
+  # Ensure switch-to-configuration is generated — required for live switching.
+  # Infra VMs with nix.enable = false would otherwise have it disabled.
+  system.switch.enable = true;
+
   # CRITICAL: restartIfChanged = false — this service must not restart itself
   # while handling a SWITCH command, or it kills the handler mid-flight.
   systemd.services.vm-switch = {

@@ -9,7 +9,7 @@
 # - get-colorscheme-mode: Show current mode
 # - refresh-colors: Apply current colors to running apps
 #
-# The host pushes colors via vsock (vm-colorscheme service in microvm-base.nix),
+# The host pushes colors via vsock (vm-colorscheme service in microvm-profile-base.nix),
 # but these scripts provide manual control and fallback mechanisms.
 #
 { config, lib, pkgs, ... }:

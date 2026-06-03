@@ -39,6 +39,8 @@ in {
     ../options.nix
     # QEMU Guest profile for virtio modules
     (modulesPath + "/profiles/qemu-guest.nix")
+    # Live NixOS switch via vsock:14504 (microvm update / microvm switch)
+    ./vm-switch.nix
   ];
 
   # Builder-specific options

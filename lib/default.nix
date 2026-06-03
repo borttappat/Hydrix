@@ -153,7 +153,7 @@ in rec {
       ++ [
       { hydrix.userColorschemesDir = userColorschemesDir; }
       microvm.nixosModules.microvm
-      ../vm/infra/microvm-base.nix  # User setup, vsock, shares, etc.
+      ../vm/infra/microvm-profile-base.nix  # User setup, vsock, shares, etc.
     ] ++ nixpkgs.lib.optionals (builtins.pathExists ../vm/profiles/${profile}) [
       ../vm/profiles/${profile}               # Hydrix base profile (only if it exists)
     ] ++ [

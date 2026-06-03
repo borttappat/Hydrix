@@ -1,6 +1,6 @@
 # Files Agent - Per-VM vsock service for file transfer operations
 #
-# This module is imported by all regular VMs (via microvm-base.nix).
+# This module is imported by all regular VMs (via microvm-profile-base.nix).
 # It listens on vsock port 14506 for commands from the host and executes
 # encrypted file operations on behalf of the files VM transfer flow.
 #

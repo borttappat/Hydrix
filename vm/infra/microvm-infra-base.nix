@@ -7,6 +7,11 @@
 { config, lib, ... }:
 let vmName = config.networking.hostName; in {
 
+  imports = [
+    # Live NixOS switch via vsock:14504 (microvm update / microvm switch)
+    ./vm-switch.nix
+  ];
+
   config = {
     system.stateVersion = "25.05";
     nixpkgs.hostPlatform = lib.mkDefault "x86_64-linux";
@@ -40,6 +45,14 @@ let vmName = config.networking.hostName; in {
           mountPoint = "/mnt/vm-secrets";
           proto      = "virtiofs";
           readOnly   = true;
+        }
+        # VM config directory — used by vm-switch to receive .switch-reg nix DB dump.
+        # Created by `microvm build` at /var/lib/microvms/<name>/config on the host.
+        {
+          tag        = "vm-config";
+          source     = "/var/lib/microvms/${vmName}/config";
+          mountPoint = "/mnt/vm-config";
+          proto      = "9p";
         }
       ];
 

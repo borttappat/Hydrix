@@ -27,7 +27,7 @@
 # - PHP/Composer (composer.json)
 # - Crystal (shard.yml)
 #
-# Imported by both vm-base.nix (libvirt VMs) and microvm-base.nix (microVMs)
+# Imported by both vm-base.nix (libvirt VMs) and microvm-profile-base.nix (microVMs)
 #
 {
   config,
@@ -566,7 +566,7 @@
           };
         };
     }
-    NIMTEMPLATE;
+    NIMTEMPLATE
 
         cat > $out/zig.nix << 'EOF'
     {

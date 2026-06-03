@@ -83,13 +83,16 @@
   #   - Table = off        so wg-quick doesn't touch the main routing table
   #   - strip IPv6 address (router has enableIPv6 = false)
   #   - strip DNS line     (router uses dnsmasq, not wg-quick DNS management)
-  injectTableOff = f: pkgs.runCommand (builtins.baseNameOf f) { } ''
-    ${pkgs.gnused}/bin/sed \
-      -e '/^\[Interface\]/a Table = off' \
-      -e '/^Address/s/,.*$//' \
-      -e '/^DNS/d' \
-      ${f} > $out
-  '';
+  injectTableOff = f:
+    let serverName = lib.removeSuffix ".conf" (builtins.baseNameOf f);
+    in pkgs.runCommand (builtins.baseNameOf f) { } ''
+      ${pkgs.gnused}/bin/sed \
+        -e '1i# Server: ${serverName}' \
+        -e '/^\[Interface\]/a Table = off' \
+        -e '/^Address/s/,.*$//' \
+        -e '/^DNS/d' \
+        ${f} > $out
+    '';
 
   # Named derivations so the boot-assign service can reference them in path
   vpnAssign = pkgs.writeShellScriptBin "vpn-assign" (builtins.readFile ../../scripts/vpn-assign.sh);
@@ -125,6 +128,8 @@ in {
     ../options.nix
     # QEMU Guest profile for virtio modules
     (modulesPath + "/profiles/qemu-guest.nix")
+    # Live NixOS switch via vsock:14504 (microvm update / microvm switch)
+    ./vm-switch.nix
   ];
 
   # ===== MicroVM Router Options =====
