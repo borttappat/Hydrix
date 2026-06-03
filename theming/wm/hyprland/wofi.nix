@@ -33,27 +33,14 @@ let
     in toString (if (ui.pillRadius or null) != null
                  then ui.pillRadius
                  else builtins.floor ((ui.cornerRadius or 2) * (ui.pillRadiusScale or 2.0)));
+  wofiWidth  = toString config.hydrix.graphical.ui.rofiWidth;
+  wofiHeight = toString config.hydrix.graphical.ui.rofiHeight;
 
   wofiLauncher = pkgs.writeShellScriptBin "wofi-launcher" ''
     set -euo pipefail
 
-    readonly SCALING_JSON="${scalingJson}"
     readonly MICROVM_SCRIPT="microvm"
     readonly VM_REGISTRY="/etc/hydrix/vm-registry.json"
-
-    # ── Scaling & Theme Functions ──────────────────────────────────────────
-
-    get_scaling_value() {
-        local key="$1"
-        local default="$2"
-        if [[ -f "$SCALING_JSON" ]]; then
-            local val
-            val=$(${pkgs.jq}/bin/jq -r "$key // empty" "$SCALING_JSON" 2>/dev/null)
-            echo "''${val:-$default}"
-        else
-            echo "$default"
-        fi
-    }
 
     # ── Workspace Detection ────────────────────────────────────────────────
 
@@ -154,10 +141,9 @@ let
     }
 
     build_theme() {
-        local corner_radius font_size font_name
-        corner_radius=$(get_scaling_value '.sizes.corner_radius' '${wofiCornerRadius}')
-        font_size=$(get_scaling_value '.fonts.wofi' '${wofiSize}')
-        font_name=$(get_scaling_value '.font_names.wofi' "$(get_scaling_value '.font_name' '${fontFamily}')")
+        local corner_radius='${wofiCornerRadius}'
+        local font_size='${wofiSize}'
+        local font_name='${fontFamily}'
 
         local bg fg accent
         bg=$(get_wal_color '.colors.color0' '#0e0f17')
@@ -169,6 +155,8 @@ let
     font-family: ''${font_name};
     font-size: ''${font_size}px;
     color: ''${fg};
+    transition: none;
+    animation: none;
 }
 
 #window {
@@ -222,12 +210,7 @@ EOF
 
     # Common wofi flags used by all invocations
     wofi_args() {
-        local font_size font_name width height
-        font_size=$(get_scaling_value '.fonts.wofi' '${wofiSize}')
-        font_name=$(get_scaling_value '.font_names.wofi' "$(get_scaling_value '.font_name' '${fontFamily}')")
-        width=$(get_scaling_value '.sizes.rofi_width' '600')
-        height=$(get_scaling_value '.sizes.rofi_height' '400')
-        echo "--show-icons --width=''${width} --height=''${height} --define=font=''${font_name} ''${font_size} --define=icon_theme=Papirus"
+        echo "--show-icons --width=${wofiWidth} --height=${wofiHeight} --define=font=${fontFamily} ${wofiSize} --define=icon_theme=Papirus"
     }
 
     # ── VM Start Prompt ────────────────────────────────────────────────────
@@ -397,9 +380,208 @@ EOF
     main "$@"
   '';
 
+  # Cross-VM launcher — lists all running display VMs (not workspace-scoped),
+  # lets user pick one then pick an app from that VM's sw/bin/.
+  # Uses the identical theme as wofi-launcher (build_theme / wal colors).
+  vmLaunch = pkgs.writeShellScriptBin "vm-launch" ''
+    set -euo pipefail
+
+    readonly VM_REGISTRY="/etc/hydrix/vm-registry.json"
+
+    # ── Color helpers (identical to wofi-launcher) ────────────────────────────
+
+    get_wal_color() {
+        local key="$1"
+        local fallback="$2"
+        local wal_json="$HOME/.cache/wal/colors.json"
+        local wal_sh="$HOME/.cache/wal/colors.sh"
+        local color=""
+
+        if [[ -f "$wal_json" ]]; then
+            color=$(${pkgs.jq}/bin/jq -r "$key // empty" "$wal_json" 2>/dev/null)
+        fi
+        if [[ -z "$color" && -f "$wal_sh" ]]; then
+            local sh_key
+            sh_key=$(echo "$key" | ${pkgs.gnused}/bin/sed 's|.*\.\(color[0-9]*\)|\1|')
+            color=$(${pkgs.gnugrep}/bin/grep -E "^''${sh_key}=" "$wal_sh" \
+                | head -1 \
+                | ${pkgs.gnused}/bin/sed "s/^[^=]*='//;s/'$//")
+        fi
+        echo "''${color:-$fallback}"
+    }
+
+    # ── Theme (identical to wofi-launcher) ────────────────────────────────────
+
+    build_theme() {
+        local corner_radius='${wofiCornerRadius}'
+        local font_size='${wofiSize}'
+        local font_name='${fontFamily}'
+
+        local bg fg accent
+        bg=$(get_wal_color '.colors.color0' '#0e0f17')
+        fg=$(get_wal_color '.colors.color7' '#e4d1ef')
+        accent=$(get_wal_color '.colors.color4' '#f09ea2')
+
+        cat <<EOF
+* {
+    font-family: ''${font_name};
+    font-size: ''${font_size}px;
+    color: ''${fg};
+    transition: none;
+    animation: none;
+}
+
+#window {
+    background-color: ''${bg};
+    border-radius: ''${corner_radius}px;
+    border: 0px solid transparent;
+}
+
+#outer-box {
+    padding: 8px;
+}
+
+#input {
+    background-color: transparent;
+    border: none;
+    border-bottom: 1px solid ''${accent};
+    border-radius: 0;
+    padding: 4px 8px;
+    margin-bottom: 4px;
+    color: ''${fg};
+}
+
+#scroll { }
+
+#inner-box {
+    padding: 4px;
+}
+
+#entry {
+    padding: 6px 8px;
+    border-radius: ''${corner_radius}px;
+}
+
+#entry:selected {
+    background-color: ''${accent};
+}
+
+#text {
+    color: ''${fg};
+}
+
+#text:selected {
+    color: ''${bg};
+}
+
+#img {
+    margin-right: 6px;
+}
+EOF
+    }
+
+    wofi_pick() {
+        local prompt="$1"
+        local theme_file
+        theme_file=$(${pkgs.coreutils}/bin/mktemp /tmp/vm-launch-XXXXXX.css)
+        build_theme > "$theme_file"
+        local result
+        result=$(${pkgs.wofi}/bin/wofi --show dmenu \
+            --style="$theme_file" \
+            --width=${wofiWidth} \
+            --height=${wofiHeight} \
+            --prompt="$prompt" \
+            --insensitive \
+            2>/dev/null) || true
+        ${pkgs.coreutils}/bin/rm -f "$theme_file"
+        echo "$result"
+    }
+
+    # ── VM discovery ──────────────────────────────────────────────────────────
+    # Lists all running microvms that have hasDisplay != false in the registry.
+    # Infra VMs (router, builder, gitsync, etc.) have hasDisplay: false and are excluded.
+
+    get_running_display_vms() {
+        ${pkgs.systemd}/bin/systemctl list-units --type=service --state=running --no-legend 2>/dev/null \
+            | ${pkgs.gnugrep}/bin/grep -oP 'microvm@\Kmicrovm-[a-z]+(-[a-z0-9-]+)?(?=\.service)' \
+            | ${pkgs.gnugrep}/bin/grep -v '^$' \
+            | while IFS= read -r vm; do
+                local profile="''${vm#microvm-}"
+                if [[ -f "$VM_REGISTRY" ]]; then
+                    local has_display
+                    has_display=$(${pkgs.jq}/bin/jq -r --arg p "$profile" \
+                        '.[$p].hasDisplay // true' "$VM_REGISTRY" 2>/dev/null)
+                    [[ "$has_display" == "false" ]] && continue
+                fi
+                echo "$vm"
+              done || true
+    }
+
+    get_vm_system_path() {
+        local vm_name="$1"
+        local runner vm_system
+
+        runner=""
+        for p in \
+            "/var/lib/microvms/''${vm_name}/current" \
+            "/var/lib/microvms/''${vm_name}/booted"; do
+            [[ -L "$p" ]] && { runner=$(readlink -f "$p"); break; }
+        done
+
+        [[ -z "$runner" ]] && return 1
+
+        vm_system=$(${pkgs.gnugrep}/bin/grep -oP '/nix/store/\S+-nixos-system-\S+' \
+            "''${runner}/bin/microvm-run" 2>/dev/null \
+            | head -1 | ${pkgs.gnused}/bin/sed 's|/[^/]*$||')
+
+        [[ -n "$vm_system" && -d "''${vm_system}/sw/bin" ]] \
+            && echo "$vm_system" || return 1
+    }
+
+    main() {
+        local running_vms selected_vm selected_app
+
+        running_vms=$(get_running_display_vms)
+        if [[ -z "$running_vms" ]]; then
+            ${pkgs.libnotify}/bin/notify-send -t 3000 "vm-launch" "No display VMs running"
+            exit 0
+        fi
+
+        local vm_count
+        vm_count=$(echo "$running_vms" | ${pkgs.gnugrep}/bin/grep -c . 2>/dev/null || echo 0)
+
+        if [[ "$vm_count" -eq 1 ]]; then
+            selected_vm=$(echo "$running_vms" | head -1)
+        else
+            selected_vm=$(echo "$running_vms" | wofi_pick "VM")
+            [[ -z "$selected_vm" ]] && exit 0
+        fi
+
+        local vm_system
+        if vm_system=$(get_vm_system_path "$selected_vm"); then
+            selected_app=$(${pkgs.coreutils}/bin/ls -1 "''${vm_system}/sw/bin/" 2>/dev/null \
+                | ${pkgs.coreutils}/bin/sort -u \
+                | wofi_pick "''${selected_vm}")
+            [[ -z "$selected_app" ]] && exit 0
+
+            if [[ -n "''${HYPRLAND_INSTANCE_SIGNATURE:-}" ]]; then
+                hypr-ws-app "$selected_app" &
+            elif [[ -n "''${SWAYSOCK:-}" ]]; then
+                sway-ws-app "$selected_app" &
+            fi
+            disown 2>/dev/null || true
+        else
+            ${pkgs.libnotify}/bin/notify-send -t 4000 "vm-launch" \
+                "''${selected_vm}: could not read app list (VM built?)"
+        fi
+    }
+
+    main "$@"
+  '';
+
 in {
   config = lib.mkIf (config.hydrix.graphical.enable && (config.hydrix.sway.enable || config.hydrix.hyprland.enable)) {
-    environment.systemPackages = [ wofiLauncher ];
+    environment.systemPackages = [ wofiLauncher vmLaunch ];
 
     home-manager.users.${username} = { pkgs, ... }: {
       programs.wofi = {
