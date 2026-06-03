@@ -19,7 +19,7 @@ in {
   # hydrix.graphical.ui.rofiWidth  = lib.mkDefault 500;  # pixels
   # hydrix.graphical.ui.rofiHeight = lib.mkDefault 400;  # pixels
 
-  config = lib.mkIf config.hydrix.graphical.enable {
+  config = lib.mkIf (config.hydrix.graphical.enable && config.hydrix.i3.enable) {
     home-manager.users.${username} = { pkgs, ... }: {
       programs.rofi = {
 
