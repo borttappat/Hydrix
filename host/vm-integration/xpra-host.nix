@@ -1977,13 +1977,15 @@ in {
     pkgs.python3Packages.i3ipc  # For focus daemon
     alacrittyDpi  # DPI-aware alacritty (used by ws-app fallback and i3 keybindings)
     vmApp
-    vmLaunch
     wsApp      # Workspace-aware app launcher
-    wsRofi     # Workspace-aware rofi
     vmStatus
     vmI3Config
     i3FocusDaemon
     xpraPreAttach  # Pre-attach to all running VMs at session startup
+  ] ++ lib.optionals config.hydrix.i3.enable [
+    # i3/X11 only: rofi-based scripts that conflict with Wayland equivalents
+    vmLaunch    # xpra launcher (Wayland: wofi.nix provides vm-launch)
+    wsRofi      # workspace rofi (X11 only)
   ];
 
   systemd.user.services.vm-focus-daemon = {
