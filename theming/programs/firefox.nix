@@ -237,12 +237,14 @@ let
   '';
 
   # User-agent presets — named shortcuts to realistic UA strings
+  # Chrome/Edge track: major version, update periodically (current: 136, May 2026)
+  # Safari/Firefox track: version + WebKit/Gecko build, update less frequently
   uaPresets = {
-    edge-windows    = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 Edg/131.0.0.0";
-    chrome-windows  = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
-    chrome-mac      = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
-    safari-mac      = "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_2_1) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Safari/605.1.15";
-    firefox-windows = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:132.0) Gecko/20100101 Firefox/132.0";
+    edge-windows    = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36 Edg/136.0.0.0";
+    chrome-windows  = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36";
+    chrome-mac      = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36";
+    safari-mac      = "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_7_6) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.4 Safari/605.1.15";
+    firefox-windows = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:138.0) Gecko/20100101 Firefox/138.0";
   };
 
   ffCfg = config.hydrix.graphical.firefox;
@@ -321,8 +323,6 @@ in {
           "sidebar.verticalTabs" = lock-true;
           "sidebar.visibility" = { Value = "hide-sidebar"; Status = "locked"; };
           "sidebar.position_start" = lock-true;
-        } // lib.optionalAttrs (resolvedUA != null) {
-          "general.useragent.override" = { Value = resolvedUA; Status = "locked"; };
         };
       };
     };
@@ -397,6 +397,14 @@ in {
             "sidebar.expandOnHover" = true;
             "sidebar.visibility" = "hide-sidebar";  # Start collapsed
             "sidebar.position_start" = true;  # Sidebar on left
+          } // lib.optionalAttrs (resolvedUA != null) {
+            # user.js works for hidden prefs; policies.Preferences silently ignores them
+            "general.useragent.override" = resolvedUA;
+            # navigator.platform must match the spoofed UA or sites will still detect Linux
+            "general.platform.override" =
+              if lib.hasInfix "Windows" resolvedUA then "Win32"
+              else if lib.hasInfix "Macintosh" resolvedUA then "MacIntel"
+              else "Linux x86_64";
           };
 
           # Custom CSS for Firefox UI
