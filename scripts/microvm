@@ -1086,7 +1086,7 @@ cmd_purge() {
     # Show what will be deleted
     echo -e "${YELLOW}This will delete all persistent data for ${BOLD}${vm_name}${NC}${YELLOW}:${NC}"
     echo ""
-    ls -lh "$vm_dir"/*.qcow2 2>/dev/null || echo "  (no qcow2 files found)"
+    ls -lh "$vm_dir"/*.qcow2 "$vm_dir"/*.luks 2>/dev/null || echo "  (no data files found)"
     echo ""
 
     # Calculate total size
@@ -3082,6 +3082,7 @@ main() {
             ;;
         encrypt-setup)
             [[ $# -lt 1 ]] && { log_error "Usage: microvm encrypt-setup <name> [size_mb]"; exit 1; }
+            set -- "$(get_vm_name_from_target "$1")" "${@:2}"
             cmd_encrypt_setup "$@"
             ;;
         snapshot|snap)
