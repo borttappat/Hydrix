@@ -21,6 +21,20 @@ let
   VM_REGISTRY = "/etc/hydrix/vm-registry.json";
   username = config.hydrix.username;
 
+  # Nix-computed defaults for vm-select theming (mirrors vault-pick / wofi-launcher)
+  vmSelectFontFamily = config.hydrix.graphical.font.family;
+  vmSelectWofiSize   = let
+    base     = config.hydrix.graphical.font.size;
+    relation = config.hydrix.graphical.font.relations.wofi or
+               config.hydrix.graphical.font.relations.rofi or 1.0;
+    raw      = builtins.floor (base * relation);
+  in toString (if raw < 11 then 11 else raw);
+  vmSelectCornerRadius = let ui = config.hydrix.graphical.ui;
+    in toString (if (ui.pillRadius or null) != null
+                 then ui.pillRadius
+                 else builtins.floor ((ui.cornerRadius or 2) * (ui.pillRadiusScale or 2.0)));
+  vmSelectWidth = toString config.hydrix.graphical.ui.rofiWidth;
+
   # ── waypipe-connect ────────────────────────────────────────────────────────
   waypipeConnect = pkgs.writeShellScriptBin "waypipe-connect" ''
     set -euo pipefail
@@ -83,7 +97,7 @@ let
     # Correct ordering: start listening FIRST, then tell VM to connect.
     while true; do
       # 1. Start host waypipe listener in the background.
-      ${pkgs.waypipe}/bin/waypipe --vsock --socket "$PORT" --compress none client &
+      ${pkgs.waypipe}/bin/waypipe --vsock --socket "$PORT" --compress none --threads 4 client &
       WAYPIPE_PID=$!
 
       # 2. Poll until host vsock socket is actually open — no blind sleep.
@@ -460,36 +474,77 @@ let
 
     notify() { ${pkgs.libnotify}/bin/notify-send -u normal "vm-select" "$*"; }
 
-    # ── Theming (mirrors wofi-launcher) ───────────────────────────────────
+    # ── Theming (mirrors wofi-launcher / vault-pick) ──────────────────────
     get_wal_color() {
       local key="$1" fallback="$2" color=""
       local wal_json="$HOME/.cache/wal/colors.json"
-      [[ -f "$wal_json" ]] \
-        && color=$(${pkgs.jq}/bin/jq -r "$key // empty" "$wal_json" 2>/dev/null)
+      if [[ -f "$wal_json" ]]; then
+        color=$(${pkgs.jq}/bin/jq -r "$key // empty" "$wal_json" 2>/dev/null)
+      fi
       echo "''${color:-$fallback}"
     }
 
     build_theme() {
-      local bg fg accent corner_radius font_size
+      local corner_radius='${vmSelectCornerRadius}'
+      local font_size='${vmSelectWofiSize}'
+      local font_name='${vmSelectFontFamily}'
+      local bg fg accent
       bg=$(get_wal_color '.colors.color0' '#0e0f17')
       fg=$(get_wal_color '.colors.color7' '#e4d1ef')
       accent=$(get_wal_color '.colors.color4' '#f09ea2')
-      local scaling_json="$HOME/.config/hydrix/scaling.json"
-      if [[ -f "$scaling_json" ]]; then
-        corner_radius=$(${pkgs.jq}/bin/jq -r '.sizes.corner_radius // 8' "$scaling_json")
-        font_size=$(${pkgs.jq}/bin/jq -r '.fonts.wofi // 12' "$scaling_json")
-      else
-        corner_radius=8; font_size=12
-      fi
       cat <<EOF
-* { font-size: ''${font_size}px; color: ''${fg}; }
-#window { background-color: ''${bg}; border-radius: ''${corner_radius}px; border: 0px solid transparent; }
-#outer-box { padding: 8px; }
-#input { background-color: transparent; border: none; border-bottom: 1px solid ''${accent}; border-radius: 0; padding: 4px 8px; margin-bottom: 4px; color: ''${fg}; }
-#inner-box { padding: 4px; }
-#entry { padding: 8px 12px; background-color: transparent; border-radius: ''${corner_radius}px; }
-#entry:selected { background-color: ''${accent}; color: ''${bg}; }
-#entry-text { background-color: transparent; color: inherit; }
+* {
+    font-family: ''${font_name};
+    font-size: ''${font_size}px;
+    color: ''${fg};
+}
+
+#window {
+    background-color: ''${bg};
+    border-radius: ''${corner_radius}px;
+    border: 0px solid transparent;
+}
+
+#outer-box {
+    padding: 8px;
+}
+
+#input {
+    background-color: transparent;
+    border: none;
+    border-bottom: 1px solid ''${accent};
+    border-radius: 0;
+    padding: 4px 8px;
+    margin-bottom: 4px;
+    color: ''${fg};
+}
+
+#scroll { }
+
+#inner-box {
+    padding: 4px;
+}
+
+#entry {
+    padding: 6px 8px;
+    border-radius: ''${corner_radius}px;
+}
+
+#entry:selected {
+    background-color: ''${accent};
+}
+
+#text {
+    color: ''${fg};
+}
+
+#text:selected {
+    color: ''${bg};
+}
+
+#img {
+    margin-right: 6px;
+}
 EOF
     }
 
@@ -561,7 +616,7 @@ EOF
           --style="$THEME" \
           --prompt="WS$WS vm" \
           --lines="$VM_COUNT" \
-          --width=320 \
+          --width=${vmSelectWidth} \
           --no-actions \
           2>/dev/null || true)
     ${pkgs.coreutils}/bin/rm -f "$THEME"
