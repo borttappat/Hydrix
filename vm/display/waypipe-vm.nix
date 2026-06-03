@@ -193,7 +193,7 @@ in {
         exec ${pkgs.waypipe}/bin/waypipe \
           --vsock --socket ${waypipePort} \
           --compress none \
-          --threads 2 \
+          --threads 4 \
           --display waypipe-0 \
           ${titlePrefixArg} \
           server -- sleep infinity
