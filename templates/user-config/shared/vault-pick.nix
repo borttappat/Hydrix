@@ -11,7 +11,18 @@
 # Hyprland rule: float + fixed size for class vault-pick
 { config, lib, pkgs, ... }:
 let
-  cfg = config.hydrix.vault;
+  cfg        = config.hydrix.vault;
+  fontFamily = config.hydrix.graphical.font.family;
+  wofiSize   = let
+    base     = config.hydrix.graphical.font.size;
+    relation = config.hydrix.graphical.font.relations.wofi or
+               config.hydrix.graphical.font.relations.rofi or 1.0;
+    raw      = builtins.floor (base * relation);
+  in toString (if raw < 11 then 11 else raw);
+  wofiCornerRadius = let ui = config.hydrix.graphical.ui;
+    in toString (if (ui.pillRadius or null) != null
+                 then ui.pillRadius
+                 else builtins.floor ((ui.cornerRadius or 2) * (ui.pillRadiusScale or 2.0)));
 
   vaultPickTui = pkgs.writeShellApplication {
     name = "vault-pick-tui";
@@ -52,22 +63,66 @@ let
       }
 
       build_theme() {
-        local radius font_size font_name bg fg accent
-        radius=$(scaling_val '.sizes.corner_radius' '8')
-        font_size=$(scaling_val '.fonts.wofi' '13')
-        font_name=$(scaling_val '.font_names.wofi' "$(scaling_val '.font_name' 'monospace')")
+        local corner_radius font_size font_name bg fg accent
+        corner_radius=$(scaling_val '.sizes.corner_radius' '${wofiCornerRadius}')
+        font_size=$(scaling_val '.fonts.wofi' '${wofiSize}')
+        font_name=$(scaling_val '.font_names.wofi' "$(scaling_val '.font_name' '${fontFamily}')")
         bg=$(wal_color '.colors.color0' '#0e0f17')
         fg=$(wal_color '.colors.color7' '#e4d1ef')
         accent=$(wal_color '.colors.color4' '#f09ea2')
         cat <<EOF
-* { font-family: ''${font_name}; font-size: ''${font_size}px; color: ''${fg}; }
-#window { background-color: ''${bg}; border-radius: ''${radius}px; border: 0px solid transparent; }
-#outer-box { padding: 8px; }
-#input { background-color: transparent; border: none; border-bottom: 1px solid ''${accent}; border-radius: 0; padding: 4px 8px; margin-bottom: 4px; color: ''${fg}; }
-#entry { padding: 6px 8px; border-radius: ''${radius}px; }
-#entry:selected { background-color: ''${accent}; }
-#text { color: ''${fg}; }
-#text:selected { color: ''${bg}; }
+* {
+    font-family: ''${font_name};
+    font-size: ''${font_size}px;
+    color: ''${fg};
+}
+
+#window {
+    background-color: ''${bg};
+    border-radius: ''${corner_radius}px;
+    border: 0px solid transparent;
+}
+
+#outer-box {
+    padding: 8px;
+}
+
+#input {
+    background-color: transparent;
+    border: none;
+    border-bottom: 1px solid ''${accent};
+    border-radius: 0;
+    padding: 4px 8px;
+    margin-bottom: 4px;
+    color: ''${fg};
+}
+
+#scroll { }
+
+#inner-box {
+    padding: 4px;
+}
+
+#entry {
+    padding: 6px 8px;
+    border-radius: ''${corner_radius}px;
+}
+
+#entry:selected {
+    background-color: ''${accent};
+}
+
+#text {
+    color: ''${fg};
+}
+
+#text:selected {
+    color: ''${bg};
+}
+
+#img {
+    margin-right: 6px;
+}
 EOF
       }
 
@@ -75,8 +130,13 @@ EOF
       trap 'rm -f "$THEME"' EXIT
       build_theme > "$THEME"
 
+      WOFI_W=$(scaling_val '.sizes.rofi_width'  '600')
+      WOFI_H=$(scaling_val '.sizes.rofi_height' '400')
+
       wofi_dmenu() {
-        wofi --show dmenu --style="$THEME" "$@" 2>/dev/null || true
+        wofi --show dmenu --style="$THEME" \
+          --width="$WOFI_W" --height="$WOFI_H" \
+          "$@" 2>/dev/null || true
       }
 
       # Quick reachability check before showing any UI
