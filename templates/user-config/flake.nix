@@ -106,16 +106,16 @@
 
     hostConfig = { ... }: {
       imports = [
-        ./shared/common.nix      # Locale, timezone, scaling — shared with all VMs
-        ./shared/fonts.nix
-        ./shared/vim.nix         # Deploy .vimrc from configs/vim/.vimrc
-        ./shared/starship.nix    # Deploy starship.toml from configs/starship/
-        ./shared/fish.nix        # Shell abbreviations + functions
-        ./shared/alacritty.nix   # Cursor, keyboard overrides
-        ./shared/dunst.nix       # Notification preferences
-        ./shared/ranger.nix      # File manager mappings + rifle rules
-        ./shared/rofi.nix        # Launcher keybindings
-        ./shared/zathura.nix     # PDF viewer settings
+        ./modules/common.nix      # Locale, timezone, scaling — shared with all VMs
+        ./modules/fonts.nix
+        ./modules/vim.nix         # Deploy .vimrc from configs/vim/.vimrc
+        ./modules/starship.nix    # Deploy starship.toml from configs/starship/
+        ./modules/fish.nix        # Shell abbreviations + functions
+        ./modules/alacritty.nix   # Cursor, keyboard overrides
+        ./modules/dunst.nix       # Notification preferences
+        ./modules/ranger.nix      # File manager mappings + rifle rules
+        ./modules/rofi.nix        # Launcher keybindings
+        ./modules/zathura.nix     # PDF viewer settings
       ];
       hydrix.username = hostUsername;  # Required: VMs use this for virtiofs share paths
       hydrix.vmColors.enable = true;   # VMs inherit host colorscheme (reads wal cache at runtime)
@@ -152,13 +152,13 @@
         inherit userColorschemesDir;
         modules = [
           (machinesDir + "/${file}")
-          ./shared/wifi.nix         # WiFi credentials (shared across machines)
-          ./shared/repos.nix        # Declarative git repos (add yours, or leave repos = {})
-          ./shared/fonts.nix        # Font packages and profiles
-          ./shared/hyprland.nix     # Hyprland keybindings + config (user-customizable)
-          ./shared/waybar.nix       # Waybar layout and modules (user-customizable)
-          ./shared/i3.nix           # i3 keybindings (user-customizable)
-          ./shared/sway.nix         # sway keybindings (user-customizable)
+          ./modules/wifi.nix         # WiFi credentials (shared across machines)
+          ./modules/repos.nix        # Declarative git repos (add yours, or leave repos = {})
+          ./modules/fonts.nix        # Font packages and profiles
+          ./modules/hyprland.nix     # Hyprland keybindings + config (user-customizable)
+          ./modules/waybar.nix       # Waybar layout and modules (user-customizable)
+          ./modules/i3.nix           # i3 keybindings (user-customizable)
+          ./modules/sway.nix         # sway keybindings (user-customizable)
           vmThemeSyncModule         # VM theme sync (host-side)
           { hydrix.vmThemeSync.enable = true;
             hydrix.networking.vmRegistry      = vmRegistry;
@@ -169,22 +169,22 @@
               map (m: "microvm-${m._profileName}") discoveredMetas
               ++ map (m: "microvm-${m._infraName}") discoveredInfra
               ++ map (m: "microvm-pentest-${m._taskName}") discoveredTasks; }
-          ./shared/common.nix       # Locale + shared settings (all machines)
-          ./shared/graphical.nix    # UI preferences (opacity, bluelight, etc.)
-          ./shared/polybar.nix      # Polybar style, workspace labels, module layout
-          ./shared/waybar.nix       # Waybar module
-          ./shared/fish.nix         # Shell abbreviations + functions (user additions)
-          ./shared/alacritty.nix    # Terminal cursor, keyboard overrides
-          ./shared/dunst.nix        # Notification sound + size preferences
-          ./shared/ranger.nix       # File manager mappings + rifle rules
-          ./shared/rofi.nix         # Launcher keybindings + extraConfig
-          ./shared/zathura.nix      # PDF viewer settings
-          ./shared/starship.nix     # Prompt env vars (config is in configs/starship/)
-          ./shared/vim.nix          # Vim plugins (config is in configs/vim/)
-          ./shared/helix.nix
-          ./shared/firefox.nix      # Host Firefox toggle + user-agent
-          ./shared/obsidian.nix     # Host Obsidian toggle + vault paths
-          ./shared/vault.nix        # Vault VM credential launcher (vault-cli + vault-pick)
+          ./modules/common.nix       # Locale + shared settings (all machines)
+          ./modules/graphical.nix    # UI preferences (opacity, bluelight, etc.)
+          ./modules/polybar.nix      # Polybar style, workspace labels, module layout
+          ./modules/waybar.nix       # Waybar module
+          ./modules/fish.nix         # Shell abbreviations + functions (user additions)
+          ./modules/alacritty.nix    # Terminal cursor, keyboard overrides
+          ./modules/dunst.nix        # Notification sound + size preferences
+          ./modules/ranger.nix       # File manager mappings + rifle rules
+          ./modules/rofi.nix         # Launcher keybindings + extraConfig
+          ./modules/zathura.nix      # PDF viewer settings
+          ./modules/starship.nix     # Prompt env vars (config is in configs/starship/)
+          ./modules/vim.nix          # Vim plugins (config is in configs/vim/)
+          ./modules/helix.nix
+          ./modules/firefox.nix      # Host Firefox toggle + user-agent
+          ./modules/obsidian.nix     # Host Obsidian toggle + vault paths
+          ./modules/vault.nix        # Vault VM credential launcher (vault-cli + vault-pick)
         ];
       };
     }) machineFiles);
@@ -374,8 +374,8 @@
         inherit wifiPciAddress extraNetworks;
         profileNetworks = allProfileNetworks;
         modules = [
-          ./shared/common.nix
-          ./shared/wifi.nix
+          ./modules/common.nix
+          ./modules/wifi.nix
           ./infra/router/default.nix
           # Mullvad VPN — place .conf files in vpn/, edit vpn/mullvad.nix,
           # set enable = true, then rebuild the router.
@@ -389,8 +389,8 @@
         inherit wifiPciAddress extraNetworks;
         profileNetworks = allProfileNetworks;
         modules = [
-          ./shared/common.nix
-          ./shared/wifi.nix
+          ./modules/common.nix
+          ./modules/wifi.nix
           ./infra/router-stable/default.nix
         ];
       };
@@ -400,7 +400,7 @@
       "microvm-builder" = hydrix.lib.mkMicrovmBuilder {
         inherit hostUsername;
         modules = [
-          ./shared/common.nix
+          ./modules/common.nix
           ./infra/builder/default.nix
         ];
       };

@@ -561,8 +561,8 @@ migrate_legacy_config() {
 
     [[ ! -d "$CONFIG_DIR/infra" ]] && copy_template_infra
 
-    # Ensure modules, colorschemes, templates, configs directories exist
-    [[ ! -d "$CONFIG_DIR/modules" ]]    && copy_template_modules
+    # Ensure custom, colorschemes, templates, configs directories exist
+    [[ ! -d "$CONFIG_DIR/custom" ]]     && copy_template_custom
     [[ ! -d "$CONFIG_DIR/templates" ]]  && copy_template_templates
     [[ ! -d "$CONFIG_DIR/colorschemes" ]] && create_colorschemes_dir
     [[ ! -d "$CONFIG_DIR/configs" ]]    && copy_template_configs
@@ -938,27 +938,27 @@ copy_template_profiles() {
     log "  Copied from template"
 }
 
-copy_template_shared() {
-    log "Creating shared config from template..."
+copy_template_modules() {
+    log "Creating modules config from template..."
 
-    mkdir -p "$CONFIG_DIR/shared"
+    mkdir -p "$CONFIG_DIR/modules"
 
     local tmpl_root
     tmpl_root=$(find_hydrix_templates) || error "Could not find Hydrix templates directory"
-    cp -r "$tmpl_root/shared"/* "$CONFIG_DIR/shared/"
+    cp -r "$tmpl_root/modules"/* "$CONFIG_DIR/modules/"
     log "  Copied from template"
 }
 
-substitute_shared_locale() {
-    local common="$CONFIG_DIR/shared/common.nix"
+substitute_modules_locale() {
+    local common="$CONFIG_DIR/modules/common.nix"
 
     # Skip if placeholders are already gone (existing repo has real values)
     if ! grep -q "@TIMEZONE@" "$common" 2>/dev/null; then
-        log "  shared/common.nix already configured, skipping locale substitution"
+        log "  modules/common.nix already configured, skipping locale substitution"
         return
     fi
 
-    log "  Substituting locale placeholders in shared/common.nix..."
+    log "  Substituting locale placeholders in modules/common.nix..."
     sed -i \
         -e "s|@TIMEZONE@|${CONFIG[timezone]}|g" \
         -e "s|@LOCALE@|${CONFIG[locale]}|g" \
@@ -969,12 +969,12 @@ substitute_shared_locale() {
     log "  Locale: tz=${CONFIG[timezone]} lang=${CONFIG[locale]} kb=${CONFIG[xkbLayout]}"
 }
 
-substitute_shared_wifi() {
-    local wifi="$CONFIG_DIR/shared/wifi.nix"
+substitute_modules_wifi() {
+    local wifi="$CONFIG_DIR/modules/wifi.nix"
 
     # Skip if placeholders are already gone (existing repo has real credentials)
     if ! grep -q "@WIFI_SSID@" "$wifi" 2>/dev/null; then
-        log "  shared/wifi.nix already configured, skipping WiFi substitution"
+        log "  modules/wifi.nix already configured, skipping WiFi substitution"
         return
     fi
 
@@ -983,7 +983,7 @@ substitute_shared_wifi() {
         return
     fi
 
-    log "  Substituting WiFi credentials in shared/wifi.nix..."
+    log "  Substituting WiFi credentials in modules/wifi.nix..."
     sed -i \
         -e "s|@WIFI_SSID@|${CONFIG[wifiSsid]}|g" \
         -e "s|@WIFI_PASSWORD@|${CONFIG[wifiPassword]}|g" \
@@ -991,14 +991,14 @@ substitute_shared_wifi() {
     log "  WiFi: ssid=${CONFIG[wifiSsid]}"
 }
 
-copy_template_modules() {
-    log "Creating modules from template..."
+copy_template_custom() {
+    log "Creating custom modules from template..."
 
-    mkdir -p "$CONFIG_DIR/modules"
+    mkdir -p "$CONFIG_DIR/custom"
 
     local tmpl_root
     tmpl_root=$(find_hydrix_templates) || error "Could not find Hydrix templates directory"
-    cp -r "$tmpl_root/modules"/* "$CONFIG_DIR/modules/"
+    cp -r "$tmpl_root/custom"/* "$CONFIG_DIR/custom/"
     log "  Copied from template"
 }
 
@@ -1147,10 +1147,10 @@ generate_full_config() {
     generate_flake_nix
     copy_template_specialisations
     copy_template_profiles
-    copy_template_shared
-    substitute_shared_locale
-    substitute_shared_wifi
     copy_template_modules
+    substitute_modules_locale
+    substitute_modules_wifi
+    copy_template_custom
     copy_template_templates
     copy_template_configs
     create_colorschemes_dir
@@ -1185,10 +1185,10 @@ generate_machine_only() {
     generate_machine_nix
     copy_hardware_config
 
-    # Update shared files if they still have placeholder values
+    # Update modules files if they still have placeholder values
     # (handles edge case: user cloned a fresh repo with unsubstituted templates)
-    substitute_shared_locale
-    substitute_shared_wifi
+    substitute_modules_locale
+    substitute_modules_wifi
 
     # Commit the new machine
     (
@@ -1234,9 +1234,9 @@ prompt_wifi() {
         return
     fi
 
-    # Skip if shared/wifi.nix already has real credentials (not placeholder)
-    if [[ -f "$CONFIG_DIR/shared/wifi.nix" ]] && ! grep -q "@WIFI_SSID@" "$CONFIG_DIR/shared/wifi.nix" 2>/dev/null; then
-        log "WiFi already configured in shared/wifi.nix, skipping"
+    # Skip if modules/wifi.nix already has real credentials (not placeholder)
+    if [[ -f "$CONFIG_DIR/modules/wifi.nix" ]] && ! grep -q "@WIFI_SSID@" "$CONFIG_DIR/modules/wifi.nix" 2>/dev/null; then
+        log "WiFi already configured in modules/wifi.nix, skipping"
         return
     fi
 

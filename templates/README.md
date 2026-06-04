@@ -26,7 +26,7 @@ Users get a separate `~/hydrix-config/` directory that imports Hydrix as a flake
 │  machines/<serial>.nix  Machine config (all hydrix.* opts)  │
 │  profiles/              VM profile customizations            │
 │  specialisations/       Boot mode extra packages             │
-│  shared/common.nix      Settings shared across machines     │
+│  modules/common.nix     Settings shared across machines     │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -54,7 +54,7 @@ templates/
 │   │   ├── administrative.nix      # Admin mode extras
 │   │   ├── fallback.nix            # Fallback mode extras
 │   │   └── leisure.nix.example     # Example custom specialisation
-│   └── shared/
+│   └── modules/
 │       └── common.nix              # Cross-machine settings
 └── README.md                       # This file
 ```
@@ -99,8 +99,8 @@ Profiles are overlays — Hydrix base profiles provide all core functionality, u
 
 The framework defines the infrastructure for each mode (lockdown, administrative, fallback). These files are for the user's extra packages per mode.
 
-### shared/common.nix
-**Copied to**: `~/hydrix-config/shared/common.nix`
+### modules/common.nix
+**Copied to**: `~/hydrix-config/modules/common.nix`
 **Purpose**: Settings applied to all machines. Optional — all options commented out by default.
 
 ## How Setup Scripts Use Templates

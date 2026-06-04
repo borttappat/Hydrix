@@ -335,7 +335,7 @@ let
     result=$(echo "POLL" | timeout 1 socat - VSOCK-CONNECT:200:14506 2>/dev/null)
     [ -z "$result" ] && exit 0
     count=$(echo "$result" | jq '.networks | length' 2>/dev/null || echo "0")
-    local_ssid=$(grep -oP 'ssid\s*=\s*"\K[^"]+' "${homeDir}/hydrix-config/shared/wifi.nix" 2>/dev/null | head -1 || echo "")
+    local_ssid=$(grep -oP 'ssid\s*=\s*"\K[^"]+' "${homeDir}/hydrix-config/modules/wifi.nix" 2>/dev/null | head -1 || echo "")
     router_ssid=$(echo "$result" | jq -r '.networks[0].ssid // ""' 2>/dev/null)
     [ -z "$router_ssid" ] && exit 0
     [ "$router_ssid" != "$local_ssid" ] && echo "WIFI! $count" || echo "WIFI $count"

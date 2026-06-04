@@ -2,7 +2,7 @@
 # wifi-sync - Sync WiFi credentials from Router VM to ~/hydrix-config
 #
 # Queries router VM via vsock for WiFi networks, compares with local config,
-# and provides commands to pull credentials into shared/wifi.nix
+# and provides commands to pull credentials into modules/wifi.nix
 #
 # Usage:
 #   wifi-sync poll                              # Query router, show differences
@@ -22,7 +22,7 @@ else
   exit 1
 fi
 
-readonly WIFI_NIX="$PROJECT_DIR/shared/wifi.nix"
+readonly WIFI_NIX="$PROJECT_DIR/modules/wifi.nix"
 readonly ROUTER_PORT=14506
 
 VM_REGISTRY="/etc/hydrix/vm-registry.json"
@@ -133,7 +133,7 @@ case "${1:-}" in
     log "  Password: $password"
     log ""
     log "Next steps:"
-    log "  git add shared/wifi.nix"
+    log "  git add modules/wifi.nix"
     log "  git commit -m 'feat(wifi): update credentials'"
     log "  rebuild"
     ;;
