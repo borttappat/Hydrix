@@ -15,7 +15,7 @@ let
   cfg = config.hydrix.graphical;
 in
 {
-  imports = [ ./i3.nix ./polybar.nix ./picom.nix ./rofi.nix ./scripts.nix ];
+  imports = [ ./i3.nix ./polybar.nix ./picom.nix ./rofi.nix ./scripts.nix ./file-finder.nix ];
 
   config = lib.mkIf (cfg.enable && config.hydrix.i3.enable) {
     services.xserver.displayManager.startx.enable = true;

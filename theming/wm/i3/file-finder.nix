@@ -1,10 +1,10 @@
-# File Finder Script
+# File Finder Script (i3/X11 only)
 #
 # Fuzzy file search launcher with smart file-type opener.
 # Bind in your hydrix-config i3 keybindings (e.g. $mod+Shift+o).
 #
 # Dual mode:
-#   - DISPLAY set: rofi dmenu with pywal colors and scaling.json theming
+#   - DISPLAY set: rofi dmenu with pywal colors
 #   - No DISPLAY:  fzf terminal fallback (for VM terminals)
 #
 # Opens by mime type: text → vim (alacritty-dpi), pdf → zathura, image → feh
@@ -17,17 +17,12 @@ let
   fileFinderScript = pkgs.writeShellScriptBin "file-finder" ''
     set -euo pipefail
 
-    readonly SCALING_JSON="$HOME/.config/hydrix/scaling.json"
-
-    get_scaling_value() {
-        local key="$1" default="$2" val
-        if [[ -f "$SCALING_JSON" ]]; then
-            val=$(${pkgs.jq}/bin/jq -r "$key // empty" "$SCALING_JSON" 2>/dev/null)
-            echo "''${val:-$default}"
-        else
-            echo "$default"
-        fi
-    }
+    # Sizing from Nix config (baked at build time)
+    GAPS=${toString cfg.ui.gaps}
+    CORNER_RADIUS=${toString cfg.ui.cornerRadius}
+    FONT_SIZE=${toString cfg.font.size}
+    FONT_NAME="${cfg.font.family}"
+    OVERLAY_ALPHA="D9"
 
     get_color() {
         local name="$1" fallback="$2" color
@@ -39,13 +34,6 @@ let
     }
 
     build_theme() {
-        local bar_gaps corner_radius font_size font_name overlay_alpha
-        bar_gaps=$(get_scaling_value '.sizes.bar_gaps' '10')
-        corner_radius=$(get_scaling_value '.sizes.corner_radius' '8')
-        font_size=$(get_scaling_value '.fonts.rofi' '12')
-        font_name=$(get_scaling_value '.font_name' 'Iosevka')
-        overlay_alpha=$(get_scaling_value '.sizes.overlay_alpha_hex' 'D9')
-
         local bg fg accent prefix
         bg=$(get_color "color0" "#101116")
         fg=$(get_color "color7" "#c0caf5")
@@ -54,7 +42,7 @@ let
 
         cat <<EOF
     configuration {
-        font: "''${font_name} Bold ''${font_size}";
+        font: "''${FONT_NAME} Bold ''${FONT_SIZE}";
         show-icons: false;
         disable-history: false;
         hover-select: true;
@@ -67,7 +55,7 @@ let
     }
 
     * {
-        bg: ''${bg}''${overlay_alpha};
+        bg: ''${bg}''${OVERLAY_ALPHA};
         bg-solid: ''${bg};
         fg: ''${fg};
         accent: ''${accent};
@@ -81,7 +69,7 @@ let
         width: 700px;
         background-color: @bg;
         border: 0px;
-        border-radius: ''${corner_radius}px;
+        border-radius: ''${CORNER_RADIUS}px;
     }
 
     mainbox {
@@ -119,7 +107,7 @@ let
         padding: 6px 12px;
         background-color: transparent;
         text-color: @fg;
-        border-radius: ''${corner_radius}px;
+        border-radius: ''${CORNER_RADIUS}px;
         cursor: pointer;
     }
 

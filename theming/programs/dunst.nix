@@ -1,7 +1,8 @@
 # Dunst Notification Daemon Configuration
 #
 # Dynamic wal colors support — dunstrc is generated at runtime by the
-# generate-dunstrc script from scaling.json and the wal cache.
+# generate-dunstrc script from the wal colors cache (~/.cache/wal/colors.json).
+# Sizing and layout values come from hydrix.graphical.* (Nix config).
 # Notifications appear top-right, below the bar (bar reserves its space),
 # inset by gaps + 5px on both axes.
 #
@@ -25,41 +26,20 @@
     #!/usr/bin/env bash
     # Generate dunstrc with wal colors and dynamic sizing from scaling.json
 
-    SCALING_JSON="$HOME/.config/hydrix/scaling.json"
-    SCALING_JSON_VM="/mnt/hydrix-config/scaling.json"
     DUNST_DIR="$HOME/.config/dunst"
     DUNSTRC="$DUNST_DIR/dunstrc"
 
     ${pkgs.coreutils}/bin/mkdir -p "$DUNST_DIR"
 
-    # Read scaling values from scaling.json (or use defaults)
-    if [ -f "$SCALING_JSON" ]; then
-      SCALE_FILE="$SCALING_JSON"
-    elif [ -f "$SCALING_JSON_VM" ]; then
-      SCALE_FILE="$SCALING_JSON_VM"
-    else
-      SCALE_FILE=""
-    fi
-
-    if [ -n "$SCALE_FILE" ]; then
-      GAPS=$(${pkgs.jq}/bin/jq -r '.sizes.gaps // ${toString cfg.ui.gaps}' "$SCALE_FILE")
-      BAR_HEIGHT=$(${pkgs.jq}/bin/jq -r '.sizes.bar_height // ${toString cfg.ui.barHeight}' "$SCALE_FILE")
-      BORDER=$(${pkgs.jq}/bin/jq -r '.sizes.border // ${toString cfg.ui.border}' "$SCALE_FILE")
-      CORNER_RADIUS=$(${pkgs.jq}/bin/jq -r '.sizes.corner_radius // ${toString cfg.ui.cornerRadius}' "$SCALE_FILE")
-      FONT_NAME=$(${pkgs.jq}/bin/jq -r '.font_names.dunst // .font_name // "${fontName}"' "$SCALE_FILE")
-      FONT_SIZE=$(${pkgs.jq}/bin/jq -r '.fonts.dunst // ${toString fontSize}' "$SCALE_FILE")
-      OVERLAY_ALPHA=$(${pkgs.jq}/bin/jq -r '.sizes.overlay_alpha_hex // "D9"' "$SCALE_FILE")
-      DUNST_WIDTH=${toString cfg.ui.dunstWidth}
-    else
-      GAPS=${toString cfg.ui.gaps}
-      BAR_HEIGHT=${toString cfg.ui.barHeight}
-      BORDER=${toString cfg.ui.border}
-      CORNER_RADIUS=${toString cfg.ui.cornerRadius}
-      FONT_NAME="${fontName}"
-      FONT_SIZE=${toString fontSize}
-      OVERLAY_ALPHA="D9"
-      DUNST_WIDTH=${toString cfg.ui.dunstWidth}
-    fi
+    # Sizing from Nix config — rebuild to change layout/font
+    GAPS=${toString cfg.ui.gaps}
+    BAR_HEIGHT=${toString cfg.ui.barHeight}
+    BORDER=${toString cfg.ui.border}
+    CORNER_RADIUS=${toString cfg.ui.cornerRadius}
+    FONT_NAME="${fontName}"
+    FONT_SIZE=${toString fontSize}
+    OVERLAY_ALPHA="D9"
+    DUNST_WIDTH=${toString cfg.ui.dunstWidth}
 
     # Padding scaled from bar height
     PADDING=$((BAR_HEIGHT / 4))

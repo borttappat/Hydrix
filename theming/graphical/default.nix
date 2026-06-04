@@ -36,7 +36,6 @@ in {
     ./home.nix             # Home Manager programs
     ./scripts.nix          # Colorscheme management scripts
     ../programs/blugon.nix       # Blue light filter (i3/X11 only, gated internally)
-    ../programs/file-finder.nix  # Fuzzy file search (i3/X11 only, gated internally)
     ../fonts                     # Per-font profiles (sizes, overrides, UI adjustments)
     ../wm/focus-mode.nix   # Focus mode (lock keybindings to single VM type)
     # NixOS-level WM modules: system packages, portals, PAM, session scripts.
