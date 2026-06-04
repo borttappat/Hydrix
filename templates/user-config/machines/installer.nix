@@ -5,7 +5,8 @@
 # Config file is named by hardware serial for automatic reinstall detection.
 # The visual hostname is always "hydrix".
 #
-# See machines/example-serial.nix for all available options with documentation.
+# Shared UI prefs: modules/graphical.nix — override here with plain assignment.
+# All hydrix.graphical.* options listed there with lib.mkDefault values.
 #
 # BOOT MODES:
 #   DEFAULT (Lockdown):  No host internet, minimal packages, hardened
@@ -62,6 +63,13 @@
     colorscheme = "@COLORSCHEME@";
     graphical.wallpaper = "${hydrix}/wallpapers/WindowRain.png";
 
+    # ─────────────────────────────────────────────────────────────────────
+    # ENVIRONMENT DEFAULTS
+    # ─────────────────────────────────────────────────────────────────────
+    # shell    = "fish";   # DEFAULT: "fish"  — options: "fish" | "bash" | "zsh"
+    # terminal = "alacritty";                 # DEFAULT: "alacritty"
+    # editor   = "vim";                       # DEFAULT: "vim" (sets EDITOR/VISUAL)
+
     # Window manager selection - all are off by default; enable exactly one here.
     # i3.enable also gates the X11/xpra stack in all VMs (waypipe used otherwise).
     hyprland.enable = true;   # Wayland/Hyprland stack - start with: hyprland-session
@@ -85,9 +93,20 @@
     };
 
     # ─────────────────────────────────────────────────────────────────────
+    # USER ACCOUNT (optional overrides)
+    # ─────────────────────────────────────────────────────────────────────
+    # user = {
+    #   extraGroups  = [ "audio" "video" "dialout" ];  # Additional groups
+    #   autologin    = false;                           # DEFAULT: false
+    #   sshPublicKeys = [                               # Keys added to ~/.ssh/authorized_keys
+    #     "ssh-ed25519 AAAA..."
+    #   ];
+    # };
+
+    # ─────────────────────────────────────────────────────────────────────
     # ROUTER
     # ─────────────────────────────────────────────────────────────────────
-    # WiFi credentials are in shared/wifi.nix (shared across all machines).
+    # WiFi credentials are in modules/wifi.nix (shared across all machines).
     router = {
       type = "@ROUTER_TYPE@";
       wan.mode = "@WAN_MODE@";
@@ -225,7 +244,8 @@
     # ─────────────────────────────────────────────────────────────────────
     # GRAPHICAL
     # ─────────────────────────────────────────────────────────────────────
-    # Shared UI preferences live in shared/graphical.nix (imported for all machines).
+    # Shared UI preferences live in modules/graphical.nix (imported for all machines).
+    # All options listed there — override here with plain assignment (no mkForce needed).
     graphical = {
       enable = true;
 
@@ -249,8 +269,8 @@
       # scaling.hyprInternalOutput = "eDP-1";   # DEFAULT: "eDP-1" (run: hyprctl monitors)
 
       # ─── Hyprland keyboard remapping ───────────────────────────────────
-      # Custom xkb keymap — takes precedence over layout/variant from shared/common.nix.
-      # Use for key remapping (e.g. § -> ~, CapsLock -> Ctrl). See example-serial.nix.
+      # Custom xkb keymap — takes precedence over layout/variant from modules/common.nix.
+      # Use for key remapping (e.g. § -> ~, CapsLock -> Ctrl).
       # keyboard.xkbFile = pkgs.writeText "my-keymap" ''
       #   xkb_keymap {
       #     xkb_keycodes { include "evdev+aliases(qwerty)" };
@@ -286,6 +306,17 @@
       # ─── Blue light filter ─────────────────────────────────────────────
       # bluelight.enable      = true;   # DEFAULT: true
       # bluelight.defaultTemp = 4500;   # DEFAULT: 4500K
+
+      # ─── Firefox ───────────────────────────────────────────────────────
+      # firefox.verticalTabs = true;         # DEFAULT: false - vertical tab sidebar
+      # firefox.uidensity    = "compact";    # "compact" | "normal" (DEFAULT: "normal")
+      # firefox.search.default = "DuckDuckGo";  # DEFAULT: "DuckDuckGo"
+      # More firefox options (extensions, userAgent, etc.) per profile in profiles/*/default.nix
+
+      # ─── PDF viewer (zathura) ──────────────────────────────────────────
+      # zathura.recolor             = true;   # DEFAULT: true  - dark mode recolor
+      # zathura.recolorKeepHue      = true;   # DEFAULT: true
+      # zathura.recolorReverseVideo = false;  # DEFAULT: false
     };
   };
 
