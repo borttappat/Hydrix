@@ -44,6 +44,26 @@ let
   stableRouterEnabled =
     (allVms ? "microvm-router-stable" && allVms."microvm-router-stable".enable);
 
+  # Stable router TAP → bridge mapping.
+  # Derived from profileNetworks (uses vmRegistry for correct bridge names)
+  # and extraNetworks (custom profiles + non-builtin infra VMs like files).
+  # Only mv-rts-bldr is hardcoded: builder is a builtinVm not in either list.
+  stableTaps =
+    { "mv-rts-bldr" = "br-builder"; }
+    // lib.listToAttrs (map (pn: {
+      name  = if lib.hasPrefix "mv-router-" pn.routerTap
+              then "mv-rts-" + lib.removePrefix "mv-router-" pn.routerTap
+              else "mv-rts-${pn.name}";
+      value = (config.hydrix.networking.vmRegistry.${pn.name} or {}).bridge
+              or "br-${pn.name}";
+    }) config.hydrix.networking.profileNetworks)
+    // lib.listToAttrs (map (n: {
+      name  = if lib.hasPrefix "mv-router-" n.routerTap
+              then "mv-rts-" + lib.removePrefix "mv-router-" n.routerTap
+              else "mv-rts-${n.name}";
+      value = "br-${n.name}";
+    }) config.hydrix.networking.extraNetworks);
+
   # Router TAP interface to bridge mapping
   # TAP names must be max 15 chars (Linux limit)
   # Framework infrastructure TAPs are hardcoded; profile TAPs are generated
@@ -464,22 +484,7 @@ in {
 
           path = [ pkgs.iproute2 ];
 
-          script = let
-            stableTaps = {
-              "mv-rts-pent" = "br-pentest";
-              "mv-rts-comm" = "br-comms";
-              "mv-rts-brow" = "br-browse";
-              "mv-rts-dev"  = "br-dev";
-              "mv-rts-lurk" = "br-lurking";
-              "mv-rts-file" = "br-files";
-              "mv-rts-bldr" = "br-builder";
-            } // lib.listToAttrs (map (n: {
-              name  = if lib.hasPrefix "mv-router-" n.routerTap
-                      then "mv-rts-" + lib.removePrefix "mv-router-" n.routerTap
-                      else "mv-rts-${n.name}";
-              value = "br-${n.name}";
-            }) config.hydrix.networking.extraNetworks);
-          in ''
+          script = ''
             set -e
             echo "Creating stable router TAP interfaces..."
             ${lib.concatStringsSep "\n" (lib.mapAttrsToList (tap: bridge: ''
@@ -494,22 +499,7 @@ in {
             echo "Stable router TAP interfaces ready"
           '';
 
-          preStop = let
-            stableTaps = {
-              "mv-rts-pent" = "br-pentest";
-              "mv-rts-comm" = "br-comms";
-              "mv-rts-brow" = "br-browse";
-              "mv-rts-dev"  = "br-dev";
-              "mv-rts-lurk" = "br-lurking";
-              "mv-rts-file" = "br-files";
-              "mv-rts-bldr" = "br-builder";
-            } // lib.listToAttrs (map (n: {
-              name  = if lib.hasPrefix "mv-router-" n.routerTap
-                      then "mv-rts-" + lib.removePrefix "mv-router-" n.routerTap
-                      else "mv-rts-${n.name}";
-              value = "br-${n.name}";
-            }) config.hydrix.networking.extraNetworks);
-          in ''
+          preStop = ''
             echo "Cleaning up stable router TAP interfaces..."
             ${lib.concatStringsSep "\n" (lib.mapAttrsToList (tap: _: ''
               if ip link show ${tap} &>/dev/null; then
