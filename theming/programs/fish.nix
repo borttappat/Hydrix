@@ -5,7 +5,7 @@
 # lockdown git wrapper (host only), and the __save_last_dir plumbing.
 #
 # All abbreviations, colors, cursor settings, and user functions live in
-# hydrix-config/shared/fish.nix.
+# hydrix-config/modules/fish.nix.
 {
   config,
   lib,

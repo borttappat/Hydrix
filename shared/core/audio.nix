@@ -3,19 +3,19 @@
 
 {
   # Pipewire
-  security.rtkit.enable = true;
+  security.rtkit.enable = lib.mkDefault true;
 
   services.pipewire = {
-    enable = true;
-    alsa.enable = true;
-    alsa.support32Bit = true;
-    pulse.enable = true;
-    wireplumber.enable = true;
+    enable        = lib.mkDefault true;
+    alsa.enable   = lib.mkDefault true;
+    alsa.support32Bit = lib.mkDefault true;
+    pulse.enable  = lib.mkDefault true;
+    wireplumber.enable = lib.mkDefault true;
   };
 
   # ALSA CLI tools (amixer, aplay, etc.)
   environment.systemPackages = [ pkgs.alsa-utils ];
 
   # Disable PulseAudio (using Pipewire instead)
-  services.pulseaudio.enable = false;
+  services.pulseaudio.enable = lib.mkDefault false;
 }
