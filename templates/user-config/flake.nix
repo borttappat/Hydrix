@@ -377,13 +377,10 @@
           ./shared/common.nix
           ./shared/wifi.nix
           ./infra/router/default.nix
-          # Mullvad VPN — auto-included when vpn/mullvad.nix exists.
-          # Setup: copy vpn/mullvad.nix.example → vpn/mullvad.nix,
-          # place downloaded Mullvad .conf files in ~/hydrix-config/vpn/,
-          # fill in the bridges map, then set enable = true.
-        ] ++ (if builtins.pathExists ./vpn/mullvad.nix
-              then [{ hydrix.router.vpn.mullvad = import ./vpn/mullvad.nix; }]
-              else []);
+          # Mullvad VPN — place .conf files in vpn/, edit vpn/mullvad.nix,
+          # set enable = true, then rebuild the router.
+          { hydrix.router.vpn.mullvad = import ./vpn/mullvad.nix; }
+        ];
       };
 
       # MicroVM Router Stable (immutable fallback — starts automatically if main router fails)

@@ -222,6 +222,6 @@ let
     main "$@"
   '';
 
-in lib.mkIf cfg.enable {
+in lib.mkIf (cfg.enable && config.hydrix.i3.enable) {
   environment.systemPackages = [ fileFinderScript ];
 }

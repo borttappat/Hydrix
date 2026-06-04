@@ -73,12 +73,14 @@
     then "mv-rts-" + lib.removePrefix "mv-router-" n.routerTap
     else "mv-rts-${n.name}";
 
-  # Framework LAN interfaces — management plane only. All other subnets are
-  # auto-discovered from profileNetworks + extraNetworks (meta.nix declarations).
-  frameworkLans = [
-    { tap = "mv-rts-mgmt"; subnet = "192.168.100"; routerIp = "192.168.100.253"; }
-    { tap = "mv-rts-bldr"; subnet = "192.168.210"; routerIp = "192.168.210.253"; }
-  ];
+  # Infrastructure LAN interfaces — from infra/*/meta.nix builtinVm entries.
+  # Stable router uses mv-rts-* prefix instead of mv-router-*.
+  stableInfraLan = l: {
+    tap      = builtins.replaceStrings ["mv-router-"] ["mv-rts-"] l.tap;
+    subnet   = l.subnet;
+    routerIp = "${l.subnet}.253";
+  };
+  frameworkLans = map stableInfraLan cfg.router.microvm.infraLans;
 
   # All profile/extra network LAN interfaces — derived from meta.nix at build time.
   profileLans = map (n: {

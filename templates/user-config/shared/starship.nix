@@ -1,12 +1,20 @@
 # Starship Prompt — User Configuration
+#
+# Installs starship, initializes it in fish, and deploys starship.toml.
 
-{ config, lib, ... }:
+{ config, lib, pkgs, ... }:
 
 let
   username = config.hydrix.username;
 in {
   config = lib.mkIf config.hydrix.graphical.enable {
-    home-manager.users.${username} = { ... }: {
+    environment.systemPackages = [ pkgs.starship ];
+
+    home-manager.users.${username} = { pkgs, ... }: {
+      programs.fish.interactiveShellInit = lib.mkAfter ''
+        ${pkgs.starship}/bin/starship init fish | source
+      '';
+
       xdg.configFile."starship.toml".text = ''
         "$schema" = 'https://starship.rs/config-schema.json'
 

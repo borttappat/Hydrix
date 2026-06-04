@@ -17,7 +17,6 @@
   # Install fish and related tools
   environment.systemPackages = with pkgs; [
     fish
-    starship  # Prompt
     zoxide    # Smart cd (init in config.fish)
   ];
 }

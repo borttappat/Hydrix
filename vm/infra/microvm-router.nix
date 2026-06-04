@@ -79,20 +79,9 @@
   hasMullvad = vpnCfg.mullvad.enable && vpnCfg.mullvad.bridges != {};
   mullvadBridges = vpnCfg.mullvad.bridges; # attrset: bridge-name → conf-file path
 
-  # Sanitise a Mullvad conf for router use:
-  #   - Table = off        so wg-quick doesn't touch the main routing table
-  #   - strip IPv6 address (router has enableIPv6 = false)
-  #   - strip DNS line     (router uses dnsmasq, not wg-quick DNS management)
-  injectTableOff = f:
-    let serverName = lib.removeSuffix ".conf" (builtins.baseNameOf f);
-    in pkgs.runCommand (builtins.baseNameOf f) { } ''
-      ${pkgs.gnused}/bin/sed \
-        -e '1i# Server: ${serverName}' \
-        -e '/^\[Interface\]/a Table = off' \
-        -e '/^Address/s/,.*$//' \
-        -e '/^DNS/d' \
-        ${f} > $out
-    '';
+  # WireGuard config processing hook — user-defined via hydrix.router.vpn.mullvad.processConfig
+  # Default: identity (pass through raw conf files unmodified)
+  processConfig = vpnCfg.mullvad.processConfig;
 
   # Named derivations so the boot-assign service can reference them in path
   vpnAssign = pkgs.writeShellScriptBin "vpn-assign" (builtins.readFile ../../scripts/vpn-assign.sh);
@@ -107,21 +96,18 @@
   # LAN interface names — all statically known at build time via MAC→name links.
   # Used in nftables to identify WAN/VPN egress by negation so the firewall
   # never depends on runtime WAN detection (which can fail on fresh installs).
-  lanTaps = [
-    "mv-router-mgmt" "mv-router-pent" "mv-router-comm" "mv-router-brow"
-    "mv-router-dev"  "mv-router-lurk" "mv-router-bldr"
-  ] ++ map (n: n.routerTap) extraNetworks;
+  # Derived from infraLans + all profile/extra networks — no hardcoded names.
+  lanTaps = map (l: l.tap) cfg.router.microvm.infraLans
+    ++ map (n: n.routerTap) allNetworks;
 
   # nftables set literal: { "lo", "mv-router-mgmt", ... }
   lanTapSetNft = "{ " + lib.concatMapStringsSep ", " (t: "\"${t}\"") (["lo"] ++ lanTaps) + " }";
 
   # All LAN segments the router serves, with their router-side IP suffix (.253).
-  # Management tap (fixed) ++ profile/extra-network taps (auto-discovered from meta.nix).
-  # Adding an infra VM with routerTap + subnet in hydrix-config automatically appears here.
-  allLans =
-    [ { tap = "mv-router-mgmt"; subnet = "192.168.100"; }
-      { tap = "mv-router-bldr"; subnet = "192.168.210"; }
-    ] ++ map (n: { tap = n.routerTap; subnet = n.subnet; }) allNetworks;
+  # infraLans (from infra/*/meta.nix builtinVm entries) ++ profile/extra-network taps.
+  # Adding routerTap + subnet to any meta.nix in hydrix-config automatically appears here.
+  infraLans = cfg.router.microvm.infraLans;
+  allLans = infraLans ++ map (n: { tap = n.routerTap; subnet = n.subnet; }) allNetworks;
 in {
   imports = [
     # Central options for config access
@@ -329,9 +315,9 @@ in {
     ];
 
     # Use latest kernel for best iwlwifi/WiFi support (matches libvirt router)
-    boot.kernelPackages = pkgs.linuxPackages_latest;
+    boot.kernelPackages = lib.mkDefault pkgs.linuxPackages_latest;
 
-    boot.kernelModules = [
+    boot.kernelModules = lib.mkDefault [
       "virtio_blk"
       "virtio_pci"
       "virtio_rng"
@@ -502,18 +488,19 @@ in {
         # fixed by systemd.network.links above. Variable names match what
         # dnsmasq-config expects: profile name → IFACE_<NAME>, infra → IFACE_<TAP>.
         "hydrix-router/interfaces".text =
-          "IFACE_MGMT=mv-router-mgmt\n"
-          + "IFACE_BUILDER=mv-router-bldr\n"
+          lib.concatMapStrings (l: let
+            varName = lib.toUpper (builtins.replaceStrings ["-" "mv-router-"] ["_" ""] l.tap);
+          in "IFACE_${varName}=${l.tap}\n") infraLans
           + lib.concatMapStrings (n: let
               varName = lib.toUpper (builtins.replaceStrings ["-"] ["_"] n.name);
             in "IFACE_${varName}=${n.routerTap}\n") allNetworks
           ;
       }
-      # Mullvad WireGuard conf files — Table=off injected, copied to /etc/wireguard/
+      # Mullvad WireGuard conf files — processed via hydrix.router.vpn.mullvad.processConfig
       (lib.mkIf hasMullvad (
         lib.mapAttrs' (bridge: f: {
           name = "wireguard/wg-${bridge}.conf";
-          value = { source = injectTableOff f; mode = "0600"; };
+          value = { source = processConfig f; mode = "0600"; };
         }) mullvadBridges
       ))
     ];
@@ -649,8 +636,11 @@ in {
           fi
         }
 
-        add_iface "$IFACE_MGMT" "192.168.100" "192.168.100.253"
-        add_iface "$IFACE_BUILDER" "192.168.210" "192.168.210.253"
+        # Infrastructure LANs (from infra/*/meta.nix)
+        ${lib.concatStringsSep "\n        " (map (l:
+          "add_iface \"${l.tap}\" \"${l.subnet}\" \"${l.subnet}.253\""
+        ) infraLans)}
+        # Profile + extra networks (from profiles/*/meta.nix + extraNetworks)
         ${lib.concatStringsSep "\n        " (map (n: let
           varName = lib.toUpper (builtins.replaceStrings ["-"] ["_"] n.name);
         in "add_iface \"$IFACE_${varName}\" \"${n.subnet}\" \"${n.subnet}.253\"") allNetworks)}
@@ -661,8 +651,8 @@ in {
     };
 
     services.dnsmasq = {
-      enable = true;
-      resolveLocalQueries = true;
+      enable = lib.mkDefault true;
+      resolveLocalQueries = lib.mkDefault true;
       settings = {
         conf-dir = "/etc/dnsmasq.d/,*.conf";
       };
@@ -856,10 +846,10 @@ in {
     };
 
     # ===== Services =====
-    services.openssh.enable = false; # No SSH - console only
-    services.qemuGuest.enable = true;
-    services.getty.autologinUser = routerUser;
-    services.haveged.enable = true;
+    services.openssh.enable = lib.mkDefault false; # No SSH - console only
+    services.qemuGuest.enable = lib.mkDefault true;
+    services.getty.autologinUser = lib.mkDefault routerUser;
+    services.haveged.enable = lib.mkDefault true;
 
     # ===== User Configuration =====
     users.users.${routerUser} =
@@ -876,7 +866,7 @@ in {
     security.sudo.wheelNeedsPassword = false;
 
     # ===== Packages =====
-    environment.systemPackages = with pkgs; [
+    environment.systemPackages = lib.mkDefault (with pkgs; [
       openvpn
       iproute2
       iptables
@@ -901,7 +891,7 @@ in {
       wireguard-tools
       vpnAssign
       vpnStatus
-    ] ++ cfg.router.microvm.extraPackages;
+    ] ++ cfg.router.microvm.extraPackages);
 
     # ===== Tmpfiles =====
     systemd.tmpfiles.rules = [
@@ -943,7 +933,7 @@ in {
         echo "╔══════════════════════════════════════════════════════════╗"
         echo "║           HYDRIX MICROVM ROUTER                          ║"
         echo "╠══════════════════════════════════════════════════════════╣"
-        echo "║  Networks: 192.168.100-108.x                             ║"
+        echo "║  Networks: ${lib.concatMapStringsSep ", " (l: l.subnet) (lib.take 3 allLans)}...  ║"
         echo "╚══════════════════════════════════════════════════════════╝"
         echo ""
       '';

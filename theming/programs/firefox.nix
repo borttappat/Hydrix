@@ -15,7 +15,8 @@
 let
   username = config.hydrix.username;
   vmType = config.hydrix.vmType;
-  useFirefoxWrapped = config.hydrix.i3.enable;
+  # Legacy X11/i3 DPI wrapper — only used when i3 is explicitly enabled
+  useFirefoxWrapped = config.hydrix.i3.enable or false;
 
   # Lock helpers for policies
   lock-false = {
@@ -265,7 +266,7 @@ in {
       enable = true;
       languagePacks = [ "en-US" ];
 
-      policies = {
+      policies = lib.mkDefault {
         DisableTelemetry = true;
         DisableFirefoxStudies = true;
         EnableTrackingProtection = {
@@ -331,7 +332,7 @@ in {
     home-manager.users.${username} = { pkgs, config, ... }: {
       programs.firefox = {
         enable = lib.mkDefault true;
-        # Use DPI/pywalfox wrapper on X11 (i3); plain Firefox on Wayland (Sway/Hyprland)
+        # Plain Firefox on Wayland (Sway/Hyprland); DPI/pywalfox wrapper only on X11 (i3)
         package = lib.mkDefault (if useFirefoxWrapped then firefoxWrapped else pkgs.firefox);
 
         profiles.default = {
@@ -379,17 +380,13 @@ in {
             # since the portal works on both host and VMs.
             "widget.use-xdg-desktop-portal.file-picker" = 1;
 
-            # Font/UI scaling for HiDPI displays
-            # NOTE: layout.css.devPixelsPerPx is managed dynamically by firefox-dpi wrapper
-            # It reads scale_factor from ~/.config/hydrix/scaling.json at runtime
-
-            # Force system font on web content
-            "browser.display.use_document_fonts" = 0;  # 0 = use user fonts, 1 = allow web fonts
-            "font.name.monospace.x-western" = lib.mkForce fontName;
-            "font.name.sans-serif.x-western" = lib.mkForce fontName;
-            "font.name.serif.x-western" = lib.mkForce fontName;
-            "font.size.variable.x-western" = lib.mkForce fontSize;
-            "font.size.monospace.x-western" = lib.mkForce fontSize;
+            # System font on web content
+            "browser.display.use_document_fonts" = lib.mkDefault 0;  # 0 = use user fonts, 1 = allow web fonts
+            "font.name.monospace.x-western" = lib.mkDefault fontName;
+            "font.name.sans-serif.x-western" = lib.mkDefault fontName;
+            "font.name.serif.x-western" = lib.mkDefault fontName;
+            "font.size.variable.x-western" = lib.mkDefault fontSize;
+            "font.size.monospace.x-western" = lib.mkDefault fontSize;
           } // lib.optionalAttrs ffCfg.verticalTabs {
             # Native Vertical Tabs - start collapsed, expand on hover
             "sidebar.revamp" = true;

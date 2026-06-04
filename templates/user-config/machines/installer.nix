@@ -95,12 +95,10 @@
     };
 
       # ─── Mullvad VPN (optional) ────────────────────────────────────────
-      # 1. mullvad.net →  Account →  WireGuard config →  select server →  download .conf
+      # 1. mullvad.net -> Account -> WireGuard config -> select server -> download .conf
       # 2. Place downloaded files in ~/hydrix-config/vpn/
-      # 3. Copy vpn/mullvad.nix.example → vpn/mullvad.nix, map bridges to files
-      # 4. Uncomment the line below and rebuild the router
-      #
-      # vpn.mullvad = import ../vpn/mullvad.nix;
+      # 3. Edit vpn/mullvad.nix: map bridges to .conf files, set enable = true
+      # 4. Rebuild the router: microvm build microvm-router && microvm restart microvm-router
 
     # ─────────────────────────────────────────────────────────────────────
     # HARDWARE

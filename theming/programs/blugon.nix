@@ -1,7 +1,7 @@
 # Blugon Blue Light Filter Configuration
 #
 # Provides screen color temperature adjustment to reduce eye strain.
-# Controlled via polybar module (click to adjust) or keybindings.
+# Controlled via keybindings. X11/i3 only (gated behind hydrix.i3.enable).
 #
 # HYBRID AUTO/MANUAL MODE:
 # - On boot: Auto-polls based on time-of-day schedule (warm at night, cool during day)
@@ -183,7 +183,7 @@ EOF
   '';
 
 in {
-  config = lib.mkIf (config.hydrix.graphical.enable && cfg.enable && !isVM) {
+  config = lib.mkIf (config.hydrix.graphical.enable && config.hydrix.i3.enable && cfg.enable && !isVM) {
     # Add blugon package
     environment.systemPackages = [ pkgs.blugon ];
 

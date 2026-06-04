@@ -655,7 +655,7 @@ in {
   # This module now only provides the systemd services and script
   # Options are defined in options.nix
 
-  config = lib.mkIf (cfg.enable && cfg.scaling.auto) {
+  config = lib.mkIf (cfg.enable && cfg.scaling.auto && (config.hydrix.i3.enable or false)) {
     environment.systemPackages = [ hydrixScaleScript ] ++ runtimeDeps;
 
     # Host service (X11 only — Wayland sessions use graphical-session.target too)
