@@ -8,5 +8,4 @@
   subnet    = "192.168.105";     # /24 prefix — matches CID last octet
   workspace = 5;
   label     = "DEV";
-  icon      = "";
 }

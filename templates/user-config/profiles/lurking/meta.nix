@@ -8,5 +8,4 @@
   subnet    = "192.168.106";     # /24 prefix — matches CID last octet
   workspace = 6;
   label     = "LURKING";
-  icon      = "";
 }

@@ -78,13 +78,6 @@ let meta = import ./meta.nix; in
 
   users.users.${config.hydrix.username}.extraGroups = [ "docker" ];
 
-  hydrix.ollama = {
-    enable = false;
-    model = "deepseek-coder:6.7b";
-    cpuCores = 5;
-    memoryLimit = "10G";
-  };
-
   # =========================================================================
   # EXTRA PACKAGES
   # =========================================================================
