@@ -628,7 +628,6 @@ let
       "custom/vms"
       "custom/sep"
       "custom/volume"
-      "custom/zenaudio"
       "custom/bluetooth"
       "custom/sep"
       "custom/temp"
@@ -671,7 +670,6 @@ let
     "custom/vms"            = { exec = "${vmsScript}";           interval = 10; format = "{}"; tooltip = false; escape = false; };
     "custom/sep"            = { exec = "echo '|'"; interval = "once"; format = "{}"; tooltip = false; };
     "custom/volume"    = { exec = "${volumeScript}";    interval = 5;  format = "{}"; tooltip = false; escape = false; "on-click" = "pavucontrol"; "on-scroll-up" = "${pkgs.pulseaudio}/bin/pactl set-sink-volume @DEFAULT_SINK@ +5%"; "on-scroll-down" = "${pkgs.pulseaudio}/bin/pactl set-sink-volume @DEFAULT_SINK@ -5%"; };
-    "custom/zenaudio"  = { exec = "${zenaudioScript}";  interval = 3;  format = "{}"; tooltip = false; escape = false; "on-click" = "zenaudio toggle"; };
     "custom/bluetooth" = { exec = "${bluetoothScript}"; interval = 10; format = "{}"; tooltip = false; escape = false; "return-type" = "json"; };
     "custom/temp"      = { exec = "${monoTempScript}";  interval = 5;  format = "{}"; tooltip = false; escape = false; };
     "custom/memory"    = { exec = "${hostMemScript}";   interval = 5;  format = "{}"; tooltip = false; escape = false; "return-type" = "json"; };
