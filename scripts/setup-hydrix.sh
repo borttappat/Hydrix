@@ -566,6 +566,7 @@ migrate_legacy_config() {
     [[ ! -d "$CONFIG_DIR/templates" ]]  && copy_template_templates
     [[ ! -d "$CONFIG_DIR/colorschemes" ]] && create_colorschemes_dir
     [[ ! -d "$CONFIG_DIR/configs" ]]    && copy_template_configs
+    [[ ! -d "$CONFIG_DIR/vpn" ]]       && copy_template_vpn
 
     # Update flake.nix to use auto-discovery
     generate_flake_nix
@@ -1064,6 +1065,15 @@ copy_template_secrets() {
     log "  secrets/ scaffold created (see secrets/.sops.yaml for setup instructions)"
 }
 
+copy_template_vpn() {
+    log "Creating vpn directory..."
+    mkdir -p "$CONFIG_DIR/vpn"
+    local tmpl_root
+    tmpl_root=$(find_hydrix_templates) || error "Could not find Hydrix templates directory"
+    cp -r "$tmpl_root/vpn"/* "$CONFIG_DIR/vpn/"
+    log "  Copied from template (add .conf files and edit vpn/mullvad.nix to activate)"
+}
+
 copy_template_readme() {
     local tmpl_root
     tmpl_root=$(find_hydrix_templates) || return 0  # README is optional
@@ -1153,6 +1163,7 @@ generate_full_config() {
     copy_template_custom
     copy_template_templates
     copy_template_configs
+    copy_template_vpn
     create_colorschemes_dir
     copy_wallpapers
     copy_template_readme

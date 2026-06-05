@@ -1877,6 +1877,15 @@ copy_template_configs() {
     log "  Copied program configs from template"
 }
 
+copy_template_vpn() {
+    local config_dir="$1"
+    log "Creating vpn directory..."
+    mkdir -p "$config_dir/vpn"
+    local template_dir="$SCRIPT_DIR/../templates/user-config/vpn"
+    cp -r "$template_dir"/* "$config_dir/vpn/"
+    log "  Copied from template (add .conf files and edit vpn/mullvad.nix to activate)"
+}
+
 copy_template_readme() {
     local config_dir="$1"
     local template_dir="$SCRIPT_DIR/../templates/user-config"
@@ -1989,6 +1998,7 @@ generate_config_to_temp() {
         copy_template_fonts "$TEMP_CONFIG"
         copy_template_colorschemes "$TEMP_CONFIG"
         copy_template_configs "$TEMP_CONFIG"
+        copy_template_vpn "$TEMP_CONFIG"
         copy_template_readme "$TEMP_CONFIG"
         generate_machine_nix "$TEMP_CONFIG"
         generate_hardware_config "$TEMP_CONFIG"

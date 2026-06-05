@@ -385,7 +385,9 @@
           ./infra/router/default.nix
           # Mullvad VPN — place .conf files in vpn/, edit vpn/mullvad.nix,
           # set enable = true, then rebuild the router.
-          { hydrix.router.vpn.mullvad = import ./vpn/mullvad.nix; }
+        ] ++ (if builtins.pathExists ./vpn/mullvad.nix
+              then [{ hydrix.router.vpn.mullvad = import ./vpn/mullvad.nix; }]
+              else []) ++ [
         ];
       };
 
