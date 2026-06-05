@@ -1,11 +1,15 @@
 # Ranger File Manager Configuration
 #
 # Home Manager module for Ranger file manager.
+# All settings and mappings use lib.mkDefault so hydrix-config modules can
+# override any individual entry without lib.mkForce.
+# Use hydrix.graphical.ranger.extraMappings / extraRifle to extend from config.
 
 { config, lib, pkgs, ... }:
 
 let
   username = config.hydrix.username;
+  rangerCfg = config.hydrix.graphical.ranger;
 in {
   config = lib.mkIf config.hydrix.graphical.enable {
     home-manager.users.${username} = { pkgs, ... }: {
@@ -14,56 +18,59 @@ in {
 
         settings = {
           # Preview
-          preview_images = true;
-          preview_images_method = "kitty";
-          preview_files = true;
-          preview_directories = true;
-          collapse_preview = true;
+          preview_images        = lib.mkDefault true;
+          preview_images_method = lib.mkDefault "kitty";
+          preview_files         = lib.mkDefault true;
+          preview_directories   = lib.mkDefault true;
+          collapse_preview      = lib.mkDefault true;
 
           # Display
-          draw_borders = "both";
-          column_ratios = "1,3,4";
-          hidden_filter = "^\\.|\\.pyc$|~$";
-          show_hidden = false;
-          confirm_on_delete = "multiple";
+          draw_borders       = lib.mkDefault "both";
+          column_ratios      = lib.mkDefault "1,3,4";
+          hidden_filter      = lib.mkDefault "^\\.|\\.pyc$|~$";
+          show_hidden        = lib.mkDefault false;
+          confirm_on_delete  = lib.mkDefault "multiple";
 
           # Behavior
-          autosave_bookmarks = true;
-          save_console_history = true;
-          mouse_enabled = true;
-          tilde_in_titlebar = true;
+          autosave_bookmarks   = lib.mkDefault true;
+          save_console_history = lib.mkDefault true;
+          mouse_enabled        = lib.mkDefault true;
+          tilde_in_titlebar    = lib.mkDefault true;
 
           # Sorting
-          sort = "natural";
-          sort_case_insensitive = true;
-          sort_directories_first = true;
+          sort                   = lib.mkDefault "natural";
+          sort_case_insensitive  = lib.mkDefault true;
+          sort_directories_first = lib.mkDefault true;
 
           # VCS
-          vcs_aware = true;
-          vcs_backend_git = "enabled";
+          vcs_aware       = lib.mkDefault true;
+          vcs_backend_git = lib.mkDefault "enabled";
         };
 
-        mappings = {
-          # Quick navigation
-          gh = "cd ~";
-          gH = "cd ${config.hydrix.paths.configDir}";
-          gd = "cd ~/Downloads";
-          gD = "cd ~/Documents";
-          gp = "cd ~/Pictures";
-          gv = "cd ~/Videos";
-          gc = "cd ~/.config";
-          gn = "cd /nix/store";
+        mappings = lib.mkMerge [
+          {
+            # Quick navigation
+            gh = lib.mkDefault "cd ~";
+            gH = lib.mkDefault "cd ${config.hydrix.paths.configDir}";
+            gd = lib.mkDefault "cd ~/Downloads";
+            gD = lib.mkDefault "cd ~/Documents";
+            gp = lib.mkDefault "cd ~/Pictures";
+            gv = lib.mkDefault "cd ~/Videos";
+            gc = lib.mkDefault "cd ~/.config";
+            gn = lib.mkDefault "cd /nix/store";
 
-          # Operations
-          DD = "shell mv %s ~/.local/share/Trash/files/";
-          X = "shell extract %s";
-          Z = "shell tar -cvzf %f.tar.gz %s";
+            # Operations
+            DD = lib.mkDefault "shell mv %s ~/.local/share/Trash/files/";
+            X  = lib.mkDefault "shell extract %s";
+            Z  = lib.mkDefault "shell tar -cvzf %f.tar.gz %s";
 
-          # Toggle settings
-          zh = "set show_hidden!";
-          zp = "set preview_files!";
-          zi = "set preview_images!";
-        };
+            # Toggle settings
+            zh = lib.mkDefault "set show_hidden!";
+            zp = lib.mkDefault "set preview_files!";
+            zi = lib.mkDefault "set preview_images!";
+          }
+          rangerCfg.extraMappings
+        ];
 
         rifle = [
           # Web
@@ -71,11 +78,11 @@ in {
 
           # Text
           { condition = "mime ^text, label editor"; command = "\${VISUAL:-$EDITOR} -- \"$@\""; }
-          { condition = "ext py, label editor"; command = "\${VISUAL:-$EDITOR} -- \"$@\""; }
-          { condition = "ext nix, label editor"; command = "\${VISUAL:-$EDITOR} -- \"$@\""; }
+          { condition = "ext py, label editor";     command = "\${VISUAL:-$EDITOR} -- \"$@\""; }
+          { condition = "ext nix, label editor";    command = "\${VISUAL:-$EDITOR} -- \"$@\""; }
 
           # Images
-          { condition = "mime ^image, has feh, X, flag f"; command = "feh -- \"$@\""; }
+          { condition = "mime ^image, has feh, X, flag f";  command = "feh -- \"$@\""; }
           { condition = "mime ^image, has sxiv, X, flag f"; command = "sxiv -- \"$@\""; }
 
           # Video/Audio
@@ -90,7 +97,7 @@ in {
 
           # Fallback
           { condition = "mime ^text, label pager"; command = "\${PAGER:-less} -- \"$@\""; }
-        ];
+        ] ++ rangerCfg.extraRifle;
       };
 
       # Joshuto as alternative file manager

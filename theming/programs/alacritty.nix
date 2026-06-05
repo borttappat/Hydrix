@@ -143,8 +143,8 @@ in {
 
           # General
           general = {
-            live_config_reload = true;
-            ipc_socket = true;
+            live_config_reload = lib.mkDefault true;
+            ipc_socket         = lib.mkDefault true;
             # colors-runtime.toml is the sole color source for all alacritty instances.
             # Host: written by write-alacritty-colors on every walrgb run.
             # VMs: written by init-wal-cache or vsock handler (host bg + VM text colors).
@@ -155,7 +155,7 @@ in {
 
           # Environment
           env = {
-            TERM = "xterm-256color";
+            TERM = lib.mkDefault "xterm-256color";
           };
 
           # Cursor
@@ -208,11 +208,11 @@ in {
             effectiveOpacity = opacityCfg.overlayOverrides.alacritty or opacityCfg.alacritty;
           in {
             opacity = lib.mkDefault effectiveOpacity;
-            dynamic_padding = true;
-            resize_increments = !vmColorsEnabled;  # Disable for VMs to fix xpra artifacts
+            dynamic_padding   = lib.mkDefault true;
+            resize_increments = lib.mkDefault (!vmColorsEnabled);  # Disable for VMs to fix xpra artifacts
             class = {
-              general = "Alacritty";
-              instance = "Alacritty";
+              general  = lib.mkDefault "Alacritty";
+              instance = lib.mkDefault "Alacritty";
             };
             padding = { x = sc.padding; y = sc.padding + 2; };
           };

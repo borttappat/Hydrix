@@ -247,6 +247,21 @@ in {
       mode = "0644";
     };
 
+    # vsock port assignments — scripts read from here instead of hardcoding
+    environment.etc."hydrix/ports.json" = {
+      text = builtins.toJSON config.hydrix.networking.vsockPorts;
+      mode = "0644";
+    };
+
+    # Host network config — scripts read from here instead of hardcoding
+    environment.etc."hydrix/host-config.json" = {
+      text = builtins.toJSON {
+        hostIp     = config.hydrix.networking.hostIp;
+        hostPrefix = 24;
+      };
+      mode = "0644";
+    };
+
     # Ensure virtiofsd is available
     # Install custom microvm script with high priority to override upstream
     environment.systemPackages = [

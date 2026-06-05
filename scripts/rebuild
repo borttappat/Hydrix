@@ -15,7 +15,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Defaults
 UPDATE_FLAKE=false
-PREBUILD_VMS=false
+UPDATE_ALL_FLAKE=false
 PREBUILD_MICROVMS=false
 CHECK_BASES=false
 CHECK_MICROVMS=false
@@ -37,9 +37,9 @@ Modes:
   If no mode is specified, rebuilds the current mode.
 
 Options:
-  -u, --update          Update flake inputs before build
-  -p, --prebuild        Pre-build VM configs after host rebuild
-  -m, --prebuild-microvms  Pre-build microVM runners after host rebuild
+  -u, --update          Update hydrix flake input before build
+  -U, --update-all      Update all flake inputs before build
+  -a, -m, --prebuild-microvms  Pre-build microVM runners after host rebuild
   -c, --check-bases     Check base image status after build
   --check-microvms      Show microVM status (running/outdated)
   -r, --rebuild-stale   Rebuild stale base images
@@ -54,8 +54,8 @@ EOF
 while [[ $# -gt 0 ]]; do
     case $1 in
         -u|--update) UPDATE_FLAKE=true; shift ;;
-        -p|--prebuild) PREBUILD_VMS=true; shift ;;
-        -m|--prebuild-microvms) PREBUILD_MICROVMS=true; shift ;;
+        -U|--update-all) UPDATE_ALL_FLAKE=true; shift ;;
+        -a|-m|--prebuild-microvms) PREBUILD_MICROVMS=true; shift ;;
         -c|--check-bases) CHECK_BASES=true; shift ;;
         --check-microvms) CHECK_MICROVMS=true; shift ;;
         -r|--rebuild-stale) REBUILD_STALE=true; shift ;;
@@ -70,6 +70,20 @@ done
 
 log() { echo ":: $*"; }
 err() { echo "!! $*" >&2; }
+
+HOST_CONFIG="/etc/hydrix/host-config.json"
+
+# Return "IP/prefix" for the management bridge host address.
+# Reads from /etc/hydrix/host-config.json; falls back to 192.168.100.1/24.
+get_host_ip() {
+    if [[ -f "$HOST_CONFIG" ]]; then
+        local ip prefix
+        ip=$(jq -r '.hostIp // empty' "$HOST_CONFIG" 2>/dev/null)
+        prefix=$(jq -r '.hostPrefix // 24' "$HOST_CONFIG" 2>/dev/null)
+        [[ -n "$ip" ]] && echo "${ip}/${prefix}" && return
+    fi
+    echo "192.168.100.1/24"
+}
 
 # =========================================================================
 # FLAKE DIRECTORY DETECTION
@@ -182,7 +196,7 @@ restore_network() {
     done
 
     # Restore host IP on management bridge
-    sudo ip addr add 192.168.100.1/24 dev br-mgmt 2>/dev/null || true
+    sudo ip addr add "$(get_host_ip)" dev br-mgmt 2>/dev/null || true
 }
 
 # Build via builder VM (for lockdown mode)
@@ -393,25 +407,12 @@ do_build() {
 # POST-BUILD
 # =========================================================================
 
-# Pre-build VM configs for virtiofs cache
-prebuild_vms() {
-    log "Pre-building VM configs..."
-    local configs=("vm-pentest" "vm-browsing" "vm-comms" "vm-dev")
-    local ok=0
-    for cfg in "${configs[@]}"; do
-        if nix build "$FLAKE_DIR#nixosConfigurations.${cfg}.config.system.build.toplevel" --no-link 2>/dev/null; then
-            ((ok++)) || true
-        fi
-    done
-    log "VM cache: $ok/${#configs[@]}"
-}
-
 # Pre-build microVM runners
 prebuild_microvms() {
     log "Pre-building microVM runners..."
     local configs
     configs=$(nix eval "$FLAKE_DIR#nixosConfigurations" --apply 'builtins.attrNames' --json 2>/dev/null | \
-        jq -r '.[]' | grep -E '^micro(browse|hack|dev|comms|lurk|router|build)$' || true)
+        jq -r '.[]' | grep -E '^microvm-' || true)
 
     if [[ -z "$configs" ]]; then
         log "No microVM configs found"
@@ -437,7 +438,7 @@ check_microvms() {
     log "Checking microVM status..."
     local configs
     configs=$(nix eval "$FLAKE_DIR#nixosConfigurations" --apply 'builtins.attrNames' --json 2>/dev/null | \
-        jq -r '.[]' | grep -E '^micro(browse|hack|dev|comms|lurk|router|build)$' || true)
+        jq -r '.[]' | grep -E '^microvm-' || true)
 
     if [[ -z "$configs" ]]; then
         log "No microVM configs declared"
@@ -542,9 +543,6 @@ post_build() {
         sudo systemctl restart hydrix-colorscheme.service 2>/dev/null || true
     fi
 
-    if $PREBUILD_VMS; then
-        prebuild_vms
-    fi
     if $PREBUILD_MICROVMS; then
         prebuild_microvms
     fi
@@ -606,9 +604,12 @@ main() {
             exit 1
         fi
 
-        if $UPDATE_FLAKE; then
-            log "Updating flake..."
+        if $UPDATE_ALL_FLAKE; then
+            log "Updating all flake inputs..."
             nix flake update "$FLAKE_DIR"
+        elif $UPDATE_FLAKE; then
+            log "Updating hydrix flake input..."
+            (cd "$FLAKE_DIR" && nix flake update hydrix)
         fi
 
         if ! do_build "$machine_config" "$target_spec"; then

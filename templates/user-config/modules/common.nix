@@ -57,6 +57,30 @@
   #   "dynamic" — VMs use host background + their own text colors
   #   "none"    — VMs use their own colorscheme independently
 
+  # ─── Extra walrgb theming hook ───────────────────────────────────────
+  # Shell commands appended after core walrgb theming. Runs on every walrgb call.
+  # Available variables: HEX_CODE (hex color, no #), WALLPAPER (path to wallpaper)
+  # Full wal cache at ~/.cache/wal/colors.json for all 16 palette colors.
+  # Example: RGB keyboard, Notion, custom scripts, etc.
+  #
+  # hydrix.graphical.walrgbExtraCommands = ''
+  #   # Set OpenRGB device to wal primary color
+  #   if command -v openrgb >/dev/null 2>&1; then
+  #     openrgb --device 0 --mode static --color "$HEX_CODE" 2>/dev/null || true
+  #   fi
+  # '';
+
+  # ─── Ranger file manager extensions ─────────────────────────────────
+  # Extra key mappings (merged with framework defaults)
+  # hydrix.graphical.ranger.extraMappings = {
+  #   gw = "cd ~/work";
+  # };
+
+  # Extra rifle opener rules (appended after framework rules)
+  # hydrix.graphical.ranger.extraRifle = [
+  #   { condition = "ext md, has glow, X, flag f"; command = "glow -- \"$@\""; }
+  # ];
+
   # ─── Packages on every machine ──────────────────────────────────────
   # environment.systemPackages = with pkgs; [ git neovim ripgrep ];
 

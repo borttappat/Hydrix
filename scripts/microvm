@@ -47,14 +47,31 @@ detect_flake_dir() {
 }
 
 readonly FLAKE_DIR="$(detect_flake_dir)"
-readonly XPRA_PORT=14500
-readonly SWITCH_PORT=14504
+
+# Load a vsock port from /etc/hydrix/ports.json, falling back to the default.
+# Fallbacks match the hydrix.networking.vsockPorts option defaults.
+PORTS_JSON="/etc/hydrix/ports.json"
+load_port() {
+    local key="$1" default="$2"
+    if [[ -f "$PORTS_JSON" ]]; then
+        local val
+        val=$(jq -r --arg k "$key" '.[$k] // empty' "$PORTS_JSON" 2>/dev/null)
+        echo "${val:-$default}"
+    else
+        echo "$default"
+    fi
+}
+
+readonly XPRA_PORT=$(load_port xpra 14500)
+readonly SWITCH_PORT=$(load_port switch 14504)
+readonly DISPLAY_MODE_PORT=$(load_port displayMode 14509)
+readonly WAYPIPE_LAUNCH_PORT=$(load_port waypipeLaunch 14508)
 readonly BUILDER_NAME="microvm-builder"
-readonly BUILDER_BUILD_PORT=14510
-readonly BUILDER_STATUS_PORT=14511
+readonly BUILDER_BUILD_PORT=$(load_port builderBuild 14510)
+readonly BUILDER_STATUS_PORT=$(load_port builderStatus 14511)
 readonly GITSYNC_NAME="microvm-gitsync"
-readonly GITSYNC_GIT_PORT=14512
-readonly GITSYNC_STATUS_PORT=14513
+readonly GITSYNC_GIT_PORT=$(load_port gitsyncGit 14512)
+readonly GITSYNC_STATUS_PORT=$(load_port gitsyncStatus 14513)
 
 # Colors
 readonly RED=$'\e[31m'
@@ -408,7 +425,7 @@ cmd_start() {
     local dm_elapsed=0
     local dm_ready=0
     while [[ $dm_elapsed -lt $((dm_timeout * 2)) ]]; do
-        if echo "PING" | socat -T2 - "VSOCK-CONNECT:${cid}:14509" 2>/dev/null | grep -q "OK"; then
+        if echo "PING" | socat -T2 - "VSOCK-CONNECT:${cid}:${DISPLAY_MODE_PORT}" 2>/dev/null | grep -q "OK"; then
             dm_ready=1
             break
         fi
@@ -442,7 +459,7 @@ cmd_start() {
             /etc/hydrix/vm-registry.json 2>/dev/null)
         if [[ -n "$vm_ws" ]]; then
             log "Starting VM waypipe service..."
-            printf 'waypipe\n' | socat -T3 - "VSOCK-CONNECT:${cid}:14509" >/dev/null 2>&1 || true
+            printf 'waypipe\n' | socat -T3 - "VSOCK-CONNECT:${cid}:${DISPLAY_MODE_PORT}" >/dev/null 2>&1 || true
             log "Waiting for VM to settle..."
             sleep 10
             pkill -f "waypipe-connect ${vm_name}$" 2>/dev/null || true
@@ -653,7 +670,7 @@ cmd_restart() {
     local dm_elapsed=0
     local dm_ready=0
     while [[ $dm_elapsed -lt 60 ]]; do
-        if echo "PING" | socat -T2 - "VSOCK-CONNECT:${cid}:14509" 2>/dev/null | grep -q "OK"; then
+        if echo "PING" | socat -T2 - "VSOCK-CONNECT:${cid}:${DISPLAY_MODE_PORT}" 2>/dev/null | grep -q "OK"; then
             dm_ready=1
             break
         fi
@@ -683,7 +700,7 @@ cmd_restart() {
             /etc/hydrix/vm-registry.json 2>/dev/null)
         if [[ -n "$vm_ws" ]]; then
             log "Starting VM waypipe service..."
-            printf 'waypipe\n' | socat -T3 - "VSOCK-CONNECT:${cid}:14509" >/dev/null 2>&1 || true
+            printf 'waypipe\n' | socat -T3 - "VSOCK-CONNECT:${cid}:${DISPLAY_MODE_PORT}" >/dev/null 2>&1 || true
             log "Waiting for VM to settle..."
             sleep 10
             pkill -f "waypipe-connect ${vm_name}$" 2>/dev/null || true
@@ -750,7 +767,7 @@ cmd_app() {
         local ready=0
         for _i in $(seq 1 20); do
             local st
-            st=$(printf 'STATUS\n' | socat -T3 - VSOCK-CONNECT:"$cid":14509 2>/dev/null || true)
+            st=$(printf 'STATUS\n' | socat -T3 - VSOCK-CONNECT:"$cid":${DISPLAY_MODE_PORT} 2>/dev/null || true)
             [[ "$st" == "waypipe" ]] && { ready=1; break; }
             sleep 0.5
         done
@@ -758,14 +775,14 @@ cmd_app() {
             log_error "waypipe not ready in $vm_name — is waypipe-connect running?"
             return 1
         fi
-        printf '%s\n' "$app_cmd" | socat -T10 - VSOCK-CONNECT:"$cid":14508
+        printf '%s\n' "$app_cmd" | socat -T10 - VSOCK-CONNECT:"$cid":${WAYPIPE_LAUNCH_PORT}
     else
         # X11/i3: lazily push xpra mode then use vm-app
         local cid
         cid=$(jq -r --arg v "$vm_name" \
             'to_entries[] | select(.value.vmName == $v) | .value.cid' \
             "$VM_REGISTRY" 2>/dev/null | head -1)
-        [[ -n "$cid" ]] && printf 'xpra\n' | socat -T5 - VSOCK-CONNECT:"$cid":14509 2>/dev/null || true
+        [[ -n "$cid" ]] && printf 'xpra\n' | socat -T5 - VSOCK-CONNECT:"$cid":${DISPLAY_MODE_PORT} 2>/dev/null || true
         vm-app "$vm_name" "$app_cmd"
     fi
 

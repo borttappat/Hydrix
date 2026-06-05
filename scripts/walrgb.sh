@@ -19,32 +19,6 @@ echo "Colorscheme set"
 
 HEX_CODE=$(sed -n '\''2p'\'' ~/.cache/wal/colors | sed '\''s/#//'\''')
 
-if command -v asusctl >/dev/null 2>&1 && asusctl -v >/dev/null 2>&1; then
-  echo "ASUS hardware detected, checking for AURA support..."
-  # Check if AURA interface is available (asusctl -s outputs "No aura interface found" if not supported)
-  # Filter out INFO logs from asusctl output
-  if ! asusctl -s 2>&1 | grep -v "^\[INFO" | grep -q "No aura interface found"; then
-    echo "AURA lighting supported, setting RGB color..."
-    asusctl aura static -c $HEX_CODE >/dev/null 2>&1
-    asusctl -k >/dev/null 2>&1
-    echo "ASUS backlight set"
-  else
-    echo "AURA lighting not supported on this device, skipping RGB"
-  fi
-elif command -v openrgb >/dev/null 2>&1; then
-  echo "Checking for RGB devices..."
-  if openrgb --list-devices 2>/dev/null | grep -q "Device [0-9]"; then
-    echo "RGB devices found, using OpenRGB to set device lighting"
-    openrgb --device 0 --mode static --color "${HEX_CODE/#/}"
-  else
-    echo "No RGB devices detected, skipping OpenRGB"
-  fi
-else
-  echo "No compatible RGB control tool found. Skipping RGB lighting control."
-fi
-
-echo "Backlight set"
-
 # Mark wal as active (for vm-focus-daemon to use wal colors)
 touch ~/.cache/wal/.active
 

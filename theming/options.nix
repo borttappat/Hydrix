@@ -13,6 +13,38 @@ in {
   options.hydrix.graphical = {
     enable = lib.mkEnableOption "Hydrix graphical environment";
 
+    walrgbExtraCommands = lib.mkOption {
+      type = lib.types.lines;
+      default = "";
+      description = ''
+        Extra shell commands appended to walrgb after the core theming steps.
+        Runs as arbitrary bash after wal has populated ~/.cache/wal/.
+
+        Available variables:
+          HEX_CODE   — accent color (color2 from wal palette), no leading #
+          file_path  — path to the wallpaper that was applied
+
+        Full wal palette (all 16 colors, background, foreground, special colors)
+        is accessible at ~/.cache/wal/colors.json. Use jq to extract any entry
+        and convert to any format your program needs — RGB, HSL, decimal, etc.
+
+        Example — OpenRGB keyboard with a specific palette color:
+          hydrix.graphical.walrgbExtraCommands = '''
+            COLOR=$(jq -r '.colors.color4' ~/.cache/wal/colors.json | sed 's/#//')
+            if command -v openrgb >/dev/null 2>&1; then
+              openrgb --device 0 --mode static --color "$COLOR"
+            fi
+          ''';
+
+        Example — convert to decimal RGB for a custom tool:
+          hydrix.graphical.walrgbExtraCommands = '''
+            C=$(jq -r '.colors.color2' ~/.cache/wal/colors.json | sed 's/#//')
+            R=$((16#''${C:0:2})); G=$((16#''${C:2:2})); B=$((16#''${C:4:2}))
+            my-rgb-tool --color "$R,$G,$B"
+          ''';
+      '';
+    };
+
     firefox.hostEnable = lib.mkOption {
       type = lib.types.bool;
       default = false;
@@ -265,6 +297,34 @@ in {
       type = lib.types.bool;
       default = true;
       description = "Copy selected text to the system clipboard automatically.";
+    };
+
+    ranger.extraMappings = lib.mkOption {
+      type = lib.types.attrsOf lib.types.str;
+      default = {};
+      description = ''
+        Extra ranger key mappings merged on top of the framework defaults.
+        Use this to add or override individual bindings from hydrix-config.
+        Example: hydrix.graphical.ranger.extraMappings = { gm = "cd ~/Music"; };
+      '';
+    };
+
+    ranger.extraRifle = lib.mkOption {
+      type = lib.types.listOf (lib.types.submodule {
+        options = {
+          condition = lib.mkOption { type = lib.types.str; };
+          command   = lib.mkOption { type = lib.types.str; };
+        };
+      });
+      default = [];
+      description = ''
+        Extra rifle file-handler rules appended after the framework defaults.
+        Use this to add handlers for file types not covered by the defaults.
+        Example:
+          hydrix.graphical.ranger.extraRifle = [
+            { condition = "ext epub, has foliate, X, flag f"; command = "foliate -- \"$@\""; }
+          ];
+      '';
     };
 
     fish.viKeyBindings = lib.mkOption {

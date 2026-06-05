@@ -26,6 +26,10 @@ let meta = import ./meta.nix; in
   # VM type (must match profile name for auto-include modules)
   hydrix.vmType = "__NAME__";
 
+  # Custom hostname (default: __NAME__-vm)
+  # WARNING: changing after first run orphans the persistent volume — set once.
+  # hydrix.vm.hostname = "__NAME__-custom";
+
   # Colorscheme for this VM (see colorschemes/ for options)
   hydrix.colorscheme = "__COLORSCHEME__";
 
