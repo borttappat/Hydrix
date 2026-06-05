@@ -413,6 +413,13 @@ let
     fi
   '';
 
+  bluetoothScript = pkgs.writeShellScript "waybar-bluetooth" ''
+    connected=$(${pkgs.bluez}/bin/bluetoothctl devices Connected 2>/dev/null | head -1)
+    [ -z "$connected" ] && exit 0
+    name=$(echo "$connected" | cut -d' ' -f3- | cut -c1-20 | tr '[:lower:]' '[:upper:]')
+    ${pkgs.jq}/bin/jq -cn --arg t "BT $name" '{"text":$t,"class":"connected"}'
+  '';
+
   batteryScript = pkgs.writeShellScript "waybar-battery" ''
     cap=$(cat /sys/class/power_supply/BAT*/capacity 2>/dev/null | head -1)
     status=$(cat /sys/class/power_supply/BAT*/status 2>/dev/null | head -1)
@@ -766,6 +773,7 @@ let
     #custom-git,
     #custom-mvms,
     #custom-vms,
+    #custom-bluetooth,
     #custom-power-profile,
     #custom-battery-time,
     #custom-rproc,
@@ -814,6 +822,9 @@ let
     /* GIT active — DATE colors when ≥10 uncommitted */
     #custom-git.active { color: @accent; border-color: alpha(@accent, 0.45); }
 
+    /* Bluetooth connected — accent fill to draw attention */
+    #custom-bluetooth.connected { color: @accent; border-color: alpha(@accent, 0.45); }
+
     /* CPU / RAM — foreground at normal, accent at ≥50%, alert fill at ≥75% */
     #custom-cpu.medium,
     #custom-memory.medium { color: @accent; border-color: alpha(@accent, 0.45); }
@@ -848,6 +859,7 @@ let
     #custom-git:hover,
     #custom-mvms:hover,
     #custom-vms:hover,
+    #custom-bluetooth:hover,
     #custom-power-profile:hover,
     #custom-battery:hover,
     #custom-battery-time:hover,
@@ -915,7 +927,7 @@ in {
   options.hydrix.graphical.waybar = {
     barType = lib.mkOption {
       type    = lib.types.enum [ "dualbar" "monobar" ];
-      default = "dualbar";
+      default = "monobar";
       description = ''
         Waybar layout profile.
         dualbar — top + bottom bars, all modules always visible.
