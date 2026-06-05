@@ -21,6 +21,7 @@ let
   sc          = config.hydrix.graphical.scaling.computed;
   ui          = config.hydrix.graphical.ui;
   gaps        = ui.gaps or 10;
+  barType     = config.hydrix.graphical.waybar.barType or "monobar";
   borderSize  = toString (sc.border or 2);
   rounding    = toString (sc.cornerRadius or 0);
   lkRounding  = toString (if (ui.cornerRadius or 0) > 0 then ui.cornerRadius * 2 else 2);
@@ -65,6 +66,19 @@ let
     done
   '';
 
+  toggleFloat = pkgs.writeShellScript "toggle-float" ''
+    ${pkgs.hyprland}/bin/hyprctl dispatch togglefloating active
+    floating=$(${pkgs.hyprland}/bin/hyprctl activewindow -j | ${pkgs.jq}/bin/jq '.floating')
+    if [ "$floating" = "true" ]; then
+      mon_w=$(${pkgs.hyprland}/bin/hyprctl monitors -j | ${pkgs.jq}/bin/jq '[.[] | select(.focused)] | .[0].width')
+      mon_h=$(${pkgs.hyprland}/bin/hyprctl monitors -j | ${pkgs.jq}/bin/jq '[.[] | select(.focused)] | .[0].height')
+      w=$(( mon_w * 80 / 100 ))
+      h=$(( mon_h * 80 / 100 ))
+      ${pkgs.hyprland}/bin/hyprctl dispatch resizeactive exact $w $h
+      ${pkgs.hyprland}/bin/hyprctl dispatch centerwindow
+    fi
+  '';
+
   toggleMouseFocus = pkgs.writeShellScript "toggle-mouse-focus" ''
     cur=$(${pkgs.hyprland}/bin/hyprctl getoption input:follow_mouse -j | ${pkgs.jq}/bin/jq -r '.int')
     if [ "$cur" = "0" ]; then
@@ -74,6 +88,34 @@ let
       ${pkgs.hyprland}/bin/hyprctl keyword input:follow_mouse 0
       ${pkgs.libnotify}/bin/notify-send -t 1500 "Mouse focus: off"
     fi
+  '';
+
+  # Wrapper that reads the user-adjustable timeout from a state file at startup.
+  # Falls back to the compiled-in idleTimeout when no override is set.
+  startWaylandIdle = pkgs.writeShellScript "start-wayland-idle" ''
+    _t=$(cat "$HOME/.local/state/lock-timeout" 2>/dev/null || echo "${idleTimeout}")
+    exec ${pkgs.swayidle}/bin/swayidle -w \
+      timeout "$_t" '${pkgs.hyprlock}/bin/hyprlock --force-focus' \
+      before-sleep '${pkgs.hyprlock}/bin/hyprlock --force-focus'
+  '';
+
+  # lock-timeout [seconds] — read or adjust the idle lock timeout at runtime.
+  # Persists across Hyprland restarts via ~/.local/state/lock-timeout.
+  # Compile-time default: ${idleTimeout}s. Run without args to show current value.
+  lockTimeout = pkgs.writeShellScriptBin "lock-timeout" ''
+    state="$HOME/.local/state/lock-timeout"
+    if [ -z "$1" ]; then
+      t=$(cat "$state" 2>/dev/null || echo "${idleTimeout}")
+      echo "Lock timeout: ''${t}s"
+      exit 0
+    fi
+    mkdir -p "$(dirname "$state")"
+    echo "$1" > "$state"
+    pkill -x swayidle 2>/dev/null || true
+    sleep 0.1
+    nohup ${startWaylandIdle} >/dev/null 2>&1 &
+    disown
+    ${pkgs.libnotify}/bin/notify-send -t 2000 "Lock timeout" "''${1}s"
   '';
 
   hyprlandConf = pkgs.writeText "hyprland.conf" ''
@@ -88,14 +130,15 @@ let
     exec-once = sh -c 'WALL=$(cat "$HOME/.cache/wal/wal" 2>/dev/null); [ -n "$WALL" ] && swaybg -i "$WALL" -m fill'
     exec-once = ${pkgs.dunst}/bin/dunst
     exec-once = sh -c 'sleep 2 && hypr-apply-colors'
-    exec-once = swayidle -w timeout ${idleTimeout} 'hyprlock --force-focus' before-sleep 'hyprlock --force-focus'
+    exec-once = ${startWaylandIdle}
 
     # ── General ────────────────────────────────────────────────────────────────
     general {
       gaps_in  = ${toString (gaps / 2)}
-      # top=0,right=gaps,bottom=0,left=gaps — comma-separated (Hyprland CSS-like format).
-      # Top/bottom gap comes from the bar's exclusive zone + pill margin, not gaps_out.
-      gaps_out = 0, ${toString gaps}, 0, ${toString gaps}
+      # top=0,right=gaps,bottom=?,left=gaps — comma-separated (Hyprland CSS-like format).
+      # Top gap comes from the bar's exclusive zone + pill margin, not gaps_out.
+      # Bottom gap: dualbar bottom bar provides it via exclusive zone; monobar needs gaps_out.
+      gaps_out = 0, ${toString gaps}, ${if barType == "monobar" then toString gaps else "0"}, ${toString gaps}
       border_size  = ${borderSize}
       col.active_border   = $activeBorder
       col.inactive_border = $inactiveBorder
@@ -145,10 +188,10 @@ let
         ''}
       follow_mouse   = 1
       sensitivity    = -0.2
-      natural_scroll = true
+      natural_scroll = false
 
       touchpad {
-        natural_scroll = true
+        natural_scroll = false
       }
     }
 
@@ -182,7 +225,7 @@ let
 
     # Launcher / Focus
     bind = $mod, Q, killactive,
-    bind = $mod, D, exec, wofi-launcher
+    bind = $mod,       D, exec, wofi-launcher
     bind = $mod SHIFT, D, exec, wofi-launcher --host
     bind = $mod, F4, exec, focus-wofi
 
@@ -192,10 +235,11 @@ let
     # Applications
     bind = $mod,       O, exec, obsidian
     bind = $mod,       M, exec, alacritty -e hydrix-tui
+    bind = $mod SHIFT, M, exec, vm-select
     bind = $mod,       Z, exec, zathura
 
-    # Vault (Bitwarden)
-    bind = $mod SHIFT, P, exec, vault-rofi
+    # Vault
+    bind = $mod SHIFT, P, exec, vault-pick
 
     # Brightness / Vibrancy
     bind = $mod,       F7, exec, hydrix-brightness-hypr -
@@ -332,6 +376,15 @@ let
     windowrulev2 = opacity 1.0 override, class:^(hypr-float)$
     windowrulev2 = rounding ${lkRounding}, class:^(Dunst)$
     windowrulev2 = rounding ${lkRounding}, class:^(wofi)$
+    windowrulev2 = noanim,                class:^(wofi)$
+    layerrule = noanim, ^(wofi)$
+
+    # VM windows forwarded via waypipe — titles start with [vm-name].
+    # Blur and alpha compositing are recomputed on every frame during scrolling;
+    # disabling them removes GPU overhead that causes scroll jank.
+    windowrulev2 = noblur,                             title:^\[
+    windowrulev2 = opacity 1.0 override 1.0 override, title:^\[
+    windowrulev2 = noanim,                             title:^\[
   '';
 
   hyprlock_conf = pkgs.writeText "hyprlock.conf" ''
@@ -393,6 +446,9 @@ let
     }
   '';
 in lib.mkIf config.hydrix.hyprland.enable {
+  environment.systemPackages = [ lockTimeout ];
+  security.pam.services.hyprlock = {};
+
   home-manager.users.${username} = { lib, ... }: {
     home.activation.hyprlandKeymap = lib.hm.dag.entryAfter ["writeBoundary"] ''
       _dir="$HOME/.config/hypr"

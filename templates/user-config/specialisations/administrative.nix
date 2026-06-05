@@ -15,11 +15,25 @@
 {
   # Enable host-level apps that are gated off in lockdown
   hydrix.graphical.firefox.hostEnable = true;
+  hydrix.graphical.firefox.extensions = [
+    "ublock-origin" "pywalfox" "vimium-ff" "detach-tab"
+  ];
   hydrix.graphical.obsidian.hostEnable = true;
 
   hydrix.services.tailscale.enable = true;
 
+  # Gaming — uncomment to enable Steam and 32-bit graphics support
+  # hardware.graphics = {
+  #   enable = true;
+  #   enable32Bit = true;
+  # };
+  # programs.steam.enable = true;
+  # hydrix.hyprland.xwayland.enable = true;
+
   environment.systemPackages = with pkgs; [
+    # VPN (administrative-only — not needed in lockdown)
+    mullvad-vpn
+
     # Network tools
     iproute2
     iptables
