@@ -67,18 +67,8 @@ in {
     ./vm-switch.nix
   ];
 
-  options.hydrix.vm = {
-    storeName = lib.mkOption {
-      type = lib.types.str;
-      default = "unknown-vm";
-      description = "NixOS configuration key for this VM (e.g. microvm-lurking). Used for host-side paths and service names. Set by the flake — do not override.";
-    };
-    hostname = lib.mkOption {
-      type = lib.types.str;
-      default = "unknown-vm";
-      description = "Hostname visible inside the VM. Defaults to storeName. Override in profiles/<name>/default.nix.";
-    };
-  };
+  # hydrix.vm.storeName and hydrix.vm.hostname are declared in vm/options.nix
+  # (applies to all VMs via commonModules). Only microVM-specific options here.
 
   options.hydrix.microvm = {
     audio.enable = lib.mkOption {
