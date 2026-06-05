@@ -153,7 +153,7 @@ in rec {
       ++ [
       { hydrix.userColorschemesDir = userColorschemesDir; }
       microvm.nixosModules.microvm
-      ../vm/infra/microvm-profile-base.nix  # User setup, vsock, shares, etc.
+      ../vm/microvm/infra/microvm-profile-base.nix  # User setup, vsock, shares, etc.
     ] ++ nixpkgs.lib.optionals (builtins.pathExists ../vm/profiles/${profile}) [
       ../vm/profiles/${profile}               # Hydrix base profile (only if it exists)
     ] ++ [
@@ -191,7 +191,7 @@ in rec {
       { nixpkgs.overlays = [ overlay-unstable ]; }
     ] ++ optionsModules ++ [
       microvm.nixosModules.microvm
-      ../vm/infra/microvm-router.nix
+      ../vm/microvm/infra/microvm-router.nix
       { networking.hostName = "microvm-router"; }
     ] ++ nixpkgs.lib.optional (wifiPciAddress != "") {
       hydrix.hardware.vfio.wifiPciAddress = wifiPciAddress;
@@ -233,7 +233,7 @@ in rec {
       { nixpkgs.overlays = [ overlay-unstable ]; }
     ] ++ optionsModules ++ [
       microvm.nixosModules.microvm
-      ../vm/infra/microvm-router-stable.nix
+      ../vm/microvm/infra/microvm-router-stable.nix
       { networking.hostName = "microvm-router-stable"; }
     ] ++ nixpkgs.lib.optional (wifiPciAddress != "") {
       hydrix.hardware.vfio.wifiPciAddress = wifiPciAddress;
@@ -262,7 +262,7 @@ in rec {
       { nixpkgs.overlays = [ overlay-unstable ]; }
     ] ++ optionsModules ++ [
       microvm.nixosModules.microvm
-      ../vm/infra/microvm-builder.nix
+      ../vm/microvm/infra/microvm-builder.nix
       {
         networking.hostName = "microvm-builder";
         # Pass host username and optional local Hydrix path to builder module
@@ -300,7 +300,7 @@ in rec {
       { nixpkgs.overlays = [ overlay-unstable ]; }
     ] ++ optionsModules ++ [
       microvm.nixosModules.microvm
-      ../vm/infra/microvm-infra-base.nix
+      ../vm/microvm/infra/microvm-infra-base.nix
       { networking.hostName = "microvm-${name}"; }
     ] ++ modules;
   };
@@ -322,7 +322,7 @@ in rec {
     inherit system;
     modules = commonModules ++ [
       { hydrix.userColorschemesDir = userColorschemesDir; }
-      ../vm/base/vm-base.nix    # VM base configuration
+      ../vm/libvirt/vm-base.nix  # VM base configuration
       ../vm/profiles/${profile} # Hydrix base profile (always included)
       "${nixpkgs}/nixos/modules/virtualisation/disk-image.nix"
       {
@@ -352,7 +352,7 @@ in rec {
     modules = [
       { nixpkgs.config.allowUnfree = true; }
     ] ++ optionsModules ++ [
-      ../vm/infra/libvirt-router.nix
+      ../vm/libvirt/router.nix
       "${nixpkgs}/nixos/modules/virtualisation/disk-image.nix"
       { image.efiSupport = false; }
     ] ++ nixpkgs.lib.optional (extraNetworks != []) {

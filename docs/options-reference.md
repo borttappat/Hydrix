@@ -12,8 +12,9 @@ Use this as a companion to `machines/installer.nix` and the templates in
 | `theming/programs/` | — | — |
 | `theming/wm/` | — | — |
 | `theming/graphical/` | — | — |
-| `vm/base/` | — | — |
-| `vm/infra/` | — | — |
+| `vm/common/` | — | — |
+| `vm/microvm/infra/` | — | — |
+| `vm/libvirt/` | — | — |
 | `vm/pentest/` + `vm/dev/` | — | — |
 | `vm/profiles/` | — | — |
 
@@ -828,7 +829,7 @@ The microvm router is the current standard; libvirt is being phased out.
 
 ---
 
-## VM Options (`vm/options.nix` + `vm/infra/microvm-base.nix`)
+## VM Options (`vm/options.nix` + `vm/microvm/infra/microvm-infra-base.nix`)
 
 These options are available inside microVM configurations.
 
