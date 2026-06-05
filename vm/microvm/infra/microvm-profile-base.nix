@@ -33,7 +33,7 @@ in {
   imports = [
     ../options.nix
     # Base system modules
-    ../base/users-vm.nix
+    ../../common/users-vm.nix
     ../../host/base/networking.nix
 
     # Core system (X11, fish shell, essential packages)
@@ -58,7 +58,7 @@ in {
     ../dev/vm-dev.nix
 
     # Auto-import packages from profiles/<vmType>/packages/
-    ../base/auto-include.nix
+    ../auto-include.nix
 
     # Files transfer agent (vsock 14506) for host-orchestrated encrypted file ops
     ../dev/files-agent.nix

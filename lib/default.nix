@@ -88,7 +88,7 @@ in rec {
         ../host/base/host-base.nix
         # Base system modules (services, virtualization)
         ../host/base/services.nix
-        ../host/virt.nix
+        ../host/libvirt/virt.nix
         ../host/base/sops.nix
 
         # Host scripts (rebuild, microvm CLI, hydrix-tui, etc.)
@@ -98,7 +98,7 @@ in rec {
         ../host/vm-integration/xpra-host.nix
 
         # MicroVM host management (virtiofsd, TAP interfaces)
-        ../host/vm-integration/microvm-host.nix
+        ../host/microvm
 
         # Builder VM host integration
         ../host/vm-integration/builder-host.nix

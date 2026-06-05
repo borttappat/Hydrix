@@ -35,7 +35,7 @@ in {
     ../options.nix
 
     # Base system modules
-    ../base/users-vm.nix
+    ../common/users-vm.nix
     ../../host/base/networking.nix
 
     # Minimal CLI environment (always included)
