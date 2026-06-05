@@ -659,6 +659,14 @@ in {
               default = [];
               description = "Named secrets to provision into this VM (e.g. [ \"github\" ])";
             };
+            encryption = lib.mkOption {
+              type = lib.types.bool;
+              default = false;
+              description = ''
+                Enable LUKS-encrypted home volume for this VM on this machine.
+                Run 'microvm encrypt-setup <name>' once after setting this, then rebuild.
+              '';
+            };
           };
         });
         default = {};

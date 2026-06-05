@@ -72,6 +72,9 @@ TEMP_CONFIG=""
 # Set when flake.nix uses a local path: input for hydrix — target path on /mnt
 HYDRIX_LOCAL_TARGET=""
 
+# Remote URL of the local Hydrix repo (if it has one) — used to clone it on the new machine
+HYDRIX_REMOTE_URL=""
+
 # ========== HYDRIX SOURCE BOOTSTRAP ==========
 # When run via curl|bash, SCRIPT_DIR is empty and repo files are missing.
 # Shallow-clone the repo so templates/disko are available.
@@ -585,33 +588,8 @@ clone_existing_repo() {
 
     # Check if machine already exists in cloned config
     if [[ -f "$CLONED_REPO/machines/${CONFIG[serial]}.nix" ]]; then
-        log "Machine '${CONFIG[serial]}' already exists in cloned config"
-        echo ""
-        echo "Options:"
-        echo "  1) Use existing machine config (update hardware detection only)"
-        echo "  2) Regenerate with current system detection (overwrites customizations)"
-        echo "  3) Cancel"
-        echo ""
-        read -p "Select [1-3, default=1]: " existing_choice
-
-        case "${existing_choice:-1}" in
-            1)
-                MODE="use-existing"
-                log "Will use existing config, regenerate hardware detection"
-                ;;
-            2)
-                MODE="add"
-                warn "Existing machine config will be overwritten"
-                ;;
-            3)
-                rm -rf "$temp_dir"
-                error "Cancelled by user"
-                ;;
-            *)
-                MODE="use-existing"
-                log "Will use existing config, regenerate hardware detection"
-                ;;
-        esac
+        MODE="use-existing"
+        log "Machine '${CONFIG[serial]}' found in cloned config — using existing"
     else
         MODE="add"
         echo ""
@@ -1942,6 +1920,18 @@ handle_local_hydrix_path() {
     target_path=$(echo "$original_path" | sed "s|/home/[^/]*/|/home/${CONFIG[username]}/|")
     HYDRIX_LOCAL_TARGET="$target_path"
 
+    # Detect remote URL of the local Hydrix repo so we can clone it (not the public one)
+    local hydrix_src
+    hydrix_src=$(_installer_hydrix_source)
+    if [[ -n "$hydrix_src" ]]; then
+        local remote_url
+        remote_url=$(git -C "$hydrix_src" remote get-url origin 2>/dev/null || true)
+        if [[ -n "$remote_url" ]]; then
+            HYDRIX_REMOTE_URL="$remote_url"
+            log "  Detected Hydrix remote: $HYDRIX_REMOTE_URL"
+        fi
+    fi
+
     local src
     src=$(_installer_hydrix_source)
     if [[ -n "$src" ]]; then
@@ -2722,12 +2712,17 @@ EOF
         if [[ ! -d "$mnt_hydrix" ]]; then
             log "Deploying Hydrix to $mnt_hydrix..."
             mkdir -p "$(dirname "$mnt_hydrix")"
-            local src
-            src=$(_installer_hydrix_source)
-            if [[ -n "$src" ]]; then
-                cp -r "$src" "$mnt_hydrix"
+            if [[ -n "$HYDRIX_REMOTE_URL" ]]; then
+                log "  Cloning from $HYDRIX_REMOTE_URL (authenticate if prompted)..."
+                try_clone_with_auth "$HYDRIX_REMOTE_URL" "$mnt_hydrix"
             else
-                git clone https://github.com/borttappat/Hydrix.git "$mnt_hydrix"
+                local src
+                src=$(_installer_hydrix_source)
+                if [[ -n "$src" ]]; then
+                    cp -r "$src" "$mnt_hydrix"
+                else
+                    git clone https://github.com/borttappat/Hydrix.git "$mnt_hydrix"
+                fi
             fi
             success "Hydrix deployed to $mnt_hydrix"
         fi
@@ -2952,10 +2947,15 @@ check_resume() {
         if [[ ! -d "$mnt_hydrix" ]]; then
             log "Deploying Hydrix to $mnt_hydrix..."
             mkdir -p "$(dirname "$mnt_hydrix")"
-            local src
-            src=$(_installer_hydrix_source)
-            if [[ -n "$src" ]]; then cp -r "$src" "$mnt_hydrix"
-            else git clone https://github.com/borttappat/Hydrix.git "$mnt_hydrix"
+            if [[ -n "$HYDRIX_REMOTE_URL" ]]; then
+                log "  Cloning from $HYDRIX_REMOTE_URL (authenticate if prompted)..."
+                try_clone_with_auth "$HYDRIX_REMOTE_URL" "$mnt_hydrix"
+            else
+                local src
+                src=$(_installer_hydrix_source)
+                if [[ -n "$src" ]]; then cp -r "$src" "$mnt_hydrix"
+                else git clone https://github.com/borttappat/Hydrix.git "$mnt_hydrix"
+                fi
             fi
         fi
         sed -i "s|hydrix\\.url = \"[^\"]*\"|hydrix.url = \"path:$HYDRIX_LOCAL_TARGET\"|" \

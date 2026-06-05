@@ -207,10 +207,14 @@
         # vault requires setup before first use - see DOCUMENTATION.md §Vault VM.
         # Disabled by default - enable and set autostart = true after initializing ~/vault/.
         "microvm-vault"    = { enable = false; };
-        # Uncomment VMs that should receive GitHub SSH key from secrets/github.yaml:
+        # Per-VM options (combine freely): enable, autostart, secrets, encryption
+        #
+        # secrets: provision named secrets into the VM (e.g. GitHub SSH key from secrets/github.yaml)
+        # encryption: enable LUKS-encrypted home volume — run 'microvm encrypt-setup <name>' once after enabling
+        #
+        # "microvm-pentest"  = { encryption = true; secrets = [ "github" ]; };
         # "microvm-browsing" = { secrets = [ "github" ]; };
         # "microvm-dev"      = { secrets = [ "github" ]; };
-        # "microvm-pentest"  = { secrets = [ "github" ]; };
         # "microvm-builder"  = { secrets = [ "github" ]; };
         # "microvm-gitsync"  = { secrets = [ "github" ]; };
       };

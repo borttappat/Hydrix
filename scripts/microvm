@@ -1208,7 +1208,7 @@ cmd_encrypt_setup() {
     log_success "Encrypted volume ready at ${luks_path}"
     echo ""
     echo -e "  ${DIM}Next steps:${NC}"
-    echo -e "  1. Add ${BOLD}hydrix.microvm.encryption.enable = true${NC} to your VM profile"
+    echo -e "  1. Add ${BOLD}encryption = true${NC} to ${BOLD}microvmHost.vms.\"${vm_name}\"${NC} in your machine config"
     echo -e "  2. Run ${BOLD}microvm build ${vm_name}${NC} to rebuild with the encrypted volume"
     echo -e "  3. Run ${BOLD}microvm start ${vm_name}${NC} — it will prompt for your passphrase"
 }

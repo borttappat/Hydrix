@@ -343,8 +343,14 @@
     # uses autoVMConfigsWithOverrides.
     getProfileModules = profileName:
       builtins.concatMap (mc:
-        let overrides = mc.config.hydrix.microvmHost.profileOverrides;
-        in nixpkgs.lib.optional (overrides ? ${profileName}) overrides.${profileName}
+        let
+          overrides = mc.config.hydrix.microvmHost.profileOverrides;
+          vmCfg = mc.config.hydrix.microvmHost.vms."microvm-${profileName}" or {};
+          encModule = nixpkgs.lib.optional (vmCfg.encryption or false)
+            { hydrix.microvm.encryption.enable = true; };
+        in
+          nixpkgs.lib.optional (overrides ? ${profileName}) overrides.${profileName}
+          ++ encModule
       ) (builtins.attrValues machineConfigs);
 
     # VM configs with per-machine profileOverrides applied
