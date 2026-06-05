@@ -3,7 +3,7 @@
 # Simple NAT router - always uses 192.168.x.x
 #
 # This is the VM-side config. For host-side management, see:
-#   modules/host/libvirt-router-host.nix
+#   host/libvirt/router.nix
 #
 # Build: nix build .#router (via lib.mkLibvirtRouter)
 # Deploy: Copy to /var/lib/libvirt/images/router.qcow2

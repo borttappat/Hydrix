@@ -18,7 +18,7 @@
 #   ├── machines/<serial>.nix # Machine config (named by hardware serial)
 #   ├── profiles/             # VM profile customizations
 #   ├── specialisations/      # Boot mode configurations
-#   └── shared/common.nix     # Shared settings (locale, timezone)
+#   └── modules/common.nix    # Shared settings (locale, timezone)
 
 set -euo pipefail
 trap 'echo "[ERR] Script exited unexpectedly at line $LINENO (exit $?)" >&2' ERR
@@ -1788,15 +1788,15 @@ copy_template_profiles() {
     log "  Copied from template"
 }
 
-copy_template_shared() {
+copy_template_modules() {
     local config_dir="$1"
-    log "Creating shared config..."
+    log "Creating modules config..."
 
-    mkdir -p "$config_dir/shared"
+    mkdir -p "$config_dir/modules"
 
-    local template_dir="$SCRIPT_DIR/../templates/user-config/shared"
+    local template_dir="$SCRIPT_DIR/../templates/user-config/modules"
 
-    cp -r "$template_dir"/* "$config_dir/shared/"
+    cp -r "$template_dir"/* "$config_dir/modules/"
 
     # Populate common.nix with locale settings detected by installer
     sed -i \
@@ -1805,11 +1805,11 @@ copy_template_shared() {
         -e "s|@CONSOLE_KEYMAP@|${CONFIG[consoleKeymap]}|g" \
         -e "s|@XKB_LAYOUT@|${CONFIG[xkbLayout]}|g" \
         -e "s|@XKB_VARIANT@|${CONFIG[xkbVariant]}|g" \
-        "$config_dir/shared/common.nix"
+        "$config_dir/modules/common.nix"
 
     # Populate wifi.nix with actual credentials from installer
     if [[ -n "${CONFIG[wifiSsid]}" ]]; then
-        cat > "$config_dir/shared/wifi.nix" << 'WIFI_HEADER'
+        cat > "$config_dir/modules/wifi.nix" << 'WIFI_HEADER'
 # WiFi Configuration - Shared across all machines
 #
 # This file is read by router VMs during build.
@@ -1822,28 +1822,28 @@ copy_template_shared() {
 
 {
 WIFI_HEADER
-        cat >> "$config_dir/shared/wifi.nix" << WIFI_BODY
+        cat >> "$config_dir/modules/wifi.nix" << WIFI_BODY
   hydrix.router.wifi = {
     ssid = "${CONFIG[wifiSsid]}";
     password = "${CONFIG[wifiPassword]}";
   };
 }
 WIFI_BODY
-        log "  WiFi credentials written to shared/wifi.nix"
+        log "  WiFi credentials written to modules/wifi.nix"
     fi
 
     log "  Copied from template"
 }
 
-copy_template_modules() {
+copy_template_custom() {
     local config_dir="$1"
-    log "Creating modules..."
+    log "Creating custom modules..."
 
-    mkdir -p "$config_dir/modules"
+    mkdir -p "$config_dir/custom"
 
-    local template_dir="$SCRIPT_DIR/../templates/user-config/modules"
+    local template_dir="$SCRIPT_DIR/../templates/user-config/custom"
 
-    cp -r "$template_dir"/* "$config_dir/modules/"
+    cp -r "$template_dir"/* "$config_dir/custom/"
     log "  Copied from template"
 }
 
@@ -1993,8 +1993,8 @@ generate_config_to_temp() {
         copy_template_specialisations "$TEMP_CONFIG"
         copy_template_infra "$TEMP_CONFIG"
         copy_template_profiles "$TEMP_CONFIG"
-        copy_template_shared "$TEMP_CONFIG"
         copy_template_modules "$TEMP_CONFIG"
+        copy_template_custom "$TEMP_CONFIG"
         copy_template_templates "$TEMP_CONFIG"
         copy_template_fonts "$TEMP_CONFIG"
         copy_template_colorschemes "$TEMP_CONFIG"

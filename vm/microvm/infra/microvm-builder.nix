@@ -36,7 +36,7 @@
   vmName = config.networking.hostName;
 in {
   imports = [
-    ../options.nix
+    ../../options.nix
     # QEMU Guest profile for virtio modules
     (modulesPath + "/profiles/qemu-guest.nix")
     # Live NixOS switch via vsock:14504 (microvm update / microvm switch)
@@ -75,16 +75,16 @@ in {
       hypervisor = "qemu";
       qemu.machine = "pc"; # Standard PC for full PCI support
 
-      # High resources for builds
-      vcpu = 8;
-      mem = 16384; # 16GB for large builds
+      # High resources for builds — override in infra/builder/default.nix
+      vcpu = lib.mkDefault 8;
+      mem = lib.mkDefault 16384; # 16GB for large builds
 
       # No squashfs store - we mount host's store directly
       storeDiskType = "none";
 
       # Disable virtiofsd sandbox to allow writes to /nix/store
       # Builder needs direct R/W access to host's nix store
-      virtiofsd.extraArgs = ["--sandbox" "none" "--cache" "always" "--thread-pool-size" "16"];
+      virtiofsd.extraArgs = lib.mkDefault ["--sandbox" "none" "--cache" "always" "--thread-pool-size" "16"];
 
       # Headless operation
       graphics.enable = false;
@@ -172,31 +172,31 @@ in {
     nix = {
       enable = true;
       settings = {
-        trusted-users = ["root" "builder"];
-        auto-optimise-store = false; # Host manages optimization
-        max-jobs = "auto";
-        cores = 0; # Use all available
+        trusted-users = lib.mkDefault ["root" "builder"];
+        auto-optimise-store = lib.mkDefault false; # Host manages optimization
+        max-jobs = lib.mkDefault "auto";
+        cores = lib.mkDefault 0; # Use all available
         # Disable sandbox - doesn't work well with virtiofs store mount
-        sandbox = false;
+        sandbox = lib.mkDefault false;
         # Enable flakes and nix-command
-        experimental-features = ["nix-command" "flakes"];
+        experimental-features = lib.mkDefault ["nix-command" "flakes"];
         # Use substituters for faster builds
-        substituters = [
+        substituters = lib.mkDefault [
           "https://cache.nixos.org"
           "https://nix-community.cachix.org"
         ];
         # Cache negative narinfo results permanently (reduces redundant DB lookups)
-        narinfo-cache-negative-ttl = 0;
+        narinfo-cache-negative-ttl = lib.mkDefault 0;
         # Parallel substituter downloads
-        http-connections = 128;
-        max-substitution-jobs = 32;
-        trusted-public-keys = [
+        http-connections = lib.mkDefault 128;
+        max-substitution-jobs = lib.mkDefault 32;
+        trusted-public-keys = lib.mkDefault [
           "cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY="
           "nix-community.cachix.org-1:mB9FSh9qf2dCimDSUo8Zy7bkq5CX+/rkCWyvRCYg3Fs="
         ];
       };
       # Don't run GC in builder - host manages GC
-      gc.automatic = false;
+      gc.automatic = lib.mkDefault false;
     };
 
     # Increase file descriptor limits for nix builds
@@ -267,10 +267,10 @@ in {
     };
 
     # ===== Services =====
-    services.openssh.enable = false; # No SSH - vsock only
-    services.qemuGuest.enable = true;
-    services.getty.autologinUser = "builder";
-    services.haveged.enable = true;
+    services.openssh.enable = lib.mkDefault false; # No SSH - vsock only
+    services.qemuGuest.enable = lib.mkDefault true;
+    services.getty.autologinUser = lib.mkDefault "builder";
+    services.haveged.enable = lib.mkDefault true;
 
     # ===== User Configuration =====
     users.users.builder = {
@@ -281,7 +281,7 @@ in {
     security.sudo.wheelNeedsPassword = false;
 
     # ===== Packages =====
-    environment.systemPackages = with pkgs; [
+    environment.systemPackages = lib.mkDefault (with pkgs; [
       git
       vim
       htop
@@ -289,7 +289,7 @@ in {
       # Nix tools
       nix-tree
       nix-diff
-    ];
+    ]);
 
     # ===== Git Configuration =====
     # Trust the mounted repos despite different ownership (virtiofs UID mapping)

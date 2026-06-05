@@ -79,24 +79,13 @@
   hasMullvad = vpnCfg.mullvad.enable && vpnCfg.mullvad.bridges != {};
   mullvadBridges = vpnCfg.mullvad.bridges; # attrset: bridge-name → conf-file path
 
-  # Sanitise a Mullvad conf for router use:
-  #   - Table = off        so wg-quick doesn't touch the main routing table
-  #   - strip IPv6 address (router has enableIPv6 = false)
-  #   - strip DNS line     (router uses dnsmasq, not wg-quick DNS management)
-  injectTableOff = f:
-    let serverName = lib.removeSuffix ".conf" (builtins.baseNameOf f);
-    in pkgs.runCommand (builtins.baseNameOf f) { } ''
-      ${pkgs.gnused}/bin/sed \
-        -e '1i# Server: ${serverName}' \
-        -e '/^\[Interface\]/a Table = off' \
-        -e '/^Address/s/,.*$//' \
-        -e '/^DNS/d' \
-        ${f} > $out
-    '';
+  # WireGuard config processing hook — user-defined via hydrix.router.vpn.mullvad.processConfig
+  # Default: identity (pass through raw conf files unmodified)
+  processConfig = vpnCfg.mullvad.processConfig;
 
   # Named derivations so the boot-assign service can reference them in path
-  vpnAssign = pkgs.writeShellScriptBin "vpn-assign" (builtins.readFile ../../scripts/vpn-assign.sh);
-  vpnStatus = pkgs.writeShellScriptBin "vpn-status" (builtins.readFile ../../scripts/vpn-status.sh);
+  vpnAssign = pkgs.writeShellScriptBin "vpn-assign" (builtins.readFile ../../../scripts/vpn-assign.sh);
+  vpnStatus = pkgs.writeShellScriptBin "vpn-status" (builtins.readFile ../../../scripts/vpn-status.sh);
 
   vmName = config.networking.hostName;
   extraNetworks = cfg.networking.extraNetworks;
@@ -107,25 +96,29 @@
   # LAN interface names — all statically known at build time via MAC→name links.
   # Used in nftables to identify WAN/VPN egress by negation so the firewall
   # never depends on runtime WAN detection (which can fail on fresh installs).
-  lanTaps = [
-    "mv-router-mgmt" "mv-router-pent" "mv-router-comm" "mv-router-brow"
-    "mv-router-dev"  "mv-router-lurk" "mv-router-bldr"
-  ] ++ map (n: n.routerTap) extraNetworks;
+  # Derived from infraLans + all profile/extra networks — no hardcoded names.
+  lanTaps = map (l: l.tap) cfg.router.microvm.infraLans
+    ++ map (n: n.routerTap) allNetworks;
 
   # nftables set literal: { "lo", "mv-router-mgmt", ... }
   lanTapSetNft = "{ " + lib.concatMapStringsSep ", " (t: "\"${t}\"") (["lo"] ++ lanTaps) + " }";
 
-  # All LAN segments the router serves, with their router-side IP suffix (.253).
-  # Management tap (fixed) ++ profile/extra-network taps (auto-discovered from meta.nix).
-  # Adding an infra VM with routerTap + subnet in hydrix-config automatically appears here.
-  allLans =
-    [ { tap = "mv-router-mgmt"; subnet = "192.168.100"; }
-      { tap = "mv-router-bldr"; subnet = "192.168.210"; }
-    ] ++ map (n: { tap = n.routerTap; subnet = n.subnet; }) allNetworks;
+  # All LAN segments the router serves (networking config: dnsmasq, systemd-networkd,
+  # nftables). Includes the management TAP — the host connects to the router via mgmt.
+  # infraLans comes from infra/*/meta.nix builtinVm entries.
+  infraLans = cfg.router.microvm.infraLans;
+  allLans = infraLans ++ map (n: { tap = n.routerTap; subnet = n.subnet; }) allNetworks;
+
+  # TAPs that need their own QEMU -netdev arg. The management TAP is already declared
+  # in microvm.interfaces (handled by the microvm framework), so we exclude it here
+  # to avoid "Device or resource busy" at QEMU startup. Same logic for systemd.network.links
+  # — the mgmt entry is hardcoded separately with the correct framework MAC.
+  _declaredTaps = map (iface: iface.id) (lib.filter (iface: iface.type == "tap") config.microvm.interfaces);
+  infraQemuTaps = lib.filter (l: !builtins.elem l.tap _declaredTaps) infraLans;
 in {
   imports = [
     # Central options for config access
-    ../options.nix
+    ../../options.nix
     # QEMU Guest profile for virtio modules
     (modulesPath + "/profiles/qemu-guest.nix")
     # Live NixOS switch via vsock:14504 (microvm update / microvm switch)
@@ -226,47 +219,32 @@ in {
           "-netdev" "tap,id=net-wan,ifname=mv-router-wan,script=no,downscript=no"
           "-device" "virtio-net-pci,netdev=net-wan,mac=02:00:00:01:09:01"
         ]
-        ++ [
-
-          # Additional TAP interfaces for each bridge
-          # TAP interfaces created by host-side systemd service
-          "-netdev"
-          "tap,id=net-pentest,ifname=mv-router-pent,script=no,downscript=no"
-          "-device"
-          "virtio-net-pci,netdev=net-pentest,mac=02:00:00:01:01:01"
-
-          "-netdev"
-          "tap,id=net-comms,ifname=mv-router-comm,script=no,downscript=no"
-          "-device"
-          "virtio-net-pci,netdev=net-comms,mac=02:00:00:01:02:01"
-
-          "-netdev"
-          "tap,id=net-browse,ifname=mv-router-brow,script=no,downscript=no"
-          "-device"
-          "virtio-net-pci,netdev=net-browse,mac=02:00:00:01:03:01"
-
-          "-netdev"
-          "tap,id=net-dev,ifname=mv-router-dev,script=no,downscript=no"
-          "-device"
-          "virtio-net-pci,netdev=net-dev,mac=02:00:00:01:04:01"
-
-          "-netdev"
-          "tap,id=net-lurking,ifname=mv-router-lurk,script=no,downscript=no"
-          "-device"
-          "virtio-net-pci,netdev=net-lurking,mac=02:00:00:01:07:01"
-
-          "-netdev"
-          "tap,id=net-builder,ifname=mv-router-bldr,script=no,downscript=no"
-          "-device"
-          "virtio-net-pci,netdev=net-builder,mac=02:00:00:01:05:01"
-
-        ]
-        ++ lib.concatLists (lib.imap0 (i: n: [
-            # Extra network: ${n.name} (${n.routerTap})
+        # Profile network TAPs — derived from profileNetworks (profiles/*/meta.nix).
+        # MACs: 02:00:00:01:XX:01, index+1 (index 0 = 01 avoids collision with mgmt=00).
+        # Order follows alphabetical profile directory discovery.
+        ++ lib.concatLists (lib.imap0 (i: pn: [
             "-netdev"
-            "tap,id=net-${n.name},ifname=${n.routerTap},script=no,downscript=no"
+            "tap,id=net-${pn.name},ifname=${pn.routerTap},script=no,downscript=no"
             "-device"
-            "virtio-net-pci,netdev=net-${n.name},mac=02:00:00:02:${lib.fixedWidthString 2 "0" (builtins.toString i)}:01"
+            "virtio-net-pci,netdev=net-${pn.name},mac=02:00:00:01:${lib.fixedWidthString 2 "0" (builtins.toString (i + 1))}:01"
+          ])
+          profileNetworks)
+        # Builtin infra VM TAPs (builtinVm = true: builder, etc.) — mgmt excluded (see infraQemuTaps).
+        # MACs: 02:00:00:03:XX:01 — separate namespace from profiles (01) and extras (02).
+        ++ lib.concatLists (lib.imap0 (i: l: [
+            "-netdev"
+            "tap,id=net-infra-${builtins.toString i},ifname=${l.tap},script=no,downscript=no"
+            "-device"
+            "virtio-net-pci,netdev=net-infra-${builtins.toString i},mac=02:00:00:03:${lib.fixedWidthString 2 "0" (builtins.toString i)}:01"
+          ])
+          infraQemuTaps)
+        # Extra user-defined network TAPs (custom profiles + non-builtin infra VMs).
+        # MACs: 02:00:00:02:XX:01
+        ++ lib.concatLists (lib.imap0 (i: n: [
+            "-netdev"
+            "tap,id=net-extra-${n.name},ifname=${n.routerTap},script=no,downscript=no"
+            "-device"
+            "virtio-net-pci,netdev=net-extra-${n.name},mac=02:00:00:02:${lib.fixedWidthString 2 "0" (builtins.toString i)}:01"
           ])
           extraNetworks);
 
@@ -329,9 +307,9 @@ in {
     ];
 
     # Use latest kernel for best iwlwifi/WiFi support (matches libvirt router)
-    boot.kernelPackages = pkgs.linuxPackages_latest;
+    boot.kernelPackages = lib.mkDefault pkgs.linuxPackages_latest;
 
-    boot.kernelModules = [
+    boot.kernelModules = lib.mkDefault [
       "virtio_blk"
       "virtio_pci"
       "virtio_rng"
@@ -350,18 +328,28 @@ in {
     # Inside the QEMU VM, virtio-net devices get kernel-assigned names (ens3, ens4, …),
     # not the host-side TAP names. These .link files rename each interface by its
     # known MAC address so that find_iface_by_name works in the setup scripts.
+    # Interface renaming: MAC → stable TAP name inside the VM.
+    # Matches the MAC assignments in qemu.extraArgs above so that
+    # find_iface_by_name and all network services see consistent names.
     systemd.network.links = {
       "10-mv-router-mgmt" = { matchConfig.MACAddress = "02:00:00:01:00:01"; linkConfig.Name = "mv-router-mgmt"; };
-      "10-mv-router-pent" = { matchConfig.MACAddress = "02:00:00:01:01:01"; linkConfig.Name = "mv-router-pent"; };
-      "10-mv-router-comm" = { matchConfig.MACAddress = "02:00:00:01:02:01"; linkConfig.Name = "mv-router-comm"; };
-      "10-mv-router-brow" = { matchConfig.MACAddress = "02:00:00:01:03:01"; linkConfig.Name = "mv-router-brow"; };
-      "10-mv-router-dev"  = { matchConfig.MACAddress = "02:00:00:01:04:01"; linkConfig.Name = "mv-router-dev";  };
-      "10-mv-router-lurk" = { matchConfig.MACAddress = "02:00:00:01:07:01"; linkConfig.Name = "mv-router-lurk"; };
-      "10-mv-router-bldr" = { matchConfig.MACAddress = "02:00:00:01:05:01"; linkConfig.Name = "mv-router-bldr"; };
     } // lib.optionalAttrs useEthernetWan {
-      # Ethernet WAN TAP — renamed by MAC so detect_wan() can find it reliably
       "10-mv-router-wan" = { matchConfig.MACAddress = "02:00:00:01:09:01"; linkConfig.Name = "mv-router-wan"; };
-    } // lib.listToAttrs (lib.imap0 (i: n: {
+    } // lib.listToAttrs (lib.imap0 (i: pn: {
+      name  = "10-${pn.routerTap}";
+      value = {
+        matchConfig.MACAddress = "02:00:00:01:${lib.fixedWidthString 2 "0" (builtins.toString (i + 1))}:01";
+        linkConfig.Name = pn.routerTap;
+      };
+    }) profileNetworks)
+    // lib.listToAttrs (lib.imap0 (i: l: {
+      name  = "10-${l.tap}";
+      value = {
+        matchConfig.MACAddress = "02:00:00:03:${lib.fixedWidthString 2 "0" (builtins.toString i)}:01";
+        linkConfig.Name = l.tap;
+      };
+    }) infraQemuTaps)
+    // lib.listToAttrs (lib.imap0 (i: n: {
       name  = "20-${n.routerTap}";
       value = {
         matchConfig.MACAddress = "02:00:00:02:${lib.fixedWidthString 2 "0" (builtins.toString i)}:01";
@@ -502,18 +490,19 @@ in {
         # fixed by systemd.network.links above. Variable names match what
         # dnsmasq-config expects: profile name → IFACE_<NAME>, infra → IFACE_<TAP>.
         "hydrix-router/interfaces".text =
-          "IFACE_MGMT=mv-router-mgmt\n"
-          + "IFACE_BUILDER=mv-router-bldr\n"
+          lib.concatMapStrings (l: let
+            varName = lib.toUpper (builtins.replaceStrings ["-" "mv-router-"] ["_" ""] l.tap);
+          in "IFACE_${varName}=${l.tap}\n") infraLans
           + lib.concatMapStrings (n: let
               varName = lib.toUpper (builtins.replaceStrings ["-"] ["_"] n.name);
             in "IFACE_${varName}=${n.routerTap}\n") allNetworks
           ;
       }
-      # Mullvad WireGuard conf files — Table=off injected, copied to /etc/wireguard/
+      # Mullvad WireGuard conf files — processed via hydrix.router.vpn.mullvad.processConfig
       (lib.mkIf hasMullvad (
         lib.mapAttrs' (bridge: f: {
           name = "wireguard/wg-${bridge}.conf";
-          value = { source = injectTableOff f; mode = "0600"; };
+          value = { source = processConfig f; mode = "0600"; };
         }) mullvadBridges
       ))
     ];
@@ -649,8 +638,11 @@ in {
           fi
         }
 
-        add_iface "$IFACE_MGMT" "192.168.100" "192.168.100.253"
-        add_iface "$IFACE_BUILDER" "192.168.210" "192.168.210.253"
+        # Infrastructure LANs (from infra/*/meta.nix)
+        ${lib.concatStringsSep "\n        " (map (l:
+          "add_iface \"${l.tap}\" \"${l.subnet}\" \"${l.subnet}.253\""
+        ) infraLans)}
+        # Profile + extra networks (from profiles/*/meta.nix + extraNetworks)
         ${lib.concatStringsSep "\n        " (map (n: let
           varName = lib.toUpper (builtins.replaceStrings ["-"] ["_"] n.name);
         in "add_iface \"$IFACE_${varName}\" \"${n.subnet}\" \"${n.subnet}.253\"") allNetworks)}
@@ -661,8 +653,8 @@ in {
     };
 
     services.dnsmasq = {
-      enable = true;
-      resolveLocalQueries = true;
+      enable = lib.mkDefault true;
+      resolveLocalQueries = lib.mkDefault true;
       settings = {
         conf-dir = "/etc/dnsmasq.d/,*.conf";
       };
@@ -856,10 +848,10 @@ in {
     };
 
     # ===== Services =====
-    services.openssh.enable = false; # No SSH - console only
-    services.qemuGuest.enable = true;
-    services.getty.autologinUser = routerUser;
-    services.haveged.enable = true;
+    services.openssh.enable = lib.mkDefault false; # No SSH - console only
+    services.qemuGuest.enable = lib.mkDefault true;
+    services.getty.autologinUser = lib.mkDefault routerUser;
+    services.haveged.enable = lib.mkDefault true;
 
     # ===== User Configuration =====
     users.users.${routerUser} =
@@ -876,7 +868,7 @@ in {
     security.sudo.wheelNeedsPassword = false;
 
     # ===== Packages =====
-    environment.systemPackages = with pkgs; [
+    environment.systemPackages = lib.mkDefault (with pkgs; [
       openvpn
       iproute2
       iptables
@@ -901,7 +893,7 @@ in {
       wireguard-tools
       vpnAssign
       vpnStatus
-    ] ++ cfg.router.microvm.extraPackages;
+    ] ++ cfg.router.microvm.extraPackages);
 
     # ===== Tmpfiles =====
     systemd.tmpfiles.rules = [
@@ -943,7 +935,7 @@ in {
         echo "╔══════════════════════════════════════════════════════════╗"
         echo "║           HYDRIX MICROVM ROUTER                          ║"
         echo "╠══════════════════════════════════════════════════════════╣"
-        echo "║  Networks: 192.168.100-108.x                             ║"
+        echo "║  Networks: ${lib.concatMapStringsSep ", " (l: l.subnet) (lib.take 3 allLans)}...  ║"
         echo "╚══════════════════════════════════════════════════════════╝"
         echo ""
       '';

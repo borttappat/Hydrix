@@ -50,6 +50,7 @@ let
   hostPollInterval = toString (config.hydrix.vmMetrics.hostPollInterval or 5);
   staleThreshold   = toString (config.hydrix.vmMetrics.staleThreshold   or 15);
   configDir        = config.hydrix.paths.configDir or "${homeDir}/hydrix-config";
+  barType          = config.hydrix.graphical.waybar.barType or "dualbar";
 
   shouldActivate = ((config.hydrix.hyprland.enable or false) || (config.hydrix.sway.enable or false))
     && (config.hydrix.graphical.enable or false);
@@ -335,7 +336,7 @@ let
     result=$(echo "POLL" | timeout 1 socat - VSOCK-CONNECT:200:14506 2>/dev/null)
     [ -z "$result" ] && exit 0
     count=$(echo "$result" | jq '.networks | length' 2>/dev/null || echo "0")
-    local_ssid=$(grep -oP 'ssid\s*=\s*"\K[^"]+' "${homeDir}/hydrix-config/shared/wifi.nix" 2>/dev/null | head -1 || echo "")
+    local_ssid=$(grep -oP 'ssid\s*=\s*"\K[^"]+' "${homeDir}/hydrix-config/modules/wifi.nix" 2>/dev/null | head -1 || echo "")
     router_ssid=$(echo "$result" | jq -r '.networks[0].ssid // ""' 2>/dev/null)
     [ -z "$router_ssid" ] && exit 0
     [ "$router_ssid" != "$local_ssid" ] && echo "WIFI! $count" || echo "WIFI $count"
@@ -362,13 +363,19 @@ let
 
   hostCpuScript = pkgs.writeShellScript "waybar-host-cpu" ''
     cpu=$(${pkgs.procps}/bin/vmstat 1 2 | awk 'END{printf "%.0f", 100-$15}')
-    [ "$cpu" -ge 75 ] && class="high" || class=""
+    if   [ "$cpu" -ge 75 ]; then class="high"
+    elif [ "$cpu" -ge 50 ]; then class="medium"
+    else class=""
+    fi
     ${pkgs.jq}/bin/jq -cn --arg t "CPU $cpu%" --arg c "$class" '{"text":$t,"class":$c}'
   '';
 
   hostMemScript = pkgs.writeShellScript "waybar-host-mem" ''
     pct=$(awk '/^MemTotal/{t=$2} /^MemAvailable/{a=$2} END{printf "%.0f", (t-a)*100/t}' /proc/meminfo)
-    [ "$pct" -ge 75 ] && class="high" || class=""
+    if   [ "$pct" -ge 75 ]; then class="high"
+    elif [ "$pct" -ge 50 ]; then class="medium"
+    else class=""
+    fi
     ${pkgs.jq}/bin/jq -cn --arg t "RAM $pct%" --arg c "$class" '{"text":$t,"class":$c}'
   '';
 
@@ -416,6 +423,56 @@ let
       *)
         lbl="BAT"
         if   [ "$cap" -le 5 ];  then class="critical"
+        elif [ "$cap" -le 15 ]; then class="warning"
+        else class=""
+        fi ;;
+    esac
+    ${pkgs.jq}/bin/jq -cn --arg t "$lbl $cap%" --arg c "$class" '{"text":$t,"class":$c}'
+  '';
+
+  # ── Monobar conditional variants ─────────────────────────────────────────
+  # These scripts gate output on thresholds — waybar hides the pill when silent.
+
+  monoGitScript = pkgs.writeShellScript "waybar-mono-git" ''
+    count=$(git -C ${configDir} status --porcelain 2>/dev/null | wc -l) || count=0
+    [ "$count" -lt 10 ] && exit 0
+    ${pkgs.jq}/bin/jq -cn --arg t "GIT $count" --arg c "active" '{"text":$t,"class":$c}'
+  '';
+
+  monoTempScript = pkgs.writeShellScript "waybar-mono-temp" ''
+    temp=$(cat /sys/class/thermal/thermal_zone*/temp 2>/dev/null \
+      | ${pkgs.coreutils}/bin/sort -rn | head -1)
+    [ -z "$temp" ] && exit 0
+    temp=$((temp / 1000))
+    [ "$temp" -lt 70 ] && exit 0
+    [ "$temp" -ge 80 ] && echo "TEMP $temp°C!" || echo "TEMP $temp°C"
+  '';
+
+  monoUptimeScript = pkgs.writeShellScript "waybar-mono-uptime" ''
+    secs=$(${pkgs.gawk}/bin/awk '{printf "%d", $1}' /proc/uptime)
+    [ "$secs" -lt 86400 ] && exit 0
+    printf 'UP %dh%02dm\n' "$((secs/3600))" "$(( (secs%3600)/60 ))"
+  '';
+
+  monoVmFsScript = pkgs.writeShellScript "waybar-mono-vm-fs" ''
+    ${_vmCacheHeader}
+    fs=$(grep '^fs=' "$CACHE" | awk -F= '{print $2}')
+    [ -z "$fs" ] && exit 0
+    [ "$fs" -lt 50 ] && exit 0
+    echo "FS $fs%"
+  '';
+
+  monoBatteryScript = pkgs.writeShellScript "waybar-mono-battery" ''
+    cap=$(cat /sys/class/power_supply/BAT*/capacity 2>/dev/null | head -1)
+    status=$(cat /sys/class/power_supply/BAT*/status 2>/dev/null | head -1)
+    [ -z "$cap" ] && exit 0
+    case "$status" in
+      Charging) lbl="CHR"; class="charging" ;;
+      Full)     lbl="BAT"; class="full" ;;
+      *)
+        lbl="BAT"
+        if   [ "$cap" -ge 80 ]; then class="full"
+        elif [ "$cap" -le 5 ];  then class="critical"
         elif [ "$cap" -le 15 ]; then class="warning"
         else class=""
         fi ;;
@@ -545,13 +602,107 @@ let
     "custom/wifi-sync"     = { exec = "${wifiSyncScript}";     interval = 10; format = "{}"; tooltip = false; escape = false; };
   };
 
-  configJson = builtins.toJSON [ topBar bottomBar ];
+  monoBar = {
+    "reload_style_on_change" = false;
+    layer    = "top";
+    position = "top";
+    height   = barHeight;
+    spacing  = 0;
+    "exclusive-zone" = barHeight + gaps - 2 * pillVMargin;
+    "margin-top"     = gaps - pillVMargin;
+    "margin-left"    = gaps - pillHMargin;
+    "margin-right"   = gaps - pillHMargin;
+
+    "modules-left"   = [
+      "hyprland/workspaces"
+      "custom/workspace-desc"
+      "custom/focus"
+    ];
+    "modules-center" = [];
+    "modules-right"  = [
+      "custom/pomo"
+      "custom/sync"
+      "custom/sep"
+      "custom/git"
+      "custom/mvms"
+      "custom/vms"
+      "custom/sep"
+      "custom/volume"
+      "custom/zenaudio"
+      "custom/bluetooth"
+      "custom/sep"
+      "custom/temp"
+      "custom/memory"
+      "custom/cpu"
+      "custom/sep"
+      "custom/disk"
+      "custom/uptime"
+      "custom/sep"
+      "custom/power-profile"
+      "custom/battery"
+      "custom/battery-time"
+      "custom/sep"
+      "custom/vm-cpu"
+      "custom/vm-ram"
+      "custom/vm-fs"
+      "custom/vm-sync-dev"
+      "custom/vm-sync-stg"
+      "custom/vm-tun"
+      "custom/vm-up"
+      "custom/sep"
+      "custom/wifi-sync"
+      "custom/sep"
+      "custom/clock"
+    ];
+
+    "hyprland/workspaces" = {
+      "disable-scroll" = true;
+      format = "{name}";
+      "on-click" = "activate";
+      "sort-by-number" = true;
+    };
+
+    "custom/workspace-desc" = { exec = "${workspaceDescScript}"; interval = 1;  format = "{}"; tooltip = false; escape = false; };
+    "custom/focus"          = { exec = "${focusScript}";         interval = 1;  format = "{}"; tooltip = false; escape = false; };
+    "custom/pomo"           = { exec = "${pomoScript}";          interval = 1;  format = "{}"; tooltip = false; escape = false; };
+    "custom/sync"           = { exec = "${syncScript}";          interval = 30; format = "{}"; tooltip = false; escape = false; };
+    "custom/git"            = { exec = "${monoGitScript}";       interval = 30; format = "{}"; tooltip = false; escape = false; "return-type" = "json"; };
+    "custom/mvms"           = { exec = "${mvmsScript}";          interval = 5;  format = "{}"; tooltip = false; escape = false; };
+    "custom/vms"            = { exec = "${vmsScript}";           interval = 10; format = "{}"; tooltip = false; escape = false; };
+    "custom/sep"            = { exec = "echo '|'"; interval = "once"; format = "{}"; tooltip = false; };
+    "custom/volume"    = { exec = "${volumeScript}";    interval = 5;  format = "{}"; tooltip = false; escape = false; "on-click" = "pavucontrol"; "on-scroll-up" = "${pkgs.pulseaudio}/bin/pactl set-sink-volume @DEFAULT_SINK@ +5%"; "on-scroll-down" = "${pkgs.pulseaudio}/bin/pactl set-sink-volume @DEFAULT_SINK@ -5%"; };
+    "custom/zenaudio"  = { exec = "${zenaudioScript}";  interval = 3;  format = "{}"; tooltip = false; escape = false; "on-click" = "zenaudio toggle"; };
+    "custom/bluetooth" = { exec = "${bluetoothScript}"; interval = 10; format = "{}"; tooltip = false; escape = false; "return-type" = "json"; };
+    "custom/temp"      = { exec = "${monoTempScript}";  interval = 5;  format = "{}"; tooltip = false; escape = false; };
+    "custom/memory"    = { exec = "${hostMemScript}";   interval = 5;  format = "{}"; tooltip = false; escape = false; "return-type" = "json"; };
+    "custom/cpu"       = { exec = "${hostCpuScript}";   interval = 5;  format = "{}"; tooltip = false; escape = false; "return-type" = "json"; };
+    "custom/disk"      = { exec = "${diskScript}";      interval = 30; format = "{}"; tooltip = false; escape = false; };
+    "custom/uptime"    = { exec = "${monoUptimeScript}";interval = 60; format = "{}"; tooltip = false; escape = false; };
+    "custom/clock"     = { exec = "${clockScript}";     interval = 60; format = "{}"; tooltip = false; escape = false; };
+    "custom/power-profile" = { exec = "${powerProfileScript}"; interval = 10; format = "{}"; tooltip = false; escape = false; };
+    "custom/battery"       = { exec = "${monoBatteryScript}";  interval = 30; format = "{}"; tooltip = false; escape = false; "return-type" = "json"; };
+    "custom/battery-time"  = { exec = "${batteryTimeScript}";  interval = 60; format = "{}"; tooltip = false; escape = false; };
+    "custom/vm-cpu"      = { exec = "${vmCpuScript}";     interval = lib.toInt hostPollInterval; format = "{}"; tooltip = false; escape = false; };
+    "custom/vm-ram"      = { exec = "${vmRamScript}";     interval = lib.toInt hostPollInterval; format = "{}"; tooltip = false; escape = false; };
+    "custom/vm-fs"       = { exec = "${monoVmFsScript}";  interval = lib.toInt hostPollInterval; format = "{}"; tooltip = false; escape = false; };
+    "custom/vm-sync-dev" = { exec = "${vmSyncDevScript}"; interval = lib.toInt hostPollInterval; format = "{}"; tooltip = false; escape = false; };
+    "custom/vm-sync-stg" = { exec = "${vmSyncStgScript}"; interval = lib.toInt hostPollInterval; format = "{}"; tooltip = false; escape = false; };
+    "custom/vm-tun"      = { exec = "${vmTunScript}";     interval = lib.toInt hostPollInterval; format = "{}"; tooltip = false; escape = false; };
+    "custom/vm-up"       = { exec = "${vmUpScript}";      interval = 30;                        format = "{}"; tooltip = false; escape = false; };
+    "custom/wifi-sync"   = { exec = "${wifiSyncScript}";  interval = 10;                        format = "{}"; tooltip = false; escape = false; };
+  };
+
+  configJson = builtins.toJSON (
+    if barType == "monobar" then [ monoBar ]
+    else [ topBar bottomBar ]
+  );
 
   defaultColorsCSS = ''
     @define-color background #0c0c0c;
     @define-color foreground #d8dee9;
     @define-color accent     #7aa2f7;
     @define-color alert      #bf616a;
+    @define-color color6     #5e81ac;
     @define-color color8     #4c566a;
   '';
 
@@ -665,11 +816,13 @@ let
     /* GIT active — DATE colors when ≥10 uncommitted */
     #custom-git.active { color: @accent; border-color: alpha(@accent, 0.45); }
 
-    /* CPU / RAM high-usage fill — mirrors battery.charging */
+    /* CPU / RAM — foreground at normal, accent at ≥50%, alert fill at ≥75% */
+    #custom-cpu.medium,
+    #custom-memory.medium { color: @accent; border-color: alpha(@accent, 0.45); }
     #custom-cpu.high,
-    #custom-memory.high { background: @accent; color: @background; border-color: @accent; }
+    #custom-memory.high   { background: @alert; color: @background; border-color: @alert; }
 
-    /* @color8 border — VM-sourced metrics (host process + all vm-* modules) */
+    /* @color6 border — VM-sourced metrics (distinguishes VM data from host) */
     #custom-rproc-bottom,
     #custom-cproc-bottom,
     #custom-vm-cpu,
@@ -679,7 +832,7 @@ let
     #custom-vm-sync-stg,
     #custom-vm-tun,
     #custom-vm-up,
-    #custom-wifi-sync { border-color: alpha(@color8, 0.6); }
+    #custom-wifi-sync { border-color: alpha(@color6, 0.6); }
 
     /* Hover: invert any pill */
     #custom-clock:hover,
@@ -760,7 +913,20 @@ let
     [ -f "$_dir/colors.css" ] || printf '%s' ${lib.escapeShellArg defaultColorsCSS} > "$_dir/colors.css"
   '';
 
-in lib.mkIf shouldActivate {
+in {
+  options.hydrix.graphical.waybar = {
+    barType = lib.mkOption {
+      type    = lib.types.enum [ "dualbar" "monobar" ];
+      default = "dualbar";
+      description = ''
+        Waybar layout profile.
+        dualbar — top + bottom bars, all modules always visible.
+        monobar  — single top bar; conditional modules hide below threshold.
+      '';
+    };
+  };
+
+  config = lib.mkIf shouldActivate {
   home-manager.users.${username} = { lib, ... }: {
     # All three waybar files are written as mutable regular files — not nix store symlinks.
     # This allows live editing (waybar reloads CSS on SIGUSR2, config on restart).
@@ -832,4 +998,5 @@ in lib.mkIf shouldActivate {
       Install.WantedBy = [ "graphical-session.target" ];
     };
   };
+  }; # config
 }

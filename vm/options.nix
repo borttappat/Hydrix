@@ -12,6 +12,24 @@
 in {
   options.hydrix = {
     # =========================================================================
+    # VM IDENTITY
+    # Used by both microVMs (set by mkMicrovm/mkInfraVm) and libvirt VMs.
+    # =========================================================================
+
+    vm = {
+      storeName = lib.mkOption {
+        type = lib.types.str;
+        default = "unknown-vm";
+        description = "NixOS configuration key for this VM (e.g. microvm-lurking). Used for host-side paths and service names. Set by the flake — do not override in user configs.";
+      };
+      hostname = lib.mkOption {
+        type = lib.types.str;
+        default = "unknown-vm";
+        description = "Hostname visible inside the VM. Defaults to storeName for microVMs. Override freely in profiles/<name>/default.nix.";
+      };
+    };
+
+    # =========================================================================
     # VM TYPE
     # =========================================================================
 

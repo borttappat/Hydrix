@@ -128,6 +128,27 @@ in {
       };
 
       microvm = {
+        infraLans = lib.mkOption {
+          type = lib.types.listOf (lib.types.submodule {
+            options = {
+              tap = lib.mkOption {
+                type = lib.types.str;
+                description = "Router-side TAP interface name (e.g. mv-router-mgmt).";
+              };
+              subnet = lib.mkOption {
+                type = lib.types.str;
+                description = "Subnet prefix without last octet (e.g. 192.168.100).";
+              };
+            };
+          });
+          default = [];
+          description = ''
+            Infrastructure LAN segments the router serves (management, builder, etc.).
+            Populated by flake.nix from infra/*/meta.nix entries that declare routerTap + subnet.
+            These subnets get static IPs, DHCP ranges, and firewall rules in the router VM.
+          '';
+        };
+
         extraPackages = lib.mkOption {
           type = lib.types.listOf lib.types.package;
           default = [];
@@ -213,7 +234,8 @@ in {
 
               At router boot, all tunnels connect; the primary exit is active,
               backups are available for manual rotation via vpn-assign.
-              Table = off is injected automatically.
+              Conf files are deployed as-is by default; use processConfig to
+              inject Table=off, strip DNS/IPv6, etc.
               Valid keys: pentest, comms, browse, dev, lurking
             '';
             example = {
@@ -223,6 +245,31 @@ in {
                 backup1 = ./mullvad-pentest-de.conf;
               };
             };
+          };
+
+          processConfig = lib.mkOption {
+            type = lib.types.raw;
+            default = f: f;
+            description = ''
+              Function applied to each WireGuard .conf file path before deployment
+              to /etc/wireguard/. Use this to inject Table=off, strip DNS/IPv6,
+              add server-name comments, or apply any other transformations.
+
+              Signature: path → derivation (or path)
+              Default: identity (conf files deployed unmodified)
+            '';
+            example = lib.literalExpression ''
+              f: let
+                serverName = lib.removeSuffix ".conf" (builtins.baseNameOf f);
+              in pkgs.runCommand (builtins.baseNameOf f) { } '''
+                ''${pkgs.gnused}/bin/sed \
+                  -e '1i# Server: ''${serverName}' \
+                  -e '/^\[Interface\]/a Table = off' \
+                  -e '/^Address/s/,.*$//' \
+                  -e '/^DNS/d' \
+                  ''${f} > $out
+              ''';
+            '';
           };
         };
       };

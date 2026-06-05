@@ -123,7 +123,7 @@ let
     # ===== BUILD & SYSTEM =====
     rebuild = "rebuild";
     new-profile = "new-profile";
-    # Note: rebuild-libvirt-router is provided by modules/host/libvirt-router-host.nix
+    # Note: rebuild-libvirt-router is provided by host/libvirt/router.nix
 
     # ===== MICROVM MANAGEMENT =====
     # Note: 'microvm' command is added in microvm-host.nix with path substitution
@@ -132,7 +132,7 @@ let
     # The hydrix-tui handles libvirt VMs, not microVMs
 
     # ===== LIBVIRT VM MANAGEMENT =====
-    # build-base, deploy-vm: wired in host/virt.nix (gated on hydrix.libvirt.enable)
+    # build-base, deploy-vm: wired in host/libvirt/virt.nix (gated on hydrix.libvirt.enable)
     hydrix-tui = "hydrix-tui.sh";
 
     # ===== PACKAGE SYNC =====

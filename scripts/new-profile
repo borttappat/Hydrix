@@ -8,7 +8,7 @@
 # and optionally triggers rebuild.
 #
 # CID / subnet / workspace convention: all three use the same number.
-# Reserved CIDs (never auto-assign): 200 (router), 210 (builder), 211 (gitsync).
+# Reserved CIDs are auto-discovered from /etc/hydrix/vm-registry.json (infra VMs).
 # Custom user profiles start at 107+.
 
 set -euo pipefail
@@ -63,7 +63,13 @@ nix_attr() {
         | sed -E 's/^[^=]+=\s*//; s/[;#].*//; s/"//g; s/[[:space:]]//g'
 }
 
-RESERVED_CIDS=(200 210 211 212)
+VM_REGISTRY="/etc/hydrix/vm-registry.json"
+if [[ -f "$VM_REGISTRY" ]]; then
+    mapfile -t RESERVED_CIDS < <(jq -r '.[].cid' "$VM_REGISTRY" 2>/dev/null | sort -un)
+else
+    # Fallback for pre-activation / fresh installs
+    RESERVED_CIDS=(200 209 210 211 212 213 214)
+fi
 declare -a USED_CIDS=() USED_WORKSPACES=()
 
 for meta in "$PROFILES_DIR"/*/meta.nix; do
@@ -95,42 +101,49 @@ SUGGESTED_WORKSPACE=$(next_free "$SUGGESTED_WORKSPACE" "${USED_WORKSPACES[@]:-}"
 SUGGESTED_SUBNET="192.168.${SUGGESTED_CID}"
 
 # Derive interface names from profile name (max 15 chars each)
-clean="${PROFILE_NAME//-/}"                          # strip hyphens for abbreviation
-SUGGESTED_BRIDGE="${PROFILE_NAME:0:12}"              # br- + up to 12 chars = 15
-SUGGESTED_BRIDGE="br-${SUGGESTED_BRIDGE}"
+first_seg="${PROFILE_NAME%%-*}"                      # everything before first hyphen
+SUGGESTED_BRIDGE="br-${PROFILE_NAME:0:12}"           # br- + up to 12 chars = 15
 SUGGESTED_TAP="mv-${PROFILE_NAME:0:12}"
-SUGGESTED_ROUTER_TAP="mv-router-${clean:0:5}"        # mv-router- = 10, + 5 = 15
+SUGGESTED_ROUTER_TAP="mv-router-${first_seg:0:5}"   # mv-router- = 10, + ≤5 = ≤15
 SUGGESTED_LABEL="${PROFILE_NAME//-/ }"
 SUGGESTED_LABEL="${SUGGESTED_LABEL^^}"
 SUGGESTED_COLORSCHEME="punk"
 
 # ---------------------------------------------------------------------------
-# Prompt for confirmation / override
+# Prompt for confirmation / override (Y/n style)
 # ---------------------------------------------------------------------------
 echo ""
 echo "New profile: $PROFILE_NAME"
 echo "========================================"
-echo "Press Enter to accept each suggestion, or type a replacement."
 echo ""
 
+# Show a suggested value; press Enter or Y to accept, N to enter a replacement.
 ask() {
     local label="$1" default="$2" hint="${3:-}"
-    local result
-    # printf and read both go to /dev/tty so they work inside $() substitutions
-    printf "  %-16s [%s]%s: " "$label" "$default" "${hint:+ ($hint)}" >/dev/tty
-    read -r result </dev/tty
-    echo "${result:-$default}"
+    local yn val
+    printf "  %s%s - suggested [%s], Y/n: " "$label" "${hint:+ ($hint)}" "$default" >/dev/tty
+    read -r yn </dev/tty
+    case "${yn,,}" in
+        n|no)
+            printf "  %s > " "$label" >/dev/tty
+            read -r val </dev/tty
+            echo "${val:-$default}"
+            ;;
+        *)
+            echo "$default"
+            ;;
+    esac
 }
 
 CID=$(ask         vsockCid    "$SUGGESTED_CID"          "integer, unique")
-WORKSPACE=$(ask   workspace   "$SUGGESTED_CID"          "i3 workspace")
+WORKSPACE=$(ask   workspace   "$SUGGESTED_WORKSPACE"    "workspace number")
 SUBNET=$(ask      subnet      "192.168.${CID}"          "no trailing octet")
-BRIDGE=$(ask      bridge      "br-${PROFILE_NAME:0:12}" "max 15 chars")
-TAP_ID=$(ask      tapId       "mv-${PROFILE_NAME:0:12}" "max 15 chars")
+BRIDGE=$(ask      bridge      "$SUGGESTED_BRIDGE"       "max 15 chars")
+TAP_ID=$(ask      tapId       "$SUGGESTED_TAP"          "max 15 chars")
 ROUTER_TAP=$(ask  routerTap   "$SUGGESTED_ROUTER_TAP"   "max 15 chars")
 LABEL=$(ask       label       "$SUGGESTED_LABEL"        "display name")
 COLORSCHEME=$(ask colorscheme "$SUGGESTED_COLORSCHEME"  "hydrix colorscheme name")
-FOCUS_COLOR=$(ask  focusBorder "orange"                  "red, orange, yellow, green, cyan, blue, purple, pink, magenta")
+FOCUS_COLOR=$(ask  focusBorder "orange"                 "red, orange, yellow, green, cyan, blue, purple, pink, magenta")
 
 # Validate interface name lengths
 for iface in "$BRIDGE" "$TAP_ID" "$ROUTER_TAP"; do
@@ -196,7 +209,7 @@ echo ""
 # ---------------------------------------------------------------------------
 # Rebuild prompt
 # ---------------------------------------------------------------------------
-printf "Trigger rebuild now? [Y/n]: "
+printf "Rebuild now? Y/n: "
 read -r do_rebuild
 if [[ "${do_rebuild:-Y}" =~ ^[Yy]$ ]]; then
     rebuild

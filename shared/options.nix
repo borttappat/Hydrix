@@ -213,6 +213,27 @@ in {
         '';
       };
 
+      vsockPorts = lib.mkOption {
+        type = lib.types.attrsOf lib.types.int;
+        default = {
+          xpra          = 14500;
+          metrics       = 14501;
+          staging       = 14502;
+          colorscheme   = 14503;
+          switch        = 14504;
+          pulse         = 14505;
+          waypipeLaunch = 14508;
+          displayMode   = 14509;
+          builderBuild  = 14510;
+          builderStatus = 14511;
+          gitsyncGit    = 14512;
+          gitsyncStatus = 14513;
+          vaultAgent    = 14514;
+          exitNodes     = 14515;
+        };
+        description = "vsock port assignments for Hydrix services. Override to avoid collisions with other software.";
+      };
+
       extraNetworks = lib.mkOption {
         type = lib.types.listOf (lib.types.submodule {
           options = {

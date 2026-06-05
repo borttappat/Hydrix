@@ -50,7 +50,7 @@
       # Module sets
       core     = ./shared/core;
       host     = ./host;
-      vm       = ./vm/base;
+      vm       = ./vm;
       graphical = ./theming;
 
       # Individual host modules

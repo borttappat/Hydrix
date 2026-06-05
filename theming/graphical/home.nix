@@ -28,11 +28,7 @@ in {
     ../programs/fish.nix
     ../programs/dunst.nix
     ../programs/zathura.nix
-    ../programs/vim.nix
     ../programs/firefox.nix
-    ../programs/starship.nix
-    ../programs/ranger.nix
-    ../programs/obsidian.nix
     ../programs/gtk.nix
   ];
 
@@ -50,16 +46,12 @@ in {
       };
 
       # Common packages available to user
+      # Note: starship, ranger, joshuto, vim are configured in hydrix-config/shared/
       home.packages = with pkgs; [
         # Terminal utilities
         tmux
         fzf
         jq
-        starship  # Prompt (also enabled via programs.starship but explicit for PATH)
-
-        # File managers (configured separately)
-        ranger
-        joshuto
 
         # Clipboard (useful in all graphical environments including xpra)
         xclip

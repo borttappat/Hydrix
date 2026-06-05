@@ -73,12 +73,22 @@
     then "mv-rts-" + lib.removePrefix "mv-router-" n.routerTap
     else "mv-rts-${n.name}";
 
-  # Framework LAN interfaces — management plane only. All other subnets are
-  # auto-discovered from profileNetworks + extraNetworks (meta.nix declarations).
-  frameworkLans = [
-    { tap = "mv-rts-mgmt"; subnet = "192.168.100"; routerIp = "192.168.100.253"; }
-    { tap = "mv-rts-bldr"; subnet = "192.168.210"; routerIp = "192.168.210.253"; }
-  ];
+  # Infrastructure LAN interfaces — from infra/*/meta.nix builtinVm entries.
+  # Stable router uses mv-rts-* prefix instead of mv-router-*.
+  stableInfraLan = l: {
+    tap      = builtins.replaceStrings ["mv-router-"] ["mv-rts-"] l.tap;
+    subnet   = l.subnet;
+    routerIp = "${l.subnet}.253";
+  };
+  # frameworkLans: ALL infra LANs including management (used for dnsmasq, systemd-networkd,
+  # nftables — the host connects to the router via the management LAN).
+  frameworkLans = map stableInfraLan cfg.router.microvm.infraLans;
+
+  # frameworkQemuTaps: infra TAPs that need their own QEMU -netdev arg.
+  # The management TAP (mv-rts-mgmt) is already declared in microvm.interfaces and must
+  # not be added again — QEMU would error "Device or resource busy".
+  _declaredTaps = map (iface: iface.id) (lib.filter (iface: iface.type == "tap") config.microvm.interfaces);
+  frameworkQemuTaps = lib.filter (l: !builtins.elem l.tap _declaredTaps) frameworkLans;
 
   # All profile/extra network LAN interfaces — derived from meta.nix at build time.
   profileLans = map (n: {
@@ -100,7 +110,7 @@
 
 in {
   imports = [
-    ../options.nix
+    ../../options.nix
     (modulesPath + "/profiles/qemu-guest.nix")
   ];
 
@@ -141,32 +151,32 @@ in {
           "-device"
           "vfio-pci,host=0000:${lib.removePrefix "0000:" wifiPciAddress},bus=pcie.1"
 
-          # Framework TAPs — stable prefix mv-rts-* / MAC 02:00:00:03:XX:01
-          "-netdev" "tap,id=net-pentest,ifname=mv-rts-pent,script=no,downscript=no"
-          "-device" "virtio-net-pci,netdev=net-pentest,mac=02:00:00:03:01:01"
-
-          "-netdev" "tap,id=net-comms,ifname=mv-rts-comm,script=no,downscript=no"
-          "-device" "virtio-net-pci,netdev=net-comms,mac=02:00:00:03:02:01"
-
-          "-netdev" "tap,id=net-browse,ifname=mv-rts-brow,script=no,downscript=no"
-          "-device" "virtio-net-pci,netdev=net-browse,mac=02:00:00:03:03:01"
-
-          "-netdev" "tap,id=net-dev,ifname=mv-rts-dev,script=no,downscript=no"
-          "-device" "virtio-net-pci,netdev=net-dev,mac=02:00:00:03:04:01"
-
-          "-netdev" "tap,id=net-lurking,ifname=mv-rts-lurk,script=no,downscript=no"
-          "-device" "virtio-net-pci,netdev=net-lurking,mac=02:00:00:03:07:01"
-
-          "-netdev" "tap,id=net-builder,ifname=mv-rts-bldr,script=no,downscript=no"
-          "-device" "virtio-net-pci,netdev=net-builder,mac=02:00:00:03:05:01"
         ]
-        # Framework profiles (pentest, browsing, comms, dev, lurking) are hardcoded above.
-        # Infra VMs with routerTap (e.g. files) and user extra profiles come from extraNetworks.
+        # Profile network TAPs — derived from profileNetworks (profiles/*/meta.nix).
+        # MACs: 02:00:00:03:XX:01, index+1 (avoids collision with mgmt=00).
+        ++ lib.concatLists (lib.imap0 (i: pn: [
+            "-netdev"
+            "tap,id=net-${pn.name},ifname=${stableRouterTap pn},script=no,downscript=no"
+            "-device"
+            "virtio-net-pci,netdev=net-${pn.name},mac=02:00:00:03:${lib.fixedWidthString 2 "0" (builtins.toString (i + 1))}:01"
+          ])
+          profileNetworks)
+        # Builtin infra VM TAPs (builtinVm = true: builder, etc.) — mgmt excluded (see frameworkQemuTaps).
+        # MACs: 02:00:00:05:XX:01 — separate namespace from profiles (03) and extras (04).
+        ++ lib.concatLists (lib.imap0 (i: l: [
+            "-netdev"
+            "tap,id=net-infra-${builtins.toString i},ifname=${l.tap},script=no,downscript=no"
+            "-device"
+            "virtio-net-pci,netdev=net-infra-${builtins.toString i},mac=02:00:00:05:${lib.fixedWidthString 2 "0" (builtins.toString i)}:01"
+          ])
+          frameworkQemuTaps)
+        # Extra user-defined network TAPs (custom profiles + non-builtin infra VMs).
+        # MACs: 02:00:00:04:XX:01
         ++ lib.concatLists (lib.imap0 (i: n: [
             "-netdev"
-            "tap,id=net-${n.name},ifname=${stableRouterTap n},script=no,downscript=no"
+            "tap,id=net-extra-${n.name},ifname=${stableRouterTap n},script=no,downscript=no"
             "-device"
-            "virtio-net-pci,netdev=net-${n.name},mac=02:00:00:04:${lib.fixedWidthString 2 "0" (builtins.toString i)}:01"
+            "virtio-net-pci,netdev=net-extra-${n.name},mac=02:00:00:04:${lib.fixedWidthString 2 "0" (builtins.toString i)}:01"
           ])
           extraNetworks);
 
@@ -225,15 +235,25 @@ in {
     # Rename virtio-net devices inside QEMU by MAC → stable TAP name.
     # This makes all interface names known at build time, enabling fully
     # declarative networking below.
+    # Interface renaming: MAC → stable TAP name inside the VM.
+    # Matches the MAC assignments in qemu.extraArgs above.
     systemd.network.links = {
       "10-mv-rts-mgmt" = { matchConfig.MACAddress = "02:00:00:03:00:01"; linkConfig.Name = "mv-rts-mgmt"; };
-      "10-mv-rts-pent" = { matchConfig.MACAddress = "02:00:00:03:01:01"; linkConfig.Name = "mv-rts-pent"; };
-      "10-mv-rts-comm" = { matchConfig.MACAddress = "02:00:00:03:02:01"; linkConfig.Name = "mv-rts-comm"; };
-      "10-mv-rts-brow" = { matchConfig.MACAddress = "02:00:00:03:03:01"; linkConfig.Name = "mv-rts-brow"; };
-      "10-mv-rts-dev"  = { matchConfig.MACAddress = "02:00:00:03:04:01"; linkConfig.Name = "mv-rts-dev";  };
-      "10-mv-rts-lurk" = { matchConfig.MACAddress = "02:00:00:03:07:01"; linkConfig.Name = "mv-rts-lurk"; };
-      "10-mv-rts-bldr" = { matchConfig.MACAddress = "02:00:00:03:05:01"; linkConfig.Name = "mv-rts-bldr"; };
-    } // lib.listToAttrs (lib.imap0 (i: n: {
+    } // lib.listToAttrs (lib.imap0 (i: pn: {
+      name  = "10-${stableRouterTap pn}";
+      value = {
+        matchConfig.MACAddress = "02:00:00:03:${lib.fixedWidthString 2 "0" (builtins.toString (i + 1))}:01";
+        linkConfig.Name = stableRouterTap pn;
+      };
+    }) profileNetworks)
+    // lib.listToAttrs (lib.imap0 (i: l: {
+      name  = "10-${l.tap}";
+      value = {
+        matchConfig.MACAddress = "02:00:00:05:${lib.fixedWidthString 2 "0" (builtins.toString i)}:01";
+        linkConfig.Name = l.tap;
+      };
+    }) frameworkQemuTaps)
+    // lib.listToAttrs (lib.imap0 (i: n: {
       name  = "20-${stableRouterTap n}";
       value = {
         matchConfig.MACAddress = "02:00:00:04:${lib.fixedWidthString 2 "0" (builtins.toString i)}:01";

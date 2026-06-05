@@ -79,16 +79,12 @@
 
   microvmRofiScript = pkgs.writeShellScriptBin "microvm-rofi" ''
     set -euo pipefail
-    SCALING_JSON="$HOME/.config/hydrix/scaling.json"
 
-    get_scaling_value() {
-      local key="$1" default="$2"
-      if [[ -f "$SCALING_JSON" ]]; then
-        ${pkgs.jq}/bin/jq -r "$key // $default" "$SCALING_JSON" 2>/dev/null || echo "$default"
-      else
-        echo "$default"
-      fi
-    }
+    # Sizing from Nix config (baked at build time)
+    GAPS=${toString cfg.ui.gaps}
+    CORNER_RADIUS=${toString cfg.ui.cornerRadius}
+    FONT_SIZE=${toString cfg.font.size}
+    FONT_NAME="${cfg.font.family}"
 
     get_color() {
       local name="$1" fallback="$2" color
@@ -108,22 +104,17 @@
 
     build_theme() {
       local n="''${1:-5}"
-      local bar_gaps corner_radius font_size font_name
-      bar_gaps=$(get_scaling_value '.sizes.bar_gaps' '10')
-      corner_radius=$(get_scaling_value '.sizes.corner_radius' '8')
-      font_size=$(get_scaling_value '.fonts.rofi' '12')
-      font_name=$(get_scaling_value '.font_name' 'Iosevka')
       local bg fg accent
       bg=$(get_color "color0" "#1a1b26")
       fg=$(get_color "color7" "#c0caf5")
       accent=$(get_color "color4" "#7aa2f7")
       cat <<EOF
-    configuration { font: "$font_name Bold $font_size"; show-icons: false; disable-history: true; kb-cancel: "Escape,q"; kb-accept-entry: "Return,KP_Enter"; kb-row-up: "Up,k"; kb-row-down: "Down,j"; }
+    configuration { font: "$FONT_NAME Bold $FONT_SIZE"; show-icons: false; disable-history: true; kb-cancel: "Escape,q"; kb-accept-entry: "Return,KP_Enter"; kb-row-up: "Up,k"; kb-row-down: "Down,j"; }
     * { bg: ''${bg}B3; bg-solid: ''${bg}; fg: ''${fg}; accent: ''${accent}; }
-    window { location: north; anchor: north; x-offset: -25%; y-offset: ''${bar_gaps}px; width: 180px; background-color: @bg; border: 0px; border-radius: ''${corner_radius}px; }
+    window { location: north; anchor: north; x-offset: -25%; y-offset: ''${GAPS}px; width: 180px; background-color: @bg; border: 0px; border-radius: ''${CORNER_RADIUS}px; }
     mainbox { background-color: transparent; children: [inputbar, listview]; padding: 4px; }
     listview { lines: $n; fixed-height: false; dynamic: true; scrollbar: false; background-color: transparent; spacing: 2px; }
-    element { padding: 8px 12px; background-color: transparent; text-color: @fg; border-radius: ''${corner_radius}px; }
+    element { padding: 8px 12px; background-color: transparent; text-color: @fg; border-radius: ''${CORNER_RADIUS}px; }
     element selected.normal { background-color: @accent; text-color: @bg-solid; }
     element-text { background-color: transparent; text-color: inherit; }
     inputbar { children: [entry]; padding: 0; background-color: transparent; border: 0; }

@@ -9,7 +9,7 @@ let meta = import ./meta.nix; in
 {
   imports = [
     # Core VM packages (editors, shell, utils)
-    ../../shared/vm-packages.nix
+    ../../modules/vm-packages.nix
     # Profile-specific packages
     ./packages.nix
     # Custom packages (added via vm-sync pull)

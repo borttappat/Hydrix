@@ -4,9 +4,9 @@
 { config, pkgs, lib, ... }:
 
 {
-  # Tor service for privacy
+  # Tor service for privacy — override in hydrix-config profiles/comms/default.nix
   services.tor = {
-    enable = true;
-    client.enable = true;
+    enable = lib.mkDefault true;
+    client.enable = lib.mkDefault true;
   };
 }

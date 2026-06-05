@@ -43,19 +43,10 @@ in {
     networking.bridges = bridgeConfigs // extraBridgeConfigs // infraBridgeConfigs // wanBridgeConfig;
 
     # Host IP on br-mgmt is set in the administrative specialisation only.
-    # Ensure bridges are up with no DHCP.
-    networking.interfaces = {
-      br-mgmt.useDHCP = false;
-      br-pentest.useDHCP = false;
-      br-comms.useDHCP = false;
-      br-lurking.useDHCP = false;
-      br-browse.useDHCP = false;
-      br-dev.useDHCP = false;
-      br-builder.useDHCP = false;
-    } // lib.listToAttrs (map (n: {
-      name  = "br-${n.name}";
-      value = { useDHCP = false; };
-    }) netCfg.extraNetworks);
+    # Ensure all VM bridges are up with no DHCP — derived from the same set
+    # used to create the bridges so new profiles are covered automatically.
+    networking.interfaces = lib.mapAttrs (_: _: { useDHCP = false; })
+      (bridgeConfigs // extraBridgeConfigs // infraBridgeConfigs // wanBridgeConfig);
 
     # NOTE: No default gateway in base config.
     # Base config = lockdown mode (host has no internet access).

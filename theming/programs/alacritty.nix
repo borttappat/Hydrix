@@ -19,8 +19,6 @@ let
   sc = config.hydrix.graphical.scaling.computed;
 
   # Font configuration from unified options
-  # Note: Runtime font size is handled by alacrittyDpi launcher reading scaling.json
-  # This static value is only used if launched directly
   fontCfg = config.hydrix.graphical.font;
   fontSize = fontCfg.overrides.alacritty or fontCfg.size;
 
@@ -137,10 +135,7 @@ in {
         enable = lib.mkDefault true;
 
         settings = {
-          # Font size is now handled dynamically by the alacrittyDpi launcher
-          # which reads from ~/.config/hydrix/scaling.json
-          # This static value is only used if launched directly (not via i3 keybind)
-          font.size = lib.mkForce fontSize;
+          font.size = lib.mkDefault fontSize;
           # Selection
           selection = {
             save_to_clipboard = alCfg.selection.saveToClipboard;
@@ -148,8 +143,8 @@ in {
 
           # General
           general = {
-            live_config_reload = true;
-            ipc_socket = true;
+            live_config_reload = lib.mkDefault true;
+            ipc_socket         = lib.mkDefault true;
             # colors-runtime.toml is the sole color source for all alacritty instances.
             # Host: written by write-alacritty-colors on every walrgb run.
             # VMs: written by init-wal-cache or vsock handler (host bg + VM text colors).
@@ -160,7 +155,7 @@ in {
 
           # Environment
           env = {
-            TERM = "xterm-256color";
+            TERM = lib.mkDefault "xterm-256color";
           };
 
           # Cursor
@@ -199,9 +194,8 @@ in {
           ];
 
           # Window
-          # Alacritty handles its own opacity (excluded from picom rules).
+          # Alacritty handles its own opacity.
           # This keeps text 100% sharp while having transparent background.
-          # Host and VMs use the same opacity for consistency.
           #
           # Opacity priority: overlayOverrides.alacritty > alacritty (legacy) > overlay
           #
@@ -213,12 +207,12 @@ in {
             # Use overlayOverrides.alacritty if set, else legacy alacritty option, else overlay
             effectiveOpacity = opacityCfg.overlayOverrides.alacritty or opacityCfg.alacritty;
           in {
-            opacity = lib.mkForce effectiveOpacity;
-            dynamic_padding = true;
-            resize_increments = !vmColorsEnabled;  # Disable for VMs to fix xpra artifacts
+            opacity = lib.mkDefault effectiveOpacity;
+            dynamic_padding   = lib.mkDefault true;
+            resize_increments = lib.mkDefault (!vmColorsEnabled);  # Disable for VMs to fix xpra artifacts
             class = {
-              general = "Alacritty";
-              instance = "Alacritty";
+              general  = lib.mkDefault "Alacritty";
+              instance = lib.mkDefault "Alacritty";
             };
             padding = { x = sc.padding; y = sc.padding + 2; };
           };
@@ -228,7 +222,7 @@ in {
           # (written at runtime by write-alacritty-colors, with /etc fallback for first boot)
           colors = {
             selection = {
-              text = lib.mkForce "CellForeground"; # Keep original text colors instead of inverting
+              text = lib.mkDefault "CellForeground"; # Keep original text colors instead of inverting
             };
           };
         };
