@@ -48,8 +48,8 @@ in {
     ../theming/vm-theming.nix
 
     # VM-specific modules
-    ./qemu-guest.nix
-    ./shared-store.nix
+    ../common/qemu-guest.nix
+    ../common/shared-store.nix
     ./bake-config.nix
     ../display/xpra-shared.nix  # Unified xpra module for all VMs
     ../display/waypipe-vm.nix   # waypipe display mode handler (vsock:14509); coexists with xpra

@@ -36,7 +36,7 @@
   vmName = config.networking.hostName;
 in {
   imports = [
-    ../options.nix
+    ../../options.nix
     # QEMU Guest profile for virtio modules
     (modulesPath + "/profiles/qemu-guest.nix")
     # Live NixOS switch via vsock:14504 (microvm update / microvm switch)

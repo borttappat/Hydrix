@@ -84,8 +84,8 @@
   processConfig = vpnCfg.mullvad.processConfig;
 
   # Named derivations so the boot-assign service can reference them in path
-  vpnAssign = pkgs.writeShellScriptBin "vpn-assign" (builtins.readFile ../../scripts/vpn-assign.sh);
-  vpnStatus = pkgs.writeShellScriptBin "vpn-status" (builtins.readFile ../../scripts/vpn-status.sh);
+  vpnAssign = pkgs.writeShellScriptBin "vpn-assign" (builtins.readFile ../../../scripts/vpn-assign.sh);
+  vpnStatus = pkgs.writeShellScriptBin "vpn-status" (builtins.readFile ../../../scripts/vpn-status.sh);
 
   vmName = config.networking.hostName;
   extraNetworks = cfg.networking.extraNetworks;
@@ -118,7 +118,7 @@
 in {
   imports = [
     # Central options for config access
-    ../options.nix
+    ../../options.nix
     # QEMU Guest profile for virtio modules
     (modulesPath + "/profiles/qemu-guest.nix")
     # Live NixOS switch via vsock:14504 (microvm update / microvm switch)

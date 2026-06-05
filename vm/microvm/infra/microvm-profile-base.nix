@@ -31,37 +31,37 @@ let
 
 in {
   imports = [
-    ../options.nix
+    ../../options.nix
     # Base system modules
     ../../common/users-vm.nix
-    ../../host/base/networking.nix
+    ../../../host/base/networking.nix
 
     # Core system (X11, fish shell, essential packages)
-    ../../shared/core
+    ../../../shared/core
 
     # Graphical stack (Stylix theming, HM programs, fonts, colors)
     # Sub-modules handle VM differences internally (isVM checks)
     # Also provides VM color sync scripts (wal-sync, refresh-colors, set-colorscheme-mode)
-    ../../theming/graphical
+    ../../../theming/graphical
 
     # VM scaling wrappers (alacritty, firefox, rofi, obsidian)
     # Reads scaling.json from host for consistent font sizes
-    ../theming/vm-scaling.nix
+    ../../theming/vm-scaling.nix
 
     # Xpra guest for seamless app forwarding (unified module for all VMs)
-    ../display/xpra-shared.nix
+    ../../display/xpra-shared.nix
 
     # waypipe display mode handler (vsock:14509); coexists with xpra
-    ../display/waypipe-vm.nix
+    ../../display/waypipe-vm.nix
 
     # vm-dev, vm-sync scripts (shared with libvirt VMs)
-    ../dev/vm-dev.nix
+    ../../dev/vm-dev.nix
 
     # Auto-import packages from profiles/<vmType>/packages/
     ../auto-include.nix
 
     # Files transfer agent (vsock 14506) for host-orchestrated encrypted file ops
-    ../dev/files-agent.nix
+    ../../dev/files-agent.nix
 
     # Live NixOS switch via vsock:14504 (microvm update / microvm switch)
     ./vm-switch.nix

@@ -110,7 +110,7 @@
 
 in {
   imports = [
-    ../options.nix
+    ../../options.nix
     (modulesPath + "/profiles/qemu-guest.nix")
   ];
 
