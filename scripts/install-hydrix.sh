@@ -2014,7 +2014,9 @@ validate_generated_config() {
     log "Validating generated configuration..."
     echo ""
 
-    # Step 1: Fetch flake inputs and verify outputs parse
+    # Fetch flake inputs — proves flake syntax is valid and all inputs are reachable.
+    # Full system evaluation is deferred to nixos-install (host) and prebuild_microvms
+    # (router, builder), which produce clean build output and proper error messages.
     log "  Fetching flake inputs..."
     local lock_output
     if ! lock_output=$(nix flake lock "$TEMP_CONFIG" --refresh 2>&1); then
@@ -2040,65 +2042,18 @@ validate_generated_config() {
     fi
     success "  Flake inputs fetched"
 
-    # Step 2: Evaluate the system configuration
-    log "  Evaluating system configuration for ${CONFIG[serial]}..."
-
-    # Diagnostic: check if disko is generating filesystem declarations
+    # Lightweight disko check — evaluates only the disk layout (fast, low memory)
+    # to catch misconfigured hydrix.disko.* before touching the disk.
+    log "  Checking disk layout..."
     local disko_check
     disko_check=$(nix eval "$TEMP_CONFIG#nixosConfigurations.${CONFIG[serial]}.config.disko.devices.disk" \
                   --no-write-lock-file 2>&1) || true
     if [[ "$disko_check" == "{ }" ]] || [[ -z "$disko_check" ]]; then
         warn "  Disko devices appear empty — fileSystems will not be generated"
-        warn "  Check hydrix.vmType and hydrix.disko.* settings"
+        warn "  Check hydrix.disko.* settings in your machine config"
     else
-        log "  Disko devices: populated"
+        success "  Disk layout: OK"
     fi
-
-    log "  Evaluating system configuration (this may take a minute)..."
-    local eval_log
-    eval_log=$(mktemp)
-    if ! nix eval "$TEMP_CONFIG#nixosConfigurations.${CONFIG[serial]}.config.system.build.toplevel" \
-                  --no-write-lock-file --show-trace >"$eval_log" 2>&1; then
-        local eval_output
-        eval_output=$(cat "$eval_log")
-        rm -f "$eval_log"
-        echo ""
-        echo "==========================================" >&2
-        echo "  SYSTEM EVALUATION FAILED" >&2
-        echo "==========================================" >&2
-        echo "" >&2
-        echo "Evaluation errors (last 80 lines):" >&2
-        echo "$eval_output" | tail -80 >&2
-        echo "" >&2
-        echo "Your disk has NOT been modified." >&2
-        echo "The generated config is saved at: $TEMP_CONFIG" >&2
-        echo "" >&2
-        echo "Common causes:" >&2
-        echo "  - Invalid option values (typo in colorscheme, bad PCI address format)" >&2
-        echo "  - Missing required options" >&2
-        echo "  - Module import errors" >&2
-        echo "" >&2
-        echo "To debug, run:" >&2
-        echo "  nix eval $TEMP_CONFIG#nixosConfigurations.${CONFIG[serial]}.config.system.build.toplevel" >&2
-        echo "" >&2
-        # Preserve temp dir for debugging (prevent secure_cleanup from removing it)
-        TEMP_CONFIG=""
-        exit 1
-    fi
-    rm -f "$eval_log"
-    success "  System evaluation: OK"
-
-    # Step 3: Quick sanity check on microvm-router (critical for first boot)
-    log "  Checking microvm-router configuration (this may take a moment)..."
-    local router_log
-    router_log=$(mktemp)
-    if ! nix eval "$TEMP_CONFIG#nixosConfigurations.microvm-router.config.system.build.toplevel" \
-         --no-write-lock-file >"$router_log" 2>&1; then
-        warn "  microvm-router evaluation failed (may be expected if WiFi not configured)"
-    else
-        success "  microvm-router configuration: OK"
-    fi
-    rm -f "$router_log"
 
     echo ""
     success "=========================================="
@@ -2108,7 +2063,7 @@ validate_generated_config() {
     echo "Your configuration has been verified:"
     echo "  ✓ Flake syntax is correct"
     echo "  ✓ Hydrix framework is accessible"
-    echo "  ✓ System configuration evaluates without errors"
+    echo "  ✓ Disk layout is configured"
     echo ""
 }
 
