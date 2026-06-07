@@ -2054,9 +2054,14 @@ validate_generated_config() {
         log "  Disko devices: populated"
     fi
 
-    local eval_output
-    if ! eval_output=$(nix eval "$TEMP_CONFIG#nixosConfigurations.${CONFIG[serial]}.config.system.build.toplevel" \
-                       --no-write-lock-file --show-trace 2>&1); then
+    log "  Evaluating system configuration (this may take a minute)..."
+    local eval_log
+    eval_log=$(mktemp)
+    if ! nix eval "$TEMP_CONFIG#nixosConfigurations.${CONFIG[serial]}.config.system.build.toplevel" \
+                  --no-write-lock-file --show-trace >"$eval_log" 2>&1; then
+        local eval_output
+        eval_output=$(cat "$eval_log")
+        rm -f "$eval_log"
         echo ""
         echo "==========================================" >&2
         echo "  SYSTEM EVALUATION FAILED" >&2
@@ -2080,16 +2085,20 @@ validate_generated_config() {
         TEMP_CONFIG=""
         exit 1
     fi
+    rm -f "$eval_log"
     success "  System evaluation: OK"
 
     # Step 3: Quick sanity check on microvm-router (critical for first boot)
-    log "  Checking microvm-router configuration..."
+    log "  Checking microvm-router configuration (this may take a moment)..."
+    local router_log
+    router_log=$(mktemp)
     if ! nix eval "$TEMP_CONFIG#nixosConfigurations.microvm-router.config.system.build.toplevel" \
-         --no-write-lock-file >/dev/null 2>&1; then
+         --no-write-lock-file >"$router_log" 2>&1; then
         warn "  microvm-router evaluation failed (may be expected if WiFi not configured)"
     else
         success "  microvm-router configuration: OK"
     fi
+    rm -f "$router_log"
 
     echo ""
     success "=========================================="
