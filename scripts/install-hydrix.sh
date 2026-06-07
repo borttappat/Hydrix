@@ -1969,7 +1969,10 @@ generate_config_to_temp() {
         # Use existing machine config, only regenerate hardware
         log "  Using existing machine config from cloned repo..."
         cp -r "$CLONED_REPO"/* "$TEMP_CONFIG/"
+        # Ensure colorschemes/ exists with a file — git drops empty dirs and nix follows git
         mkdir -p "$TEMP_CONFIG/colorschemes"
+        [[ -z "$(ls -A "$TEMP_CONFIG/colorschemes" 2>/dev/null)" ]] && \
+            touch "$TEMP_CONFIG/colorschemes/.gitkeep"
 
         # If the flake uses a local path: for hydrix, redirect it so nix flake lock works
         handle_local_hydrix_path "$TEMP_CONFIG"
@@ -1985,6 +1988,8 @@ generate_config_to_temp() {
         log "  Using cloned configuration (generating new machine config)..."
         cp -r "$CLONED_REPO"/* "$TEMP_CONFIG/"
         mkdir -p "$TEMP_CONFIG/colorschemes"
+        [[ -z "$(ls -A "$TEMP_CONFIG/colorschemes" 2>/dev/null)" ]] && \
+            touch "$TEMP_CONFIG/colorschemes/.gitkeep"
         handle_local_hydrix_path "$TEMP_CONFIG"
         generate_machine_nix "$TEMP_CONFIG"
         generate_hardware_config "$TEMP_CONFIG"
