@@ -69,7 +69,7 @@
     # These extend the framework's built-in colorschemes (nord, nvid, punk, etc.)
     # Your custom schemes take priority over framework ones with the same name.
     # Use them by name in profiles: hydrix.colorscheme = "my-custom-scheme";
-    userColorschemesDir = ./colorschemes;
+    userColorschemesDir = if builtins.pathExists ./colorschemes then ./colorschemes else null;
 
     # =========================================================================
     # VM THEME SYNC MODULE

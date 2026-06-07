@@ -976,6 +976,74 @@ validate_existing_config() {
     fi
 }
 
+patch_disko_config() {
+    # Rewrite the disko block in an existing machine config for reinstall.
+    # Old configs may have enable=false, truncated devices, or commented-out layout.
+    local machine_file="$1"
+    local device="${CONFIG[device]}"
+    local layout="${CONFIG[layout]}"
+    local swap="${CONFIG[swapSize]:-16G}"
+    local efi_id="${CONFIG[efiBootloaderId]:-nixos}"
+    local efi_part="${CONFIG[efiPartition]:-}"
+    local nixos_part="${CONFIG[nixosPartition]:-}"
+
+    log "Patching disko settings for reinstall (device=$device, layout=$layout)..."
+
+    local tmp_block tmp_out
+    tmp_block=$(mktemp)
+    tmp_out=$(mktemp)
+
+    if [[ "$layout" == dual-boot-* ]]; then
+        cat > "$tmp_block" <<BLOCK
+    disko = {
+      enable = true;
+      device = "${device}";
+      swapSize = "${swap}";
+      layout = "${layout}";
+      nixosPartition = "${nixos_part}";
+      efiPartition = "${efi_part}";
+      efiBootloaderId = "${efi_id}";
+    };
+BLOCK
+    else
+        cat > "$tmp_block" <<BLOCK
+    disko = {
+      enable = true;
+      device = "${device}";
+      swapSize = "${swap}";
+      layout = "${layout}";
+      efiBootloaderId = "${efi_id}";
+    };
+BLOCK
+    fi
+
+    awk -v bf="$tmp_block" '
+        BEGIN { in_block=0; replaced=0 }
+        !replaced && /disko[[:space:]]*=[[:space:]]*\{/ {
+            in_block=1
+            while ((getline line < bf) > 0) print line
+            close(bf)
+            replaced=1
+            next
+        }
+        in_block {
+            if (/^[[:space:]]*};/) in_block=0
+            next
+        }
+        { print }
+    ' "$machine_file" > "$tmp_out"
+
+    rm -f "$tmp_block"
+
+    if grep -q 'enable = true' "$tmp_out" && ! cmp -s "$machine_file" "$tmp_out"; then
+        mv "$tmp_out" "$machine_file"
+        log "  Updated: enable=true, device=${device}, layout=${layout}"
+    else
+        rm -f "$tmp_out"
+        warn "Could not patch disko block — update hydrix.disko manually after install"
+    fi
+}
+
 generate_hardware_config() {
     local target_dir="$1"
     local hw_file="$target_dir/machines/${CONFIG[serial]}-hardware.nix"
@@ -1969,10 +2037,6 @@ generate_config_to_temp() {
         # Use existing machine config, only regenerate hardware
         log "  Using existing machine config from cloned repo..."
         cp -r "$CLONED_REPO"/* "$TEMP_CONFIG/"
-        # Ensure colorschemes/ exists with a file — git drops empty dirs and nix follows git
-        mkdir -p "$TEMP_CONFIG/colorschemes"
-        [[ -z "$(ls -A "$TEMP_CONFIG/colorschemes" 2>/dev/null)" ]] && \
-            touch "$TEMP_CONFIG/colorschemes/.gitkeep"
 
         # If the flake uses a local path: for hydrix, redirect it so nix flake lock works
         handle_local_hydrix_path "$TEMP_CONFIG"
@@ -1987,9 +2051,6 @@ generate_config_to_temp() {
         # Clone mode with overwrite: copy cloned repo and generate new machine config
         log "  Using cloned configuration (generating new machine config)..."
         cp -r "$CLONED_REPO"/* "$TEMP_CONFIG/"
-        mkdir -p "$TEMP_CONFIG/colorschemes"
-        [[ -z "$(ls -A "$TEMP_CONFIG/colorschemes" 2>/dev/null)" ]] && \
-            touch "$TEMP_CONFIG/colorschemes/.gitkeep"
         handle_local_hydrix_path "$TEMP_CONFIG"
         generate_machine_nix "$TEMP_CONFIG"
         generate_hardware_config "$TEMP_CONFIG"

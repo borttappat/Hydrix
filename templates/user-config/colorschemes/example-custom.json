@@ -1,0 +1,28 @@
+{
+    "wallpaper": "~/wallpapers/wallpaper.jpg",
+    "alpha": "100",
+
+    "special": {
+        "background": "#0d0d0d",
+        "foreground": "#d0d0d0",
+        "cursor": "#d0d0d0"
+    },
+    "colors": {
+        "color0": "#0d0d0d",
+        "color1": "#8B3A3A",
+        "color2": "#3A8B6A",
+        "color3": "#8B7A3A",
+        "color4": "#3A5A8B",
+        "color5": "#7A3A8B",
+        "color6": "#3A8B8B",
+        "color7": "#d0d0d0",
+        "color8": "#5a5a5a",
+        "color9": "#B05050",
+        "color10": "#50B088",
+        "color11": "#B09A50",
+        "color12": "#5078B0",
+        "color13": "#9850B0",
+        "color14": "#50B0B0",
+        "color15": "#e8e8e8"
+    }
+}

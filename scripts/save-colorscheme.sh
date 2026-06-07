@@ -1,27 +1,35 @@
 #!/usr/bin/env bash
-# Save current pywal colors as a named scheme for use in VMs
+# Save current pywal colors as a named scheme for use across VMs
 #
-# Usage: ./save-colorscheme.sh <name>
-# Example: ./save-colorscheme.sh tokyo-night
+# Usage: save-colorscheme <name>
+# Example: save-colorscheme tokyo-night
 #
-# This copies your current ~/.cache/wal/colors.json to
-# Hydrix/colorschemes/<name>.json for use in VM builds
+# Saves ~/.cache/wal/colors.json to hydrix-config/colorschemes/<name>.json.
+# User colorschemes take priority over framework built-ins — use any name
+# to override a built-in (e.g. "nvid") or add a new one.
 
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-HYDRIX_DIR="$(dirname "$SCRIPT_DIR")"
-SCHEMES_DIR="$HYDRIX_DIR/colorschemes"
+# Locate hydrix-config (same detection as wifi-sync, vm-sync, rebuild)
+if [[ -n "${HYDRIX_FLAKE_DIR:-}" && -f "$HYDRIX_FLAKE_DIR/flake.nix" ]]; then
+    PROJECT_DIR="$HYDRIX_FLAKE_DIR"
+elif [[ -f "$HOME/hydrix-config/flake.nix" ]]; then
+    PROJECT_DIR="$HOME/hydrix-config"
+else
+    echo "Error: No Hydrix config found at ~/hydrix-config" >&2
+    exit 1
+fi
 
+SCHEMES_DIR="$PROJECT_DIR/colorschemes"
 NAME="${1:-}"
 
 if [ -z "$NAME" ]; then
-    echo "Usage: $0 <scheme-name>"
+    echo "Usage: save-colorscheme <scheme-name>"
     echo ""
-    echo "Saves current pywal colors as a named scheme."
+    echo "Saves current pywal colors as a named scheme in hydrix-config/colorschemes/."
     echo "Apply a wallpaper with pywal first: wal -i /path/to/image.jpg"
     echo ""
-    echo "Existing schemes:"
+    echo "Existing user schemes:"
     ls -1 "$SCHEMES_DIR"/*.json 2>/dev/null | xargs -I{} basename {} .json || echo "  (none)"
     exit 1
 fi
@@ -33,14 +41,12 @@ if [ ! -f ~/.cache/wal/colors.json ]; then
     exit 1
 fi
 
-# Create schemes directory
 mkdir -p "$SCHEMES_DIR"
-
-# Copy colors.json
 cp ~/.cache/wal/colors.json "$SCHEMES_DIR/${NAME}.json"
 
-echo "Saved color scheme: $NAME"
-echo "Location: $SCHEMES_DIR/${NAME}.json"
+echo "Saved: $SCHEMES_DIR/${NAME}.json"
 echo ""
-echo "To use in a VM, set in the profile:"
+echo "To use in a VM profile:"
 echo "  hydrix.colorscheme = \"$NAME\";"
+echo ""
+echo "Rebuild the VM to apply: microvm update microvm-<profile>"
