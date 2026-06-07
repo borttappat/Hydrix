@@ -1969,6 +1969,7 @@ generate_config_to_temp() {
         # Use existing machine config, only regenerate hardware
         log "  Using existing machine config from cloned repo..."
         cp -r "$CLONED_REPO"/* "$TEMP_CONFIG/"
+        mkdir -p "$TEMP_CONFIG/colorschemes"
 
         # If the flake uses a local path: for hydrix, redirect it so nix flake lock works
         handle_local_hydrix_path "$TEMP_CONFIG"
@@ -1983,6 +1984,7 @@ generate_config_to_temp() {
         # Clone mode with overwrite: copy cloned repo and generate new machine config
         log "  Using cloned configuration (generating new machine config)..."
         cp -r "$CLONED_REPO"/* "$TEMP_CONFIG/"
+        mkdir -p "$TEMP_CONFIG/colorschemes"
         handle_local_hydrix_path "$TEMP_CONFIG"
         generate_machine_nix "$TEMP_CONFIG"
         generate_hardware_config "$TEMP_CONFIG"
