@@ -183,6 +183,7 @@ declare -A CONFIG=(
     [hydrixSource]="github"
     [hydrixUrl]="github:borttappat/Hydrix"
     [hydrixLocalPath]=""
+    [cpuThrottle]="normal"
 )
 
 # ========== UTILITY FUNCTIONS ==========
@@ -1074,6 +1075,15 @@ select_disk() {
     lsblk -d -p -o NAME,SIZE,MODEL,TYPE | grep disk
     echo ""
 
+    # Auto-select if only one disk is present
+    local disks
+    mapfile -t disks < <(lsblk -d -p -n -o NAME,TYPE | awk '$2=="disk"{print $1}')
+    if [[ ${#disks[@]} -eq 1 ]]; then
+        CONFIG[device]="${disks[0]}"
+        log "Single disk detected — auto-selected: ${CONFIG[device]}"
+        return
+    fi
+
     read -p "Enter target disk (e.g., /dev/nvme0n1): " disk
 
     if [[ ! -b "$disk" ]]; then
@@ -1681,6 +1691,29 @@ select_hydrix_branch() {
             ;;
         *) HYDRIX_BRANCH="main" ;;
     esac
+}
+
+select_cpu_throttle() {
+    local cpu_count
+    cpu_count=$(nproc 2>/dev/null || echo "?")
+    echo ""
+    log "=== CPU Throttling ==="
+    echo "  This machine has ${cpu_count} CPU threads."
+    echo "  Throttling reduces heat and memory pressure at the cost of build time."
+    echo ""
+    echo "  1) Normal   - All cores, full speed (default)"
+    echo "  2) Reduced  - 2 jobs, 2 cores each — cooler, still reasonable"
+    echo "  3) Minimal  - 1 job, 1 core — slowest, most stable on bad hardware"
+    echo ""
+    read -p "Select throttle mode [1-3, default=1]: " choice
+
+    case "${choice:-1}" in
+        2) CONFIG[cpuThrottle]="reduced" ;;
+        3) CONFIG[cpuThrottle]="minimal" ;;
+        *) CONFIG[cpuThrottle]="normal"  ;;
+    esac
+
+    log "CPU throttle: ${CONFIG[cpuThrottle]}"
 }
 
 select_hydrix_source() {
@@ -2729,13 +2762,32 @@ EOF
     echo ""
     log "=== Running nixos-install (this takes 20-60 min depending on network) ==="
     echo ""
-    local mem_gb cpu_count
+    local mem_gb cpu_count nix_max_jobs nix_cores nix_nice
     mem_gb=$(awk '/MemTotal/ {printf "%d", $2/1024/1024}' /proc/meminfo)
     cpu_count=$(nproc 2>/dev/null || echo "?")
-    log "  System has ${mem_gb}GB RAM, ${cpu_count} CPU threads — using max-jobs=auto, cores=0, http-connections=128"
-    nixos-install --flake "$config_dir#${CONFIG[serial]}" --no-root-passwd \
-        --option max-jobs auto \
-        --option cores 0 \
+
+    local -a nix_prefix=()
+    case "${CONFIG[cpuThrottle]:-normal}" in
+        reduced)
+            nix_max_jobs="2"; nix_cores="2"
+            nix_prefix=(nice -n 10)
+            log "  Throttle: reduced (max-jobs=2, cores=2, nice=10)"
+            ;;
+        minimal)
+            nix_max_jobs="1"; nix_cores="1"
+            nix_prefix=(nice -n 19 ionice -c 2 -n 7)
+            log "  Throttle: minimal (max-jobs=1, cores=1, nice=19)"
+            ;;
+        *)
+            nix_max_jobs="auto"; nix_cores="0"
+            log "  Throttle: normal (max-jobs=auto, cores=0)"
+            ;;
+    esac
+    log "  System has ${mem_gb}GB RAM, ${cpu_count} CPU threads"
+
+    "${nix_prefix[@]}" nixos-install --flake "$config_dir#${CONFIG[serial]}" --no-root-passwd \
+        --option max-jobs "$nix_max_jobs" \
+        --option cores "$nix_cores" \
         --option http-connections 128
 
     # Remove infrastructureOnly — first rebuild will build all enabled VMs
@@ -3099,6 +3151,7 @@ access-tokens = github.com=$gh_token"
 
     select_disk
     select_layout
+    select_cpu_throttle
 
     # Show summary
     echo ""
@@ -3121,11 +3174,11 @@ access-tokens = github.com=$gh_token"
         echo "  Hardware config: NEW (auto-detected)"
     fi
     echo "  Disk:     ${CONFIG[device]} (${CONFIG[layout]})"
+    echo "  CPU:      ${CONFIG[cpuThrottle]} throttle"
     [[ "${CONFIG[layout]}" == *luks* ]] && echo "  Encryption: LUKS (password set)"
     [[ -n "${CONFIG[efiPartition]}" ]] && echo "  EFI partition: ${CONFIG[efiPartition]} (existing, not formatted)"
     echo "  Platform: ${CONFIG[platform]}"
     echo "  WiFi PCI: ${CONFIG[wifiPciAddress]}"
-    echo "  Router:   ${CONFIG[routerType]}"
     echo ""
 
     while true; do
