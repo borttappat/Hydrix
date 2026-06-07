@@ -95,8 +95,9 @@ let
   startWaylandIdle = pkgs.writeShellScript "start-wayland-idle" ''
     _t=$(cat "$HOME/.local/state/lock-timeout" 2>/dev/null || echo "${idleTimeout}")
     exec ${pkgs.swayidle}/bin/swayidle -w \
-      timeout "$_t" '${pkgs.hyprlock}/bin/hyprlock --force-focus' \
-      before-sleep '${pkgs.hyprlock}/bin/hyprlock --force-focus'
+      timeout "$_t" '${pkgs.hyprlock}/bin/hyprlock' \
+      before-sleep '${pkgs.hyprlock}/bin/hyprlock' \
+      lock '${pkgs.hyprlock}/bin/hyprlock'
   '';
 
   # lock-timeout [seconds] — read or adjust the idle lock timeout at runtime.
@@ -448,6 +449,23 @@ let
 in lib.mkIf config.hydrix.hyprland.enable {
   environment.systemPackages = [ lockTimeout ];
   security.pam.services.hyprlock = {};
+
+  # Send Lock signal to all sessions before the system goes to sleep.
+  # swayidle's `lock` event fires in response and starts hyprlock.
+  # The 1s pause gives hyprlock time to grab input before suspend completes.
+  systemd.services."lock-before-sleep" = {
+    description = "Lock screen before sleep";
+    before = [ "sleep.target" "suspend.target" "hibernate.target" "hybrid-sleep.target" "suspend-then-hibernate.target" ];
+    wantedBy = [ "sleep.target" "suspend.target" "hibernate.target" "hybrid-sleep.target" "suspend-then-hibernate.target" ];
+    serviceConfig = {
+      Type = "oneshot";
+      ExecStart = pkgs.writeShellScript "lock-before-sleep" ''
+        ${pkgs.systemd}/bin/loginctl lock-sessions
+        sleep 1
+      '';
+      TimeoutSec = 10;
+    };
+  };
 
   home-manager.users.${username} = { lib, ... }: {
     home.activation.hyprlandKeymap = lib.hm.dag.entryAfter ["writeBoundary"] ''
