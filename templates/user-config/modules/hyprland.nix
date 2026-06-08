@@ -96,7 +96,6 @@ let
     _t=$(cat "$HOME/.local/state/lock-timeout" 2>/dev/null || echo "${idleTimeout}")
     exec ${pkgs.swayidle}/bin/swayidle -w \
       timeout "$_t" '${pkgs.hyprlock}/bin/hyprlock' \
-      before-sleep '${pkgs.hyprlock}/bin/hyprlock' \
       lock '${pkgs.hyprlock}/bin/hyprlock'
   '';
 
