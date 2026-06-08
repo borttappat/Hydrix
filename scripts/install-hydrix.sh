@@ -1632,6 +1632,14 @@ gather_locale() {
 }
 
 gather_wifi() {
+    # No WiFi in macvtap/ethernet WAN mode — the router VM uses the ethernet NIC directly
+    if [[ "${CONFIG[wanMode]}" == "macvtap" ]]; then
+        log "Skipping WiFi configuration (macvtap/ethernet WAN mode)"
+        CONFIG[wifiSsid]=""
+        CONFIG[wifiPassword]=""
+        return
+    fi
+
     echo ""
     log "=== WiFi Configuration ==="
 
@@ -3188,7 +3196,9 @@ access-tokens = github.com=$gh_token"
         detect_wifi_hardware
     fi
     detect_display_resolution
-    detect_wifi_credentials
+    if [[ "${CONFIG[vfioEnable]}" == "true" ]]; then
+        detect_wifi_credentials
+    fi
     detect_hardware_serial
 
     # User configuration (needed before config source selection)
