@@ -1305,7 +1305,7 @@ Hydrix uses pywal-based colorschemes with real-time synchronization between the 
 │  REFRESH vsock signal pulls updated colors; writes stay in VM.      │
 ├─────────────────────────────────────────────────────────────────────┤
 │  Layer 3: Focus border color (host-side, Hyprland/Sway border)      │
-│  focusBorder = "yellow"  ← set in profiles/<name>/meta.nix         │
+│  focusBorder = "yellow"  ← set in profiles/<name>/meta.nix          │
 │  The border color shown on the HOST when a VM window is focused.    │
 │  Completely independent from the VM's internal colors.              │
 └─────────────────────────────────────────────────────────────────────┘

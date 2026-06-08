@@ -1185,6 +1185,16 @@ in {
         '';
       };
     };
+
+    extraBinds = lib.mkOption {
+      type    = lib.types.lines;
+      default = "";
+      description = ''
+        Machine-specific Hyprland bind lines appended after the shared config.
+        Set in your machine config for hardware-specific binds (e.g. volume keys,
+        brightness, special function keys).
+      '';
+    };
   };
 
   options.hydrix.sway = {

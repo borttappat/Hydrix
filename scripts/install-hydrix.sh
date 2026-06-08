@@ -2763,6 +2763,18 @@ partition_and_mount() {
         echo "" >&2
         read -p "  [r] Retry  [q] Quit: " disko_choice < /dev/tty
         [[ "${disko_choice,,}" == q* ]] && exit 1
+        # Clean up before retrying — LUKS mappings left open cause luksFormat to fail
+        log "Cleaning up before retry..."
+        umount -R /mnt 2>/dev/null || true
+        # Close all dm-crypt mappings on the target device
+        for mapper in /dev/mapper/*; do
+            [[ "$mapper" == "/dev/mapper/control" ]] && continue
+            dmsetup info "$mapper" 2>/dev/null | grep -q "${CONFIG[device]##*/}" && \
+                cryptsetup close "${mapper##*/}" 2>/dev/null || true
+        done
+        # Fallback: close by name if device check missed it
+        cryptsetup close cryptroot 2>/dev/null || true
+        sleep 1
     done
 
     if [[ "$layout" == dual-boot-* ]]; then

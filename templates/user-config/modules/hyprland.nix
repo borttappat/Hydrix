@@ -447,7 +447,17 @@ let
       valign = center
     }
   '';
-in lib.mkIf config.hydrix.hyprland.enable {
+in {
+  # extraBinds is also declared in Hydrix/theming/options.nix (framework-level).
+  # Re-declared here so this module is self-contained for fresh installs where
+  # the framework version in flake.lock may predate the option declaration.
+  options.hydrix.hyprland.extraBinds = lib.mkOption {
+    type    = lib.types.lines;
+    default = "";
+    description = "Machine-specific Hyprland bind lines appended after the shared config.";
+  };
+
+  config = lib.mkIf config.hydrix.hyprland.enable {
   environment.systemPackages = [ lockTimeout ];
   security.pam.services.hyprlock = {};
 
@@ -525,4 +535,5 @@ in lib.mkIf config.hydrix.hyprland.enable {
       Install.WantedBy = [ "hyprland-session.target" ];
     };
   };
+}; # end config
 }
