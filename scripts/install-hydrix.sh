@@ -193,6 +193,31 @@ error() { echo "[ERROR] $*" >&2; exit 1; }
 success() { echo "[SUCCESS] $*"; }
 warn() { echo "[WARN] $*"; }
 
+# CPU throttle helpers — read CONFIG[cpuThrottle] set by select_cpu_throttle
+throttle_max_jobs() {
+    case "${CONFIG[cpuThrottle]:-normal}" in
+        reduced) echo "2" ;;
+        minimal) echo "1" ;;
+        *)       echo "auto" ;;
+    esac
+}
+throttle_cores() {
+    case "${CONFIG[cpuThrottle]:-normal}" in
+        reduced) echo "2" ;;
+        minimal) echo "1" ;;
+        *)       echo "0" ;;
+    esac
+}
+# Populates a named array with the nice/ionice prefix for the current throttle mode
+throttle_prefix() {
+    local -n _arr="$1"
+    case "${CONFIG[cpuThrottle]:-normal}" in
+        reduced) _arr=(nice -n 10) ;;
+        minimal) _arr=(nice -n 19 ionice -c 2 -n 7) ;;
+        *)       _arr=() ;;
+    esac
+}
+
 command_exists() { command -v "$1" &>/dev/null; }
 
 # ========== GIT AUTHENTICATION ==========
@@ -1783,10 +1808,19 @@ configure_local_clone() {
         read -p "Clone from GitHub now? [Y/n]: " do_clone
 
         if [[ ! "$do_clone" =~ ^[Nn]$ ]]; then
-            log "Cloning Hydrix to $mnt_path..."
             mkdir -p "$(dirname "$mnt_path")"
-            git clone https://github.com/borttappat/Hydrix.git "$mnt_path"
-            success "Hydrix cloned successfully"
+            while true; do
+                log "Cloning Hydrix to $mnt_path..."
+                if git clone https://github.com/borttappat/Hydrix.git "$mnt_path"; then
+                    success "Hydrix cloned successfully"
+                    break
+                fi
+                echo "" >&2
+                echo "  Clone failed — network issue or rate limit." >&2
+                echo "" >&2
+                read -p "  [r] Retry  [q] Quit: " clone_choice < /dev/tty
+                [[ "${clone_choice,,}" == q* ]] && exit 1
+            done
         else
             warn "No local clone available - falling back to GitHub"
             CONFIG[hydrixSource]="github"
@@ -2118,9 +2152,14 @@ validate_generated_config() {
     # Fetch flake inputs — proves flake syntax is valid and all inputs are reachable.
     # Full system evaluation is deferred to nixos-install (host) and prebuild_microvms
     # (router, builder), which produce clean build output and proper error messages.
-    log "  Fetching flake inputs..."
     local lock_output
-    if ! lock_output=$(nix flake lock "$TEMP_CONFIG" --refresh 2>&1); then
+    while true; do
+        log "  Fetching flake inputs..."
+        if lock_output=$(nix flake lock "$TEMP_CONFIG" --refresh 2>&1); then
+            success "  Flake inputs fetched"
+            break
+        fi
+
         echo "" >&2
         echo "==========================================" >&2
         echo "  FAILED TO FETCH FLAKE INPUTS" >&2
@@ -2129,19 +2168,25 @@ validate_generated_config() {
         echo "$lock_output" | grep -v '^warning: creating lock file' | head -30 >&2
         echo "" >&2
         echo "Your disk has NOT been modified." >&2
-        echo "The generated config is saved at: $TEMP_CONFIG" >&2
+        echo "Your configuration is preserved at: $TEMP_CONFIG" >&2
         echo "" >&2
         echo "Common causes:" >&2
+        echo "  - Network not yet available on the live ISO" >&2
         echo "  - Invalid Hydrix URL (typo, private repo without auth)" >&2
-        echo "  - Network issues fetching flake inputs" >&2
         echo "" >&2
-        echo "To debug, run:" >&2
-        echo "  nix flake lock $TEMP_CONFIG" >&2
+        echo "Options:" >&2
+        echo "  r) Retry   — fix network/auth and try again (config preserved)" >&2
+        echo "  e) Edit    — open flake.nix to correct the URL" >&2
+        echo "  q) Quit    — abort installer (disk untouched)" >&2
         echo "" >&2
-        TEMP_CONFIG=""
-        exit 1
-    fi
-    success "  Flake inputs fetched"
+        read -p "Choice [r/e/q, default=r]: " flake_choice < /dev/tty
+        case "${flake_choice,,}" in
+            e) "${EDITOR:-nano}" "$TEMP_CONFIG/flake.nix" ;;
+            q) exit 1 ;;
+            *) ;;  # retry
+        esac
+        echo ""
+    done
 
     # Lightweight disko check — evaluates only the disk layout (fast, low memory)
     # to catch misconfigured hydrix.disko.* before touching the disk.
@@ -2699,8 +2744,18 @@ partition_and_mount() {
     fi
 
     # Run disko (formats and mounts the NixOS partition only)
-    log "Running disko..."
-    nix run github:nix-community/disko -- --mode disko "${disko_args[@]}" "$disko_file"
+    while true; do
+        log "Running disko..."
+        if nix run github:nix-community/disko -- --mode disko "${disko_args[@]}" "$disko_file"; then
+            break
+        fi
+        echo "" >&2
+        echo "  Disko failed — disk may be partially formatted." >&2
+        echo "  It is safe to retry (disko will reformat from scratch)." >&2
+        echo "" >&2
+        read -p "  [r] Retry  [q] Quit: " disko_choice < /dev/tty
+        [[ "${disko_choice,,}" == q* ]] && exit 1
+    done
 
     if [[ "$layout" == dual-boot-* ]]; then
         # Mount the existing EFI partition at /mnt/boot manually.
@@ -2762,32 +2817,17 @@ EOF
     echo ""
     log "=== Running nixos-install (this takes 20-60 min depending on network) ==="
     echo ""
-    local mem_gb cpu_count nix_max_jobs nix_cores nix_nice
+    local mem_gb cpu_count
     mem_gb=$(awk '/MemTotal/ {printf "%d", $2/1024/1024}' /proc/meminfo)
     cpu_count=$(nproc 2>/dev/null || echo "?")
+    log "  System has ${mem_gb}GB RAM, ${cpu_count} CPU threads, throttle=${CONFIG[cpuThrottle]:-normal}"
 
     local -a nix_prefix=()
-    case "${CONFIG[cpuThrottle]:-normal}" in
-        reduced)
-            nix_max_jobs="2"; nix_cores="2"
-            nix_prefix=(nice -n 10)
-            log "  Throttle: reduced (max-jobs=2, cores=2, nice=10)"
-            ;;
-        minimal)
-            nix_max_jobs="1"; nix_cores="1"
-            nix_prefix=(nice -n 19 ionice -c 2 -n 7)
-            log "  Throttle: minimal (max-jobs=1, cores=1, nice=19)"
-            ;;
-        *)
-            nix_max_jobs="auto"; nix_cores="0"
-            log "  Throttle: normal (max-jobs=auto, cores=0)"
-            ;;
-    esac
-    log "  System has ${mem_gb}GB RAM, ${cpu_count} CPU threads"
+    throttle_prefix nix_prefix
 
     "${nix_prefix[@]}" nixos-install --flake "$config_dir#${CONFIG[serial]}" --no-root-passwd \
-        --option max-jobs "$nix_max_jobs" \
-        --option cores "$nix_cores" \
+        --option max-jobs "$(throttle_max_jobs)" \
+        --option cores "$(throttle_cores)" \
         --option http-connections 128
 
     # Remove infrastructureOnly — first rebuild will build all enabled VMs
@@ -2806,18 +2846,31 @@ EOF
         if [[ ! -d "$mnt_hydrix" ]]; then
             log "Deploying Hydrix to $mnt_hydrix..."
             mkdir -p "$(dirname "$mnt_hydrix")"
-            if [[ -n "$HYDRIX_REMOTE_URL" ]]; then
-                log "  Cloning from $HYDRIX_REMOTE_URL (authenticate if prompted)..."
-                try_clone_with_auth "$HYDRIX_REMOTE_URL" "$mnt_hydrix"
-            else
-                local src
-                src=$(_installer_hydrix_source)
-                if [[ -n "$src" ]]; then
-                    cp -r "$src" "$mnt_hydrix"
+            while true; do
+                local deploy_ok=0
+                if [[ -n "$HYDRIX_REMOTE_URL" ]]; then
+                    log "  Cloning from $HYDRIX_REMOTE_URL (authenticate if prompted)..."
+                    try_clone_with_auth "$HYDRIX_REMOTE_URL" "$mnt_hydrix" && deploy_ok=1
                 else
-                    git clone https://github.com/borttappat/Hydrix.git "$mnt_hydrix"
+                    local src
+                    src=$(_installer_hydrix_source)
+                    if [[ -n "$src" ]]; then
+                        cp -r "$src" "$mnt_hydrix" && deploy_ok=1
+                    else
+                        git clone https://github.com/borttappat/Hydrix.git "$mnt_hydrix" && deploy_ok=1
+                    fi
                 fi
-            fi
+                [[ $deploy_ok -eq 1 ]] && break
+                echo "" >&2
+                echo "  Hydrix deploy failed. NixOS is installed but flake.nix points to" >&2
+                echo "  $HYDRIX_LOCAL_TARGET which does not exist on the target system." >&2
+                echo "" >&2
+                read -p "  [r] Retry  [s] Skip (fix manually post-install)  [q] Quit: " deploy_choice < /dev/tty
+                case "${deploy_choice,,}" in
+                    s*) warn "Skipping — manually clone Hydrix to $HYDRIX_LOCAL_TARGET after first boot"; break ;;
+                    q*) exit 1 ;;
+                esac
+            done
             success "Hydrix deployed to $mnt_hydrix"
         fi
         # Restore the local path URL in the installed config
@@ -2904,8 +2957,8 @@ prebuild_microvms() {
             --no-link \
             --store /mnt --eval-store auto \
             --print-build-logs \
-            --option max-jobs auto \
-            --option cores 0 \
+            --option max-jobs "$(throttle_max_jobs)" \
+            --option cores "$(throttle_cores)" \
             > "/tmp/hydrix-build-${vm_name}.log" 2>&1 &
         build_pids["$vm_name"]=$!
         build_descs["$vm_name"]="$vm_desc"
@@ -2933,8 +2986,8 @@ prebuild_microvms() {
             --no-link \
             --store /mnt --eval-store auto \
             --print-build-logs \
-            --option max-jobs auto \
-            --option cores 0; then
+            --option max-jobs "$(throttle_max_jobs)" \
+            --option cores "$(throttle_cores)"; then
             success "  ${vm_name} built successfully"
         else
             warn "  ${vm_name} build failed (can be built later)"
@@ -2972,9 +3025,15 @@ prebuild_microvms() {
         echo ""
         echo "========================================"
         echo ""
-        read -p "Continue with installation anyway? [y/N]: " continue_anyway
-        if [[ ! "$continue_anyway" =~ ^[Yy]$ ]]; then
-            error "Installation aborted. Please resolve the issue and re-run."
+        echo "NixOS is installed. You can fix these VMs after first boot:"
+        echo "  1. Select 'fallback' from the GRUB menu (direct WiFi)"
+        echo "  2. Run: microvm build <vm-name>"
+        echo "  3. Reboot into lockdown mode"
+        echo ""
+        read -p "Continue to finish installation? [Y/n]: " continue_anyway < /dev/tty
+        if [[ "${continue_anyway,,}" =~ ^n ]]; then
+            warn "Exiting. Disk and NixOS install are intact — re-run installer to retry VM builds."
+            exit 0
         fi
     else
         warn "$optional_failed optional VM(s) failed - can be built after first boot"
