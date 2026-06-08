@@ -2825,9 +2825,28 @@ EOF
     echo ""
     log "=== Running nixos-install (this takes 20-60 min depending on network) ==="
     echo ""
-    local mem_gb cpu_count
+    local mem_gb swap_gb total_gb cpu_count
     mem_gb=$(awk '/MemTotal/ {printf "%d", $2/1024/1024}' /proc/meminfo)
+    swap_gb=$(awk '/SwapTotal/ {printf "%d", $2/1024/1024}' /proc/meminfo)
+    total_gb=$(( mem_gb + swap_gb ))
     cpu_count=$(nproc 2>/dev/null || echo "?")
+
+    # Nix evaluation of the full system config needs ~12-16GB of address space.
+    # If total memory + swap is below threshold, create a swapfile on /mnt to prevent OOM kills.
+    if [[ $total_gb -lt 20 ]]; then
+        local swap_needed=$(( 20 - total_gb ))
+        log "  Low memory detected (${mem_gb}GB RAM + ${swap_gb}GB swap = ${total_gb}GB total)"
+        log "  Creating ${swap_needed}GB swapfile on /mnt to prevent OOM during build..."
+        if dd if=/dev/zero of=/mnt/.swapfile bs=1G count="$swap_needed" status=progress 2>/dev/null; then
+            chmod 600 /mnt/.swapfile
+            mkswap /mnt/.swapfile
+            swapon /mnt/.swapfile
+            log "  Swapfile active (will be removed after install)"
+        else
+            warn "  Could not create swapfile — build may OOM on low-memory systems"
+            warn "  Consider adding swap manually: fallocate -l 8G /swapfile && mkswap /swapfile && swapon /swapfile"
+        fi
+    fi
     log "  System has ${mem_gb}GB RAM, ${cpu_count} CPU threads, throttle=${CONFIG[cpuThrottle]:-normal}"
 
     local -a nix_prefix=()
@@ -2897,6 +2916,13 @@ EOF
     uid=$(nixos-enter -c "id -u ${CONFIG[username]}" 2>/dev/null || echo "1000")
     gid=$(nixos-enter -c "id -g ${CONFIG[username]}" 2>/dev/null || echo "100")
     chown -R "$uid:$gid" "/mnt/home/${CONFIG[username]}"
+
+    # Remove installer swapfile if we created one
+    if [[ -f /mnt/.swapfile ]]; then
+        swapoff /mnt/.swapfile 2>/dev/null || true
+        rm -f /mnt/.swapfile
+        log "Installer swapfile removed"
+    fi
 
     success "NixOS installed"
 
