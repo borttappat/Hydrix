@@ -6,6 +6,7 @@
   tapId     = "mv-comms";
   routerTap = "mv-router-comm";  # ≤15 chars (Linux iface limit)
   subnet    = "192.168.104";     # /24 prefix — matches CID last octet
-  workspace = 4;
-  label     = "COMMS";
+  workspace   = 4;
+  label       = "COMMS";
+  focusBorder = "green";
 }

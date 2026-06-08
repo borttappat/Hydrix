@@ -227,10 +227,10 @@ Generated at NixOS activation from all profile `meta.nix` files. Every runtime t
 
 ```json
 {
-  "pentest":  { "vmName": "microvm-pentest",  "cid": 102, "bridge": "br-pentest",  "subnet": "192.168.102", "workspace": 2, "label": "PENTEST"  },
-  "browsing": { "vmName": "microvm-browsing", "cid": 103, "bridge": "br-browse",   "subnet": "192.168.103", "workspace": 3, "label": "BROWSING" },
-  "comms":    { "vmName": "microvm-comms",    "cid": 104, "bridge": "br-comms",    "subnet": "192.168.104", "workspace": 4, "label": "COMMS"    },
-  "office":   { "vmName": "microvm-office",   "cid": 107, "bridge": "br-office",   "subnet": "192.168.107", "workspace": 7, "label": "OFFICE"   }
+  "pentest":  { "vmName": "microvm-pentest",  "cid": 102, "bridge": "br-pentest",  "subnet": "192.168.102", "workspace": 2, "label": "PENTEST",  "focusBorder": "orange" },
+  "browsing": { "vmName": "microvm-browsing", "cid": 103, "bridge": "br-browse",   "subnet": "192.168.103", "workspace": 3, "label": "BROWSING", "focusBorder": "yellow" },
+  "comms":    { "vmName": "microvm-comms",    "cid": 104, "bridge": "br-comms",    "subnet": "192.168.104", "workspace": 4, "label": "COMMS",    "focusBorder": "green"  },
+  "office":   { "vmName": "microvm-office",   "cid": 107, "bridge": "br-office",   "subnet": "192.168.107", "workspace": 7, "label": "OFFICE",   "focusBorder": null     }
 }
 ```
 
@@ -606,7 +606,7 @@ This auto-detects your current system configuration and generates a minimal Hydr
 │   └── <serial>.nix             # Your machine config (named by hardware serial)
 ├── profiles/                    # VM profile customizations (overlay on Hydrix base)
 │   ├── browsing/
-│   │   ├── meta.nix             # CID, bridge, subnet, workspace, label
+│   │   ├── meta.nix             # CID, bridge, subnet, workspace, label, focusBorder
 │   │   ├── default.nix          # NixOS config (colorscheme, resources)
 │   │   ├── packages.nix         # Profile-specific packages
 │   │   └── packages/            # Custom packages (via vm-sync)
@@ -1304,9 +1304,9 @@ Hydrix uses pywal-based colorschemes with real-time synchronization between the 
 │  VM has its own isolated ~/.cache/wal copied from that mount.       │
 │  REFRESH vsock signal pulls updated colors; writes stay in VM.      │
 ├─────────────────────────────────────────────────────────────────────┤
-│  Layer 3: Focus border color (host-side, i3 window border)          │
-│  hydrix.vmThemeSync.focusBorder = "yellow"                          │
-│  The i3 border color shown on the HOST when a VM window is focused. │
+│  Layer 3: Focus border color (host-side, Hyprland/Sway border)      │
+│  focusBorder = "yellow"  ← set in profiles/<name>/meta.nix         │
+│  The border color shown on the HOST when a VM window is focused.    │
 │  Completely independent from the VM's internal colors.              │
 └─────────────────────────────────────────────────────────────────────┘
 ```
@@ -1456,20 +1456,29 @@ The focus daemon resolves the border color using this priority order:
 
 #### `focusBorder` - Primary Option
 
-Set a fixed border color per VM profile. Accepts named colors or hex:
+Set a fixed border color per VM profile in **`meta.nix`** (not `default.nix`):
 
 ```nix
-# profiles/browsing/default.nix
-hydrix.vmThemeSync.focusBorder = "yellow";
-
-# profiles/pentest/default.nix
-hydrix.vmThemeSync.focusBorder = "orange";
-
-# Or use a hex code
-hydrix.vmThemeSync.focusBorder = "#FF5555";
+# profiles/browsing/meta.nix
+{
+  vsockCid    = 103;
+  bridge      = "br-browse";
+  tapId       = "mv-browse";
+  routerTap   = "mv-router-brow";
+  subnet      = "192.168.103";
+  workspace   = 3;
+  label       = "BROWSING";
+  focusBorder = "yellow";        # ← here
+}
 ```
 
+Accepts named colors or hex: `focusBorder = "#FF5555";`
+
 Named colors: `red`, `orange`, `yellow`, `green`, `cyan`, `blue`, `purple`, `pink`, `magenta`, `white`, `black`, `gray`
+
+**Why `meta.nix` and not `default.nix`?** The host flake reads `focusBorder` at evaluation time to populate `vmRegistry` (→ `/etc/hydrix/vm-registry.json`). `meta.nix` is a plain Nix attrset with zero evaluation cost. Reading it from `hydrix.vmThemeSync.focusBorder` in `default.nix` would force full NixOS evaluation of every VM config during every host rebuild, which causes OOM on systems with limited RAM.
+
+The `hydrix.vmThemeSync.focusBorder` option in `default.nix` still exists and is read by the Python focus daemons at runtime — keep it in sync with `meta.nix`.
 
 When `focusBorder` is set, it is always active and bypasses both the static/dynamic daemon modes and the `hydrix-focus` override toggle entirely.
 
@@ -1721,7 +1730,7 @@ Custom profiles start at CID 107+. Use `new-profile <name>` to scaffold one.
 new-profile myprofile
 
 # Creates:
-#   profiles/myprofile/meta.nix     # CID, bridge, subnet, workspace, label
+#   profiles/myprofile/meta.nix     # CID, bridge, subnet, workspace, label, focusBorder
 #   profiles/myprofile/default.nix  # NixOS config (imports, resources, colorscheme)
 #   profiles/myprofile/packages.nix # Package declarations
 # Also runs: git add profiles/myprofile/

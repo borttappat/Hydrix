@@ -6,6 +6,7 @@
   tapId     = "mv-dev";
   routerTap = "mv-router-dev";   # ≤15 chars (Linux iface limit)
   subnet    = "192.168.105";     # /24 prefix — matches CID last octet
-  workspace = 5;
-  label     = "DEV";
+  workspace   = 5;
+  label       = "DEV";
+  focusBorder = "cyan";
 }

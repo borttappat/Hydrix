@@ -386,6 +386,8 @@ let
     windowrulev2 = noblur,                             title:^\[
     windowrulev2 = opacity 1.0 override 1.0 override, title:^\[
     windowrulev2 = noanim,                             title:^\[
+
+    ${config.hydrix.hyprland.extraBinds}
   '';
 
   hyprlock_conf = pkgs.writeText "hyprlock.conf" ''

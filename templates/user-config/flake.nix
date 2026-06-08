@@ -296,7 +296,7 @@
           workspace   = m.workspace or null;
           label       = m.label or m._profileName;
           hasDisplay  = m.hasDisplay or true;
-          focusBorder = autoVMConfigs."microvm-${m._profileName}".config.hydrix.vmThemeSync.focusBorder or null;
+          focusBorder = m.focusBorder or null;
         };
       }) discoveredMetas) //
       builtins.listToAttrs (map (m: {
@@ -337,9 +337,9 @@
     }) discoveredMetas);
 
     # Per-machine profile overrides — extracted from machine configs AFTER machineConfigs
-    # is defined. autoVMConfigs (used for vmRegistry focusBorder) must NOT use this helper
-    # to avoid a cycle: autoVMConfigsWithOverrides -> machineConfigs -> vmRegistry ->
-    # autoVMConfigs. autoVMConfigs stays pure; only the final nixosConfigurations output
+    # is defined. Must NOT use autoVMConfigs to avoid a cycle:
+    # autoVMConfigsWithOverrides -> machineConfigs -> vmRegistry -> autoVMConfigs.
+    # autoVMConfigs stays pure; only the final nixosConfigurations output
     # uses autoVMConfigsWithOverrides.
     getProfileModules = profileName:
       builtins.concatMap (mc:

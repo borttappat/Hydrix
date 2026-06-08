@@ -166,7 +166,7 @@ Profile VMs each have a directory in `hydrix-config/profiles/` with three files:
 
 ```
 profiles/browsing/
-├── meta.nix       # CID, bridge, subnet, workspace, label
+├── meta.nix       # CID, bridge, subnet, workspace, label, focusBorder
 ├── default.nix    # NixOS config: colorscheme, RAM, vCPUs, extra packages, hosts
 └── packages/
     └── default.nix   # managed by vm-sync, do not edit manually
@@ -268,9 +268,11 @@ Layer 2 - Host wal cache via virtiofs
   pywalfox in real time.
 
 Layer 3 - Focus border (host-side)
-  hydrix.vmThemeSync.focusBorder = "yellow"
-  The i3/Sway window border color when a VM window is focused.
-  Fully independent from the VM's internal colors.
+  focusBorder = "yellow"   # in profiles/<name>/meta.nix
+  The Hyprland/Sway window border color when a VM window is focused.
+  Fully independent from the VM's internal colors. Lives in meta.nix
+  (plain attrset) so the host flake can read it without evaluating
+  any VM NixOS configuration — avoids OOM on memory-constrained hosts.
 ```
 
 ```bash
