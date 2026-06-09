@@ -12,6 +12,8 @@ let meta = import ./meta.nix; in
   imports = [
     # Core VM packages (editors, shell, utils)
     ../../modules/vm-packages.nix
+    # Tor hardening (bridges, no-swap, Firefox hardening)
+    ../../modules/tor-hardening.nix
     # Profile-specific packages
     ./packages.nix
     # Custom packages (added via vm-sync pull)
@@ -66,6 +68,21 @@ let meta = import ./meta.nix; in
   services.tor = {
     enable = true;
     client.enable = true;
+  };
+
+  # Tor hardening - bridges censorship, protects against traffic analysis
+  hydrix.tor.hardening = {
+    enable = true;
+
+    # Get bridges from torproject.org (send email: getobfs4bridges@torproject.org)
+    # bridgeType = "obfs4";  # Uncomment and set after getting bridge lines
+    # customBridges = ''
+    #   Bridge obfs4 1.2.3.4:443 0000000000000000000000000000000000000000 iat-mode=0
+    # '';
+
+    # Level controls how router-side traffic shaping should behave
+    # (Router VM must also be configured for this to take effect)
+    level = "moderate";  # minimal | moderate | paranoid
   };
 
   # =========================================================================

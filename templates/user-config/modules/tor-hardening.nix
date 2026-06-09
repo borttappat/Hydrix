@@ -90,15 +90,14 @@ in {
       SuspendThenHibernate=false
     '';
 
-    # Firefox hardening for anonymity (applies to this VM)
-    # Note: Only applies if services.tor.enable is true and Firefox is installed
+    # Firefox hardening for anonymity.
+    # Uses lib.mkDefault so it merges with firefox.nix's lib.mkDefault policies
+    # (both at priority 1500 → attrsOf merges them) rather than clobbering
+    # ExtensionSettings and other policies set there.
     programs.firefox = lib.mkIf (config.programs.firefox.enable) {
-      policies = {
-        # Disable Telemetry
+      policies = lib.mkDefault {
         DisableTelemetry = true;
-        # Disable Firefox Home data collection
         DisableFirefoxScreenshots = true;
-        # Block fingerprinting
         BlockAboutConfig = true;
       };
     };

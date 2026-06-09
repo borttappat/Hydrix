@@ -116,6 +116,7 @@
         ./modules/ranger.nix      # File manager mappings + rifle rules
         ./modules/rofi.nix        # Launcher keybindings
         ./modules/zathura.nix     # PDF viewer settings
+        ./modules/firefox.nix     # Shared Firefox defaults (extensions, UA, UI prefs)
       ];
       hydrix.username = hostUsername;  # Required: VMs use this for virtiofs share paths
       hydrix.vmColors.enable = true;   # VMs inherit host colorscheme (reads wal cache at runtime)
