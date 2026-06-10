@@ -1664,7 +1664,7 @@ main() {
     echo "  Rebuild: rebuild"
     echo ""
     echo "Set your wallpaper and colorscheme after reboot:"
-    echo "  walrgb ~/wallpapers/WindowRain.png"
+    echo "  walrgb ~/wallpapers/Hydrix.png"
     echo "Or pick a random wallpaper from the directory:"
     echo "  randomwalrgb ~/wallpapers"
     echo ""
