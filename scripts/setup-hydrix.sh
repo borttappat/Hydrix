@@ -72,7 +72,7 @@ declare -A CONFIG=(
     [wifiSsid]=""
     [wifiPassword]=""
     [routerType]="microvm"
-    [colorscheme]="puccy"
+    [colorscheme]="hydrix"
     [diskoDevice]=""
     [hardwareConfigPath]=""
     [hydrixSource]="github"
@@ -1285,9 +1285,9 @@ prompt_wifi() {
 
 prompt_colorscheme() {
     echo ""
-    log "Available colorschemes: puccy, nord, nvid, punk, perp, gruvbox, dracula"
-    read -p "Colorscheme [puccy]: " cs
-    CONFIG[colorscheme]="${cs:-puccy}"
+    log "Available colorschemes: hydrix, nord, nvid, punk"
+    read -p "Colorscheme [hydrix]: " cs
+    CONFIG[colorscheme]="${cs:-hydrix}"
 }
 
 # ========== HYDRIX SOURCE SELECTION ==========
