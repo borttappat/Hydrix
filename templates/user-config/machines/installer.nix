@@ -26,6 +26,7 @@
     ../specialisations/lockdown.nix
     ./grub-entries.nix
     ../modules/usb-blocking.nix
+    ../modules/eww.nix            # eww widget daemon + exit-nodes/vm-status overlay
   ];
 
   # =========================================================================
@@ -61,7 +62,7 @@
     username = "@USERNAME@";
     hostname = "hydrix";         # Visual hostname (config file identified by serial)
     colorscheme = "@COLORSCHEME@";
-    graphical.wallpaper = "${hydrix}/wallpapers/WindowRain.png";
+    graphical.wallpaper = "${hydrix}/theming/wallpapers/Hydrix.png";
 
     # ─────────────────────────────────────────────────────────────────────
     # ENVIRONMENT DEFAULTS
