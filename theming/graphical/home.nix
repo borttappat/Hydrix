@@ -53,10 +53,6 @@ in {
         fzf
         jq
 
-        # Clipboard (useful in all graphical environments including xpra)
-        xclip
-        xsel
-
         # Notifications
         libnotify
 
@@ -64,6 +60,8 @@ in {
         pywal
       ] ++ lib.optionals (!isMicrovm && config.hydrix.i3.enable) [
         # X11/i3 utilities — not needed under Wayland
+        xclip
+        xsel
         xdotool
         unclutter
         scrot
