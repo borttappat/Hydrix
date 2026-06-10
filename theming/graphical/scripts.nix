@@ -675,13 +675,17 @@
         echo "$SCHEME_NAME" > "$SCHEME_MARKER"
 
         ${lib.optionalString (!isVM) ''
-      # Set wallpaper via feh so ~/.fehbg exists for i3 startup
-      # One-shot: only runs on fresh installs before user sets their own wallpaper
+      # Set wallpaper on first login (before user sets their own)
       ${lib.optionalString (cfg.wallpaper != null) ''
         WALLPAPER_INIT_MARKER="$HOME/.cache/hydrix/wallpaper-initialized"
         if [ ! -f "$WALLPAPER_INIT_MARKER" ]; then
             echo "Setting initial wallpaper: ${cfg.wallpaper}"
-            ${pkgs.feh}/bin/feh --bg-fill "${cfg.wallpaper}" 2>/dev/null || true
+            if [[ -n "''${WAYLAND_DISPLAY:-}" ]]; then
+                pkill swaybg 2>/dev/null || true
+                ${pkgs.swaybg}/bin/swaybg -i "${cfg.wallpaper}" -m fill &
+            else
+                ${pkgs.feh}/bin/feh --bg-fill "${cfg.wallpaper}" 2>/dev/null || true
+            fi
             mkdir -p "$(dirname "$WALLPAPER_INIT_MARKER")"
             touch "$WALLPAPER_INIT_MARKER"
         fi
