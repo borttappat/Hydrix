@@ -2751,6 +2751,16 @@ partition_and_mount() {
         umount "${CONFIG[efiPartition]}" 2>/dev/null || true
     fi
 
+    # Pre-clean any leftover LUKS mappings from a previous install attempt.
+    # Without this, re-running the installer hits "device in use" on the first disko run.
+    umount -R /mnt 2>/dev/null || true
+    for mapper in /dev/mapper/*; do
+        [[ "$mapper" == "/dev/mapper/control" ]] && continue
+        dmsetup info "$mapper" 2>/dev/null | grep -q "${CONFIG[device]##*/}" && \
+            cryptsetup close "${mapper##*/}" 2>/dev/null || true
+    done
+    cryptsetup close cryptroot 2>/dev/null || true
+
     # Run disko (formats and mounts the NixOS partition only)
     while true; do
         log "Running disko..."
@@ -2766,13 +2776,11 @@ partition_and_mount() {
         # Clean up before retrying — LUKS mappings left open cause luksFormat to fail
         log "Cleaning up before retry..."
         umount -R /mnt 2>/dev/null || true
-        # Close all dm-crypt mappings on the target device
         for mapper in /dev/mapper/*; do
             [[ "$mapper" == "/dev/mapper/control" ]] && continue
             dmsetup info "$mapper" 2>/dev/null | grep -q "${CONFIG[device]##*/}" && \
                 cryptsetup close "${mapper##*/}" 2>/dev/null || true
         done
-        # Fallback: close by name if device check missed it
         cryptsetup close cryptroot 2>/dev/null || true
         sleep 1
     done
