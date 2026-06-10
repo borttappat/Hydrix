@@ -2759,9 +2759,11 @@ partition_and_mount() {
     #      inside disko can inform the kernel of the new table without hitting
     #      "device in use" on the old partition 2
     local dev="${CONFIG[device]}"
-    umount -R /mnt 2>/dev/null || true
-    # Close any active swap on the target device
+    # Deactivate swapfile first — it keeps /mnt busy and blocks umount
+    swapoff /mnt/.swapfile 2>/dev/null || true
+    # Also deactivate any swap partitions on the target device
     swapoff "${dev}"* 2>/dev/null || true
+    umount -R /mnt 2>/dev/null || true
     # Close all dm-crypt mappings on the target device
     for mapper in /dev/mapper/*; do
         [[ "$mapper" == "/dev/mapper/control" ]] && continue
@@ -2788,8 +2790,9 @@ partition_and_mount() {
         [[ "${disko_choice,,}" == q* ]] && exit 1
         # Clean up before retrying — LUKS mappings left open cause luksFormat to fail
         log "Cleaning up before retry..."
-        umount -R /mnt 2>/dev/null || true
+        swapoff /mnt/.swapfile 2>/dev/null || true
         swapoff "${dev}"* 2>/dev/null || true
+        umount -R /mnt 2>/dev/null || true
         for mapper in /dev/mapper/*; do
             [[ "$mapper" == "/dev/mapper/control" ]] && continue
             dmsetup info "$mapper" 2>/dev/null | grep -q "${dev##*/}" && \
