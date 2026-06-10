@@ -342,9 +342,12 @@ in {
                 # Brief pause for network stack, then let nix handle retries
                 sleep 2
 
-                # Run nix build - stream output directly to vsock
-                # nix has built-in retry logic for network issues
-                if ${pkgs.nix}/bin/nix build "$flake" --no-link --print-out-paths 2>&1; then
+                # Run nix build - stream plain-text progress lines to vsock.
+                # --log-format raw: one line per action (fetch/build), no ANSI/carriage-returns.
+                # --print-out-paths: emit result store paths on success.
+                # 2>&1: merge stderr (nix progress) into stdout so socat carries it all.
+                if ${pkgs.nix}/bin/nix build "$flake" --no-link --print-out-paths \
+                     --log-format raw 2>&1; then
                   echo "DONE"
                 else
                   echo "ERROR build failed"
@@ -355,8 +358,10 @@ in {
                 flake="$rest"
                 echo "OK prefetching $flake"
 
-                # Just fetch dependencies without building
-                if ${pkgs.nix}/bin/nix flake prefetch "$flake" 2>&1; then
+                # Fetch all dependencies without building.
+                # --log-format raw: plain streaming output, no ANSI.
+                if ${pkgs.nix}/bin/nix flake prefetch "$flake" \
+                     --log-format raw 2>&1; then
                   echo "DONE prefetch complete"
                 else
                   echo "ERROR prefetch failed"
