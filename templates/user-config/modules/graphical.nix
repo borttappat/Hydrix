@@ -86,6 +86,8 @@
     # splash.font       = lib.mkDefault null;  # null = CozetteVector
   };
 
+  hydrix.colorscheme = lib.mkDefault "hydrix";
+
   # ─── VM color inheritance ─────────────────────────────────────────────
   # hydrix.colorschemeInheritance = lib.mkDefault "dynamic";
   #   "full"    — VMs use all host wal colors
