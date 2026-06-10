@@ -48,9 +48,13 @@ in {
     };
 
     # XDG portal for screen sharing, file pickers, etc.
+    # xdg-desktop-portal-hyprland is intentionally NOT listed here —
+    # home-manager's wayland.windowManager.hyprland (systemd.enable = true)
+    # activates it via systemd.user.packages. Listing it in extraPortals too
+    # causes a duplicate xdg-desktop-portal-hyprland.service symlink → build failure.
     xdg.portal = {
       enable = lib.mkDefault true;
-      extraPortals = [ pkgs.xdg-desktop-portal-hyprland ];
+      extraPortals = [ pkgs.xdg-desktop-portal-gtk ];
       config.hyprland.default = [ "hyprland" "gtk" ];
     };
 
