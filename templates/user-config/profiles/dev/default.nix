@@ -25,7 +25,7 @@ let meta = import ./meta.nix; in
   # hydrix.vm.hostname = "my-dev";
 
   # Colorscheme for this VM
-  hydrix.colorscheme = "puccy";
+  hydrix.colorscheme = "nvid";
   # Per-VM focus border - simple threat-level indicator for VM windows
   # Supports named colors: red, orange, yellow, green, cyan, blue, purple, pink, magenta
   # Or hex codes: #RRGGBB
