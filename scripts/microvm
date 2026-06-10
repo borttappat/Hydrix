@@ -1637,23 +1637,30 @@ cmd_builder_build() {
         flake_target=$(resolve_builder_target "$target")
         log "Building ${BOLD}${target}${NC}..."
 
-        local build_output build_status=0
-        build_output=$({ echo "BUILD $flake_target"; sleep 1; } | socat -t600 -T900 - "VSOCK-CONNECT:${BUILDER_CID}:${BUILDER_BUILD_PORT}" 2>&1) || build_status=$?
+        # Stream build output live — tee to a log file for post-build error detection.
+        # $() command substitution would buffer everything until the build finishes;
+        # tee lets the while-read loop display each line as it arrives from the VM.
+        local build_log
+        build_log=$(mktemp)
 
-        while IFS= read -r line; do
-            case "$line" in
-                OK*)       log "$line" ;;
-                RESULT\ *) log_success "Result: ${BOLD}${line#RESULT }${NC}" ;;
-                DONE*)     log_success "$line" ;;
-                ERROR*)    log_error "$line" ;;
-                *)         [[ -n "$line" ]] && echo "  $line" ;;
-            esac
-        done <<< "$build_output"
+        { echo "BUILD $flake_target"; sleep 1; } \
+            | socat -t600 -T900 - "VSOCK-CONNECT:${BUILDER_CID}:${BUILDER_BUILD_PORT}" \
+            | tee "$build_log" \
+            | while IFS= read -r line; do
+                case "$line" in
+                    OK*)       log "$line" ;;
+                    RESULT\ *) log_success "Result: ${BOLD}${line#RESULT }${NC}" ;;
+                    DONE*)     log_success "$line" ;;
+                    ERROR*)    log_error "$line" ;;
+                    *)         [[ -n "$line" ]] && echo "  $line" ;;
+                esac
+              done
 
-        if echo "$build_output" | grep -q "^ERROR"; then
+        if grep -q "^ERROR" "$build_log"; then
             log_error "Build failed: ${BOLD}${target}${NC}"
             failed_targets+=("$target")
         fi
+        rm -f "$build_log"
     done
 
     # Step 3: Stop builder (restores host nix-daemon and read-only store)
