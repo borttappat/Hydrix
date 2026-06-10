@@ -2843,10 +2843,10 @@ EOF
     total_gb=$(( mem_gb + swap_gb ))
     cpu_count=$(nproc 2>/dev/null || echo "?")
 
-    # Nix evaluation of the full system config needs ~12-16GB of address space.
+    # Nix evaluation of the full system config (3 specialisations) needs ~24-32GB of address space.
     # If total memory + swap is below threshold, create a swapfile on /mnt to prevent OOM kills.
-    if [[ $total_gb -lt 20 ]]; then
-        local swap_needed=$(( 20 - total_gb ))
+    if [[ $total_gb -lt 32 ]]; then
+        local swap_needed=$(( 32 - total_gb ))
         log "  Low memory detected (${mem_gb}GB RAM + ${swap_gb}GB swap = ${total_gb}GB total)"
         log "  Creating ${swap_needed}GB swapfile on /mnt to prevent OOM during build..."
         local fstype
