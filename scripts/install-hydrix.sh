@@ -2751,15 +2751,28 @@ partition_and_mount() {
         umount "${CONFIG[efiPartition]}" 2>/dev/null || true
     fi
 
-    # Pre-clean any leftover LUKS mappings from a previous install attempt.
-    # Without this, re-running the installer hits "device in use" on the first disko run.
+    # Pre-clean any leftover state from a previous install attempt so disko
+    # can repartition cleanly. Order matters:
+    #   1. Unmount everything under /mnt
+    #   2. Close all dm-crypt mappings that reference the target device
+    #   3. Drop the kernel's partition references (partx -d) so partprobe
+    #      inside disko can inform the kernel of the new table without hitting
+    #      "device in use" on the old partition 2
+    local dev="${CONFIG[device]}"
     umount -R /mnt 2>/dev/null || true
+    # Close any active swap on the target device
+    swapoff "${dev}"* 2>/dev/null || true
+    # Close all dm-crypt mappings on the target device
     for mapper in /dev/mapper/*; do
         [[ "$mapper" == "/dev/mapper/control" ]] && continue
-        dmsetup info "$mapper" 2>/dev/null | grep -q "${CONFIG[device]##*/}" && \
+        dmsetup info "$mapper" 2>/dev/null | grep -q "${dev##*/}" && \
             cryptsetup close "${mapper##*/}" 2>/dev/null || true
     done
     cryptsetup close cryptroot 2>/dev/null || true
+    # Drop kernel partition refs — without this, partprobe inside disko fails
+    # with "unable to inform the kernel" and the old partition stays "in use"
+    partx -d "$dev" 2>/dev/null || true
+    sleep 1
 
     # Run disko (formats and mounts the NixOS partition only)
     while true; do
@@ -2776,12 +2789,14 @@ partition_and_mount() {
         # Clean up before retrying — LUKS mappings left open cause luksFormat to fail
         log "Cleaning up before retry..."
         umount -R /mnt 2>/dev/null || true
+        swapoff "${dev}"* 2>/dev/null || true
         for mapper in /dev/mapper/*; do
             [[ "$mapper" == "/dev/mapper/control" ]] && continue
-            dmsetup info "$mapper" 2>/dev/null | grep -q "${CONFIG[device]##*/}" && \
+            dmsetup info "$mapper" 2>/dev/null | grep -q "${dev##*/}" && \
                 cryptsetup close "${mapper##*/}" 2>/dev/null || true
         done
         cryptsetup close cryptroot 2>/dev/null || true
+        partx -d "$dev" 2>/dev/null || true
         sleep 1
     done
 
