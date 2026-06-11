@@ -21,7 +21,21 @@
 #   └── modules/common.nix    # Shared settings (locale, timezone)
 
 set -euo pipefail
-trap 'echo "[ERR] Script exited unexpectedly at line $LINENO (exit $?)" >&2' ERR
+
+_fail_banner() {
+    local line=$1 code=$2
+    echo "" >&2
+    echo "==========================================" >&2
+    echo "  INSTALLATION FAILED" >&2
+    echo "==========================================" >&2
+    echo "  Error at line $line (exit code: $code)" >&2
+    echo "  Full log: ${HYDRIX_LOG:-/tmp/hydrix-install.log}" >&2
+    echo "" >&2
+    echo "  The disk has been partitioned. Re-running the" >&2
+    echo "  installer is safe — it will detect and resume." >&2
+    echo "==========================================" >&2
+}
+trap '_fail_banner $LINENO $?' ERR
 
 # When piped via curl | bash, redirect interactive reads to the terminal
 if [[ ! -t 0 ]] && [[ -e /dev/tty ]]; then
@@ -132,6 +146,12 @@ secure_cleanup() {
     # Clean up LUKS password file
     if [[ -f /tmp/luks-password ]]; then
         shred -u /tmp/luks-password 2>/dev/null || rm -f /tmp/luks-password
+    fi
+
+    # Copy log to installed system on failure (success path copies it in the brace block)
+    if [[ -n "${HYDRIX_LOG:-}" ]] && [[ -f "${HYDRIX_LOG:-}" ]] && [[ -d "/mnt/var/log" ]]; then
+        mkdir -p /mnt/var/log/hydrix 2>/dev/null || true
+        cp "$HYDRIX_LOG" /mnt/var/log/hydrix/ 2>/dev/null || true
     fi
 
     # Clean up temp config directory if set and installation didn't complete
