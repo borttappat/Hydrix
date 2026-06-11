@@ -15,6 +15,7 @@
 
 let
   username = config.hydrix.username;
+  hasI3 = config.hydrix.i3.enable;
   jq = "${pkgs.jq}/bin/jq";
 
   generateGtkColorsScript = pkgs.writeShellScriptBin "generate-gtk-colors" ''
@@ -190,7 +191,7 @@ in {
         dconf
 
         # GTK settings tools (X11 only — Wayland users use nwg-look or similar)
-      ] ++ lib.optionals config.hydrix.i3.enable [
+      ] ++ lib.optionals hasI3 [
         lxappearance
       ];
 
