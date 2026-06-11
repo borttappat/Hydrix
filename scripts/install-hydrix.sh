@@ -2830,6 +2830,8 @@ install_nixos() {
     # (Config was already generated and validated before partitioning)
     log "Copying validated configuration to target..."
     mkdir -p "$(dirname "$config_dir")"
+    # Remove any stale config from a previous interrupted run before copying
+    [[ -d "$config_dir" ]] && rm -rf "$config_dir"
     cp -r "$TEMP_CONFIG" "$config_dir"
 
     # Initialize/update git repo
