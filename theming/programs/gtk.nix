@@ -186,11 +186,12 @@ in {
         papirus-icon-theme
         vanilla-dmz
 
-        # GTK settings tools
-        lxappearance
-
         # dconf for virt-manager settings
         dconf
+
+        # GTK settings tools (X11 only — Wayland users use nwg-look or similar)
+      ] ++ lib.optionals config.hydrix.i3.enable [
+        lxappearance
       ];
 
       # virt-manager specific settings via dconf
