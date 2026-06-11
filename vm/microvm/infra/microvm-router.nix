@@ -109,12 +109,10 @@
   infraLans = cfg.router.microvm.infraLans;
   allLans = infraLans ++ map (n: { tap = n.routerTap; subnet = n.subnet; }) allNetworks;
 
-  # TAPs that need their own QEMU -netdev arg. The management TAP is already declared
-  # in microvm.interfaces (handled by the microvm framework), so we exclude it here
-  # to avoid "Device or resource busy" at QEMU startup. Same logic for systemd.network.links
-  # — the mgmt entry is hardcoded separately with the correct framework MAC.
-  _declaredTaps = map (iface: iface.id) (lib.filter (iface: iface.type == "tap") config.microvm.interfaces);
-  infraQemuTaps = lib.filter (l: !builtins.elem l.tap _declaredTaps) infraLans;
+  # TAPs that need their own QEMU -netdev arg. The management TAP is declared
+  # explicitly in extraArgs below (pre-created by microvm-router-taps.service),
+  # so exclude it here to avoid duplicate -netdev arguments.
+  infraQemuTaps = lib.filter (l: l.tap != "mv-router-mgmt") infraLans;
 in {
   imports = [
     # Central options for config access
@@ -180,15 +178,11 @@ in {
       graphics.enable = false;
 
       # ===== Network Interfaces =====
-      # Primary TAP interface (br-mgmt) - defined in microvm.interfaces
-      # (additional TAPs added via qemu.extraArgs below)
-      interfaces = [
-        {
-          type = "tap";
-          id = "mv-router-mgmt";
-          mac = "02:00:00:01:00:01"; # Static MAC for router management
-        }
-      ];
+      # All TAPs are pre-created by microvm-router-taps.service and passed via
+      # qemu.extraArgs with script=no,downscript=no. Using microvm.interfaces
+      # for the management TAP caused its setup script to race or fail silently
+      # in nested KVM environments; explicit pre-creation is consistent and reliable.
+      interfaces = [];
 
       # ===== Additional Network Interfaces + PCI Passthrough =====
       # Added via qemu.extraArgs for proper control over device ordering
@@ -206,6 +200,10 @@ in {
           "socket,id=console,path=/var/lib/microvms/${config.networking.hostName}/console.sock,server=on,wait=off"
           "-serial"
           "chardev:console"
+
+          # Management TAP (br-mgmt) — pre-created by microvm-router-taps.service
+          "-netdev" "tap,id=net-mgmt,ifname=mv-router-mgmt,script=no,downscript=no"
+          "-device" "virtio-net-pci,netdev=net-mgmt,mac=02:00:00:01:00:01"
 
         ]
         # VFIO passthrough — only when using WiFi PCI passthrough as WAN

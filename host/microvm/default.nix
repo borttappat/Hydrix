@@ -457,8 +457,10 @@ in {
             set -e
             echo "Creating router microVM TAP interfaces..."
 
-            # Create TAP interfaces for router (except primary which microvm.nix handles)
-            # Format: tap name -> bridge
+            # Create all router TAP interfaces including mv-router-mgmt.
+            # Previously mgmt was excluded and left to microvm.nix, but its setup
+            # script can race or fail silently in nested KVM. Pre-creating all TAPs
+            # here is safe — the if-guard skips creation when already present.
             ${lib.concatStringsSep "\n" (lib.mapAttrsToList (tap: bridge: ''
               if ! ip link show ${tap} &>/dev/null; then
                 ip tuntap add dev ${tap} mode tap
@@ -467,7 +469,7 @@ in {
               ip link set ${tap} master ${bridge} 2>/dev/null || true
               ip link set ${tap} up
               echo "  ${tap} -> ${bridge}"
-            '') (lib.filterAttrs (tap: _: tap != "mv-router-mgmt") routerTaps))}
+            '') routerTaps)}
 
             echo "Router TAP interfaces ready"
           '';
@@ -478,7 +480,7 @@ in {
               if ip link show ${tap} &>/dev/null; then
                 ip link del ${tap} 2>/dev/null || true
               fi
-            '') (lib.filterAttrs (tap: _: tap != "mv-router-mgmt") routerTaps))}
+            '') routerTaps)}
           '';
         };
       })
