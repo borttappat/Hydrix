@@ -220,7 +220,7 @@ let
             :text {node.location}))
         (label
           :class "node-meta"
-          :text {node.age + "   " + node.rx + "↓  " + node.tx + "↑"}
+          :text {(node.location == node.endpoint ? "" : node.endpoint + "   ") + node.age + "   " + node.rx + "↓  " + node.tx + "↑"}
           :halign "start")))
 
     (defwidget vm-status-widget []
