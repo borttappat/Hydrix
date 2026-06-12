@@ -7,4 +7,8 @@
   label      = "ROUTER";
   hasDisplay = false;
   builtinVm  = true;
+
+  # Management network — host↔router communication
+  routerTap  = "mv-router-mgmt";
+  subnet     = "192.168.100";
 }

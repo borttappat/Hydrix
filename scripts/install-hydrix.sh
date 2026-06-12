@@ -2932,6 +2932,29 @@ EOF
         --option cores "$(throttle_cores)" \
         --option http-connections 128
 
+    # Verify the install actually landed — nixos-install can exit 0 despite
+    # bootloader or activation failures (e.g. "Failed to create stream fd").
+    local install_ok=true
+    if [[ ! -L /mnt/nix/var/nix/profiles/system ]]; then
+        warn "NixOS system profile missing at /mnt/nix/var/nix/profiles/system"
+        install_ok=false
+    fi
+    if [[ ! -f /mnt/boot/grub/grub.cfg ]] && [[ ! -d /mnt/boot/EFI ]]; then
+        warn "No bootloader found on /mnt/boot (neither grub.cfg nor EFI/)"
+        install_ok=false
+    fi
+    if [[ "$install_ok" == false ]]; then
+        echo "" >&2
+        echo "==========================================" >&2
+        echo "  INSTALLATION INCOMPLETE" >&2
+        echo "==========================================" >&2
+        echo "  nixos-install exited 0 but key paths are" >&2
+        echo "  missing. The machine will not boot." >&2
+        echo "  Full log: ${HYDRIX_LOG:-}" >&2
+        echo "==========================================" >&2
+        exit 1
+    fi
+
     # Remove infrastructureOnly — first rebuild will build all enabled VMs
     log "Removing infrastructureOnly from machine config..."
     sed -i '/infrastructureOnly/d' "$config_dir/machines/${CONFIG[serial]}.nix"

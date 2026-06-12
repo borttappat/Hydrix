@@ -110,9 +110,30 @@
   allLans = infraLans ++ map (n: { tap = n.routerTap; subnet = n.subnet; }) allNetworks;
 
   # TAPs that need their own QEMU -netdev arg. The management TAP is declared
-  # explicitly in extraArgs below (pre-created by microvm-router-taps.service),
-  # so exclude it here to avoid duplicate -netdev arguments.
+  # explicitly in extraArgs below, so exclude it to avoid duplicates.
   infraQemuTaps = lib.filter (l: l.tap != "mv-router-mgmt") infraLans;
+
+  # Script run by QEMU *after* TUNSETIFF to bridge the TAP to its host bridge.
+  # Using script= (not script=no) ensures QEMU holds the fd before bridge
+  # attachment — eliminating the EBUSY race where a pre-bridged TAP blocks
+  # TUNSETIFF (Linux rejects TUNSETIFF when an rx_handler is already registered).
+  # TAPs are created on-demand by QEMU itself via TUNSETIFF; no pre-creation needed.
+  tapBridgeScript = pkgs.writeShellScript "router-tap-bridge" ''
+    TAP="$1"
+    case "$TAP" in
+      mv-router-mgmt)  BRIDGE="br-mgmt"    ;;
+      mv-router-bldr)  BRIDGE="br-builder" ;;
+      ${lib.optionalString useEthernetWan "mv-router-wan)   BRIDGE=\"br-wan\"   ;;\n      "}${lib.concatMapStrings (pn: "${pn.routerTap}) BRIDGE=\"br-${pn.name}\" ;;\n      ") profileNetworks}${lib.concatMapStrings (n: "${n.routerTap}) BRIDGE=\"br-${n.name}\" ;;\n      ") extraNetworks}# Unknown infra TAPs: udev catch-all bridges them after QEMU has the fd open
+      *)               exit 0 ;;
+    esac
+    # Wait for bridge (max 5s; should exist via network.target before QEMU starts)
+    for i in $(seq 10); do
+      ${pkgs.iproute2}/bin/ip link show "$BRIDGE" > /dev/null 2>&1 && break
+      sleep 0.5
+    done
+    ${pkgs.iproute2}/bin/ip link set "$TAP" master "$BRIDGE" 2>/dev/null || true
+    ${pkgs.iproute2}/bin/ip link set "$TAP" up 2>/dev/null || true
+  '';
 in {
   imports = [
     # Central options for config access
@@ -178,10 +199,10 @@ in {
       graphics.enable = false;
 
       # ===== Network Interfaces =====
-      # All TAPs are pre-created by microvm-router-taps.service and passed via
-      # qemu.extraArgs with script=no,downscript=no. Using microvm.interfaces
-      # for the management TAP caused its setup script to race or fail silently
-      # in nested KVM environments; explicit pre-creation is consistent and reliable.
+      # All TAPs are created on-demand by QEMU via TUNSETIFF and bridged via
+      # tapBridgeScript (called after TUNSETIFF, so QEMU holds the fd before
+      # bridge attachment). microvm.interfaces is empty to avoid any tap-up
+      # script that could race with QEMU's TUNSETIFF call.
       interfaces = [];
 
       # ===== Additional Network Interfaces + PCI Passthrough =====
@@ -201,8 +222,8 @@ in {
           "-serial"
           "chardev:console"
 
-          # Management TAP (br-mgmt) — pre-created by microvm-router-taps.service
-          "-netdev" "tap,id=net-mgmt,ifname=mv-router-mgmt,script=no,downscript=no"
+          # Management TAP (br-mgmt) — created by QEMU, bridged by tapBridgeScript
+          "-netdev" "tap,id=net-mgmt,ifname=mv-router-mgmt,script=${tapBridgeScript},downscript=no"
           "-device" "virtio-net-pci,netdev=net-mgmt,mac=02:00:00:01:00:01"
 
         ]
@@ -214,7 +235,7 @@ in {
         ]
         # Ethernet WAN TAP — only when using macvtap/ethernet as WAN
         ++ lib.optionals useEthernetWan [
-          "-netdev" "tap,id=net-wan,ifname=mv-router-wan,script=no,downscript=no"
+          "-netdev" "tap,id=net-wan,ifname=mv-router-wan,script=${tapBridgeScript},downscript=no"
           "-device" "virtio-net-pci,netdev=net-wan,mac=02:00:00:01:09:01"
         ]
         # Profile network TAPs — derived from profileNetworks (profiles/*/meta.nix).
@@ -222,7 +243,7 @@ in {
         # Order follows alphabetical profile directory discovery.
         ++ lib.concatLists (lib.imap0 (i: pn: [
             "-netdev"
-            "tap,id=net-${pn.name},ifname=${pn.routerTap},script=no,downscript=no"
+            "tap,id=net-${pn.name},ifname=${pn.routerTap},script=${tapBridgeScript},downscript=no"
             "-device"
             "virtio-net-pci,netdev=net-${pn.name},mac=02:00:00:01:${lib.fixedWidthString 2 "0" (builtins.toString (i + 1))}:01"
           ])
@@ -231,7 +252,7 @@ in {
         # MACs: 02:00:00:03:XX:01 — separate namespace from profiles (01) and extras (02).
         ++ lib.concatLists (lib.imap0 (i: l: [
             "-netdev"
-            "tap,id=net-infra-${builtins.toString i},ifname=${l.tap},script=no,downscript=no"
+            "tap,id=net-infra-${builtins.toString i},ifname=${l.tap},script=${tapBridgeScript},downscript=no"
             "-device"
             "virtio-net-pci,netdev=net-infra-${builtins.toString i},mac=02:00:00:03:${lib.fixedWidthString 2 "0" (builtins.toString i)}:01"
           ])
@@ -240,7 +261,7 @@ in {
         # MACs: 02:00:00:02:XX:01
         ++ lib.concatLists (lib.imap0 (i: n: [
             "-netdev"
-            "tap,id=net-extra-${n.name},ifname=${n.routerTap},script=no,downscript=no"
+            "tap,id=net-extra-${n.name},ifname=${n.routerTap},script=${tapBridgeScript},downscript=no"
             "-device"
             "virtio-net-pci,netdev=net-extra-${n.name},mac=02:00:00:02:${lib.fixedWidthString 2 "0" (builtins.toString i)}:01"
           ])

@@ -435,13 +435,14 @@ in {
         };
       })
 
-      # Router MicroVM TAP Interface Setup
-      # Creates TAP interfaces for the router before QEMU starts
-      # The primary TAP (mv-router-mgmt) is handled by microvm.nix
-      # Additional TAPs added via qemu.extraArgs need manual creation
+      # Router MicroVM TAP ordering hook.
+      # TAPs are now created on-demand by QEMU via TUNSETIFF and bridged by
+      # tapBridgeScript (called after TUNSETIFF, post-fd-open). This service
+      # exists solely to ensure network.target (bridges up) is reached before
+      # microvm@microvm-router.service starts. No TAP pre-creation needed.
       (lib.mkIf routerEnabled {
         microvm-router-taps = {
-          description = "Create TAP interfaces for router microVM";
+          description = "Ensure bridges are ready before router microVM starts";
           requiredBy = [ "microvm@microvm-router.service" ];
           before = [ "microvm@microvm-router.service" ];
           after = [ "network.target" ];
@@ -449,39 +450,8 @@ in {
           serviceConfig = {
             Type = "oneshot";
             RemainAfterExit = true;
+            ExecStart = "${pkgs.coreutils}/bin/true";
           };
-
-          path = [ pkgs.iproute2 ];
-
-          script = ''
-            set -e
-            echo "Creating router microVM TAP interfaces..."
-
-            # Create all router TAP interfaces including mv-router-mgmt.
-            # Previously mgmt was excluded and left to microvm.nix, but its setup
-            # script can race or fail silently in nested KVM. Pre-creating all TAPs
-            # here is safe — the if-guard skips creation when already present.
-            ${lib.concatStringsSep "\n" (lib.mapAttrsToList (tap: bridge: ''
-              if ! ip link show ${tap} &>/dev/null; then
-                ip tuntap add dev ${tap} mode tap
-                echo "  Created ${tap}"
-              fi
-              ip link set ${tap} master ${bridge} 2>/dev/null || true
-              ip link set ${tap} up
-              echo "  ${tap} -> ${bridge}"
-            '') routerTaps)}
-
-            echo "Router TAP interfaces ready"
-          '';
-
-          preStop = ''
-            echo "Cleaning up router microVM TAP interfaces..."
-            ${lib.concatStringsSep "\n" (lib.mapAttrsToList (tap: _: ''
-              if ip link show ${tap} &>/dev/null; then
-                ip link del ${tap} 2>/dev/null || true
-              fi
-            '') routerTaps)}
-          '';
         };
       })
 
