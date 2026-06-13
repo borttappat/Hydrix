@@ -758,45 +758,5 @@ FLAKE_EOF
       '';
     };
 
-    # ===== Persist directory symlink =====
-    # Create ~/persist symlink to /mnt/vm-persist
-    # This enables vm-dev/vm-sync workflow (same as microVMs)
-    systemd.services.hydrix-persist-link = {
-      description = "Create Hydrix persist symlink for vm-dev workflow";
-      wantedBy = [ "multi-user.target" ];
-      after = [ "mnt-vm\\x2dpersist.mount" ];
-      serviceConfig = {
-        Type = "oneshot";
-        RemainAfterExit = true;
-      };
-      path = [ pkgs.util-linux pkgs.coreutils ];
-      script = ''
-        USER_HOME="/home/${config.hydrix.username}"
-        PERSIST_LINK="$USER_HOME/persist"
-
-        # Skip if mount doesn't exist
-        if ! mountpoint -q /mnt/vm-persist 2>/dev/null; then
-          echo "Persist mount not present, skipping symlink"
-          exit 0
-        fi
-
-        # Create or update symlink
-        if [ -L "$PERSIST_LINK" ]; then
-          current=$(readlink "$PERSIST_LINK")
-          if [ "$current" != "/mnt/vm-persist" ]; then
-            rm "$PERSIST_LINK"
-            ln -s /mnt/vm-persist "$PERSIST_LINK"
-          fi
-        elif [ -d "$PERSIST_LINK" ]; then
-          mv "$PERSIST_LINK" "$PERSIST_LINK.bak"
-          ln -s /mnt/vm-persist "$PERSIST_LINK"
-        else
-          ln -s /mnt/vm-persist "$PERSIST_LINK"
-        fi
-
-        chown -h ${config.hydrix.username}:users "$PERSIST_LINK"
-        echo "Persist symlink created: $PERSIST_LINK -> /mnt/vm-persist"
-      '';
-    };
   };
 }
