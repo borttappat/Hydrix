@@ -1,17 +1,14 @@
   <pre>
- @@@  @@@ @@@ @@@ @@@@@@@  @@@@@@@  @@@ @@@  @@@
- @@!  @@@ @@! !@@ @@!  @@@ @@!  @@@ @@! @@!  !@@
- @!@!@!@!  !@!@!  @!@  !@! @!@!!@!  !!@  !@@!@!
- !!:  !!!   !!:   !!:  !!! !!: :!!  !!:  !: :!!
-  :   : :   .:    :: :  :   :   : : :   :::  :::
-
-        An attempt at a somewhat secure workstation framework
-        based on NixOS, MicroVMs and compartmentalization
+    __  __          __     _
+   / / / /_  ______/ /____(_)  __
+  / /_/ / / / / __  / ___/ / |/_/
+ / __  / /_/ / /_/ / /  / />  <
+/_/ /_/\__, /\__,_/_/  /_/_/|_|
+      /____/
+                An attempt at a somewhat secure workstation framework
+                Based on NixOS, MicroVMs and compartmentalization
   </pre>
 
-Discl**AI**mer - AI was used in setting this project up, do not use unless you feel comfortable with that piece of information
-
-**Everything** seen here is still under development. Once I end up with a solid prototype that has been more battle-tested and ran on different hardware, I will try to make some sort of numbered release.
 
 Hydrix is an options-driven NixOS framework that provides complete network isolation through VM compartmentalization. Your WiFi hardware is passed directly to a router VM via VFIO, giving you granular control over network traffic while maintaining a hardened host.
 
@@ -268,13 +265,13 @@ The Files VM (`microvm-files`, CID 212) has **multiple TAP interfaces** - one pe
 
 ```
 Files VM (192.168.108.10 on br-files)
-├── mv-files (always → br-files)
-├── mv-files-pent (→ br-pentest, if "pentest" in accessFrom)
-├── mv-files-brow (→ br-browse, if "browsing" in accessFrom)
-├── mv-files-dev  (→ br-dev, if "dev" in accessFrom)
-├── mv-files-comm (→ br-comms, if "comms" in accessFrom)
-├── mv-files-lurk (→ br-lurking, if "lurking" in accessFrom)
-└── mv-router-file (→ br-files, router leg)
+├── mv-files (always -> br-files)
+├── mv-files-pent (-> br-pentest, if "pentest" in accessFrom)
+├── mv-files-brow (-> br-browse, if "browsing" in accessFrom)
+├── mv-files-dev  (-> br-dev, if "dev" in accessFrom)
+├── mv-files-comm (-> br-comms, if "comms" in accessFrom)
+├── mv-files-lurk (-> br-lurking, if "lurking" in accessFrom)
+└── mv-router-file (-> br-files, router leg)
 ```
 
 Configuration in your flake:
@@ -317,7 +314,7 @@ Per-bridge IPs (derived from vm-registry): Files VM gets `.2` on each bridge (e.
 - Disables router VM and all microVMs
 - Use for emergency debugging or when VM isolation not needed
 
-Switch modes live (lockdown ↔ administrative, no reboot):
+Switch modes live (lockdown <-> administrative, no reboot):
 
 ```bash
 hydrix-switch administrative    # Add gateway via router VM
@@ -494,7 +491,7 @@ The files VM (`microvm-files`) bypasses this intentionally by connecting directl
 The host has no L3 presence on VM bridges. All bridges exist as pure L2 plumbing:
 - No IPv4 addresses on any bridge in any mode
 - IPv6 link-local auto-assignment is disabled on all VM bridges via sysctl (`net.ipv6.conf.<br>.disable_ipv6`)
-- `br-shared` is VM-only in all modes — the host never holds an address there
+- `br-shared` is VM-only in all modes - the host never holds an address there
 
 The one exception is `br-mgmt` in **Administrative** mode, where the host needs `192.168.100.1/24` to route through the router VM as a gateway. That address is absent in Lockdown.
 
@@ -505,8 +502,8 @@ The one exception is `br-mgmt` in **Administrative** mode, where the host needs 
 | all others | no address | no address |
 
 In **Lockdown** mode (default boot):
-- No bridge addresses — host is invisible to all VMs at L3
-- No default gateway — host has no internet access
+- No bridge addresses - host is invisible to all VMs at L3
+- No default gateway - host has no internet access
 - Host builds happen via the builder VM, which has internet through the router
 - Git push/pull happens via the gitsync VM, which mounts repos from the host R/W
 - All VM communication uses vsock, which is independent of bridge networking
@@ -534,12 +531,12 @@ curl -sL https://raw.githubusercontent.com/borttappat/Hydrix/main/scripts/instal
 The installer will:
 1. **Auto-detect hardware**: CPU (Intel/AMD), WiFi PCI address, ASUS features
 2. **Prompt for configuration**: Username, hostname, disk, WiFi credentials
-3. **Detect locale**: Timezone, keyboard layout, and locale are read from the running system and written into `shared/common.nix` — one file that applies to both host and all VMs
+3. **Detect locale**: Timezone, keyboard layout, and locale are read from the running system and written into `modules/common.nix` - one file that applies to both host and all VMs
 4. **Partition disk**: GPT with EFI, optional LUKS encryption
 5. **Generate config** in `~/hydrix-config/`:
    - `flake.nix` - Main flake importing Hydrix
    - `machines/<hostname>.nix` - Your machine configuration
-   - `shared/common.nix` - Locale, timezone, scaling (auto-populated)
+   - `modules/common.nix` - Locale, timezone, scaling (auto-populated)
    - `specialisations/` - Boot mode configurations
 5. **Pre-build infrastructure VMs**: `microvm-router`, `microvm-router-stable`, `microvm-builder`
 
@@ -615,7 +612,7 @@ This auto-detects your current system configuration and generates a minimal Hydr
 │   ├── comms/
 │   └── lurking/
 ├── colorschemes/                # Custom colorschemes (pywal JSON format)
-├── shared/                      # Settings shared across all machines and VMs
+├── modules/                      # Settings shared across all machines and VMs
 │   ├── common.nix               # Locale, shared packages
 │   ├── wifi.nix                 # WiFi credentials
 │   ├── fonts.nix                # Font packages and profiles
@@ -632,7 +629,7 @@ This auto-detects your current system configuration and generates a minimal Hydr
 │   ├── vim.nix                  # Editor configuration
 │   ├── firefox.nix              # Host Firefox toggle and user-agent
 │   └── obsidian.nix             # Host Obsidian toggle and vault paths
-├── modules/                     # Local NixOS modules
+├── custom/                     # Local NixOS modules
 ├── tasks/                       # Pentest task VM slots (task1.nix, task2.nix, ...)
 └── specialisations/
     ├── _base.nix                # Shared base packages
@@ -748,10 +745,10 @@ All configuration is done through `hydrix.*` options in your machine config file
 
 ### Locale and Timezone
 
-Locale is standard NixOS — configure it once in `shared/common.nix` and it applies to the host and all VMs automatically:
+Locale is standard NixOS, configure it once in `modules/common.nix` and it applies to the host and all VMs automatically:
 
 ```nix
-# shared/common.nix
+# modules/common.nix
 time.timeZone                 = "America/New_York";
 i18n.defaultLocale            = "en_US.UTF-8";
 i18n.extraLocaleSettings      = { LC_ALL = "en_US.UTF-8"; };
@@ -857,7 +854,7 @@ mvm rebuild comms
     # Iterative network updates:
     # 1. Connect to new WiFi on router VM console (nmcli / nmtui)
     # 2. wifi-sync poll  # Compare router vs local config
-    # 3. wifi-sync pull   # Pull credentials into shared/wifi.nix
+    # 3. wifi-sync pull   # Pull credentials into modules/wifi.nix
     # 4. rebuild          # Apply to router VM
 
     # Mullvad VPN integration
@@ -882,7 +879,7 @@ mvm rebuild comms
 
 ### Networking
 
-Built-in bridges (`br-mgmt`, `br-pentest`, `br-comms`, `br-browse`, `br-dev`, `br-builder`, `br-lurking`, `br-files`) are created automatically — no configuration needed for the default set.
+Built-in bridges (`br-mgmt`, `br-pentest`, `br-comms`, `br-browse`, `br-dev`, `br-builder`, `br-lurking`, `br-files`) are created automatically, no configuration needed for the default set.
 
 To add a custom bridge beyond the built-in set, use `extraNetworks`. Each entry creates a host bridge (`br-<name>`), TAP attachment rules, and a DHCP subnet in the router VM. Declare it once; it is injected into both the host and router VM configs automatically.
 
@@ -891,7 +888,7 @@ To add a custom bridge beyond the built-in set, use `extraNetworks`. Each entry 
   hydrix.networking.extraNetworks = [
     {
       name      = "office";          # creates br-office
-      subnet    = "192.168.109";     # /24 prefix — .253 becomes the router gateway
+      subnet    = "192.168.109";     # /24 prefix, .253 becomes the router gateway
       routerTap = "mv-router-offi";  # router-side TAP name (max 15 chars)
     }
   ];
@@ -1086,13 +1083,13 @@ isMicrovm = !isHost && !graphical.standalone;
 The `standalone` option on a VM config is the switch:
 
 ```nix
-hydrix.graphical.standalone = true;   # libvirt VM with own display → full WM tier
-hydrix.graphical.standalone = false;  # microVM via xpra → theming only (default)
+hydrix.graphical.standalone = true;   # libvirt VM with own display -> full WM tier
+hydrix.graphical.standalone = false;  # microVM via xpra -> theming only (default)
 ```
 
 ### Shared Modules
 
-The `shared/` directory in your `hydrix-config` holds settings that apply to all machines. Each file is a NixOS module imported by every machine (and, where relevant, by VMs via `hostConfig`). Settings use `lib.mkDefault` so individual machine configs can override with plain assignment.
+The `modules/` directory in your `hydrix-config` holds settings that apply to all machines. Each file is a NixOS module imported by every machine (and, where relevant, by VMs via `hostConfig`). Settings use `lib.mkDefault` so individual machine configs can override with plain assignment.
 
 | File | What it controls |
 |------|-----------------|
@@ -1175,7 +1172,7 @@ Labels can be overridden temporarily at runtime with `ws-name`:
 
 ```bash
 ws-name encryption   # current workspace shows "ENCRYPTION" in polybar
-ws-name              # reset — reverts to registry label (e.g. "DEV")
+ws-name              # reset, reverts to registry label (e.g. "DEV")
 ```
 
 Overrides are written to `/tmp/ws-names/<number>` and cleared automatically on reboot. The polybar module checks this directory before falling back to the vm-registry, so i3 workspace names are never changed.
@@ -1245,6 +1242,8 @@ The polybar PWR module shows the current mode (SAVE/AUTO/PERF) and left-clicking
 | `unibar` | Classic solid bar with `//` separators |
 | `modular` | Transparent background with module backgrounds (default) |
 | `pills` | Multiple small rounded floating bars |
+
+Also mainly replace with Waybar on Hyprland
 
 ### Secrets Management
 
@@ -1317,7 +1316,7 @@ Each VM has its own declarative colorscheme that drives pywal inside the VM:
 
 ```nix
 # profiles/browsing/default.nix
-hydrix.colorscheme = "punk";   # pink/purple cyberpunk
+hydrix.colorscheme = "hydrix";   # default colorscheme 
 ```
 
 This scheme is used for the VM's own terminals, rofi, dunst, GTK, and any other pywal-aware apps running inside the VM. It acts as the base palette, which colors are actually applied depends on Layer 2.
@@ -1325,11 +1324,6 @@ This scheme is used for the VM's own terminals, rofi, dunst, GTK, and any other 
 **Available colorschemes** (located in `colorschemes/`):
 - `hydrix` - Default teal/cyan
 - `nord` - Nord blue
-- `nvid` - Nvidia greens
-- `punk` - Pink/purple cyberpunk
-- `modgruv` - Gruvbox warm
-- `zero` - Pure black minimal
-- `blues`, `dunes`, `nebula`, `perp`, `deeporange`, `mardu`
 
 User-defined colorschemes in `hydrix-config/colorschemes/` take priority over framework ones with the same name.
 
@@ -1340,7 +1334,7 @@ With `vmThemeSync` enabled, VMs do not run pywal locally. Instead, the host's wa
 ```
 Host                                      VM
 ~/.cache/wal/  (read-only virtiofs)       /mnt/wal-cache  (read-only mount)
-  colors.json  ──── virtiofs ──────>        │  copied at boot by wal-cache-link
+  colors.json  ---- virtiofs ---->        │  copied at boot by wal-cache-link
   sequences                               ~/.cache/wal/  (isolated local copy)
   colors                                    colors.json
                                             sequences
@@ -1438,7 +1432,7 @@ Without this, the virtiofs mount would be empty on first boot and VMs would have
 
 ### Layer 3 — Focus Border Color
 
-The focus border is the window border color shown **on the host** when a VM application window is focused. It works on both i3 (X11) and Sway (Wayland). It is entirely independent from what colors the VM uses internally — you can have a VM running `nord` internally while its host-side border is bright orange.
+The focus border is the window border color shown **on the host** when a VM application window is focused. It works on both i3 (X11) and Sway (Wayland). It is entirely independent from what colors the VM uses internally, you can have a VM running `nord` internally while its host-side border is bright orange.
 
 **Implementation note (Sway):** Sway has no IPC command to change `client.focused` at runtime — the only mechanism is writing `~/.config/sway/colors.conf` and calling `swaymsg reload`. To avoid a visible freeze during focus switches, the reload is scheduled asynchronously on a background thread with a 40ms debounce. The focus event handler returns immediately (no compositor pause), and the border color updates imperceptibly shortly after. Rapid workspace switches are coalesced into a single reload.
 
@@ -1478,7 +1472,7 @@ Named colors: `red`, `orange`, `yellow`, `green`, `cyan`, `blue`, `purple`, `pin
 
 **Why `meta.nix` and not `default.nix`?** The host flake reads `focusBorder` at evaluation time to populate `vmRegistry` (→ `/etc/hydrix/vm-registry.json`). `meta.nix` is a plain Nix attrset with zero evaluation cost. Reading it from `hydrix.vmThemeSync.focusBorder` in `default.nix` would force full NixOS evaluation of every VM config during every host rebuild, which causes OOM on systems with limited RAM.
 
-The `hydrix.vmThemeSync.focusBorder` option in `default.nix` still exists and is read by the Python focus daemons at runtime — keep it in sync with `meta.nix`.
+The `hydrix.vmThemeSync.focusBorder` option in `default.nix` still exists and is read by the Python focus daemons at runtime, keep it in sync with `meta.nix`.
 
 When `focusBorder` is set, it is always active and bypasses both the static/dynamic daemon modes and the `hydrix-focus` override toggle entirely.
 
@@ -1614,7 +1608,7 @@ Font profiles live in `~/hydrix-config/fonts/`. Each profile sets per-app sizes,
      # ...
    };
    ```
-3. Add the package to `shared/fonts.nix` under `packages` and `packageMap`
+3. Add the package to `modules/fonts.nix` under `packages` and `packageMap`
 4. Set `hydrix.graphical.font.family = "MyFont"` in your machine config
 
 The profile activates automatically, no other wiring needed.
@@ -1756,7 +1750,7 @@ hydrix.microvmHost.vms."microvm-myprofile" = { enable = true; };
    hydrix.vm.hostname = "my-custom-name";
    ```
 
-3. If the profile needs a Mullvad VPN tunnel, add to `machines/<serial>.nix` (or `shared/graphical.nix`):
+3. If the profile needs a Mullvad VPN tunnel, add to `machines/<serial>.nix` (or `modules/graphical.nix`):
 ```nix
 hydrix.router.vpn.mullvad.bridges.myprofile = ./mullvad-myprofile.conf;
 ```
@@ -2403,13 +2397,13 @@ VM reboot / shutdown → tmpfs destroyed → starts locked
 
 ```bash
 cp -r ~/Hydrix/templates/user-config/infra/vault ~/hydrix-config/infra/
-cp ~/Hydrix/templates/user-config/shared/vault*.nix ~/hydrix-config/shared/
+cp ~/Hydrix/templates/user-config/modules/vault*.nix ~/hydrix-config/modules/
 ```
 
 **2. Import in your machine config:**
 
 ```nix
-imports = [ ../shared/vault.nix ];
+imports = [ ../modules/vault.nix ];
 ```
 
 **3. Add to machine autostart:**
@@ -2418,7 +2412,7 @@ imports = [ ../shared/vault.nix ];
 hydrix.microvmHost.vms."microvm-vault" = { autostart = true; };
 ```
 
-**4. Add keybind** in `shared/hyprland.nix` / `shared/sway.nix`:
+**4. Add keybind** in `modules/hyprland.nix` / `modules/sway.nix`:
 
 ```
 bind = $mod SHIFT, P, exec, vault-pick        # Hyprland
@@ -3191,7 +3185,7 @@ All scripts are wrapped via Nix and available in PATH after installation.
 | Command | Purpose |
 |---------|---------|
 | `wifi-sync poll` | Query router VM for current networks, compare with local config |
-| `wifi-sync pull` | Pull credentials from router, update `shared/wifi.nix` |
+| `wifi-sync pull` | Pull credentials from router, update `modules/wifi.nix` |
 | `wifi-sync status` | Quick sync status check |
 
 ### MicroVM
@@ -3470,7 +3464,7 @@ waypipe-connect-all             # connect waypipe for all running profile VMs
 
 ### Keybindings
 
-User keybindings live in `shared/sway.nix` in your hydrix-config (provisioned from the template). They mirror `shared/i3.nix` — same workspace bindings, same `sway-ws-app` for VM routing.
+User keybindings live in `modules/sway.nix` in your hydrix-config (provisioned from the template). They mirror `modules/i3.nix` - same workspace bindings, same `sway-ws-app` for VM routing.
 
 ### Internal Display Scaling (Wayland)
 

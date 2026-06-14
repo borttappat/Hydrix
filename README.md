@@ -13,88 +13,38 @@ Discl **AI** mer - **AI** was used in setting this project up, do not use unless
 
 **Everything** seen here is still under development. Once I end up with a solid prototype that has been more battle-tested and ran on different hardware, I will try to make some sort of numbered release.
 
-Hydrix is an options-driven NixOS framework that provides complete network isolation through VM compartmentalization. Your WiFi hardware is passed directly to a router VM via VFIO, giving you granular control over network traffic while maintaining a hardened host. Qubes will always be a better setup, and from a security and segmentation standpoint, Hydrix makes(at least as of now) sacrifices such as a shared Host -> Guest shared /nix/store. Further development is neccessary to fully find ways of approximating Qubes, but expect manually reading through all of the code of this setup and tweaking things yourself to tailor settings to your security preferences. The heavy lifting here is all done with [MicroVMs](https://github.com/microvm-nix/microvm.nix), huge shoutout to Astro.
+Hydrix is an options-driven NixOS framework that provides complete network isolation through VM compartmentalization. Your WiFi hardware is passed directly to a router VM via VFIO, giving you granular control over network traffic while maintaining a hardened host. Qubes will always be a better setup, and from a security and segmentation standpoint, Hydrix makes(at least as of now) sacrifices such as a shared Host -> Guest shared /nix/store. Further development is neccessary to fully find ways of approximating Qubes, but expect manually reading through all of the code of this setup and tweaking things yourself to tailor settings to your security preferences. The heavy lifting here is all done with [MicroVMs](https://github.com/microvm-nix/microvm.nix), huge shoutout to Astro. 
 
 For full documentation see [DOCUMENTATION.md](DOCUMENTATION.md).
 
 ---
 
-## Architecture
-
-```
-+---------------------------------------------------------------------+
-|                         HOST (Lockdown Mode)                        |
-|   - No direct internet access                                       |
-|   - WiFi hardware passed to router VM via VFIO                      |
-|   - No L3 presence on any bridge (no IPv4 or IPv6 addresses)        |
-|   - Bridges exist as L2 plumbing only; host is invisible to VMs     |
-|   - Bridges: br-mgmt, br-pentest, br-comms, br-browse, br-dev,      |
-|              br-shared, br-builder, br-lurking, br-files            |
-+---------------------------------------------------------------------+
-                            |
-        TAP Interfaces (Router VM connects to each bridge)
-                            |
-         +---- br-mgmt (192.168.100.0/24) ------+
-         |         ^ mv-router-mgmt              |
-         +---- br-pentest (192.168.101.0/24) ---+
-         |         ^ mv-router-pent              |
-         +---- br-comms (192.168.102.0/24) -----+
-         |         ^ mv-router-comm              |
-         +---- br-browse (192.168.103.0/24) ----+
-         |         ^ mv-router-brow              |--- Router VM (WiFi)
-         +---- br-dev (192.168.104.0/24) -------+
-         |         ^ mv-router-dev               |    CID: 200
-         +---- br-shared (192.168.105.0/24) ----+
-         |         ^ mv-router-shar              |    Subnets: 192.168.100-108.x
-         +---- br-builder (192.168.106.0/24) ---+
-         |         ^ mv-router-bldr              |
-         +---- br-lurking (192.168.107.0/24) ---+
-         |         ^ mv-router-lurk              |
-         +---- br-files (192.168.108.0/24) ------+
-                         ^ mv-router-file        |
-                         |                       |
-              +----------+----------+------------+-----------+
-              |          |          |            |           |
-         +--------+  +--------+  +--------+  +--------+  +--------+
-         |Pentest |  |Browsing|  |  Comms |  |  Dev   |  |Lurking |
-         |   VM   |  |   VM   |  |   VM   |  |   VM   |  |   VM   |
-         |CID:102 |  |CID:103 |  |CID:104 |  |CID:105 |  |CID:106 |
-         +--------+  +--------+  +--------+  +--------+  +--------+
-
-         +--------+  +--------+  +--------+
-         |Builder |  |Gitsync |  | Files  |
-         |   VM   |  |   VM   |  |   VM   |
-         |CID:210 |  |CID:211 |  |CID:212 |
-         +--------+  +--------+  +--------+
-
-         +--------+  +--------+
-         | Vault  |  |Hostsync|
-         |   VM   |  |   VM   |
-         |CID:213 |  |CID:214 |
-         +--------+  +--------+
-```
-
-All VM communication uses vsock. No SSH or network access to VMs. Your configuration lives in a separate `~/hydrix-config/` repo that imports Hydrix as a flake input. Machine configs are named by hardware serial number for automatic detection during reinstalls.
-
----
-
 ## Features
+
 
 - **MicroVM compartmentalization** - profile VMs (browsing, pentest, dev, comms, lurking) and infrastructure VMs (router, builder, gitsync, files, vault, usb-sandbox, hostsync)
 - **WiFi VFIO passthrough** - host has no direct internet in lockdown mode; all traffic routes through the router VM
-- **Sway/Hyprland (Wayland) and i3 (X11)** - Started out with i3, migrated to Wayland for Waypipe suppoert over Xpra - VM apps forwarded as native windows via waypipe or xpra over vsock
-- **VM metrics polling** - polybar bottom bar pulls live CPU, RAM, disk, uptime from each running VM via vsock
-- **vm-dev / vm-sync** (WIP) - develop packages inside VMs, stage and pull them into host profiles without a rebuild
+
 - **Task pentest slots** - pre-declared isolated VM slots (task1-3) assignable to named engagements without a host rebuild
+
 - **Per-VM Mullvad VPN** - each profile VM can exit through a different Mullvad server
+
 - **Encrypted inter-VM file transfer** - files VM with per-bridge TAP access and vsock passphrase delivery
+
 - **Builder VM** - builds host and VM closures from inside a locked-down nix environment with internet via router VM
 - **Gitsync VM** - push and pull git repos from lockdown mode without host internet
 - **Hostsync VM** - secure file inbox from VMs to host
 - **Vault VM** - isolated KeepassXC credential store with wofi picker and vsock-only access
+- **USB sandbox VM** - safe handling of untrusted USB storage inside an isolated VM
+
 - **Declarative boot modes** - lockdown (default), administrative, fallback as NixOS specialisations
 - **Stable fallback router** - immutable break-glass router VM for when the main router config breaks
-- **USB sandbox** - safe handling of untrusted USB storage inside an isolated VM
+
+Some more visual/graphical features:
+
+
+- **Sway/Hyprland (Wayland) and i3 (X11)** - Started out with i3, migrated to Wayland for Waypipe suppoert over Xpra - VM apps forwarded as native windows via waypipe or xpra over vsock. Currently mainly set up with Hyprland in mind.
+- **VM metrics polling** - polybar bottom bar pulls live CPU, RAM, disk, uptime from each running VM via vsock
 - **Pywal colorscheme system** - three independent color layers per VM: declarative base scheme, live host wal-cache sync via virtiofs, and per-VM focus border color on the host
 
 ---
@@ -109,11 +59,6 @@ The host has three boot modes, each a NixOS specialisation:
 | administrative | Via router VM | `192.168.100.1` on `br-mgmt` only | Full functionality, VM management, package installs |
 | fallback | Direct WiFi, no router VM | No bridges | Emergency recovery, initial setup |
 
-```bash
-rebuild                  # lockdown (default)
-rebuild administrative   # full functionality
-rebuild fallback         # emergency direct WiFi
-```
 
 Specialisation files live in `hydrix-config/specialisations/`. Add extra packages per mode there:
 
@@ -145,16 +90,14 @@ curl -sL https://raw.githubusercontent.com/borttappat/Hydrix/main/scripts/setup-
 
 The script detects your current system (user, locale, WiFi), creates `~/hydrix-config/`, generates your machine config, and handles multi-machine setups.
 
-### After setup
-
-```bash
-# Rebuild the host
-rebuild
 
 # Start a profile VM (waypipe or xpra tunnel starts automatically)
+```bash
 microvm start microvm-browsing
+```
 
 # Build and start all profile VMs at once
+```bash
 mvm rebuild browsing pentest dev comms lurking
 ```
 
@@ -176,9 +119,9 @@ Built-in profiles and their defaults:
 
 | VM | CID | WS | Bridge | Persistence |
 |----|-----|----|--------|-------------|
-| microvm-pentest | 102 | 2 | br-pentest | persistent, LUKS-encrypted |
+| microvm-pentest | 102 | 2 | br-pentest | persistent, optionally LUKS-encrypted |
 | microvm-browsing | 103 | 3 | br-browse | 10GB home |
-| microvm-comms | 104 | 4 | br-comms | ephemeral |
+| microvm-comms | 104 | 4 | br-comms | persistent |
 | microvm-dev | 105 | 5 | br-dev | 50GB + 20GB docker |
 | microvm-lurking | 106 | 6 | br-lurking | ephemeral |
 
@@ -196,26 +139,39 @@ microvm start microvm-myvm
 
 ## Building and Rebuilding VMs
 
+
+Build a VM image (evaluates config, writes runner to nix store)
 ```bash
-# Build a VM image (evaluates config, writes runner to nix store)
 microvm build microvm-browsing
+```
 
-# Start a VM (polls readiness, then connects waypipe/xpra tunnel)
+Start a VM (polls readiness, then connects waypipe/xpra tunnel)
+```bash
 microvm start microvm-browsing
+```
 
-# Stop a VM
+Stop a VM
+```bash
 microvm stop microvm-browsing
+```
 
-# Restart (required for kernel, initrd, or runner changes)
+Restart (required for kernel, initrd, or runner changes)
+```bash
 microvm restart microvm-browsing
+```
 
-# Live switch (applies config changes without restart - no kernel/runner changes)
+Live switch (applies config changes without restart - no kernel/runner changes)
+```bash
 microvm update microvm-browsing
+```
 
-# Check running vs built state
+Check running vs built state
+```bash
 microvm switch-status microvm-browsing
+```
 
-# Operate on multiple VMs at once
+Operate on multiple VMs at once
+```bash
 mvm rebuild browsing pentest dev
 mvm stop files pentest browsing router builder gitsync
 mvm build files pentest browsing
@@ -230,25 +186,26 @@ microvm builder switch            # build + switch host config
 
 ---
 
-## Display Stack: Sway and i3
+## Display Stack: Hyprland(actively maintaine), Sway and i3(both somewhat deprecated)
 
-Both are supported and can coexist (start from separate TTYs).
 
 ```nix
 # machines/<serial>.nix
-hydrix.sway.enable = true;   # Wayland - VM apps forwarded via waypipe
-hydrix.i3.enable   = true;   # X11     - VM apps forwarded via xpra
+hydrix.sway.enable = true;      # Wayland - VM apps forwarded via waypipe
+hydrix.hyprland.enable = true;  # Wayland - VM apps forwared via waypipe
+hydrix.i3.enable   = true;      # X11     - VM apps forwarded via xpra
 ```
 
-Under Sway, pressing `Super+Return` on a VM workspace launches the terminal in that VM via waypipe. The window appears as a native Sway window. Under i3 the same key uses xpra.
+Under Hyprland/Sway, pressing `Super+Return` on a VM workspace launches the terminal in that VM via waypipe. The window appears as a native Sway window. Under i3 the same key uses xpra.
 
 ```bash
-sway-session       # start Sway (cleans up waypipe + env on exit)
-sway-ws-app alacritty          # launch app in the VM on current workspace
-sway-ws-app firefox https://...
+sway-session       # start Sway 
+hyprland-session   # start Hyprland  
+sway-ws-app alacritty          # launch app in the VM on current workspace, naming convention due to Sway being approached first
+sway-ws-app firefox
 ```
 
-User keybindings live in `shared/sway.nix` and `shared/i3.nix` in your `hydrix-config`.
+User keybindings live in `modules/hyprland.nix`, `modules/sway.nix` and `modules/i3.nix` in your `hydrix-config`.
 
 ---
 
@@ -258,8 +215,8 @@ Three independent color layers per VM:
 
 ```
 Layer 1 - VM internal colorscheme
-  hydrix.colorscheme = "punk"
-  Drives pywal inside the VM: alacritty, rofi, dunst, GTK
+  hydrix.colorscheme = "hydrix"
+  Drives pywal inside the VM: alacritty, dunst, GTK
 
 Layer 2 - Host wal cache via virtiofs
   Host ~/.cache/wal shared read-only into VMs at boot.
@@ -272,7 +229,7 @@ Layer 3 - Focus border (host-side)
   The Hyprland/Sway window border color when a VM window is focused.
   Fully independent from the VM's internal colors. Lives in meta.nix
   (plain attrset) so the host flake can read it without evaluating
-  any VM NixOS configuration — avoids OOM on memory-constrained hosts.
+  any VM NixOS configuration - avoids OOM on memory-constrained hosts.
 ```
 
 ```bash
@@ -283,7 +240,7 @@ randomwalrgb                 # random wallpaper from configured directory
 Declarative colorschemes in `profiles/<name>/default.nix`:
 
 ```nix
-hydrix.colorscheme = "nord";   # nord, punk, nvid, hydrix, modgruv, zero, blues, ...
+hydrix.colorscheme = "nord";   # nord, hydrix, ... add more with `save-colorscheme xyz` 
 ```
 
 User-defined colorschemes in `hydrix-config/colorschemes/` (pywal JSON format) take priority over framework ones with the same name.
@@ -292,9 +249,9 @@ User-defined colorschemes in `hydrix-config/colorschemes/` (pywal JSON format) t
 
 ## Adding Packages
 
-### Shared system packages (all machines and VMs)
+### modules system packages (all machines and VMs)
 
-Add to `shared/common.nix`:
+Add to `modules/common.nix`:
 
 ```nix
 environment.systemPackages = with pkgs; [ ripgrep fd ];
