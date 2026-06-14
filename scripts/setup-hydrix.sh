@@ -1111,7 +1111,7 @@ generate_machine_nix() {
 
     local tmpl_root
     tmpl_root=$(find_hydrix_templates) || error "Could not find Hydrix templates directory"
-    local template_file="$tmpl_root/machines/example-serial.nix"
+    local template_file="$tmpl_root/machines/installer.nix"
     [[ -f "$template_file" ]] || error "Machine config template not found: $template_file"
 
     # Build hardware import line
@@ -1157,6 +1157,7 @@ generate_full_config() {
     generate_flake_nix
     copy_template_specialisations
     copy_template_profiles
+    copy_template_infra
     copy_template_modules
     substitute_modules_locale
     substitute_modules_wifi
