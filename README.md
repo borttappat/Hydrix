@@ -34,7 +34,7 @@ For full documentation see [DOCUMENTATION.md](DOCUMENTATION.md).
 - **Builder VM** - builds host and VM closures from inside a locked-down nix environment with internet via router VM
 - **Gitsync VM** - push and pull git repos from lockdown mode without host internet
 - **Hostsync VM** - secure file inbox from VMs to host
-- **Vault VM** - isolated KeepassXC credential store with wofi picker and vsock-only access
+- **Vault VM** - isolated KeepassXC credential store with launcher-based picker and vsock-only access
 - **USB sandbox VM** - safe handling of untrusted USB storage inside an isolated VM
 
 - **Declarative boot modes** - lockdown (default), administrative, fallback as NixOS specialisations
@@ -43,8 +43,8 @@ For full documentation see [DOCUMENTATION.md](DOCUMENTATION.md).
 Some more visual/graphical features:
 
 
-- **Sway/Hyprland (Wayland) and i3 (X11)** - Started out with i3, migrated to Wayland for Waypipe suppoert over Xpra - VM apps forwarded as native windows via waypipe or xpra over vsock. Currently mainly set up with Hyprland in mind.
-- **VM metrics polling** - polybar bottom bar pulls live CPU, RAM, disk, uptime from each running VM via vsock
+- **Hyprland (primary), Sway and i3 (available, disabled by default)** - VM apps forwarded as native windows via waypipe (Wayland) or xpra (X11) over vsock. All three WMs default to disabled - enable exactly one in your machine config.
+- **VM metrics polling** - status bar pulls live CPU, RAM, disk, uptime from each running VM via vsock
 - **Pywal colorscheme system** - three independent color layers per VM: declarative base scheme, live host wal-cache sync via virtiofs, and per-VM focus border color on the host
 
 ---
@@ -91,7 +91,7 @@ curl -sL https://raw.githubusercontent.com/borttappat/Hydrix/main/scripts/setup-
 The script detects your current system (user, locale, WiFi), creates `~/hydrix-config/`, generates your machine config, and handles multi-machine setups.
 
 
-# Start a profile VM (waypipe or xpra tunnel starts automatically)
+# Start a profile VM (display tunnel starts automatically)
 ```bash
 microvm start microvm-browsing
 ```
@@ -145,7 +145,7 @@ Build a VM image (evaluates config, writes runner to nix store)
 microvm build microvm-browsing
 ```
 
-Start a VM (polls readiness, then connects waypipe/xpra tunnel)
+Start a VM (polls readiness, then connects display tunnel)
 ```bash
 microvm start microvm-browsing
 ```
@@ -186,26 +186,71 @@ microvm builder switch            # build + switch host config
 
 ---
 
-## Display Stack: Hyprland(actively maintaine), Sway and i3(both somewhat deprecated)
+## Display Stack
 
+All three WMs default to disabled. Enable exactly one in `machines/<serial>.nix`:
 
 ```nix
-# machines/<serial>.nix
-hydrix.sway.enable = true;      # Wayland - VM apps forwarded via waypipe
-hydrix.hyprland.enable = true;  # Wayland - VM apps forwared via waypipe
-hydrix.i3.enable   = true;      # X11     - VM apps forwarded via xpra
+# machines/<serial>.nix - enable exactly one
+hydrix.hyprland.enable = true;  # Wayland, VM apps forwarded via waypipe (recommended)
+# hydrix.sway.enable = true;    # Wayland, VM apps forwarded via waypipe
+# hydrix.i3.enable = true;      # X11, VM apps forwarded via xpra
 ```
 
-Under Hyprland/Sway, pressing `Super+Return` on a VM workspace launches the terminal in that VM via waypipe. The window appears as a native Sway window. Under i3 the same key uses xpra.
+Hyprland is the primary supported stack. Sway and i3 are available but see less maintenance.
+
+On a VM workspace, pressing `Super+Return` launches the terminal in that VM. Under Hyprland and Sway the window appears as a native compositor window via waypipe. Under i3 the same key uses xpra.
+
+### Hyprland (primary, actively maintained)
+
+| Component | Program |
+|-----------|---------|
+| Compositor | Hyprland |
+| Status bar | waybar |
+| Launcher | wofi |
+| Lockscreen | hyprlock |
+| VM forwarding | waypipe (vsock) |
 
 ```bash
-sway-session       # start Sway 
-hyprland-session   # start Hyprland  
-sway-ws-app alacritty          # launch app in the VM on current workspace, naming convention due to Sway being approached first
-sway-ws-app firefox
+hyprland-session              # start Hyprland session from TTY
+hypr-ws-app alacritty        # launch app in VM on current workspace
+hypr-ws-app firefox
 ```
 
-User keybindings live in `modules/hyprland.nix`, `modules/sway.nix` and `modules/i3.nix` in your `hydrix-config`.
+Keybindings live in `modules/hyprland.nix`.
+
+### Sway (available, less maintained)
+
+| Component | Program |
+|-----------|---------|
+| Compositor | Sway |
+| Status bar | waybar |
+| Launcher | wofi |
+| Lockscreen | swaylock |
+| VM forwarding | waypipe (vsock) |
+
+```bash
+sway-session                  # start Sway session from TTY
+sway-ws-app alacritty        # launch app in VM on current workspace
+```
+
+Keybindings live in `modules/sway.nix`.
+
+### i3 (available, X11)
+
+| Component | Program |
+|-----------|---------|
+| Window manager | i3 |
+| Status bar | polybar |
+| Launcher | rofi |
+| Lockscreen | xss-lock |
+| VM forwarding | xpra (vsock) |
+
+```bash
+ws-app alacritty              # launch app in VM on current workspace
+```
+
+Keybindings live in `modules/i3.nix`.
 
 ---
 
@@ -226,7 +271,7 @@ Layer 2 - Host wal cache via virtiofs
 
 Layer 3 - Focus border (host-side)
   focusBorder = "yellow"   # in profiles/<name>/meta.nix
-  The Hyprland/Sway window border color when a VM window is focused.
+  The compositor border color when a VM window is focused.
   Fully independent from the VM's internal colors. Lives in meta.nix
   (plain attrset) so the host flake can read it without evaluating
   any VM NixOS configuration - avoids OOM on memory-constrained hosts.
