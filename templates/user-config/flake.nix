@@ -269,7 +269,13 @@
          (builtins.filter hasMeta infraNames);
 
     infraNetworks = map (m: { name = m._infraName; inherit (m) subnet routerTap; })
-      (builtins.filter (m: m ? routerTap) discoveredInfra);
+      (builtins.filter (m: m ? routerTap && !(m.builtinVm or false)) discoveredInfra);
+
+    # Builtin infra VMs (builtinVm = true) with routerTap+subnet — TAPs are hardwired in
+    # the framework, but subnets come from meta.nix. Passed to router as infraLans so it
+    # can assign IPs on those interfaces (e.g. 192.168.100.253 on mv-router-mgmt).
+    infraLans = map (m: { tap = m.routerTap; inherit (m) subnet; })
+      (builtins.filter (m: m ? routerTap && (m.builtinVm or false)) discoveredInfra);
 
     infraTapBridges = builtins.foldl' (acc: m: acc // m.tapBridges)
       {} (builtins.filter (m: m ? tapBridges) discoveredInfra);
@@ -384,12 +390,12 @@
           ./modules/common.nix
           ./modules/wifi.nix
           ./infra/router/default.nix
+          { hydrix.router.microvm.infraLans = infraLans; }
           # Mullvad VPN — place .conf files in vpn/, edit vpn/mullvad.nix,
           # set enable = true, then rebuild the router.
         ] ++ (if builtins.pathExists ./vpn/mullvad.nix
               then [{ hydrix.router.vpn.mullvad = import ./vpn/mullvad.nix; }]
-              else []) ++ [
-        ];
+              else []);
       };
 
       # MicroVM Router Stable (immutable fallback — starts automatically if main router fails)
@@ -401,6 +407,7 @@
           ./modules/common.nix
           ./modules/wifi.nix
           ./infra/router-stable/default.nix
+          { hydrix.router.microvm.infraLans = infraLans; }
         ];
       };
 
