@@ -165,6 +165,16 @@ in {
       description = "Firefox UI density: 0 = normal, 1 = compact, 2 = touch.";
     };
 
+    firefox.homepage = lib.mkOption {
+      type = lib.types.nullOr lib.types.str;
+      default = null;
+      description = ''
+        URL to use as Firefox's startup homepage. null = Firefox default (about:home).
+        Applied as browser.startup.homepage with startup page set to show homepage.
+      '';
+      example = "https://example.com";
+    };
+
     zathura.recolor = lib.mkOption {
       type = lib.types.bool;
       default = true;

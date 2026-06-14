@@ -26,7 +26,17 @@
 # To add a custom extension, use firefox-extension-add <slug> to get the entry,
 # then add it to firefox.extensionRegistry below and select it per-profile.
 
-{ lib, ... }:
+{ config, lib, ... }:
+
+let
+  reg  = config.hydrix.graphical.firefox.extensionRegistry;
+  exts = config.hydrix.graphical.firefox.extensions;
+  mkExtSettings = names:
+    builtins.listToAttrs (map (n: {
+      name  = reg.${n}.id;
+      value = { install_url = reg.${n}.url; installation_mode = "force_installed"; };
+    }) (builtins.filter (n: reg ? ${n}) names));
+in
 
 {
   # Install Firefox on the host system (it's always on in VMs)
@@ -37,6 +47,11 @@
     "ublock-origin" "bitwarden" "vimium-ff" "darkreader" "pywalfox"
   ];
 
+  # Wire extensions into the actual Firefox policy so they are force-installed.
+  # References the final merged value of hydrix.graphical.firefox.extensions, so
+  # profile-specific lists in profiles/<name>/default.nix are respected automatically.
+  programs.firefox.policies.ExtensionSettings = mkExtSettings exts;
+
   # User-agent spoofing — set per-profile, not globally
   # hydrix.graphical.firefox.userAgent = lib.mkDefault "edge-windows";
 
@@ -44,4 +59,7 @@
   hydrix.graphical.firefox.verticalTabs = lib.mkDefault true;
   hydrix.graphical.firefox.uidensity = lib.mkDefault 1;  # 0=normal, 1=compact, 2=touch
   hydrix.graphical.firefox.search.default = lib.mkDefault "ddg";
+
+  # Startup homepage — set to your preferred URL, or leave null for about:home
+  # hydrix.graphical.firefox.homepage = lib.mkDefault "https://example.com";
 }

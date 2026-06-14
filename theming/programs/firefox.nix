@@ -387,6 +387,9 @@ in {
             "font.name.serif.x-western" = lib.mkDefault fontName;
             "font.size.variable.x-western" = lib.mkDefault fontSize;
             "font.size.monospace.x-western" = lib.mkDefault fontSize;
+          } // lib.optionalAttrs (ffCfg.homepage != null) {
+            "browser.startup.homepage" = ffCfg.homepage;
+            "browser.startup.page" = 1;  # 0=blank, 1=homepage, 3=resume session
           } // lib.optionalAttrs ffCfg.verticalTabs {
             # Native Vertical Tabs - start collapsed, expand on hover
             "sidebar.revamp" = true;
