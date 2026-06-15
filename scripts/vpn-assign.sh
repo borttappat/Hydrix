@@ -22,6 +22,11 @@
 
 set -euo pipefail
 
+# Re-exec with sudo if not root — ip route/rule require root
+if [ "$(id -u)" != "0" ]; then
+    exec sudo "$0" "$@"
+fi
+
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -108,14 +113,17 @@ update_routing() {
         direct)
             local wan gw
             wan=$(get_wan_interface)
-            [ -z "$wan" ] && { echo -e "${RED}Error: No WAN interface${NC}"; return 1; }
-            gw=$(ip route | awk "/default.*$wan/{print \$3}")
-            if [ -n "$gw" ]; then
-                ip route add default via "$gw" dev "$wan" table "$table"
+            if [ -z "$wan" ]; then
+                echo -e "${YELLOW}[$network]${NC} Direct WAN (WAN not ready yet — will route once up)"
             else
-                ip route add default dev "$wan" table "$table"
+                gw=$(ip route | awk "/default.*$wan/{print \$3}")
+                if [ -n "$gw" ]; then
+                    ip route add default via "$gw" dev "$wan" table "$table"
+                else
+                    ip route add default dev "$wan" table "$table"
+                fi
+                echo -e "${GREEN}[$network]${NC} Direct WAN ($wan)"
             fi
-            echo -e "${GREEN}[$network]${NC} Direct WAN ($wan)"
             ;;
         *)
             local vpn_if
@@ -287,6 +295,7 @@ save_persistent() {
 
 usage() {
     load_network_map 2>/dev/null || true
+    local nets="${!ROUTING_TABLES[*]}"
     cat << EOF
 Usage: vpn-assign <command> [args]
 
@@ -298,7 +307,7 @@ Usage: vpn-assign <command> [args]
   status                      Show assignments and active tunnels
   help                        This help
 
-Known networks:  ${!ROUTING_TABLES[*]:-"(load network-map to list)"}
+Known networks:  ${nets:-(load network-map to list)}
 Targets:         mullvad-<name>  direct  blocked
 EOF
 }

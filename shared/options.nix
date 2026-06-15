@@ -230,6 +230,7 @@ in {
           gitsyncStatus = 14513;
           vaultAgent    = 14514;
           exitNodes     = 14515;
+          lanControl    = 14516;
         };
         description = "vsock port assignments for Hydrix services. Override to avoid collisions with other software.";
       };

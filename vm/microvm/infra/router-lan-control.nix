@@ -1,7 +1,7 @@
 # Router LAN Control Service
 #
 # Vsock control endpoint for managing pentest VM LAN access.
-# Listens on vsock port 14515 for commands from host.
+# Listens on vsock port 14516 for commands from host.
 #
 # Commands:
 #   ENABLE_LAN <CID>          - Bridge VM with CID to physical network
@@ -361,14 +361,14 @@ in
     };
   };
 
-  # Vsock server on port 14515
+  # Vsock server on port 14516
   systemd.services.lan-control-server = {
-    description = "LAN control vsock server (port 14515)";
+    description = "LAN control vsock server (port 14516)";
     wantedBy = [ "multi-user.target" ];
     after = [ "router-lan-control.service" ];
     serviceConfig = {
       Type = "simple";
-      ExecStart = "${pkgs.socat}/bin/socat VSOCK-LISTEN:14515,reuseaddr,fork EXEC:${lanControlBin}/bin/router-lan-control";
+      ExecStart = "${pkgs.socat}/bin/socat VSOCK-LISTEN:14516,reuseaddr,fork EXEC:${lanControlBin}/bin/router-lan-control";
       Restart = "always";
     };
   };

@@ -792,10 +792,15 @@ in {
       serviceConfig = { Type = "oneshot"; RemainAfterExit = true; };
       script =
         # Connect each configured tunnel — fall back to direct if wg-quick fails
-        # so a failed tunnel never leaves a bridge with an empty routing table
+        # so a failed tunnel never leaves a bridge with an empty routing table.
+        # If the interface already exists (service restarted after partial run),
+        # skip wg-quick and re-apply routing from whatever state the tunnel is in.
         lib.concatMapStrings (bridge: ''
           echo "Connecting wg-${bridge}..."
-          if wg-quick up wg-${bridge}; then
+          if ip link show wg-${bridge} &>/dev/null; then
+            echo "wg-${bridge} already up, re-applying routing"
+            vpn-assign ${bridge} wg-${bridge}
+          elif wg-quick up wg-${bridge}; then
             vpn-assign ${bridge} wg-${bridge}
           else
             echo "Warning: wg-${bridge} failed to connect, routing ${bridge} direct"
@@ -887,7 +892,7 @@ in {
     security.sudo.wheelNeedsPassword = false;
 
     # ===== Packages =====
-    environment.systemPackages = lib.mkDefault (with pkgs; [
+    environment.systemPackages = (with pkgs; [
       openvpn
       iproute2
       iptables
