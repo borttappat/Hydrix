@@ -2794,6 +2794,15 @@ partition_and_mount() {
     # Drop kernel partition refs — without this, partprobe inside disko fails
     # with "unable to inform the kernel" and the old partition stays "in use"
     partx -d "$dev" 2>/dev/null || true
+
+    # For full-disk layouts, wipe any existing partition table so disko starts
+    # clean. Without this, stale GPT/partition signatures can cause disko to
+    # skip formatting or leave stale EFI entries that break subsequent installs.
+    if [[ "$layout" == full-disk-* ]]; then
+        log "Wiping existing partition table on ${dev}..."
+        wipefs -a "$dev" 2>/dev/null || true
+        sgdisk --zap-all "$dev" 2>/dev/null || true
+    fi
     sleep 1
 
     # Run disko (formats and mounts the NixOS partition only)
@@ -3187,6 +3196,17 @@ check_resume() {
 
     local config_dir="/mnt/home/${RESUME_USERNAME}/hydrix-config"
     [[ -d "$config_dir" ]] || { warn "Resume state found but config missing at $config_dir"; return 1; }
+
+    # Validate the target disk is still partitioned — if the disk was wiped since
+    # the previous run, resuming past disko would run nixos-install on a blank disk.
+    if [[ -n "${RESUME_DEVICE:-}" ]]; then
+        local part_count
+        part_count=$(lsblk -n -o TYPE "${RESUME_DEVICE}" 2>/dev/null | grep -c "^part$" || echo 0)
+        if [[ "$part_count" -eq 0 ]]; then
+            warn "Resume state found but ${RESUME_DEVICE} has no partitions — disk was wiped, starting fresh"
+            return 1
+        fi
+    fi
 
     echo ""
     log "=== Interrupted installation detected ==="
