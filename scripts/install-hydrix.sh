@@ -2802,6 +2802,31 @@ partition_and_mount() {
         log "Wiping existing partition table on ${dev}..."
         wipefs -a "$dev" 2>/dev/null || true
         sgdisk --zap-all "$dev" 2>/dev/null || true
+
+        # Remove stale EFI NVRAM boot entries. On a full-disk install every
+        # previous OS on this machine is being replaced, so all existing entries
+        # should be cleared. We keep:
+        #   - The current boot entry (live USB / installer)
+        #   - Entries that have no HD() path (removable media, firmware setup)
+        # We delete:
+        #   - VenHw() entries — always stale shortcuts left by previous installers
+        #   - HD() entries referencing a partition on the target device
+        log "Removing stale EFI boot entries..."
+        local current_boot
+        current_boot=$(efibootmgr 2>/dev/null | awk '/^BootCurrent:/{print $2}')
+        local dev_base="${dev##*/}"
+        while IFS= read -r line; do
+            local bootnum
+            bootnum=$(echo "$line" | grep -oP '^Boot\K[0-9A-Fa-f]{4}') || continue
+            [[ "$bootnum" == "$current_boot" ]] && continue
+            local full_entry
+            full_entry=$(efibootmgr -v 2>/dev/null | grep "^Boot${bootnum}")
+            if echo "$full_entry" | grep -q "VenHw(" || \
+               echo "$full_entry" | grep -qP "HD\(.*${dev_base}"; then
+                efibootmgr -B -b "$bootnum" 2>/dev/null || true
+            fi
+        done < <(efibootmgr 2>/dev/null | grep '^Boot[0-9A-Fa-f]\{4\}')
+        log "EFI NVRAM cleaned."
     fi
     sleep 1
 
