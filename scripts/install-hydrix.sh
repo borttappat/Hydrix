@@ -2969,21 +2969,50 @@ EOF
     # Verify the install actually landed — nixos-install can exit 0 despite
     # bootloader or activation failures (e.g. "Failed to create stream fd").
     local install_ok=true
+    local -a install_failures=()
+
     if [[ ! -L /mnt/nix/var/nix/profiles/system ]]; then
-        warn "NixOS system profile missing at /mnt/nix/var/nix/profiles/system"
+        install_failures+=("NixOS system profile missing at /mnt/nix/var/nix/profiles/system")
         install_ok=false
     fi
-    if [[ ! -f /mnt/boot/grub/grub.cfg ]] && [[ ! -d /mnt/boot/EFI ]]; then
-        warn "No bootloader found on /mnt/boot (neither grub.cfg nor EFI/)"
+
+    if [[ ! -f /mnt/boot/grub/grub.cfg ]]; then
+        install_failures+=("GRUB config missing at /mnt/boot/grub/grub.cfg")
         install_ok=false
     fi
+
+    if [[ -d /sys/firmware/efi ]]; then
+        local efi_binary
+        efi_binary=$(find /mnt/boot/EFI -name "grubx64.efi" 2>/dev/null | head -1)
+        if [[ -z "$efi_binary" ]]; then
+            install_failures+=("grubx64.efi missing from /mnt/boot/EFI/ — bootloader was not written")
+            install_ok=false
+        fi
+        if ! efibootmgr 2>/dev/null | grep -qi "hydrix"; then
+            install_failures+=("No Hydrix entry found in EFI NVRAM — efibootmgr registration failed")
+            install_ok=false
+        fi
+    fi
+
+    local kernel_count
+    kernel_count=$(find /mnt/boot/kernels -name "*bzImage*" 2>/dev/null | wc -l)
+    if [[ "$kernel_count" -eq 0 ]]; then
+        install_failures+=("No kernel found in /mnt/boot/kernels/ — NixOS activation failed")
+        install_ok=false
+    fi
+
     if [[ "$install_ok" == false ]]; then
         echo "" >&2
         echo "==========================================" >&2
         echo "  INSTALLATION INCOMPLETE" >&2
         echo "==========================================" >&2
-        echo "  nixos-install exited 0 but key paths are" >&2
-        echo "  missing. The machine will not boot." >&2
+        echo "  nixos-install exited 0 but the following" >&2
+        echo "  checks failed — machine will not boot:"  >&2
+        echo "" >&2
+        for failure in "${install_failures[@]}"; do
+            echo "  ✗ $failure" >&2
+        done
+        echo "" >&2
         echo "  Full log: ${HYDRIX_LOG:-}" >&2
         echo "==========================================" >&2
         exit 1
