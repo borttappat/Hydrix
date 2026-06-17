@@ -2813,19 +2813,23 @@ partition_and_mount() {
         #   - HD() entries referencing a partition on the target device
         log "Removing stale EFI boot entries..."
         local current_boot efi_verbose
-        current_boot=$(efibootmgr 2>/dev/null | awk '/^BootCurrent:/{print $2}')
-        efi_verbose=$(efibootmgr -v 2>/dev/null)
-        local dev_base="${dev##*/}"
-        while IFS= read -r bootnum; do
-            [[ "$bootnum" == "$current_boot" ]] && continue
-            local full_entry
-            full_entry=$(echo "$efi_verbose" | grep "^Boot${bootnum}")
-            if echo "$full_entry" | grep -q "VenHw(" || \
-               echo "$full_entry" | grep -qP "HD\(.*${dev_base}"; then
-                efibootmgr -B -b "$bootnum" 2>/dev/null || true
-            fi
-        done < <(echo "$efi_verbose" | grep -oP '^Boot\K[0-9A-Fa-f]{4}')
-        log "EFI NVRAM cleaned."
+        current_boot=$(timeout 5 efibootmgr 2>/dev/null | awk '/^BootCurrent:/{print $2}')
+        efi_verbose=$(timeout 10 efibootmgr -v 2>/dev/null)
+        if [[ -z "$efi_verbose" ]]; then
+            warn "efibootmgr timed out or returned nothing — skipping EFI cleanup"
+        else
+            local dev_base="${dev##*/}"
+            while IFS= read -r bootnum; do
+                [[ "$bootnum" == "$current_boot" ]] && continue
+                local full_entry
+                full_entry=$(echo "$efi_verbose" | grep "^Boot${bootnum}")
+                if echo "$full_entry" | grep -q "VenHw(" || \
+                   echo "$full_entry" | grep -qP "HD\(.*${dev_base}"; then
+                    timeout 5 efibootmgr -B -b "$bootnum" 2>/dev/null || true
+                fi
+            done < <(echo "$efi_verbose" | grep -oP '^Boot\K[0-9A-Fa-f]{4}')
+            log "EFI NVRAM cleaned."
+        fi
     fi
     sleep 1
 
