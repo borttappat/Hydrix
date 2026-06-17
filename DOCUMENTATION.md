@@ -216,7 +216,7 @@ microvm console router-stable    # serial console access
 
 Short names accepted: `router-stable`, `stable-router`, `stable`.
 
-> **CIDs and subnets are user-configurable.** Built-in profiles (browsing, pentest, dev, comms, lurking) ship with default CIDs/subnets but these are declared in each profile's `meta.nix` in your `hydrix-config/profiles/<name>/meta.nix`. The host module writes all profile metadata to `/etc/hydrix/vm-registry.json` at activation, all scripts, polybar, and i3 read from there at runtime, never from hardcoded maps. Adding a new VM type requires only `profiles/<name>/meta.nix` + `profiles/<name>/default.nix` in your config.
+> **CIDs and subnets are user-configurable.** Built-in profiles (browsing, pentest, dev, comms, lurking) ship with default CIDs/subnets but these are declared in each profile's `meta.nix` in your `hydrix-config/profiles/<name>/meta.nix`. The host module writes all profile metadata to `/etc/hydrix/vm-registry.json` at activation, all scripts, the status bar, and the WM read from there at runtime, never from hardcoded maps. Adding a new VM type requires only `profiles/<name>/meta.nix` + `profiles/<name>/default.nix` in your config.
 
 ### VM Registry (`/etc/hydrix/vm-registry.json`)
 
@@ -231,9 +231,9 @@ Generated at NixOS activation from all profile `meta.nix` files. Every runtime t
 }
 ```
 
-**Convention: `vsockCid` = subnet last octet = i3 workspace.** All three use the same number. Custom profiles start at CID 107+. Reserved: 200 (router), 201 (router-stable), 209 (usb-sandbox), 210 (builder), 211 (gitsync), 212 (files), 213 (vault), 214 (hostsync).
+**Convention: `vsockCid` = subnet last octet = workspace number.** All three use the same number. Custom profiles start at CID 107+. Reserved: 200 (router), 201 (router-stable), 209 (usb-sandbox), 210 (builder), 211 (gitsync), 212 (files), 213 (vault), 214 (hostsync).
 
-Each entry drives: i3 `for_window` border rules, polybar workspace-desc label, `ws-app`/`ws-rofi` workspace -> VM routing, `focus-rofi` menu, `vm-sync` profile targeting, and file transfer IP resolution.
+Each entry drives: compositor border rules, workspace-desc label, `ws-app`/`ws-rofi` workspace -> VM routing, focus menu, `vm-sync` profile targeting, and file transfer IP resolution.
 
 ### VM Static IP Scheme
 
@@ -245,7 +245,7 @@ hydrix.networking.vmSubnet = meta.subnet;  # e.g. "192.168.102"
 # -> staticIp auto-set to "192.168.102.10" by microvm-base.nix
 ```
 
-`microvm-base.nix` sets `hydrix.microvm.staticIp = lib.mkDefault "${vmSubnet}.10"` whenever `vmSubnet` is non-empty. No explicit `staticIp` declaration is needed in profile modules — the template includes the `vmSubnet` line and that is sufficient.
+`microvm-base.nix` sets `hydrix.microvm.staticIp = lib.mkDefault "${vmSubnet}.10"` whenever `vmSubnet` is non-empty. No explicit `staticIp` declaration is needed in profile modules - the template includes the `vmSubnet` line and that is sufficient.
 
 The table below shows the Hydrix built-in profile **defaults**, your `meta.nix` values take precedence automatically:
 
@@ -359,7 +359,7 @@ Host (Lockdown Mode)                     Builder VM                     Router V
 hydrix.builder.enable = true;      # Enables Builder VM support
 ```
 
-The Builder VM (`microvm-builder`, CID 210) is automatically declared by the framework—no manual VM declaration needed.
+The Builder VM (`microvm-builder`, CID 210) is automatically declared by the framework - no manual VM declaration needed.
 
 **Commands:**
 
@@ -448,7 +448,7 @@ sudo systemctl start nix-daemon
 
 **MicroVM** (Recommended):
 - Uses QEMU with virtiofs for shared /nix/store
-- Display via waypipe (Wayland/Sway) or xpra (X11/i3) over vsock
+- Display via waypipe (Wayland) or xpra (X11) over vsock
 
 **Libvirt** (Alternative):
 - Traditional qcow2 images
@@ -895,7 +895,7 @@ To add a custom bridge beyond the built-in set, use `extraNetworks`. Each entry 
 }
 ```
 
-Profile and infra VMs that declare `routerTap` in their `meta.nix` are wired into `extraNetworks` automatically by the flake — you only need to set `extraNetworks` manually for bridges not tied to a profile or infra VM.
+Profile and infra VMs that declare `routerTap` in their `meta.nix` are wired into `extraNetworks` automatically by the flake - you only need to set `extraNetworks` manually for bridges not tied to a profile or infra VM.
 
 Advanced networking options (rarely needed):
 
@@ -1078,13 +1078,13 @@ isMicrovm = !isHost && !graphical.standalone;
 | **standalone** | VM with `standalone = true` | Adds: polybar, rofi, picom, xdotool, unclutter, xcape, scrot, flameshot, X11 tools |
 | **host** | `vmType = "host"` | Adds: i3lock, brightnessctl, libvibrant, xorg.xinit, xorg.xorgserver |
 
-**Why:** MicroVMs forward apps to the host via xpra, they have no local window manager and no physical display. Installing a compositor (picom), screenshot tools (flameshot, scrot), or hardware controls (brightnessctl, libvibrant) would be dead weight. Standalone libvirt VMs run a full i3 desktop via virt-manager and need the WM stack, but still have no physical backlight or lockscreen. Only the host needs those.
+**Why:** MicroVMs forward apps to the host via waypipe or xpra, they have no local window manager and no physical display. Installing a compositor (picom), screenshot tools (flameshot, scrot), or hardware controls (brightnessctl, libvibrant) would be dead weight. Standalone libvirt VMs run a full desktop via virt-manager and need the WM stack, but still have no physical backlight or lockscreen. Only the host needs those.
 
 The `standalone` option on a VM config is the switch:
 
 ```nix
 hydrix.graphical.standalone = true;   # libvirt VM with own display -> full WM tier
-hydrix.graphical.standalone = false;  # microVM via xpra -> theming only (default)
+hydrix.graphical.standalone = false;  # microVM -> theming only, display forwarded via waypipe or xpra (default)
 ```
 
 ### Shared Modules
@@ -1171,11 +1171,11 @@ vm-sync-dev-bottom  vm-sync-stg-bottom  vm-fs-bottom  vm-tun-bottom  vm-up-botto
 Labels can be overridden temporarily at runtime with `ws-name`:
 
 ```bash
-ws-name encryption   # current workspace shows "ENCRYPTION" in polybar
+ws-name encryption   # current workspace shows "ENCRYPTION" in the status bar
 ws-name              # reset, reverts to registry label (e.g. "DEV")
 ```
 
-Overrides are written to `/tmp/ws-names/<number>` and cleared automatically on reboot. The polybar module checks this directory before falling back to the vm-registry, so i3 workspace names are never changed.
+Overrides are written to `/tmp/ws-names/<number>` and cleared automatically on reboot. The status bar module checks this directory before falling back to the vm-registry, so workspace names are never changed.
 
 **focus-dynamic** - Shows which VM type is currently focused on each workspace. Uses the same vm-registry lookup.
 
@@ -1193,7 +1193,7 @@ hydrix.vmMetrics = {
 };
 ```
 
-The host queries the snapshot via vsock on demand,the VM only writes to `/run/vm-metrics-snapshot`; the host reads it when polybar modules fire.
+The host queries the snapshot via vsock on demand,the VM only writes to `/run/vm-metrics-snapshot`; the host reads it when status bar modules poll.
 
 For detailed runtime data flow, see `POLYBAR-VM-INTEGRATION.md` in your config directory.
 
@@ -1233,7 +1233,7 @@ power-profile status       # Show both profiles
 - **Balanced**: Sets governor to `powersave` with EPP `balance_power`. On Intel CPUs with Hardware P-states (HWP), the hardware scales frequency autonomously in microseconds based on load, no userspace daemon needed. `auto-cpufreq` is not used; its 2-second polling loop was causing periodic CPU spikes with no benefit on HWP hardware.
 - **Performance**: Locks governor to `performance`, enables turbo, and sets EPP to `performance`. Maximum speed at the cost of power and thermals.
 
-The polybar PWR module shows the current mode (SAVE/AUTO/PERF) and left-clicking cycles through all three modes.
+The status bar PWR module shows the current mode (SAVE/AUTO/PERF) and left-clicking cycles through all three modes.
 
 ### Polybar Styles
 
@@ -1243,7 +1243,7 @@ The polybar PWR module shows the current mode (SAVE/AUTO/PERF) and left-clicking
 | `modular` | Transparent background with module backgrounds (default) |
 | `pills` | Multiple small rounded floating bars |
 
-Also mainly replace with Waybar on Hyprland
+Note: on Hyprland, waybar is used instead of polybar.
 
 ### Secrets Management
 
@@ -1303,7 +1303,7 @@ Hydrix uses pywal-based colorschemes with real-time synchronization between the 
 │  VM has its own isolated ~/.cache/wal copied from that mount.       │
 │  REFRESH vsock signal pulls updated colors; writes stay in VM.      │
 ├─────────────────────────────────────────────────────────────────────┤
-│  Layer 3: Focus border color (host-side, Hyprland/Sway border)      │
+│  Layer 3: Focus border color (host-side, compositor border)          │
 │  focusBorder = "yellow"  ← set in profiles/<name>/meta.nix          │
 │  The border color shown on the HOST when a VM window is focused.    │
 │  Completely independent from the VM's internal colors.              │
@@ -1350,7 +1350,7 @@ walrgb / randomwalrgb / restore-colorscheme (on host)
                               pushes sequences to all user /dev/pts/* (running terminals)
                               sudo -u user refresh-colors (pywalfox, dunst, xsetroot)
 
-walrgb / wal-sync / restore-colorscheme (inside VM — fully contained)
+walrgb / wal-sync / restore-colorscheme (inside VM - fully contained)
   -> updates VM's own ~/.cache/wal/ only, never touches host
   -> refresh-colors: regenerates colors-runtime.toml
                      pushes sequences to all owned /dev/pts/*
@@ -1376,8 +1376,8 @@ Inside VMs (on REFRESH from host or after `walrgb`/`wal-sync` inside VM):
 - **Firefox**  via pywalfox
 
 On the host (after `walrgb` / `randomwalrgb` / `restore-colorscheme`):
-- **i3**  window borders
-- **Polybar**  all bar colors
+- **compositor**  window borders
+- **status bar**  all bar colors
 - **Alacritty**  all ANSI colors + cursor color (via `colors-runtime.toml`)
 - **Running terminals**  ANSI palette + cursor via sequences to all `/dev/pts/*`
 - **Dunst**  notification colors
@@ -1430,11 +1430,11 @@ Without this, the virtiofs mount would be empty on first boot and VMs would have
 
 ---
 
-### Layer 3 — Focus Border Color
+### Layer 3 - Focus Border Color
 
-The focus border is the window border color shown **on the host** when a VM application window is focused. It works on both i3 (X11) and Sway (Wayland). It is entirely independent from what colors the VM uses internally, you can have a VM running `nord` internally while its host-side border is bright orange.
+The focus border is the window border color shown **on the host** when a VM application window is focused. It works on all supported WMs. It is entirely independent from what colors the VM uses internally, you can have a VM running `nord` internally while its host-side border is bright orange.
 
-**Implementation note (Sway):** Sway has no IPC command to change `client.focused` at runtime — the only mechanism is writing `~/.config/sway/colors.conf` and calling `swaymsg reload`. To avoid a visible freeze during focus switches, the reload is scheduled asynchronously on a background thread with a 40ms debounce. The focus event handler returns immediately (no compositor pause), and the border color updates imperceptibly shortly after. Rapid workspace switches are coalesced into a single reload.
+**Implementation note (Sway):** Sway has no IPC command to change `client.focused` at runtime - the only mechanism is writing `~/.config/sway/colors.conf` and calling `swaymsg reload`. To avoid a visible freeze during focus switches, the reload is scheduled asynchronously on a background thread with a 40ms debounce. The focus event handler returns immediately (no compositor pause), and the border color updates imperceptibly shortly after. Rapid workspace switches are coalesced into a single reload.
 
 #### Priority Chain
 
@@ -1574,7 +1574,7 @@ The `scaling.json` font_name is patched by a system activation script on every `
 
 ### VM Font Pipeline
 
-VMs use their own `alacritty.toml` directly — no wrapper overrides:
+VMs use their own `alacritty.toml` directly - no wrapper overrides:
 
 1. Stylix generates `alacritty.toml` with font family and size from `hydrix.graphical.font`
 2. The VM's xpra session sets `WINIT_X11_SCALE_FACTOR=1` globally
@@ -1628,11 +1628,11 @@ New terminal windows pick up the updated font. Already-running terminals keep th
 ```bash
 # Lifecycle
 microvm build <name>       # Build/rebuild VM image
-microvm start <name>       # Start VM (polls PING→OK, then starts waypipe-connect or xpra)
+microvm start <name>       # Start VM (polls PING→OK, then starts display tunnel (waypipe or xpra))
 microvm stop <name>        # Stop VM
 microvm restart <name>     # Restart VM
 
-# Applications (Sway/waypipe — just press Super+Return on the VM workspace)
+# Applications (just press Super+Return on the VM workspace in Hyprland/Sway)
 microvm app <name> <cmd>   # Launch app via xpra (i3/X11 only)
 microvm attach <name>      # Attach to xpra session (i3/X11 only)
 microvm console <name>     # Serial console (headless VMs)
@@ -1662,7 +1662,7 @@ Persistent home volumes can be LUKS-encrypted so data is locked at rest whenever
 
 - `microvm encrypt-setup` creates a raw LUKS2 container (`home.luks`) in `/var/lib/microvms/<name>/`
 - `microvm start` runs `cryptsetup luksOpen` before QEMU starts, presenting `/dev/mapper/vm-<name>-home` to the VM
-- `microvm stop` runs `cryptsetup luksClose` after the VM halts — data is locked immediately
+- `microvm stop` runs `cryptsetup luksClose` after the VM halts - data is locked immediately
 - If the host is powered off mid-session, the container is locked automatically on reboot (the mapper device never persists across boots)
 
 **Enabling encryption for a VM:**
@@ -1680,14 +1680,14 @@ microvm encrypt-setup microvm-pentest
 # 4. Rebuild to point the VM at the encrypted volume
 microvm build microvm-pentest
 
-# 5. Start — passphrase prompt appears before QEMU launches
+# 5. Start - passphrase prompt appears before QEMU launches
 microvm start microvm-pentest
 ```
 
 **Notes:**
 
-- Any existing `home.qcow2` is **not** migrated — it remains on disk and can be mounted manually for data recovery (see below), then deleted once you've confirmed the encrypted volume is working
-- Snapshots (`microvm snapshot`) do not apply to encrypted volumes — use a filesystem-level backup of `home.luks` while the mapper is closed instead
+- Any existing `home.qcow2` is **not** migrated - it remains on disk and can be mounted manually for data recovery (see below), then deleted once you've confirmed the encrypted volume is working
+- Snapshots (`microvm snapshot`) do not apply to encrypted volumes - use a filesystem-level backup of `home.luks` while the mapper is closed instead
 - On **btrfs** hosts: disable copy-on-write on the container file to prevent fragmentation: `sudo chattr +C /var/lib/microvms/<name>/home.luks` (must be set before first write)
 
 **Recovering data from the old qcow2:**
@@ -1730,7 +1730,7 @@ new-profile myprofile
 # Also runs: git add profiles/myprofile/
 ```
 
-The flake auto-discovers any profile directory that contains `meta.nix` — no manual wiring in `flake.nix` required.
+The flake auto-discovers any profile directory that contains `meta.nix` - no manual wiring in `flake.nix` required.
 
 **Then complete the integration manually:**
 
@@ -1739,11 +1739,11 @@ The flake auto-discovers any profile directory that contains `meta.nix` — no m
 hydrix.microvmHost.vms."microvm-myprofile" = { enable = true; };
 ```
 
-2. Customise `profiles/myprofile/default.nix` — set colorscheme, RAM/vCPUs, packages.
+2. Customise `profiles/myprofile/default.nix` - set colorscheme, RAM/vCPUs, packages.
 
    Optionally set a custom hostname (what you see at the shell prompt inside the VM).
    The default is the profile name suffixed with `-vm` (e.g. `myprofile-vm`).
-   This only affects the internal hostname — host scripts, window titles, and storage paths
+   This only affects the internal hostname - host scripts, window titles, and storage paths
    always use the nixosConfiguration key (`microvm-myprofile`):
 
    ```nix
@@ -1755,7 +1755,7 @@ hydrix.microvmHost.vms."microvm-myprofile" = { enable = true; };
 hydrix.router.vpn.mullvad.bridges.myprofile = ./mullvad-myprofile.conf;
 ```
 
-4. Rebuild in order — router and files VM have their TAP interfaces baked into the QEMU runner at build time, so they need a full restart to pick up the new bridge:
+4. Rebuild in order - router and files VM have their TAP interfaces baked into the QEMU runner at build time, so they need a full restart to pick up the new bridge:
 ```bash
 rebuild                       # host: creates br-myprofile, updates tapLookupScript + vm-registry
 mvm rebuild router files      # router picks up new subnet TAP; files VM picks up new bridge leg
@@ -1767,14 +1767,14 @@ microvm start microvm-myprofile
 - `br-myprofile` bridge created and firewall-trusted
 - Router gets a TAP and dnsmasq entry for the new subnet (from `routerTap` in meta.nix)
 - TAP→bridge mapping in `tapLookupScript` (the `mv-myprofile*` glob covers all TAPs)
-- `vm-registry.json` updated at activation (workspace, CID, subnet — polybar and focus daemon read from there)
+- `vm-registry.json` updated at activation (workspace, CID, subnet \- the status bar and focus daemon read from there)
 - `hydrix-switch` and `router-status` include the new bridge
 
 ### Infrastructure VMs
 
 Infrastructure VMs fall into two categories:
 
-**Framework-fixed** — defined in Hydrix modules, reserved CIDs, not in `profiles/`. Do not assign these CIDs to profile or user infra VMs.
+**Framework-fixed** - defined in Hydrix modules, reserved CIDs, not in `profiles/`. Do not assign these CIDs to profile or user infra VMs.
 
 | Name | CID | Purpose |
 |------|-----|---------|
@@ -1782,7 +1782,7 @@ Infrastructure VMs fall into two categories:
 | `microvm-router-stable` | 201 | Break-glass fallback router |
 | `microvm-builder` | 210 | Lockdown-mode nix builds |
 
-**Template-based** — declared in `hydrix-config/infra/<name>/`, auto-discovered by the flake. Hydrix provides a starting template; the user owns the config. Reserved CIDs: do not reuse these for profile or custom infra VMs.
+**Template-based** - declared in `hydrix-config/infra/<name>/`, auto-discovered by the flake. Hydrix provides a starting template; the user owns the config. Reserved CIDs: do not reuse these for profile or custom infra VMs.
 
 | Name | CID | Purpose |
 |------|-----|---------|
@@ -1836,7 +1836,7 @@ The `tor-hardening.nix` module provides Tor anonymity hardening for VMs. Import 
 1. Create `infra/<name>/meta.nix`:
 ```nix
 {
-  vsockCid = 214;               # unique — avoid reserved CIDs above
+  vsockCid = 214;               # unique - avoid reserved CIDs above
   subnet   = "192.168.214";    # unique /24 prefix
   tapId    = "mv-myinfra";
   tapMac   = "02:00:00:02:xx:01";  # unique MAC
@@ -1845,7 +1845,7 @@ The `tor-hardening.nix` module provides Tor anonymity hardening for VMs. Import 
 }
 ```
 
-2. Create `infra/<name>/default.nix` — standard NixOS module; `mkInfraVm` provides the headless base.
+2. Create `infra/<name>/default.nix` - standard NixOS module; `mkInfraVm` provides the headless base.
 
 3. Declare in `machines/<serial>.nix`:
 ```nix
@@ -1860,13 +1860,13 @@ microvm build microvm-myinfra
 microvm start microvm-myinfra
 ```
 
-If `routerTap` is set, the flake feeds it into `extraNetworks`, which automatically wires a router TAP and routes that subnet — no changes to router config required. If omitted, the VM is isolated and only reachable from other VMs sharing its bridge (like usb-sandbox).
+If `routerTap` is set, the flake feeds it into `extraNetworks`, which automatically wires a router TAP and routes that subnet - no changes to router config required. If omitted, the VM is isolated and only reachable from other VMs sharing its bridge (like usb-sandbox).
 
 ### TUI Launcher
 
 ```bash
 hydrix-tui              # Interactive TUI for VM management
-# Or press Mod+m for rofi launcher
+# Or press Mod+m for the launcher
 ```
 
 The TUI's MicroVM menu includes task pentest slots. Task slots display their active engagement name and offer a **Snapshots** sub-menu when stopped.
@@ -1878,7 +1878,7 @@ For work that benefits from isolation per target or engagement, Hydrix supports 
 **How it works:**
 - Three task slots (`microvm-pentest-task1/2/3`, CIDs 115–117) are declared permanently in the host config via `hydrix-config/tasks/task*.nix`
 - Service units, TAP interfaces, and bridges are created once during the initial rebuild
-- `microvm pentest create <name>` assigns an engagement to a free slot and builds its closure — no rebuild needed
+- `microvm pentest create <name>` assigns an engagement to a free slot and builds its closure - no rebuild needed
 
 **One-time setup** (done during any normal rebuild window):
 
@@ -1944,7 +1944,7 @@ The files VM (`microvm-files`, CID 212, fixed infra) is an encrypted jump host f
 - A random passphrase is generated fresh per transfer on the host and held only in host memory
 - The passphrase travels **exclusively via vsock** - it never touches a bridge network
 - SHA-256 is verified at every hop; the passphrase is only released to the destination after all checksums match
-- Source files are never modified or moved — the original path is always preserved
+- Source files are never modified or moved - the original path is always preserved
 - The files VM receives only ciphertext during transfer operations (it sees plaintext only during `store`, where it decrypts into its own `/storage`)
 - Port 8888 on each VM only accepts connections from the files VM's IP (`.2` on that bridge), enforced by iptables on each VM
 
@@ -2048,7 +2048,7 @@ The files VM's TAP list is **auto-discovered** at build time from `infra/files/m
 **Security model:**
 
 - Regular VMs have no direct host filesystem access whatsoever
-- Only hostsync can write to the host, and only to `~/vm-inbox/` — blast radius is one directory
+- Only hostsync can write to the host, and only to `~/vm-inbox/` - blast radius is one directory
 - Files arrive at hostsync already encrypted; the passphrase is released via vsock only after three-way SHA-256 verification passes
 - Port 8888 accepts connections only from the files VM (`192.168.214.2`), enforced by nftables
 
@@ -2253,18 +2253,18 @@ Paths are relative to `/home/sandbox/` inside the VM. USB drives mount at `/home
 ┌─────────────────────────────────────────────────────────────────────┐
 │  Host (Hyprland / Wayland)                                          │
 │                                                                     │
-│  vault-pick (wofi dmenu — runs on host)                             │
-│  vault-cli  (shell script — runs on host)                           │
+│  vault-pick (launcher dmenu - runs on host)                         │
+│  vault-cli  (shell script - runs on host)                           │
 │                                                                     │
 │  ~/vault/Passwords.kdbx  ◄── AES-256 encrypted blob                │
 │       │  virtiofs (live mount, R/W)                                 │
 │       ▼                                                             │
 │  ┌──────────────────────────────────────────────────────────────┐  │
-│  │  microvm-vault (CID 213)  — NO network interface             │  │
+│  │  microvm-vault (CID 213)  - NO network interface              │  │
 │  │                                                              │  │
 │  │  /var/lib/vault/Passwords.kdbx  (virtiofs of ~/vault/)       │  │
 │  │  vault-agent: socat VSOCK-LISTEN:14514 (runs as vault user)  │  │
-│  │  /run/vault-session/token  (tmpfs, 600 — cleared on reboot)  │  │
+│  │  /run/vault-session/token  (tmpfs, 600 \- cleared on reboot)  │  │
 │  └──────────────────────────────────────────────────────────────┘  │
 │       │ vsock 14514                                                 │
 │  vault-pick / vault-cli                                             │
@@ -2278,33 +2278,33 @@ Paths are relative to `/home/sandbox/` inside the VM. USB drives mount at `/home
 
 #### Security Boundaries
 
-**Boundary 1 — Network isolation**
+**Boundary 1 \- Network isolation**
 
 The vault VM has no TAP interface and no bridge. `networking.useDHCP` and `networking.firewall` are force-disabled. The VM cannot initiate or receive any network connection regardless of what runs inside it.
 
 *Protects against:* A compromised keepassxc binary or vsock handler cannot exfiltrate credentials over the network. The only data exit is vsock back to the host.
 
-**Boundary 2 — vsock CID addressing**
+**Boundary 2 \- vsock CID addressing**
 
-vsock uses CID addressing. Only the host (CID 2) can connect to CID 213's ports — other VMs (browsing CID 103, pentest CID 102, etc.) cannot address the vault VM.
+vsock uses CID addressing. Only the host (CID 2) can connect to CID 213's ports \- other VMs (browsing CID 103, pentest CID 102, etc.) cannot address the vault VM.
 
 *Protects against:* Compromised profile VMs cannot request credentials from the vault agent even if they attempt to.
 
-**Boundary 3 — Session token in VM tmpfs**
+**Boundary 3 \- Session token in VM tmpfs**
 
-The master password is stored in `/run/vault-session/token` inside the vault VM. This is a tmpfs filesystem — never written to disk, owned by `vault:vault` (mode 700 dir, 600 file), inaccessible to the host via virtiofs, cleared on VM reboot.
+The master password is stored in `/run/vault-session/token` inside the vault VM. This is a tmpfs filesystem \- never written to disk, owned by `vault:vault` (mode 700 dir, 600 file), inaccessible to the host via virtiofs, cleared on VM reboot.
 
 *Protects against:* A host process, even as root, cannot read the master password from disk. It exists only in vault VM RAM after `UNLOCK`.
 
-**Boundary 4 — Wayland clipboard isolation**
+**Boundary 4 \- Wayland clipboard isolation**
 
-Credentials flow: vault VM → vsock → host → `wl-copy`. The Wayland compositor manages clipboard access — only the focused window can read it. The 30-second auto-clear (`wl-copy --clear`) limits the exposure window.
+Credentials flow: vault VM → vsock → host → `wl-copy`. The Wayland compositor manages clipboard access \- only the focused window can read it. The 30-second auto-clear (`wl-copy --clear`) limits the exposure window.
 
 *Protects against:* Unfocused VM windows cannot silently harvest copied passwords.
 
-**Boundary 5 — AES-256 at rest**
+**Boundary 5 \- AES-256 at rest**
 
-`~/vault/Passwords.kdbx` is world-readable and committed to git. This is intentional — the file is an opaque ciphertext without the master password.
+`~/vault/Passwords.kdbx` is world-readable and committed to git. This is intentional \- the file is an opaque ciphertext without the master password.
 
 *Protects against:* Physical disk theft, git repository compromise, or a host process reading the file directly yields only ciphertext.
 
@@ -2312,8 +2312,8 @@ Credentials flow: vault VM → vsock → host → `wl-copy`. The Wayland composi
 
 **Unlock:**
 ```
-wofi password prompt (host)
-  │  master password typed — never stored on host
+launcher password prompt (host)
+  │  master password typed - never stored on host
   ▼
 vault-pick-tui
   │  printf '%s' "UNLOCK <password>" | socat → VSOCK-CONNECT:213:14514
@@ -2338,7 +2338,7 @@ vault-agent
 host receives: "OK <value>"
   │
   ▼
-printf '%s' "$val" | wl-copy        (host only — never enters VM clipboard)
+printf '%s' "$val" | wl-copy        (host only \- never enters VM clipboard)
 (sleep 30; wl-copy --clear) &       (background auto-clear)
 ```
 
@@ -2372,7 +2372,7 @@ VM boot → tmpfs mounted at /run/vault-session/ (empty) → vault-agent listeni
 
 UNLOCK  → token written (mode 600) → locked file removed
 Active  → each GET/LIST touches token → 1-min timer checks mtime
-Idle >5m → lockfile created (token preserved for re-unlock without retype? No — UNLOCK rewrites)
+Idle >5m → lockfile created (token preserved for re-unlock without retype? No \- UNLOCK rewrites)
 Locked  → GET/LIST return ERROR vault is locked
 VM reboot / shutdown → tmpfs destroyed → starts locked
 ```
@@ -2412,7 +2412,7 @@ imports = [ ../modules/vault.nix ];
 hydrix.microvmHost.vms."microvm-vault" = { autostart = true; };
 ```
 
-**4. Add keybind** in `modules/hyprland.nix` / `modules/sway.nix`:
+**4. Add keybind** in your WM keybindings module (`modules/hyprland.nix`, `modules/sway.nix`, or `modules/i3.nix`):
 
 ```
 bind = $mod SHIFT, P, exec, vault-pick        # Hyprland
@@ -2478,18 +2478,18 @@ exit
 
 #### Troubleshooting
 
-**"ERROR wrong password" despite correct password** — DB created as root, unreadable by vault agent:
+**"ERROR wrong password" despite correct password** \- DB created as root, unreadable by vault agent:
 ```bash
 sudo chown $USER:users ~/vault/Passwords.kdbx && chmod 644 ~/vault/Passwords.kdbx
 ```
 
-**vault-cli ping returns nothing** — vault VM not running:
+**vault-cli ping returns nothing** \- vault VM not running:
 ```bash
 microvm status microvm-vault
 microvm start vault
 ```
 
-**microvm start vault hangs / virtiofsd error `/home/user/vault does not exist`** — missing username fix in `infraVMConfigs` in `flake.nix`. Ensure the block passes `{ hydrix.username = hostUsername; }`:
+**microvm start vault hangs / virtiofsd error `/home/user/vault does not exist`** \- missing username fix in `infraVMConfigs` in `flake.nix`. Ensure the block passes `{ hydrix.username = hostUsername; }`:
 ```nix
 modules = [
   { hydrix.username = hostUsername; }
@@ -2497,7 +2497,7 @@ modules = [
 ];
 ```
 
-**Clipboard shows `PROTECTED`** — vault VM runner is stale, rebuild it:
+**Clipboard shows `PROTECTED`** \- vault VM runner is stale, rebuild it:
 ```bash
 mvm rebuild vault
 ```
@@ -2555,7 +2555,7 @@ The `vm-sync pull` command automatically:
 
 ## Mullvad VPN
 
-Each VM bridge can route through a separate Mullvad WireGuard exit node. The router VM manages all tunnels — VMs themselves have no VPN configuration.
+Each VM bridge can route through a separate Mullvad WireGuard exit node. The router VM manages all tunnels \- VMs themselves have no VPN configuration.
 
 ### Setup
 
@@ -2565,7 +2565,7 @@ Each VM bridge can route through a separate Mullvad WireGuard exit node. The rou
    ~/hydrix-config/vpn/mullvad-pentest.conf
    ~/hydrix-config/vpn/mullvad-comms.conf
    ```
-   Multiple VMs can share the same Mullvad key pair — just download separate .conf files pointing to different (or the same) servers.
+   Multiple VMs can share the same Mullvad key pair \- just download separate .conf files pointing to different (or the same) servers.
 
 2. **Create `vpn/mullvad.nix`**. copy from the provided example:
    ```bash
@@ -2588,7 +2588,7 @@ Each VM bridge can route through a separate Mullvad WireGuard exit node. The rou
    ```nix
    router.vpn.mullvad = import ../vpn/mullvad.nix;
    ```
-   The flake also auto-includes `vpn/mullvad.nix` if it exists — no manual wiring needed if you use the flake template as-is.
+   The flake also auto-includes `vpn/mullvad.nix` if it exists \- no manual wiring needed if you use the flake template as-is.
 
 4. **Rebuild the router:**
    ```bash
@@ -2702,7 +2702,7 @@ VM /nix/.rw-store (qcow2) ──┘
 
 ### Nix DB Registration
 
-Paths exist in the VM's `/nix/store` via virtiofs but the VM's local nix database (`/nix/var/nix/db/db.sqlite`) doesn't know about them. This matters during `microvm update` — home-manager's `nix-store --realise` queries the local DB. The host dumps registration info before switching, and the VM loads it with `nix-store --load-db`.
+Paths exist in the VM's `/nix/store` via virtiofs but the VM's local nix database (`/nix/var/nix/db/db.sqlite`) doesn't know about them. This matters during `microvm update` \- home-manager's `nix-store --realise` queries the local DB. The host dumps registration info before switching, and the VM loads it with `nix-store --load-db`.
 
 ---
 
@@ -2919,7 +2919,7 @@ Workspaces are mapped to VMs via the `ws-app` script. Pressing `Super+Return` la
 | WS7-9 | Host | Always host terminal |
 | WS10 | Router | Serial console |
 
-> **Note**: VM workspaces are dynamic — they're read from `/etc/hydrix/vm-registry.json` at runtime. Adding a new profile VM automatically adds its workspace mapping. No hardcoded workspace→VM tables in scripts.
+> **Note**: VM workspaces are dynamic \- they're read from `/etc/hydrix/vm-registry.json` at runtime. Adding a new profile VM automatically adds its workspace mapping. No hardcoded workspace→VM tables in scripts.
 
 ### vm-registry Integration
 
@@ -2933,7 +2933,7 @@ ws-app (Super+Return)
   -> launch app on appropriate target
 ```
 
-**polybar workspace-desc module** - Shows workspace label (e.g., "BROWSING") with colored underline:
+**workspace-desc module** (status bar) - Shows workspace label (e.g., "BROWSING") with colored underline:
 
 ```bash
 # Runtime lookup (no hardcoded values)
@@ -2942,9 +2942,9 @@ jq -r --argjson w "$ws" \
   /etc/hydrix/vm-registry.json
 ```
 
-**polybar focus-dynamic module** - Shows which VM type is focused on each workspace, using the same registry lookup.
+**focus-dynamic module** (status bar) - Shows which VM type is focused on each workspace, using the same registry lookup.
 
-**focus-rofi menu** - Press `Mod+F4` to enter focus mode. The menu is built by scanning vm-registry for all profile VMs.
+**focus menu** (launcher) - Press `Mod+F4` to enter focus mode. The menu is built by scanning vm-registry for all profile VMs.
 
 ### Active VM Tracking
 
@@ -2954,7 +2954,7 @@ For workspace types that support multiple VMs (pentest, browsing, dev), `ws-app`
 1. If active VM is set and still running → use it
 2. If active VM stopped → find all running VMs of that type
    - Exactly one → use it, update active
-   - Multiple → show rofi selection menu, update active
+   - Multiple -> show launcher selection menu, update active
    - None → fall back to host, clear active
 
 **Manual VM selection**: Use `ws-rofi` (or `Mod+d` on a VM workspace) to choose which VM is "active" for that type.
@@ -2978,23 +2978,23 @@ Super+Shift+Return
   -> alacritty-dpi (always host, regardless of workspace)
 ```
 
-**Wayland / sway (waypipe mode):**
+**Wayland / Hyprland or Sway (waypipe mode):**
 ```
 Super+Return
-  -> sway-ws-app alacritty
-  -> detect focused workspace (swaymsg)
-  -> query vm-registry for workspace→VM mapping
+  -> hypr-ws-app alacritty  (or sway-ws-app on Sway)
+  -> detect focused workspace
+  -> query vm-registry for workspace->VM mapping
   -> if VM not running: notify "use microvm start <vm>", exec host terminal
   -> if waypipe-connect not running: start it (setsid, background), wait 1s
   -> poll vsock:14509 STATUS every 1s until "waypipe" (up to 20s)
   -> send "alacritty" to vsock:14508 (waypipe-launch)
   -> VM runs alacritty with WAYLAND_DISPLAY=waypipe-0
-  -> window appears on host sway desktop, for_window routes it to correct workspace
+  -> window appears on host desktop, compositor routes it to correct workspace
 ```
 
 ### waypipe VM Forwarding (Wayland)
 
-waypipe replaces xpra when the host is running a Wayland compositor (sway/Hyprland). VM apps appear as individual windows on the host desktop with no visible border between "VM app" and "host app".
+waypipe is used when the host runs a Wayland compositor (Hyprland or Sway). VM apps appear as individual windows on the host desktop with no visible border between "VM app" and "host app".
 
 **Architecture:**
 
@@ -3002,7 +3002,7 @@ waypipe replaces xpra when the host is running a Wayland compositor (sway/Hyprla
 VM side (waypipe server):                   Host side (waypipe client):
   App -> WAYLAND_DISPLAY=waypipe-0             waypipe --vsock --socket <PORT> client
   waypipe --vsock --socket <PORT> server        ↑ listens; VM connects to this
-    -> connects to host vsock:<PORT>           forwards to $WAYLAND_DISPLAY (sway/Hyprland)
+    -> connects to host vsock:<PORT>           forwards to $WAYLAND_DISPLAY
 ```
 
 The VM's waypipe server connects *out* to the host (VM→HOST vsock works because `vhost_vsock` is loaded on the host). The host's waypipe client listens on a per-VM vsock port.
@@ -3014,9 +3014,9 @@ The VM's waypipe server connects *out* to the host (VM→HOST vsock works becaus
 | `microvm start <vm>` | Polls `PING` on vsock:14509 until VM responds `OK`, then starts `waypipe-connect <vm>` in background + sends notification |
 | `waypipe-connect` starts | Starts host-side `waypipe client` listener, sends `waypipe-reconnect` to VM via vsock:14509 |
 | VM receives `waypipe-reconnect` | Restarts `waypipe-vsock`; VM's waypipe server connects out to host vsock port |
-| Sway starts (VMs already running) | `waypipe-connect-all` spawns one poller per running VM; each polls `PING→OK` then starts `waypipe-connect` immediately |
-| App launched | `sway-ws-app` sends command to vsock:14508; VM runs app under `WAYLAND_DISPLAY=waypipe-0` |
-| Connection drops | VM `waypipe-vsock` has `Restart=always`; host `waypipe-connect` has restart loop — both self-heal |
+| Compositor starts (VMs already running) | `waypipe-connect-all` spawns one poller per running VM; each polls `PING->OK` then starts `waypipe-connect` immediately |
+| App launched | ws-app sends command to vsock:14508; VM runs app under `WAYLAND_DISPLAY=waypipe-0` |
+| Connection drops | VM `waypipe-vsock` has `Restart=always`; host `waypipe-connect` has restart loop - both self-heal |
 | `exit-wayland` | Kills all `waypipe-connect` processes; pushes `stop` to VMs; unsets `WAYLAND_DISPLAY` |
 
 **Display mode selection (vsock:14509):**
@@ -3031,13 +3031,13 @@ The `display-mode` service on each VM accepts these commands:
 | `stop` | Stops all display services (WM exiting) |
 | `PING` | Returns `"OK"` (VM readiness check) |
 
-**Known gotcha — `set -e` and the restart loop:**
+**Known gotcha \- `set -e` and the restart loop:**
 
-`waypipe-connect` uses `set -euo pipefail`. The `waypipe client` command exits non-zero when the VM disconnects cleanly. Without `|| true` on the waypipe invocation, the bash wrapper exits silently and the restart loop never runs — leaving the host with no active tunnel while `pgrep` still finds nothing, causing `sway-ws-app` to keep trying to start the tunnel from scratch. The fix: `waypipe client || true` in the while loop.
+`waypipe-connect` uses `set -euo pipefail`. The `waypipe client` command exits non-zero when the VM disconnects cleanly. Without `|| true` on the waypipe invocation, the bash wrapper exits silently and the restart loop never runs - leaving the host with no active tunnel while `pgrep` still finds nothing, causing the ws-app script to keep trying to start the tunnel from scratch. The fix: `waypipe client || true` in the while loop.
 
-**Known gotcha — STATUS false positive:**
+**Known gotcha \- STATUS false positive:**
 
-`STATUS` checks both `[[ -S /run/user/1000/waypipe-0 ]]` AND `systemctl is-active --quiet waypipe-vsock`. Checking only the socket file is insufficient, it can persist after the service has stopped (crashed, or stopped by `stop` push). If STATUS incorrectly returns `"waypipe"`, `sway-ws-app` proceeds to launch the app which then fails silently (app starts in VM but no window appears on host).
+`STATUS` checks both `[[ -S /run/user/1000/waypipe-0 ]]` AND `systemctl is-active --quiet waypipe-vsock`. Checking only the socket file is insufficient, it can persist after the service has stopped (crashed, or stopped by `stop` push). If STATUS incorrectly returns `"waypipe"`, the ws-app script proceeds to launch the app which then fails silently (app starts in VM but no window appears on host).
 
 ### Adding a New Profile VM
 
@@ -3063,8 +3063,8 @@ microvm build microvm-myprofile && microvm start microvm-myprofile
 
 **What auto-adapts after rebuild** (no manual wiring needed):
 - `ws-app` routes workspace -> new VM (reads vm-registry at runtime)
-- polybar `workspace-desc` shows new label; `focus-dynamic` shows new VM type
-- `focus-rofi` menu includes new VM
+- status bar `workspace-desc` shows new label; `focus-dynamic` shows new VM type
+- focus menu includes new VM
 - `hydrix-switch` and `router-status` include the new bridge
 
 **What you add manually:**
@@ -3127,7 +3127,7 @@ hydrix.graphical.lockscreen = {
 
 | Key | Action |
 |-----|--------|
-| `Mod+d` | Launcher (workspace-aware: host rofi or VM app menu) |
+| `Mod+d` | Launcher (workspace-aware: host launcher or VM app menu) |
 | `Mod+b` | Firefox |
 | `Mod+o` | Obsidian |
 | `Mod+Shift+f` | File manager (joshuto) |
@@ -3153,7 +3153,7 @@ hydrix.graphical.lockscreen = {
 | Key | Action |
 |-----|--------|
 | `Mod+Shift+i` | Edit i3 config |
-| `Mod+Shift+p` | Edit polybar config |
+| `Mod+Shift+p` | Edit status bar config |
 | `Mod+Shift+n` | Edit nix machine config |
 
 ---
@@ -3194,7 +3194,7 @@ All scripts are wrapped via Nix and available in PATH after installation.
 |---------|---------|
 | `microvm <cmd>` | MicroVM management CLI |
 | `microvm build <name>` | Build/rebuild VM |
-| `microvm start <name>` | Start VM (polls PING→OK, starts waypipe-connect or xpra) |
+| `microvm start <name>` | Start VM (polls PING->OK, starts display tunnel) |
 | `microvm app <name> <cmd>` | Launch app in VM |
 | `microvm stop <name>` | Stop VM |
 
@@ -3241,7 +3241,7 @@ See [Mullvad VPN](#mullvad-vpn) for full setup instructions.
 | `hydrix-tui` | Unified VM management TUI |
 | `hydrix-lock` | Activate lockscreen |
 | `vm-status` | Show system status (bridges, VMs, etc.) |
-| `display-setup` | Reconfigure displays/polybar |
+| `display-setup` | Reconfigure displays/status bar |
 ---
 
 ## Troubleshooting
@@ -3289,13 +3289,13 @@ microvm list
 lsmod | grep vhost_vsock
 ```
 
-### No Display in VM (xpra)
+### No Display in VM
 
 ```bash
-# Check xpra status
+# Check xpra status (i3/X11 only)
 xpra info vsock://<CID>:14500
 
-# Re-attach manually
+# Re-attach manually (i3/X11 only)
 microvm attach <name>
 ```
 
@@ -3330,12 +3330,12 @@ waypipe-connect <vm-name>   # foreground - Ctrl+C when done
 | STATUS returns `"waypipe"` but apps don't appear | Stale socket file, service actually dead | STATUS now checks `systemctl is-active waypipe-vsock` too |
 | STATUS returns `"none"` indefinitely | `display-mode` not receiving push, or VM not booted | Check `pgrep -af waypipe-connect`; restart `microvm start` |
 
-### Waypipe: sway-ws-app Errors "waypipe not ready after 20s"
+### Waypipe: ws-app Errors "waypipe not ready after 20s"
 
 ```bash
 # Verify the VM has display-mode service (waypipe-vm.nix must be imported)
 printf 'PING\n' | socat -T3 - VSOCK-CONNECT:<CID>:14509
-# Expected: "OK" — if no response, waypipe-vm.nix is not in the VM profile
+# Expected: "OK" - if no response, waypipe-vm.nix is not in the VM profile
 
 # Check waypipe-connect log
 cat /tmp/waypipe-connect-<vm-name>.log
@@ -3405,21 +3405,33 @@ cat ~/.config/hydrix/scaling.json
 
 ---
 
-## Wayland / Sway Stack
+## Wayland Stack (Hyprland / Sway)
 
-Hydrix supports Sway as a drop-in Wayland alternative to i3. VM apps are forwarded to the host desktop via **waypipe** instead of xpra, appearing as individual native windows.
+Hydrix supports Hyprland (primary) and Sway as Wayland compositors. VM apps are forwarded to the host desktop via **waypipe**, appearing as individual native windows. i3 is also available as an X11 option. All three default to disabled - enable exactly one.
 
 ### Enabling
 
 ```nix
-# machines/<serial>.nix
-hydrix.sway.enable = true;   # Wayland/Sway compositor
-hydrix.i3.enable  = true;    # Can coexist — start from separate TTYs
+# machines/<serial>.nix - enable exactly one
+hydrix.hyprland.enable = true;  # Wayland, VM apps forwarded via waypipe (recommended)
+# hydrix.sway.enable = true;    # Wayland, VM apps forwarded via waypipe
+# hydrix.i3.enable = true;      # X11, VM apps forwarded via xpra
 ```
 
-Start Sway with:
+### Programs per WM
+
+| Component | Hyprland | Sway | i3 |
+|-----------|----------|------|----|
+| Compositor/WM | Hyprland | Sway | i3 |
+| Status bar | waybar | waybar | polybar |
+| Launcher | wofi | wofi | rofi |
+| Lockscreen | hyprlock | swaylock | xss-lock |
+| VM forwarding | waypipe | waypipe | xpra |
+
+Start the session:
 ```bash
-sway-session   # cleans up waypipe + env on exit
+hyprland-session   # Hyprland - cleans up waypipe + env on exit
+sway-session       # Sway - cleans up waypipe + env on exit
 ```
 
 ### Module Overview
@@ -3433,15 +3445,15 @@ sway-session   # cleans up waypipe + env on exit
 
 **`waypipe-host.nix`** is auto-imported by `core.nix` and activates when `sway.enable` or `hyprland.enable` is true. No explicit import needed in your machine config.
 
-**`waypipe-vm.nix`** is auto-imported by `vm-base.nix` for all profile VMs. It coexists with xpra — the `display-mode` handler (vsock:14509) switches between them at runtime based on what the host pushes.
+**`waypipe-vm.nix`** is auto-imported by `vm-base.nix` for all profile VMs. It coexists with xpra \- the `display-mode` handler (vsock:14509) switches between them at runtime based on what the host pushes.
 
 ### Display Mode Switching
 
 The host connects to each VM's `display-mode` service (vsock:14509) to switch display services:
 
-**Wayland/sway:** `waypipe-connect` sends `waypipe-reconnect` directly to the VM, bypassing `vm-push-display-mode`. The VM unconditionally restarts `waypipe-vsock` and connects to the host listener.
+**Wayland (Hyprland/Sway):** `waypipe-connect` sends `waypipe-reconnect` directly to the VM, bypassing `vm-push-display-mode`. The VM unconditionally restarts `waypipe-vsock` and connects to the host listener.
 
-**X11/i3:** `vm-push-display-mode` sends `xpra` to the VM, which starts `xpra-vsock`.
+**X11 (i3):** `vm-push-display-mode` sends `xpra` to the VM, which starts `xpra-vsock`.
 
 ```
 microvm start <vm>  [Wayland]
@@ -3464,11 +3476,11 @@ waypipe-connect-all             # connect waypipe for all running profile VMs
 
 ### Keybindings
 
-User keybindings live in `modules/sway.nix` in your hydrix-config (provisioned from the template). They mirror `modules/i3.nix` - same workspace bindings, same `sway-ws-app` for VM routing.
+User keybindings live in `modules/hyprland.nix`, `modules/sway.nix`, or `modules/i3.nix` in your hydrix-config depending on which WM is enabled. Sway and i3 modules mirror each other - same workspace bindings, same VM routing pattern.
 
 ### Internal Display Scaling (Wayland)
 
-Unlike i3 (which uses xrandr), Sway uses per-output scale. External monitors are unaffected.
+Unlike i3 (which uses xrandr), Sway and Hyprland use per-output scale. External monitors are unaffected.
 
 ```nix
 # machines/<serial>.nix
@@ -3477,11 +3489,11 @@ hydrix.graphical.scaling.swayInternalMode   = "1280x800"; # OR: change actual hw
 hydrix.graphical.scaling.swayInternalOutput = "eDP-1";    # default; run: swaymsg -t get_outputs
 ```
 
-`swayInternalScale` and `swayInternalMode` are mutually exclusive — scale takes priority when both are set.
+`swayInternalScale` and `swayInternalMode` are mutually exclusive - scale takes priority when both are set.
 
 ### Audio Forwarding (waypipe mode)
 
-waypipe carries Wayland display only — it has no audio channel. A parallel **PulseAudio-over-vsock** bridge on port 14505 provides audio to VM apps launched via waypipe.
+waypipe carries Wayland display only \- it has no audio channel. A parallel **PulseAudio-over-vsock** bridge on port 14505 provides audio to VM apps launched via waypipe.
 
 **Architecture:**
 
@@ -3510,7 +3522,7 @@ VM app
     ];
   };
   ```
-  Any client that can reach the socket is accepted without a cookie. The only clients that can reach it are VMs on this machine via vsock — so on a single-user machine where you own all VMs, there is no meaningful threat. On a shared machine with untrusted VMs, you would want proper auth instead.
+  Any client that can reach the socket is accepted without a cookie. The only clients that can reach it are VMs on this machine via vsock \- so on a single-user machine where you own all VMs, there is no meaningful threat. On a shared machine with untrusted VMs, you would want proper auth instead.
 
 **VM side (`waypipe-vm.nix`):**
 
@@ -3527,11 +3539,15 @@ VM app
 | `display-mode` receives `xpra` | Stops `pulse-vsock` (xpra handles audio internally) |
 | `display-mode` receives `stop` | Stops `pulse-vsock` alongside all display services |
 
-No configuration required — audio works automatically for all profile VMs as soon as they are started in waypipe mode.
+No configuration required \- audio works automatically for all profile VMs as soon as they are started in waypipe mode.
 
-### Polybar in Sway
+### Status Bar Notes
 
-Polybar runs under XWayland in Sway. The `xworkspaces` module uses `type = internal/i3` (polybar's sway-compatible mode). The bar is launched by `display-setup --no-move` from the Sway startup command, with `I3SOCK=$SWAYSOCK` so the workspace module connects to Sway's IPC.
+**Hyprland:** waybar is used as the status bar, managed via a systemd user service and restarted automatically on monitor add/remove events.
+
+**Sway:** polybar runs under XWayland. The `xworkspaces` module uses `type = internal/i3` (polybar's Sway-compatible mode). The bar is launched by `display-setup --no-move` from the Sway startup command, with `I3SOCK=$SWAYSOCK` so the workspace module connects to Sway's IPC.
+
+**i3:** polybar runs natively under X11.
 
 ---
 
