@@ -825,47 +825,80 @@ in {
       serviceConfig = {
         Type = "simple";
         ExecStart = let
-          syncHandler = pkgs.writeShellScript "wifi-sync-handler" ''
-            NM_DIR="/etc/NetworkManager/system-connections"
+          handler = pkgs.writeShellScript "wifi-sync-handler" ''
+            GREP="${pkgs.gnugrep}/bin/grep"
+            SED="${pkgs.gnused}/bin/sed"
 
-            extract_networks() {
-              local first=true
-              echo -n '{"networks":['
-              shopt -s nullglob
-              for conn_file in "$NM_DIR"/*.nmconnection; do
-                [[ -f "$conn_file" ]] || continue
+            json_esc() { printf '%s' "$1" | $SED 's/\\/\\\\/g; s/"/\\"/g'; }
 
-                local ssid=$(grep -E '^ssid=' "$conn_file" | head -1 | cut -d= -f2-)
-                local psk=$(grep -E '^psk=' "$conn_file" | head -1 | cut -d= -f2-)
-                local conn_type=$(grep -E '^type=' "$conn_file" | head -1 | cut -d= -f2-)
-
-                if [[ "$conn_type" == "wifi" && -n "$ssid" && -n "$psk" ]]; then
-                  if [ "$first" = true ]; then
-                    first=false
-                  else
-                    echo -n ','
-                  fi
-                  ssid=$(echo "$ssid" | sed 's/"/\\"/g')
-                  psk=$(echo "$psk" | sed 's/"/\\"/g')
-                  echo -n "{\"ssid\":\"$ssid\",\"password\":\"$psk\"}"
-                fi
-              done
-              shopt -u nullglob
-              echo ']}'
+            # Extract key=value from a keyfile using grep -m1 (no head, no SIGPIPE).
+            # Strips the key= prefix with shell expansion — no awk or cut needed.
+            kf_get() {
+              local line
+              line=$($GREP -m1 "^$1=" "$2" 2>/dev/null) || return 1
+              printf '%s' "''${line#*=}"
             }
 
-            read -r cmd arg
+            # Read active SSID from kernel via iw — no D-Bus, works from socat EXEC context.
+            get_current() {
+              local line
+              line=$(${pkgs.iw}/bin/iw dev 2>/dev/null | $GREP -m1 $'\tssid ') || true
+              printf '%s' "''${line#*ssid }"
+            }
 
+            # Flat list of all wifi connections from both NM dirs.
+            # /run/ = declared (from wifi.nix build); /var/lib/ = runtime-added (pending).
+            # Dedup by SSID — /run/ takes precedence (listed first).
+            get_connections() {
+              local first=true seen="" ssid psk
+              printf '['
+              shopt -s nullglob
+              for f in /run/NetworkManager/system-connections/*.nmconnection \
+                       /var/lib/NetworkManager/system-connections/*.nmconnection; do
+                [[ -f "$f" ]] || continue
+                ssid=$(kf_get ssid "$f") || continue
+                psk=$(kf_get psk "$f") || continue
+                [[ -n "$ssid" && -n "$psk" ]] || continue
+                case "$seen" in *"|''${ssid}|"*) continue ;; esac
+                seen="''${seen}|''${ssid}|"
+                [[ "$first" == true ]] || printf ','
+                first=false
+                printf '{"ssid":"%s","psk":"%s"}' "$(json_esc "$ssid")" "$(json_esc "$psk")"
+              done
+              shopt -u nullglob
+              printf ']'
+            }
+
+            read -r cmd
             case "$cmd" in
               POLL|STATUS)
-                extract_networks
+                printf '{"current":"%s","connections":' "$(json_esc "$(get_current)")"
+                get_connections
+                printf '}'
+                ;;
+              ADD)
+                read -r ssid
+                read -r pass
+                [[ -n "$ssid" && -n "$pass" ]] || {
+                  printf '{"ok":false,"error":"missing ssid or password"}'; exit 0; }
+                if ${pkgs.networkmanager}/bin/nmcli device wifi connect "$ssid" \
+                   password "$pass" 2>/dev/null; then
+                  printf '{"ok":true,"connected":true}'
+                elif ${pkgs.networkmanager}/bin/nmcli connection add \
+                   type wifi con-name "$ssid" ssid "$ssid" \
+                   wifi-sec.key-mgmt wpa-psk wifi-sec.psk "$pass" \
+                   connection.autoconnect yes 2>/dev/null; then
+                  printf '{"ok":true,"connected":false}'
+                else
+                  printf '{"ok":false,"error":"failed to add connection"}'
+                fi
                 ;;
               *)
-                echo '{"error":"unknown command"}'
+                printf '{"error":"unknown command"}'
                 ;;
             esac
           '';
-        in "${pkgs.socat}/bin/socat VSOCK-LISTEN:14506,reuseaddr,fork EXEC:${syncHandler}";
+        in "${pkgs.socat}/bin/socat VSOCK-LISTEN:14506,reuseaddr,fork EXEC:${handler}";
         Restart = "always";
         RestartSec = 5;
       };

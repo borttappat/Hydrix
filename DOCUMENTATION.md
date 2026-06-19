@@ -515,7 +515,16 @@ In **Administrative** mode:
 
 ### WiFi Credentials in Nix Store
 
-WiFi credentials (`router.wifi.ssid`/`password`) end up in `/nix/store` as plaintext inside the router VM's config closure. For stricter environments, store credentials via `sops-nix` and reference the decrypted secret path. On a single-user machine with full-disk encryption the nix store exposure is typically acceptable.
+WiFi credentials declared in `modules/wifi.nix` are baked into the router VM's NixOS closure and end up in `/nix/store` as plaintext (or WPA PSK hashes). Because all VMs share the host's `/nix/store` via virtiofs, **any VM — including a compromised browsing or pentest VM — can read your WiFi credentials** by scanning the store.
+
+`wifi-sync` stores WPA PSK hashes (64-char hex strings derived from SSID + password via `wpa_passphrase`), not plaintext passwords — but a PSK hash is sufficient to authenticate to the network, so the exposure is equivalent.
+
+**sops-nix integration is not yet implemented.** The `hydrix.router.wifi.networks` option takes plain strings at NixOS evaluation time, before sops secrets are decrypted. Wiring runtime secrets into this option would require changes to how the framework generates NM keyfiles (writing them at activation time rather than build time). This is tracked as future work.
+
+In the meantime, the pragmatic mitigations are:
+- Full-disk encryption on the host (protects the store at rest)
+- Minimise the trust you place in profile VMs — treat any VM as potentially able to read your WiFi PSKs
+- Home networks with WPA2-PSK are lower risk than corporate/sensitive networks; consider not declaring those here
 
 ---
 
@@ -851,11 +860,7 @@ mvm rebuild comms
       ];
     };
 
-    # Iterative network updates:
-    # 1. Connect to new WiFi on router VM console (nmcli / nmtui)
-    # 2. wifi-sync poll  # Compare router vs local config
-    # 3. wifi-sync pull   # Pull credentials into modules/wifi.nix
-    # 4. rebuild          # Apply to router VM
+    # Use wifi-sync to manage networks — see "WiFi Credential Management" section below
 
     # Mullvad VPN integration
     vpn.mullvad = {
@@ -876,6 +881,65 @@ mvm rebuild comms
   };
 }
 ```
+
+### WiFi Credential Management (wifi-sync)
+
+`wifi-sync` is the host-side tool for managing the `hydrix.router.wifi.networks` list in `modules/wifi.nix`. It communicates with the router VM over vsock port 14506.
+
+#### How it works
+
+The router VM maintains two NetworkManager connection directories:
+
+| Directory | Contents | Source |
+|---|---|---|
+| `/run/NetworkManager/system-connections/` | Declared networks — generated from `wifi.nix` at build time | NixOS build |
+| `/var/lib/NetworkManager/system-connections/` | Runtime-added networks — persists across restarts | `nmcli` at runtime |
+
+`wifi-sync poll` (POLL command over vsock) reads both directories and returns a flat `connections` list. The host script diffs this against `wifi.nix` to identify which connections are already declared and which are pending (in `/var/lib/` but not yet in `wifi.nix`).
+
+#### Commands
+
+```bash
+wifi-sync                    # Admin: status + pending list. Fallback: capture current connection
+wifi-sync add SSID PASSWORD  # Push network to router NM + save PSK hash to wifi.nix
+wifi-sync pull               # Merge pending router connections into wifi.nix
+wifi-sync list               # Show networks declared in wifi.nix
+wifi-sync remove SSID        # Remove a network from wifi.nix
+```
+
+**Admin mode** — router VM is reachable via vsock (normal lockdown/administrative operation).
+
+**Fallback mode** — router VM is not running (e.g. fallback specialisation with direct host WiFi). `wifi-sync` reads the current connection from the host's `nmcli` and saves it.
+
+#### Adding a new network
+
+```bash
+# From host — pushes to router NM and saves to wifi.nix in one step:
+wifi-sync add "NetworkName" "password"
+rebuild
+microvm purge microvm-router --force && microvm build microvm-router && microvm start microvm-router
+```
+
+Or connect manually on the router console first, then pull:
+
+```bash
+# On router console:
+nmcli device wifi connect "NetworkName" password "password"
+# Then on host:
+wifi-sync pull
+rebuild
+microvm purge microvm-router --force && microvm build microvm-router && microvm start microvm-router
+```
+
+#### Why purge is required
+
+`rebuild` + `mvm rebuild router` alone is **not sufficient** when adding or removing networks. NetworkManager's runtime state in `/var/lib/` persists across VM restarts and takes precedence over the freshly generated `/run/` connections. Only a full purge clears this state, after which the new NixOS-declared connections in `/run/` are the only ones NM sees.
+
+This is a known limitation — ideally NM should reconcile its state with the declared connections on activation. For now, purge is the reliable path whenever you change `wifi.nix` and need the router to connect to a different or newly added network.
+
+#### Password storage
+
+Passwords are stored as 64-char WPA PSK hashes derived via `wpa_passphrase SSID PASSWORD`. NM accepts these directly and the plaintext password is never written to disk. However, see [WiFi Credentials in Nix Store](#wifi-credentials-in-nix-store) — the hashes are still readable by all VMs via the shared `/nix/store`.
 
 ### Networking
 
@@ -3359,6 +3423,20 @@ microvm console microrouter
 # Verify NetworkManager
 nmcli device status
 ```
+
+### New WiFi Network Not Connecting After Rebuild
+
+Rebuilding and restarting the router VM is not enough when you add or remove a network from `wifi.nix`. NetworkManager's persistent state in `/var/lib/NetworkManager/` survives VM restarts and takes precedence over the newly generated `/run/` connections.
+
+Fix: purge the router VM so it starts with a clean NM state:
+
+```bash
+microvm purge microvm-router --force
+microvm build microvm-router
+microvm start microvm-router
+```
+
+After a purge, only the connections declared in `wifi.nix` (written to `/run/` at boot) exist, and NM connects normally.
 
 ### Host Has No Internet (Expected in Lockdown)
 

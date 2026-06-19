@@ -148,6 +148,9 @@ let
     vpn-assign = "vpn-assign.sh";
     vpn-status = "vpn-status.sh";
 
+    # ===== WIFI =====
+    wifi-sync = "wifi-sync.sh";
+
     # ===== UTILITIES =====
     # hydrix-lock: wired in theming/wm/i3/scripts.nix (gated on hydrix.i3.enable)
     # i3launch:    wired in theming/wm/i3/scripts.nix (gated on hydrix.i3.enable)
@@ -160,6 +163,7 @@ let
 in {
   config = lib.mkIf (config.hydrix.vmType == "host" || config.hydrix.vmType == null) {
     environment.systemPackages = scriptPackages ++ [
+      pkgs.wpa_supplicant  # provides wpa_passphrase for wifi-sync PSK hashing
       # Backwards compatibility alias
       (pkgs.writeShellScriptBin "nixbuild" ''
         exec rebuild "$@"
