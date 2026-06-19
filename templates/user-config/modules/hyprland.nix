@@ -95,7 +95,7 @@ let
   startWaylandIdle = pkgs.writeShellScript "start-wayland-idle" ''
     _t=$(cat "$HOME/.local/state/lock-timeout" 2>/dev/null || echo "${idleTimeout}")
     exec ${pkgs.swayidle}/bin/swayidle -w \
-      timeout "$_t" '${pkgs.hyprlock}/bin/hyprlock' \
+      timeout "$_t" '${pkgs.systemd}/bin/loginctl lock-session' \
       lock '${pkgs.hyprlock}/bin/hyprlock'
   '';
 
