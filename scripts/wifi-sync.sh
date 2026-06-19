@@ -258,6 +258,15 @@ case "$CMD" in
     success "Removed '$target'"
     ;;
 
+  count)
+    if ! is_admin; then echo 0; exit 0; fi
+    poll=$(r_poll)
+    connections=$(echo "$poll" | jq '.connections // []' 2>/dev/null)
+    local_nets=$(read_nix)
+    pending=$(poll_pending "$connections" "$local_nets")
+    echo "$pending" | jq 'length'
+    ;;
+
   *)
     cat <<'USAGE'
 Usage: wifi-sync [command] [args]
@@ -267,6 +276,7 @@ Usage: wifi-sync [command] [args]
   pull              Merge all router NM connections into wifi.nix (admin mode)
   list              Show known networks in wifi.nix
   remove SSID       Remove a network from wifi.nix
+  count             Print number of unsaved router connections (for scripts/widgets)
 
 After any change, run 'rebuild' to bake credentials into the router VM.
 USAGE

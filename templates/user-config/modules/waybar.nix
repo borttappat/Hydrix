@@ -331,15 +331,33 @@ let
   '';
 
   wifiSyncScript = pkgs.writeShellScript "waybar-wifi-sync" ''
-    ws=$(hyprctl activeworkspace -j 2>/dev/null | jq -r '.id // empty')
-    [ "$ws" != "10" ] && exit 0
-    result=$(echo "POLL" | timeout 1 socat - VSOCK-CONNECT:200:14506 2>/dev/null)
-    [ -z "$result" ] && exit 0
-    count=$(echo "$result" | jq '.networks | length' 2>/dev/null || echo "0")
-    local_ssid=$(grep -oP 'ssid\s*=\s*"\K[^"]+' "${homeDir}/hydrix-config/modules/wifi.nix" 2>/dev/null | head -1 || echo "")
-    router_ssid=$(echo "$result" | jq -r '.networks[0].ssid // ""' 2>/dev/null)
-    [ -z "$router_ssid" ] && exit 0
-    [ "$router_ssid" != "$local_ssid" ] && echo "WIFI! $count" || echo "WIFI $count"
+    poll=$(echo "POLL" | ${pkgs.coreutils}/bin/timeout 2 \
+      ${pkgs.socat}/bin/socat -t2 - VSOCK-CONNECT:200:14506 2>/dev/null)
+    [ -z "$poll" ] && exit 0
+
+    current=$(echo "$poll" | ${pkgs.jq}/bin/jq -r '.current // ""' 2>/dev/null)
+    [ -z "$current" ] && exit 0
+
+    local_ssids=$(${pkgs.gnugrep}/bin/grep -oP '(?<=ssid = ")[^"]+' \
+      "${homeDir}/hydrix-config/modules/wifi.nix" 2>/dev/null \
+      | ${pkgs.jq}/bin/jq -Rrs 'split("\n") | map(select(length > 0))')
+
+    pending=$(echo "$poll" | ${pkgs.jq}/bin/jq \
+      --argjson l "$local_ssids" \
+      '[.connections[] | select(.ssid as $s | $l | index($s) == null)] | length' \
+      2>/dev/null || echo 0)
+
+    if [ "$pending" -gt 0 ]; then
+      ${pkgs.jq}/bin/jq -cn \
+        --arg t "WIFI +$pending" \
+        --arg tt "$pending unsaved network(s) — run: wifi-sync pull" \
+        --arg c "unsaved" \
+        '{"text":$t,"tooltip":$tt,"class":$c}'
+    else
+      ${pkgs.jq}/bin/jq -cn \
+        --arg t "WIFI $current" \
+        '{"text":$t}'
+    fi
   '';
 
   batteryTimeScript = pkgs.writeShellScript "waybar-battery-time" ''

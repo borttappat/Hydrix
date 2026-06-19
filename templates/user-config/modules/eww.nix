@@ -1,10 +1,12 @@
 # shared/eww.nix — eww widget daemon + left-side overlay
 #
 # left-overlay (top-left): stacked vertical panel showing:
+#   - router:     connected SSID + unsaved network count (polls wifi-sync vsock 14506)
 #   - exit-nodes: active VM WireGuard exit nodes (queries router CID 200 vsock 14515)
 #   - vm-status:  running/stopped VM overview (parses `microvm status`)
 #
-# Window opens when either exit nodes are active OR any VM is running.
+# Window opens when router is connected OR exit nodes active OR any VM running.
+# Watcher reads the cached eww router_stats variable — no duplicate network calls.
 # Colors sourced from ~/.cache/wal/colors.scss (pywal SCSS output).
 # Font size and geometry derived from hydrix.graphical.ui/scaling values.
 #
@@ -85,7 +87,8 @@ let
 
   # Polling script: parses `microvm status` table output (NAME STATUS CID columns).
   # microvm status uses ANSI color codes in the STATUS field — strip them before parsing.
-  # Returns {"running":[{name,cid},...], "stopped":[{name,cid},...]} for eww.
+  # CID = subnet last octet, so running VM IP = 192.168.<cid>.2.
+  # Returns {"running":[{name,ip},...], "stopped":[{name},...]} for eww.
   ewwMvmStatus = pkgs.writeShellApplication {
     name = "eww-mvm-status";
     runtimeInputs = [ pkgs.jq pkgs.coreutils pkgs.gnused ];
@@ -104,10 +107,14 @@ let
       while read -r name status cid; do
         case "$name" in microvm-*) ;; *) continue ;; esac
         short="''${name#microvm-}"
-        entry="{\"name\":\"$short\",\"cid\":\"$cid\"}"
         case "$status" in
-          running) running_json=$(echo "$running_json" | jq --argjson e "$entry" '. + [$e]') ;;
-          stopped) stopped_json=$(echo "$stopped_json" | jq --argjson e "$entry" '. + [$e]') ;;
+          running)
+            ip="192.168.$cid.2"
+            entry="{\"name\":\"$short\",\"ip\":\"$ip\"}"
+            running_json=$(echo "$running_json" | jq --argjson e "$entry" '. + [$e]') ;;
+          stopped)
+            entry="{\"name\":\"$short\"}"
+            stopped_json=$(echo "$stopped_json" | jq --argjson e "$entry" '. + [$e]') ;;
         esac
       done < <("$microvm" status 2>/dev/null \
         | sed -E 's/\x1b\[[0-9;]*[a-zA-Z]//g' \
@@ -117,32 +124,57 @@ let
     '';
   };
 
-  # Watcher: opens left-overlay when exit nodes active OR any VM running; closes when both empty.
+  # Polling script: queries wifi-sync vsock 14506 (already used by wifi-sync tool).
+  # Returns router POLL JSON enriched with "pending": N (connections not yet in wifi.nix).
+  ewwRouterStats = pkgs.writeShellApplication {
+    name = "eww-router-stats";
+    runtimeInputs = [ pkgs.socat pkgs.jq pkgs.gnugrep ];
+    text = ''
+      result=$(echo "POLL" | socat -T3 - VSOCK-CONNECT:200:14506 2>/dev/null || true)
+      if [ -z "$result" ]; then
+        echo '{"current":"","connections":[],"pending":0}'
+      else
+        known=$(grep -oP '(?<=ssid = ")[^"]+' "/home/${username}/hydrix-config/modules/wifi.nix" 2>/dev/null \
+          | jq -Rrs 'split("\n") | map(select(length > 0))')
+        pending=$(echo "$result" | jq --argjson l "$known" \
+          '[.connections[] | select(.ssid as $s | $l | index($s) == null)] | length' \
+          2>/dev/null || echo 0)
+        echo "$result" | jq --argjson p "$pending" '. + {"pending": $p}'
+      fi
+    '';
+  };
+
+  # Watcher: independently opens/closes three overlay windows:
+  #   vm-overlay     (top left)    — when any VM is running
+  #   wg-overlay     (center left) — when WireGuard exit nodes are active
+  #   router-overlay (bottom left) — when router is connected (reads cached eww variable)
   ewwLeftWatcher = pkgs.writeShellApplication {
     name = "eww-left-watch";
     runtimeInputs = [ pkgs.eww pkgs.jq pkgs.coreutils ];
     text = ''
-      last="closed"
+      # router-overlay opens once at startup to kick off its defpoll;
+      # :visible {router_stats.current != ""} in the widget handles show/hide.
+      eww open router-overlay 2>/dev/null || true
+
+      last_vm="closed"; last_wg="closed"
       while true; do
         wg=$(eww-wg-status 2>/dev/null || echo "[]")
         vm=$(eww-mvm-status 2>/dev/null || echo '{"running":[],"stopped":[]}')
         wg_count=$(echo "$wg" | jq 'length' 2>/dev/null || echo 0)
         vm_count=$(echo "$vm" | jq '.running | length' 2>/dev/null || echo 0)
 
-        if [ "$wg_count" -gt 0 ] || [ "$vm_count" -gt 0 ]; then
-          state="open"
+        if [ "$vm_count" -gt 0 ]; then
+          if [ "$last_vm" = "closed" ]; then eww open  vm-overlay 2>/dev/null || true; last_vm="open";   fi
         else
-          state="closed"
+          if [ "$last_vm" = "open"   ]; then eww close vm-overlay 2>/dev/null || true; last_vm="closed"; fi
         fi
 
-        if [ "$state" != "$last" ]; then
-          if [ "$state" = "open" ]; then
-            eww open left-overlay 2>/dev/null || true
-          else
-            eww close left-overlay 2>/dev/null || true
-          fi
-          last="$state"
+        if [ "$wg_count" -gt 0 ]; then
+          if [ "$last_wg" = "closed" ]; then eww open  wg-overlay 2>/dev/null || true; last_wg="open";   fi
+        else
+          if [ "$last_wg" = "open"   ]; then eww close wg-overlay 2>/dev/null || true; last_wg="closed"; fi
         fi
+
         sleep 5
       done
     '';
@@ -159,7 +191,12 @@ let
       :initial "{\"running\":[],\"stopped\":[]}"
       `eww-mvm-status`)
 
-    (defwindow left-overlay
+    (defpoll router_stats
+      :interval "5s"
+      :initial "{\"current\":\"\",\"connections\":[],\"pending\":0}"
+      `eww-router-stats`)
+
+    (defwindow vm-overlay
       :monitor 0
       :geometry (geometry
         :x "${toString widgetX}px"
@@ -169,20 +206,52 @@ let
       :exclusive false
       :stacking "bottom"
       :focusable false
-      (left-overlay-widget))
+      (vm-status-widget))
 
-    (defwidget left-overlay-widget []
+    (defwindow wg-overlay
+      :monitor 0
+      :geometry (geometry
+        :x "${toString widgetX}px"
+        :y "0px"
+        :width "270px"
+        :anchor "center left")
+      :exclusive false
+      :stacking "bottom"
+      :focusable false
+      (exit-nodes-widget))
+
+    (defwindow router-overlay
+      :monitor 0
+      :geometry (geometry
+        :x "${toString widgetX}px"
+        :y "${toString widgetY}px"
+        :width "270px"
+        :anchor "bottom left")
+      :exclusive false
+      :stacking "bottom"
+      :focusable false
+      (router-widget))
+
+    (defwidget router-widget []
       (box
+        :class "router-stats"
         :orientation "v"
         :space-evenly false
         :spacing 0
-        (exit-nodes-widget)
+        :visible {router_stats.current != ""}
         (label
-          :class "section-sep"
-          :text " "
-          :halign "start"
-          :visible {arraylength(wg_nodes) > 0 && arraylength(vm_status.running) > 0})
-        (vm-status-widget)))
+          :class "rs-title"
+          :text "ROUTER"
+          :halign "start")
+        (label
+          :class "rs-ssid"
+          :text {router_stats.current}
+          :halign "start")
+        (label
+          :class {router_stats.pending > 0 ? "rs-pending unsaved" : "rs-pending"}
+          :visible {router_stats.pending > 0}
+          :text {"+" + router_stats.pending + " unsaved"}
+          :halign "start")))
 
     (defwidget exit-nodes-widget []
       (box
@@ -209,7 +278,7 @@ let
           :spacing 6
           (label
             :class "node-dot {node.class}"
-            :text {node.class == "active" ? "●" : node.class == "stale" ? "○" : "✗"})
+            :text {node.class == "active" ? "●" : "○"})
           (label
             :class "node-vm"
             :text {node.vm}
@@ -234,21 +303,10 @@ let
           :class "vs-title"
           :text "VMS"
           :halign "start")
-        (box
-          :orientation "v"
-          :space-evenly false
-          (for vm in {vm_status.running}
-            (vm-row-running :vm vm)))
-        (box
-          :orientation "v"
-          :space-evenly false
-          :visible {arraylength(vm_status.stopped) > 0}
-          (label
-            :class "vs-section"
-            :text "STOPPED"
-            :halign "start")
-          (for vm in {vm_status.stopped}
-            (vm-row-stopped :vm vm)))))
+        (for vm in {vm_status.running}
+          (vm-row-running :vm vm))
+        (for vm in {vm_status.stopped}
+          (vm-row-stopped :vm vm))))
 
     (defwidget vm-row-running [vm]
       (box
@@ -265,9 +323,8 @@ let
           :hexpand true
           :halign "start")
         (label
-          :class "vm-cid"
-          :text {"CID " + vm.cid}
-          :visible {vm.cid != ""})))
+          :class "vm-ip"
+          :text {vm.ip})))
 
     (defwidget vm-row-stopped [vm]
       (box
@@ -298,6 +355,29 @@ let
       color: $foreground;
       background-color: transparent;
     }
+
+    /* router-stats */
+
+    .router-stats {
+      background-color: transparent;
+      padding: 6px 10px;
+    }
+
+    .rs-title {
+      font-weight: bold;
+      color: $color4;
+      letter-spacing: 0.06em;
+    }
+
+    .rs-ssid {
+      font-weight: bold;
+      color: $foreground;
+    }
+
+    .rs-pending.unsaved {
+      color: $color1;
+    }
+
 
     /* exit-nodes */
 
@@ -338,12 +418,6 @@ let
       margin-top: 1px;
     }
 
-    .section-sep {
-      color: $color8;
-      padding: 0 10px;
-      margin-top: 4px;
-    }
-
     /* vm-status */
 
     .vm-status {
@@ -356,14 +430,6 @@ let
       color: $color4;
       letter-spacing: 0.06em;
       margin-bottom: 4px;
-    }
-
-    .vs-section {
-      font-weight: bold;
-      color: $color8;
-      letter-spacing: 0.06em;
-      margin-top: 6px;
-      margin-bottom: 2px;
     }
 
     .vm-row {
@@ -385,7 +451,7 @@ let
       font-weight: normal;
     }
 
-    .vm-cid {
+    .vm-ip {
       color: $color8;
     }
   '';
@@ -395,7 +461,7 @@ let
 in lib.mkIf config.hydrix.hyprland.enable {
 
   home-manager.users.${username} = { lib, ... }: {
-    home.packages = [ pkgs.eww ewwWgStatus ewwMvmStatus ewwLeftWatcher ];
+    home.packages = [ pkgs.eww ewwWgStatus ewwMvmStatus ewwRouterStats ewwLeftWatcher ];
 
     home.activation.ewwConfig = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
       _dir="$HOME/.config/eww"
