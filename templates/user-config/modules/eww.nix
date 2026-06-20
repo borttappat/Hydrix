@@ -1,12 +1,13 @@
-# shared/eww.nix — eww widget daemon + left-side overlay
+# shared/eww.nix — eww widget daemon + unified left-side overlay
 #
-# left-overlay (top-left): stacked vertical panel showing:
-#   - router:     connected SSID + unsaved network count (polls wifi-sync vsock 14506)
-#   - exit-nodes: active VM WireGuard exit nodes (queries router CID 200 vsock 14515)
-#   - vm-status:  running/stopped VM overview (parses `microvm status`)
+# Single left-overlay window (center left) with three stacked sections:
+#   - VMS:        running/stopped VM overview (parses `microvm status`)
+#   - EXIT NODES: active WireGuard exit nodes with session totals
+#                 (queries router CID 200 vsock 14515)
+#   - NETWORK:    connected SSID, unsaved count, WAN + per-VM bandwidth
+#                 (wifi-sync vsock 14506; net-stats vsock 14517)
 #
-# Window opens when router is connected OR exit nodes active OR any VM running.
-# Watcher reads the cached eww router_stats variable — no duplicate network calls.
+# Panel is gated by :visible so it appears fully-formed once data arrives.
 # Colors sourced from ~/.cache/wal/colors.scss (pywal SCSS output).
 # Font size and geometry derived from hydrix.graphical.ui/scaling values.
 #
@@ -14,12 +15,11 @@
 #
 { config, lib, pkgs, ... }:
 let
-  username  = config.hydrix.username;
-  ui        = config.hydrix.graphical.ui;
-  gaps    = let v = ui.gaps or null; in if v != null then v else 10;
-  widgetX = gaps;
-  widgetY = gaps;
-  fontSize  = let v = config.hydrix.graphical.font.size or null; in if v != null then v else 10;
+  username = config.hydrix.username;
+  ui       = config.hydrix.graphical.ui;
+  gaps     = let v = ui.gaps or null; in if v != null then v else 10;
+  widgetX  = gaps;
+  fontSize = let v = config.hydrix.graphical.font.size or null; in if v != null then v else 10;
 
   # Polling script: queries router vsock 14515 for wg dump JSON, then
   # cross-references /tmp/hydrix-metrics-* to filter down to running VMs with
@@ -103,7 +103,6 @@ let
         exit 0
       fi
 
-      # Strip ANSI codes, then process lines beginning with "microvm-".
       while read -r name status cid; do
         case "$name" in microvm-*) ;; *) continue ;; esac
         short="''${name#microvm-}"
@@ -144,39 +143,35 @@ let
     '';
   };
 
-  # Watcher: independently opens/closes three overlay windows:
-  #   vm-overlay     (top left)    — when any VM is running
-  #   wg-overlay     (center left) — when WireGuard exit nodes are active
-  #   router-overlay (bottom left) — when router is connected (reads cached eww variable)
+  # Polling script: queries net-stats vsock 14517, formats byte rates,
+  # normalises direction to VM perspective (router rx/tx → VM up/down).
+  ewwNetStats = pkgs.writeShellApplication {
+    name = "eww-net-stats";
+    runtimeInputs = [ pkgs.socat pkgs.jq ];
+    text = ''
+      raw=$(echo "" | socat -T4 - VSOCK-CONNECT:200:14517 2>/dev/null || true)
+      [ -z "$raw" ] && { echo '{"wan":{"iface":"","down":"","up":""},"vms":[]}'; exit 0; }
+      echo "$raw" | jq '
+        def fmt:
+          if . >= 1048576 then "\(. / 1048576 | floor)MB/s"
+          elif . >= 1024 then "\(. / 1024 | floor)KB/s"
+          else "\(.)B/s"
+          end;
+        {wan:{iface:.wan.iface,down:(.wan.rx|fmt),up:(.wan.tx|fmt)},
+         vms:[.vms[]|{vm:.vm,down:(.tx|fmt),up:(.rx|fmt)}]}
+      ' 2>/dev/null || echo '{"wan":{"iface":"","down":"","up":""},"vms":[]}'
+    '';
+  };
+
+  # Watcher: opens left-overlay after a brief delay so the first poll cycle
+  # completes before the window renders (avoids layout jitter on spawn).
   ewwLeftWatcher = pkgs.writeShellApplication {
     name = "eww-left-watch";
-    runtimeInputs = [ pkgs.eww pkgs.jq pkgs.coreutils ];
+    runtimeInputs = [ pkgs.eww pkgs.coreutils ];
     text = ''
-      # router-overlay opens once at startup to kick off its defpoll;
-      # :visible {router_stats.current != ""} in the widget handles show/hide.
-      eww open router-overlay 2>/dev/null || true
-
-      last_vm="closed"; last_wg="closed"
-      while true; do
-        wg=$(eww-wg-status 2>/dev/null || echo "[]")
-        vm=$(eww-mvm-status 2>/dev/null || echo '{"running":[],"stopped":[]}')
-        wg_count=$(echo "$wg" | jq 'length' 2>/dev/null || echo 0)
-        vm_count=$(echo "$vm" | jq '.running | length' 2>/dev/null || echo 0)
-
-        if [ "$vm_count" -gt 0 ]; then
-          if [ "$last_vm" = "closed" ]; then eww open  vm-overlay 2>/dev/null || true; last_vm="open";   fi
-        else
-          if [ "$last_vm" = "open"   ]; then eww close vm-overlay 2>/dev/null || true; last_vm="closed"; fi
-        fi
-
-        if [ "$wg_count" -gt 0 ]; then
-          if [ "$last_wg" = "closed" ]; then eww open  wg-overlay 2>/dev/null || true; last_wg="open";   fi
-        else
-          if [ "$last_wg" = "open"   ]; then eww close wg-overlay 2>/dev/null || true; last_wg="closed"; fi
-        fi
-
-        sleep 5
-      done
+      sleep 3
+      eww open left-overlay 2>/dev/null || true
+      sleep infinity
     '';
   };
 
@@ -196,19 +191,12 @@ let
       :initial "{\"current\":\"\",\"connections\":[],\"pending\":0}"
       `eww-router-stats`)
 
-    (defwindow vm-overlay
-      :monitor 0
-      :geometry (geometry
-        :x "${toString widgetX}px"
-        :y "${toString widgetY}px"
-        :width "270px"
-        :anchor "top left")
-      :exclusive false
-      :stacking "bottom"
-      :focusable false
-      (vm-status-widget))
+    (defpoll net_stats
+      :interval "5s"
+      :initial "{\"wan\":{\"iface\":\"\",\"down\":\"\",\"up\":\"\"},\"vms\":[]}"
+      `eww-net-stats`)
 
-    (defwindow wg-overlay
+    (defwindow left-overlay
       :monitor 0
       :geometry (geometry
         :x "${toString widgetX}px"
@@ -218,19 +206,17 @@ let
       :exclusive false
       :stacking "bottom"
       :focusable false
-      (exit-nodes-widget))
+      (left-panel))
 
-    (defwindow router-overlay
-      :monitor 0
-      :geometry (geometry
-        :x "${toString widgetX}px"
-        :y "${toString widgetY}px"
-        :width "270px"
-        :anchor "bottom left")
-      :exclusive false
-      :stacking "bottom"
-      :focusable false
-      (router-widget))
+    (defwidget left-panel []
+      (box
+        :orientation "v"
+        :space-evenly false
+        :spacing 10
+        :visible {router_stats.current != "" || arraylength(vm_status.running) > 0}
+        (vm-status-widget)
+        (exit-nodes-widget)
+        (router-widget)))
 
     (defwidget router-widget []
       (box
@@ -241,7 +227,7 @@ let
         :visible {router_stats.current != ""}
         (label
           :class "rs-title"
-          :text "ROUTER"
+          :text "NETWORK"
           :halign "start")
         (label
           :class "rs-ssid"
@@ -251,7 +237,10 @@ let
           :class {router_stats.pending > 0 ? "rs-pending unsaved" : "rs-pending"}
           :visible {router_stats.pending > 0}
           :text {"+" + router_stats.pending + " unsaved"}
-          :halign "start")))
+          :halign "start")
+        (net-wan-row :stats {net_stats.wan})
+        (for vm in {net_stats.vms}
+          (net-vm-row :vm vm))))
 
     (defwidget exit-nodes-widget []
       (box
@@ -289,7 +278,7 @@ let
             :text {node.location}))
         (label
           :class "node-meta"
-          :text {(node.location == node.endpoint ? "" : node.endpoint + "   ") + node.age + "   " + node.rx + "↓  " + node.tx + "↑"}
+          :text {(node.location == node.endpoint ? "" : node.endpoint + "   ") + node.age + "   " + node.rx + "↓  " + node.tx + "↑  total"}
           :halign "start")))
 
     (defwidget vm-status-widget []
@@ -340,6 +329,42 @@ let
           :text {vm.name}
           :hexpand true
           :halign "start")))
+
+    (defwidget net-wan-row [stats]
+      (box
+        :class "net-row wan-row"
+        :orientation "h"
+        :space-evenly false
+        :spacing 6
+        (label
+          :class "net-iface"
+          :text {stats.iface}
+          :hexpand true
+          :halign "start")
+        (label
+          :class "net-down"
+          :text {stats.down + "↓"})
+        (label
+          :class "net-up"
+          :text {stats.up + "↑"})))
+
+    (defwidget net-vm-row [vm]
+      (box
+        :class "net-row"
+        :orientation "h"
+        :space-evenly false
+        :spacing 6
+        (label
+          :class "net-vm"
+          :text {vm.vm}
+          :hexpand true
+          :halign "start")
+        (label
+          :class "net-down"
+          :text {vm.down + "↓"})
+        (label
+          :class "net-up"
+          :text {vm.up + "↑"})))
   '';
 
   ewwScss = ''
@@ -367,6 +392,7 @@ let
       font-weight: bold;
       color: $color4;
       letter-spacing: 0.06em;
+      margin-bottom: 10px;
     }
 
     .rs-ssid {
@@ -377,7 +403,6 @@ let
     .rs-pending.unsaved {
       color: $color1;
     }
-
 
     /* exit-nodes */
 
@@ -454,6 +479,34 @@ let
     .vm-ip {
       color: $color8;
     }
+
+    /* net-stats (rows embedded in router-widget) */
+
+    .net-row {
+      margin-top: 3px;
+    }
+
+    .wan-row {
+      margin-top: 4px;
+    }
+
+    .net-iface {
+      font-weight: bold;
+      color: $foreground;
+    }
+
+    .net-vm {
+      color: $foreground;
+    }
+
+    .net-down {
+      color: $color8;
+      min-width: 70px;
+    }
+
+    .net-up {
+      color: $color8;
+    }
   '';
 
   ewwYuckFile = pkgs.writeText "eww.yuck" ewwYuck;
@@ -461,7 +514,7 @@ let
 in lib.mkIf config.hydrix.hyprland.enable {
 
   home-manager.users.${username} = { lib, ... }: {
-    home.packages = [ pkgs.eww ewwWgStatus ewwMvmStatus ewwRouterStats ewwLeftWatcher ];
+    home.packages = [ pkgs.eww ewwWgStatus ewwMvmStatus ewwRouterStats ewwNetStats ewwLeftWatcher ];
 
     home.activation.ewwConfig = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
       _dir="$HOME/.config/eww"
@@ -491,7 +544,7 @@ in lib.mkIf config.hydrix.hyprland.enable {
 
     systemd.user.services.eww-left-watch = {
       Unit = {
-        Description = "eww left-overlay open/close watcher";
+        Description = "eww left-overlay watcher";
         After       = [ "hyprland-session.target" ];
         PartOf      = [ "hyprland-session.target" ];
       };
