@@ -380,8 +380,9 @@ in {
             # since the portal works on both host and VMs.
             "widget.use-xdg-desktop-portal.file-picker" = 1;
 
-            # System font on web content
-            "browser.display.use_document_fonts" = lib.mkDefault 0;  # 0 = use user fonts, 1 = allow web fonts
+            # Allow web fonts so icon fonts (Font Awesome etc.) render correctly.
+            # System font is set as default via font.name.* below — no need to block web fonts.
+            "browser.display.use_document_fonts" = lib.mkDefault 1;
             "font.name.monospace.x-western" = lib.mkDefault fontName;
             "font.name.sans-serif.x-western" = lib.mkDefault fontName;
             "font.name.serif.x-western" = lib.mkDefault fontName;
@@ -463,11 +464,12 @@ in {
           '';
 
           userContent = ''
-            /* Content styling with system font */
-
-            /* Force system font on ALL web content */
+            /* Force system font on all web content.
+               Exclude <i> elements — icon fonts (Font Awesome etc.) universally
+               use <i> as the container, and their glyphs live in the Unicode
+               Private Use Area which only the icon web font has. */
             @-moz-document regexp(".*") {
-              * {
+              *:not(i) {
                 font-family: "${fontName}", monospace !important;
               }
             }
