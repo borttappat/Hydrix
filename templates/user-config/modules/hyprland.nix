@@ -96,7 +96,7 @@ let
     _t=$(cat "$HOME/.local/state/lock-timeout" 2>/dev/null || echo "${idleTimeout}")
     exec ${pkgs.swayidle}/bin/swayidle -w \
       timeout "$_t" '${pkgs.systemd}/bin/loginctl lock-session' \
-      lock '${pkgs.hyprlock}/bin/hyprlock'
+      lock 'pidof hyprlock || ${pkgs.hyprlock}/bin/hyprlock'
   '';
 
   # lock-timeout [seconds] — read or adjust the idle lock timeout at runtime.
@@ -280,7 +280,7 @@ let
 
     # Lock / Suspend / Exit
     bind = $mod SHIFT,      E, exec, hyprlock
-    bind = $mod SHIFT,      S, exec, hyprlock && systemctl suspend
+    bind = $mod SHIFT,      S, exec, systemctl suspend
     bind = $mod CTRL SHIFT, E, exec, exit-wayland
 
     # Focus (hjkl + arrows)
