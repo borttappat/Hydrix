@@ -302,6 +302,9 @@ in {
           "browser.uitour.enabled" = lock-false;
           "browser.newtabpage.activity-stream.asrouter.userprefs.cfr.addons" = lock-false;
           "browser.newtabpage.activity-stream.asrouter.userprefs.cfr.features" = lock-false;
+          # Suppress Firefox's own upgrade/welcome dialogs
+          "browser.startup.upgradeDialog.enabled" = lock-false;
+          "browser.aboutwelcome.enabled" = lock-false;
           # Prevent extension update notifications
           "extensions.update.notifyUser" = lock-false;
           "browser.topsites.contile.enabled" = lock-false;
@@ -319,6 +322,9 @@ in {
           "browser.newtabpage.activity-stream.showSponsored" = lock-false;
           "browser.newtabpage.activity-stream.system.showSponsored" = lock-false;
           "browser.newtabpage.activity-stream.showSponsoredTopSites" = lock-false;
+        } // lib.optionalAttrs (ffCfg.newTab != null) {
+          # Disable activity-stream new tab page when newTab option is set
+          "browser.newtabpage.enabled" = lock-false;
         } // lib.optionalAttrs ffCfg.verticalTabs {
           "sidebar.revamp" = lock-true;
           "sidebar.verticalTabs" = lock-true;

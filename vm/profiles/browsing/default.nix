@@ -12,7 +12,9 @@
 { config, lib, pkgs, ... }:
 
 {
-  imports = [ ./packages.nix ];
+  imports = [
+    ./packages.nix
+  ];
 
   # VM identity
   hydrix.vmType = "browsing";

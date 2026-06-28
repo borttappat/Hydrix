@@ -175,6 +175,17 @@ in {
       example = "https://example.com";
     };
 
+    firefox.newTab = lib.mkOption {
+      type = lib.types.nullOr lib.types.str;
+      default = null;
+      description = ''
+        Controls the new tab page. null = Firefox default (activity stream).
+        Set to "about:blank" for a blank new tab, or any URL to open that page
+        on new tabs (requires the New Tab Override extension for custom URLs).
+      '';
+      example = "about:blank";
+    };
+
     zathura.recolor = lib.mkOption {
       type = lib.types.bool;
       default = true;
