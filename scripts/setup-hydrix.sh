@@ -1646,6 +1646,61 @@ main() {
         error "nixos-rebuild switch failed. Check errors above."
     fi
 
+    # --- Step 5: Sops initialization ---
+    echo ""
+    log "=== Setting up sops secrets ==="
+    echo ""
+
+    HYDRIX_FLAKE_DIR="$CONFIG_DIR"
+    export HYDRIX_FLAKE_DIR
+
+    SOPS_YAML="$CONFIG_DIR/secrets/.sops.yaml"
+
+    if command -v hydrix-sops-setup &>/dev/null; then
+        PUBKEY=$(hydrix-sops-setup --print-key 2>/dev/null || true)
+
+        if [[ -f "$SOPS_YAML" ]]; then
+            # Existing repo: this is an additional machine
+            if [[ -n "$PUBKEY" ]] && grep -qF "$PUBKEY" "$SOPS_YAML" 2>/dev/null; then
+                success "This machine's age key is already in secrets/.sops.yaml"
+            else
+                echo "This machine's age key must be added to secrets/.sops.yaml."
+                echo ""
+                echo "  Age public key: ${PUBKEY:-<run sops-age-pubkey to get it>}"
+                echo ""
+                echo "On a machine that can already decrypt, add the key above to"
+                echo "secrets/.sops.yaml and run:"
+                echo "  sops updatekeys secrets/*.yaml"
+                echo "  git add secrets/.sops.yaml secrets/*.yaml && git commit"
+                echo ""
+                echo "Until then, VMs start without secrets (graceful degradation)."
+            fi
+        else
+            # Fresh repo: initialize sops
+            hydrix-sops-setup
+            echo ""
+
+            # Offer to migrate wifi credentials to sops immediately
+            if command -v setup-wifi-secrets &>/dev/null \
+               && [[ -f "$CONFIG_DIR/modules/wifi.nix" ]] \
+               && grep -qv "@WIFI_SSID@\|networks = \[\]" "$CONFIG_DIR/modules/wifi.nix" 2>/dev/null; then
+                echo "WiFi credentials are currently in modules/wifi.nix (readable by all VMs)."
+                read -p "Encrypt them to secrets/wifi.yaml now? [Y/n]: " do_wifi
+                if [[ ! "$do_wifi" =~ ^[Nn]$ ]]; then
+                    setup-wifi-secrets
+                    echo ""
+                    echo "Next: set wifiSecretsFile in machines/${CONFIG[serial]}.nix and rebuild."
+                fi
+            fi
+
+            echo ""
+            echo "Commit the sops config:"
+            echo "  cd $CONFIG_DIR && git add -f secrets/.sops.yaml && git commit -m 'feat(secrets): init sops'"
+        fi
+    else
+        warn "hydrix-sops-setup not found. Run 'hydrix-sops-setup' after reboot to initialize sops."
+    fi
+
     # --- Done ---
     echo ""
     success "=========================================="
