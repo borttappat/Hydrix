@@ -370,16 +370,19 @@ in {
     # subdirectory) causes the condition to always fail, preventing the runner
     # symlink from being created on first boot.
     # The config subdirectory is created by hydrix-microvm-config-dirs below.
-    # Pre-create secrets source dirs for all enabled VMs.
-    # virtiofsd crashes if the source path is missing at start — pre-creating
-    # for all enabled VMs means the share is always safe to add when secrets != [].
-    ++ (lib.mapAttrsToList (name: _: "d /run/hydrix-secrets/${name}/ssh 0700 root root -")
-      (lib.filterAttrs (_: v: v.enable) cfg.vms))
-    # Create /run/secrets/github so the provisioning service always has a valid
-    # source directory to check, even when sops is not configured.
-    ++ lib.optionals (vmsWithSecrets != {}) [
-      "d /run/secrets/github 0700 root root -"
-    ];
+    # Parent dir per enabled VM — virtiofsd needs this path to exist at start.
+    ++ (lib.mapAttrsToList (name: _: "d /run/hydrix-secrets/${name} 0700 root root -")
+        (lib.filterAttrs (_: v: v.enable) cfg.vms))
+    # Subdir per (vm, secretType) pair — provisioning target for each secret.
+    ++ (lib.concatLists (lib.mapAttrsToList (name: vmCfg:
+        map (secretName:
+          let vmDir = (secretsCfg.files.${secretName} or {}).vmDir or secretName;
+          in "d /run/hydrix-secrets/${name}/${vmDir} 0700 root root -")
+          vmCfg.secrets
+      ) enabledVMs))
+    # Decryption output dir per configured file (used by hydrix-sops-decrypt-<name>).
+    ++ (lib.mapAttrsToList (name: _: "d /run/secrets/${name} 0700 root root -")
+        (lib.filterAttrs (_: f: f.enable && f.file != null) secretsCfg.files));
 
     # Declare microVMs from hydrix.microvmHost.vms
     # VM names must match nixosConfigurations in the Hydrix flake
@@ -538,9 +541,9 @@ in {
         description = "Pre-create secrets dir and provision secrets for microVM ${name}";
         wantedBy = [ "microvm-virtiofsd@${name}.service" "microvm@${name}.service" ];
         before = [ "microvm-virtiofsd@${name}.service" "microvm@${name}.service" ];
-        wants = lib.optionals (builtins.elem "github" vmCfg.secrets) [ "hydrix-github-secrets.service" ];
+        wants = map (s: "hydrix-sops-decrypt-${s}.service") vmCfg.secrets;
         after = [ "local-fs.target" ]
-          ++ lib.optionals (builtins.elem "github" vmCfg.secrets) [ "hydrix-github-secrets.service" ];
+          ++ map (s: "hydrix-sops-decrypt-${s}.service") vmCfg.secrets;
 
         serviceConfig = {
           Type = "oneshot";
@@ -548,29 +551,35 @@ in {
         };
 
         script = ''
-          SECRETS_DIR="/run/hydrix-secrets/${name}/ssh"
+          # Ensure parent dir exists for virtiofsd (safe even with no secrets)
+          mkdir -p "/run/hydrix-secrets/${name}"
+          chmod 700 "/run/hydrix-secrets/${name}"
 
-          mkdir -p "$SECRETS_DIR"
-          chmod 700 "$SECRETS_DIR"
-
-          ${lib.concatMapStrings (secret:
-            if secret == "github" then ''
-              GITHUB_SECRETS="/run/secrets/github"
-              if [ -f "$GITHUB_SECRETS/id_ed25519" ]; then
-                cp "$GITHUB_SECRETS/id_ed25519" "$SECRETS_DIR/"
-                chmod 600 "$SECRETS_DIR/id_ed25519"
-              else
-                echo "Warning: github id_ed25519 not found"
-              fi
-              if [ -f "$GITHUB_SECRETS/id_ed25519.pub" ]; then
-                cp "$GITHUB_SECRETS/id_ed25519.pub" "$SECRETS_DIR/"
-                chmod 644 "$SECRETS_DIR/id_ed25519.pub"
-              else
-                echo "Warning: github id_ed25519.pub not found"
-              fi
-            ''
-            else ''
-              echo "Warning: unknown secret type '${secret}' — skipping"
+          ${lib.concatMapStrings (secretName:
+            let
+              fileCfg   = secretsCfg.files.${secretName} or null;
+              wholeFile = fileCfg != null && fileCfg.keys == {};
+            in if fileCfg == null then ''
+              echo "Warning: unknown secret type '${secretName}' — not in hydrix.secrets.files"
+            '' else if wholeFile then ''
+              # Whole-file mode: mirror entire /run/secrets/<name>/ into vmDir
+              DEST="/run/hydrix-secrets/${name}/${fileCfg.vmDir}"
+              mkdir -p "$DEST"
+              chmod 700 "$DEST"
+              SRC="/run/secrets/${secretName}"
+              [ -d "$SRC" ] && cp -r "$SRC/." "$DEST/" && chmod -R go-rwx "$DEST/" || true
+            '' else ''
+              # Per-key mode: copy specific named files
+              DEST="/run/hydrix-secrets/${name}/${fileCfg.vmDir}"
+              mkdir -p "$DEST"
+              chmod 700 "$DEST"
+              SRC="/run/secrets/${secretName}"
+              ${lib.concatStringsSep "" (lib.mapAttrsToList (_keyName: keyCfg: ''
+                [ -f "$SRC/${keyCfg.outFile}" ] \
+                  && cp "$SRC/${keyCfg.outFile}" "$DEST/" \
+                  && chmod ${keyCfg.mode} "$DEST/${keyCfg.outFile}" \
+                  || true
+              '') fileCfg.keys)}
             ''
           ) vmCfg.secrets}
 

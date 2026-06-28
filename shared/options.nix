@@ -384,6 +384,67 @@ in {
           Set this in your machine config: hydrix.secrets.githubSecretsFile = ../secrets/github.yaml;
         '';
       };
+
+      files = lib.mkOption {
+        type = lib.types.attrsOf (lib.types.submodule {
+          options = {
+            enable = lib.mkOption {
+              type = lib.types.bool;
+              default = true;
+            };
+            file = lib.mkOption {
+              type = lib.types.nullOr lib.types.path;
+              default = null;
+            };
+            keys = lib.mkOption {
+              type = lib.types.attrsOf (lib.types.submodule {
+                options = {
+                  outFile = lib.mkOption { type = lib.types.str; };
+                  mode    = lib.mkOption { type = lib.types.str; default = "0600"; };
+                };
+              });
+              default = {};
+              description = ''
+                Keys to extract from the sops file (per-key mode).
+                Each entry extracts one YAML key to a separate output file.
+                When empty (default), the entire file is decrypted as-is (whole-file mode).
+              '';
+            };
+            outFile = lib.mkOption {
+              type = lib.types.str;
+              default = "";
+              description = ''
+                Whole-file mode only (keys = {}): output filename inside /run/secrets/<name>/.
+                Defaults to the basename of file (e.g. "discord.yaml" for secrets/discord.yaml).
+              '';
+            };
+            vmDir = lib.mkOption {
+              type = lib.types.str;
+              description = "Subdirectory name under /run/hydrix-secrets/<vm>/ for this secret type.";
+            };
+          };
+        });
+        default = {};
+        description = ''
+          Declarative sops secret files. Each enabled entry with a non-null file becomes
+          a hydrix-sops-decrypt-<name>.service and can be provisioned into VMs by listing
+          the name in hydrix.microvmHost.vms.<vmname>.secrets.
+        '';
+      };
+
+      wifi = {
+        enable = lib.mkEnableOption "WiFi credential provisioning to router VM";
+      };
+
+      wifiSecretsFile = lib.mkOption {
+        type = lib.types.nullOr lib.types.path;
+        default = null;
+        description = ''
+          Path to the encrypted wifi.yaml file in your hydrix-config repo.
+          Set this in your machine config: hydrix.secrets.wifiSecretsFile = ../secrets/wifi.yaml;
+          Run setup-wifi-secrets to create this file from your existing modules/wifi.nix.
+        '';
+      };
     };
 
     # =========================================================================
