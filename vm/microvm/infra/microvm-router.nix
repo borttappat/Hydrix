@@ -286,6 +286,15 @@ in {
           mountPoint = "/mnt/router-config";
           proto = "9p";
         }
+        # Secrets delivered by host hydrix-secrets-${vmName} service.
+        # Populated when hydrix.microvmHost.vms."microvm-router".secrets includes "wifi".
+        # Always shared (dir is pre-created by tmpfiles even when empty).
+        {
+          tag = "vm-secrets";
+          source = "/run/hydrix-secrets/${vmName}";
+          mountPoint = "/mnt/vm-secrets";
+          proto = "virtiofs";
+        }
       ];
 
       # ===== Persistent Volume for /var/lib =====
@@ -881,6 +890,12 @@ in {
                 read -r pass
                 [[ -n "$ssid" && -n "$pass" ]] || {
                   printf '{"ok":false,"error":"missing ssid or password"}'; exit 0; }
+                # WPA-PSK: 8-63 plaintext chars, or exactly 64 hex chars (pre-hashed)
+                psk_len=''${#pass}
+                if [[ "$psk_len" -lt 8 || ( "$psk_len" -gt 63 && "$psk_len" -ne 64 ) ]]; then
+                  printf '{"ok":false,"error":"PSK must be 8-63 chars (or 64-char hex hash), got %d"}' "$psk_len"
+                  exit 0
+                fi
                 if ${pkgs.networkmanager}/bin/nmcli device wifi connect "$ssid" \
                    password "$pass" 2>/dev/null; then
                   printf '{"ok":true,"connected":true}'
@@ -893,6 +908,16 @@ in {
                   printf '{"ok":false,"error":"failed to add connection"}'
                 fi
                 ;;
+              REMOVE)
+                read -r ssid
+                [[ -n "$ssid" ]] || {
+                  printf '{"ok":false,"error":"missing ssid"}'; exit 0; }
+                if ${pkgs.networkmanager}/bin/nmcli con delete "$ssid" 2>/dev/null; then
+                  printf '{"ok":true}'
+                else
+                  printf '{"ok":false,"error":"connection not found: %s"}' "$ssid"
+                fi
+                ;;
               *)
                 printf '{"error":"unknown command"}'
                 ;;
@@ -902,6 +927,45 @@ in {
         Restart = "always";
         RestartSec = 5;
       };
+    };
+
+    # ===== WiFi from Sops =====
+    # Reads /mnt/vm-secrets/wifi/networks.json (delivered by host hydrix-secrets service)
+    # and creates NM connections for each network. No-op when file is absent so
+    # non-sops deployments (credentials still in modules/wifi.nix) are unaffected.
+    systemd.services.hydrix-wifi-from-sops = {
+      description = "Configure WiFi networks from sops secrets";
+      wantedBy    = [ "network.target" ];
+      after       = [ "NetworkManager.service" ];
+      before      = [ "network.target" ];
+      serviceConfig = {
+        Type = "oneshot";
+        RemainAfterExit = true;
+      };
+      script = let
+        jq    = "${pkgs.jq}/bin/jq";
+        nmcli = "${pkgs.networkmanager}/bin/nmcli";
+      in ''
+        set -euo pipefail
+        WIFI_FILE="/mnt/vm-secrets/wifi/networks.json"
+        [ -f "$WIFI_FILE" ] || { echo "No wifi secrets — skipping"; exit 0; }
+        count=0
+        while IFS= read -r net; do
+          ssid=$(printf '%s' "$net" | ${jq} -r '.ssid')
+          psk=$(printf '%s' "$net" | ${jq} -r '.psk')
+          prio=$(printf '%s' "$net" | ${jq} -r '.priority // 50')
+          if ${nmcli} con show "$ssid" &>/dev/null; then
+            echo "  $ssid: already configured"
+          else
+            ${nmcli} con add type wifi con-name "$ssid" ssid "$ssid" \
+              wifi-sec.key-mgmt wpa-psk wifi-sec.psk "$psk" \
+              connection.autoconnect yes connection.autoconnect-priority "$prio" \
+              ipv6.method disabled
+            count=$((count+1))
+          fi
+        done < <(${jq} -c '.[]' "$WIFI_FILE")
+        echo "$count network(s) configured from sops secrets"
+      '';
     };
 
     # ===== Services =====
