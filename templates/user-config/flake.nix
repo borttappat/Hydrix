@@ -153,7 +153,7 @@
         inherit userColorschemesDir;
         modules = [
           (machinesDir + "/${file}")
-          ./modules/wifi.nix         # WiFi credentials (shared across machines)
+          ./modules/wifi.nix         # WiFi networks (legacy: move to secrets/wifi.yaml via setup-wifi-secrets)
           ./modules/repos.nix        # Declarative git repos (add yours, or leave repos = {})
           ./modules/fonts.nix        # Font packages and profiles
           ./modules/hyprland.nix     # Hyprland keybindings + config (user-customizable)

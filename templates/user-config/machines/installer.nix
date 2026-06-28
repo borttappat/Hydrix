@@ -107,7 +107,8 @@
     # ─────────────────────────────────────────────────────────────────────
     # ROUTER
     # ─────────────────────────────────────────────────────────────────────
-    # WiFi credentials are in modules/wifi.nix (shared across all machines).
+    # WiFi credentials live in secrets/wifi.yaml (sops-encrypted).
+    # Run setup-wifi-secrets to migrate from modules/wifi.nix.
     router = {
       type = "@ROUTER_TYPE@";
       wan.mode = "@WAN_MODE@";
@@ -168,18 +169,21 @@
     # };
 
     # ─────────────────────────────────────────────────────────────────────
-    # SECRETS (optional - for GitHub SSH keys, etc.)
+    # SECRETS (optional - for GitHub SSH keys, WiFi credentials, etc.)
     # ─────────────────────────────────────────────────────────────────────
     # Setup workflow:
-    #   1. Rebuild once (generates /etc/ssh/ssh_host_ed25519_key)
-    #   2. Run: sops-age-pubkey          (prints your age public key)
-    #   3. Add key to secrets/.sops.yaml in your hydrix-config
-    #   4. Fill secrets/github.yaml, encrypt: cd secrets && sops -e -i github.yaml
-    #   5. Set enable = true + github.enable = true, then rebuild
+    #   1. Set enable = true, rebuild (generates age key automatically)
+    #   2. Run: hydrix-sops-setup        (creates secrets/.sops.yaml)
+    #   3. Run: sops secrets/github.yaml (create and encrypt secrets file)
+    #   4. Set githubSecretsFile below and rebuild
+    #
+    # For WiFi credentials:
+    #   Run: setup-wifi-secrets          (migrates modules/wifi.nix to secrets/wifi.yaml)
+    #
     secrets = {
       enable = false;
-      github.enable = false;
       # githubSecretsFile = ../secrets/github.yaml;
+      # wifiSecretsFile   = ../secrets/wifi.yaml;
     };
 
   
