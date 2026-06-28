@@ -24,7 +24,7 @@ For full documentation see [DOCUMENTATION.md](DOCUMENTATION.md).
 
 - **MicroVM compartmentalization** - profile VMs (browsing, pentest, dev, comms, lurking) and infrastructure VMs (router, builder, gitsync, files, vault, usb-sandbox, hostsync)
 - **WiFi VFIO passthrough** - host has no direct internet in lockdown mode; all traffic routes through the router VM
-- **wifi-sync** - manage known WiFi networks in `modules/wifi.nix` via the router VM over vsock; supports admin mode (add/pull/list/remove via router NM) and fallback mode (capture current host connection)
+- **wifi-sync** - manage WiFi networks encrypted in `secrets/wifi.yaml` via the router VM over vsock; supports admin mode (add/pull/list/remove via router NM) and fallback mode (capture current host connection)
 
 - **Task pentest slots** - pre-declared isolated VM slots (task1-3) assignable to named engagements without a host rebuild
 

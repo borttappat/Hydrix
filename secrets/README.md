@@ -1,245 +1,182 @@
-# Hydrix Secrets Management
+# Hydrix Secrets
 
-Secure secrets provisioning for MicroVMs using [sops-nix](https://github.com/Mic92/sops-nix).
+Encrypted secrets for this hydrix-config. Safe to commit: files are age-encrypted and only your machine can decrypt them.
 
-## Overview
+## File structure
 
-- **Encrypted secrets committed to repo** - safe because only your machine can decrypt them
-- **Age key derived from SSH host key** - no additional key management needed
-- **Per-VM opt-in** - only VMs with `secrets.github = true` receive the keys
-- **Automatic provisioning** - keys appear in `~/.ssh/` inside the VM
-
-## Security Model
-
-| What | Where | Committed? | Safe? |
-|------|-------|------------|-------|
-| Encrypted secrets | `secrets/github.yaml` | Yes | Encrypted with your age key |
-| Sops config | `secrets/.sops.yaml` | No | Contains machine-specific age public key |
-| Age private key | `/var/lib/sops-nix/` | No | Derived from SSH host key at boot |
-| Decrypted secrets | `/run/secrets/` | No | Tmpfs, never persisted |
-| VM secrets | `~/.ssh/` in VM | No | Copied at VM boot |
-
-## Quick Start
-
-### 1. Enable secrets in your host config
-
-Edit your machine config (`~/hydrix-config/machines/<hostname>.nix`):
-```nix
-hydrix.secrets = {
-  enable = true;
-  github.enable = true;
-};
-
-hydrix.microvmHost.vms.microvm-browsing-test = {
-  enable = true;
-  secrets.github = true;  # Provision to this VM
-};
+```
+secrets/
+├── .sops.yaml          # sops config (age recipients) -- commit this
+├── github.yaml         # GitHub SSH keys -- commit this
+├── wifi.yaml           # WiFi credentials -- commit this (force-add if gitignored)
+└── README.md           # This file
 ```
 
-### 2. Enable in the microVM module
+## First-time setup
 
-Edit `modules/microvm/microvm-browsing.nix` (or whichever VM):
+### 1. Enable secrets and rebuild
+
+In `machines/<serial>.nix`:
+
 ```nix
-hydrix.microvm.secrets.github = true;
+hydrix.secrets.enable = true;
 ```
 
-### 3. Rebuild to generate the age key
+Then rebuild:
 
 ```bash
 rebuild
 ```
 
-### 4. Get your age public key
+This generates the age key (derived from the SSH host key) and makes it available to user-level sops commands automatically.
+
+### 2. Create secrets/.sops.yaml
 
 ```bash
-sops-age-pubkey
-# Output: age1abc123def456...
+hydrix-sops-setup
 ```
 
-### 5. Set up sops CLI access
-
-The age key is in `/var/lib/sops-nix/age-key.txt` (root-owned). For CLI usage:
+This creates `secrets/.sops.yaml` with your machine's age public key. Commit it:
 
 ```bash
-mkdir -p ~/.config/sops/age
-sudo cp /var/lib/sops-nix/age-key.txt ~/.config/sops/age/keys.txt
-sudo chown $USER:users ~/.config/sops/age/keys.txt
-chmod 600 ~/.config/sops/age/keys.txt
+git add -f secrets/.sops.yaml && git commit -m 'feat(secrets): init sops'
 ```
 
-### 6. Create your sops config
+### 3. Create encrypted secret files
 
 ```bash
-cd ~/Hydrix/secrets
-cp .sops.yaml.example .sops.yaml
+# GitHub SSH keys:
+sops secrets/github.yaml
 ```
 
-Edit `.sops.yaml` and replace `AGE_PUBLIC_KEY_PLACEHOLDER` with your key from step 4.
+Example content (decrypted view, sops encrypts on save):
 
-### 7. Create and encrypt your secrets
-
-```bash
-cp github.yaml.example github.yaml
-```
-
-Edit `github.yaml` with your actual SSH keys. Format:
 ```yaml
 id_ed25519: |
   -----BEGIN OPENSSH PRIVATE KEY-----
-  b3BlbnNzaC1rZXktdjEAAAAABG5vbmUA...
-  ...more lines...
+  b3BlbnNzaC1rZXktdjEA...
   -----END OPENSSH PRIVATE KEY-----
 id_ed25519_pub: "ssh-ed25519 AAAAC3NzaC1... user@host"
 ```
 
-**Important**: The private key content must be indented (2 spaces) under `id_ed25519: |`
-
-Encrypt:
 ```bash
-sops -e -i github.yaml
+# WiFi credentials (or use setup-wifi-secrets to migrate from modules/wifi.nix):
+sops secrets/wifi.yaml
 ```
 
-Verify:
-```bash
-cat github.yaml      # Shows encrypted content
-sops -d github.yaml  # Shows decrypted content
+Example content:
+
+```yaml
+networks: '[{"ssid":"HomeNetwork","psk":"password","priority":100}]'
 ```
 
-### 8. Commit and rebuild
+Use `setup-wifi-secrets` to populate this from an existing `modules/wifi.nix`.
+
+### 4. Declare secrets in your machine config
+
+```nix
+hydrix.secrets = {
+  enable = true;
+  githubSecretsFile = ../secrets/github.yaml;
+  wifiSecretsFile   = ../secrets/wifi.yaml;
+};
+
+hydrix.microvmHost.vms."microvm-router".secrets = [ "wifi" ];
+hydrix.microvmHost.vms."microvm-dev".secrets    = [ "github" ];
+```
+
+### 5. Commit and rebuild
 
 ```bash
-git add secrets/github.yaml
+git add -f secrets/github.yaml secrets/wifi.yaml
+git commit -m 'feat(secrets): add encrypted credentials'
 rebuild
-microvm build microvm-browsing-test
-microvm start microvm-browsing-test
 ```
 
-### 9. Test in the VM
+## How secrets reach VMs
+
+```
+secrets/wifi.yaml (age-encrypted, git-tracked)
+  |
+  | hydrix-sops-decrypt-wifi.service (host, runs at boot)
+  v
+/run/secrets/wifi/networks.json (decrypted, tmpfs)
+  |
+  | hydrix-secrets-microvm-router.service (host)
+  v
+/run/hydrix-secrets/microvm-router/wifi/ (host, tmpfs)
+  |
+  | virtiofs (live passthrough)
+  v
+/mnt/vm-secrets/wifi/networks.json (inside router VM only)
+```
+
+Other VMs have no access to `/mnt/vm-secrets/wifi/`. The pentest, browsing, and dev VMs only receive the secret types listed in their `secrets = [...]` declaration.
+
+## Adding arbitrary secrets
+
+The `hydrix.secrets.files` attrset accepts any sops-encrypted YAML file:
+
+```nix
+# Whole-file mode (no 'keys'): decrypts the entire file as-is
+hydrix.secrets.files.discord = {
+  file  = ../secrets/discord.yaml;
+  vmDir = "browser";
+};
+hydrix.microvmHost.vms."microvm-browsing".secrets = [ "discord" ];
+```
+
+Inside the browsing VM: `/mnt/vm-secrets/browser/discord.yaml`.
+
+## Applying credential changes without rebuilding
+
+After editing a secrets file, restart the relevant host services:
 
 ```bash
-microvm app microvm-browsing-test alacritty
-# In the VM terminal:
-ssh -T git@github.com
-# Should output: Hi username! You've successfully authenticated...
+sudo systemctl restart hydrix-sops-decrypt-wifi
+sudo systemctl restart hydrix-secrets-microvm-router
 ```
 
-## How It Works
+The VM sees the updated file immediately via virtiofs. No rebuild or VM restart required.
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                         HOST                                     │
-│                                                                  │
-│  1. Boot: Age key derived from /etc/ssh/ssh_host_ed25519_key    │
-│           → /var/lib/sops-nix/age-key.txt                       │
-│                                                                  │
-│  2. Activation: sops-nix decrypts secrets/github.yaml           │
-│           → /run/secrets/github/id_ed25519{,.pub}               │
-│                                                                  │
-│  3. VM Start: hydrix-secrets-<vm> copies keys                   │
-│           → /run/hydrix-secrets/<vm>/ssh/                       │
-│                                                                  │
-│  4. VM Start: microvm-virtiofsd shares directory via virtiofs   │
-│                                                                  │
-└─────────────────────────────────────────────────────────────────┘
-                              │
-                              │ virtiofs
-                              ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                      MICROVM                                     │
-│                                                                  │
-│  5. Boot: /mnt/vm-secrets mounted via virtiofs                  │
-│                                                                  │
-│  6. Boot: hydrix-secrets-provision copies to user               │
-│           → ~/.ssh/id_ed25519 (mode 600)                        │
-│           → ~/.ssh/id_ed25519.pub (mode 644)                    │
-│           → ~/.ssh/known_hosts (github.com added)               │
-│                                                                  │
-└─────────────────────────────────────────────────────────────────┘
-```
+## Adding a second machine
 
-## File Structure
+Each machine has its own age key derived from its SSH host key.
 
-```
-secrets/
-├── .sops.yaml.example   # Template with placeholder - committed
-├── .sops.yaml           # Your config with age key - gitignored
-├── github.yaml.example  # Template showing format - committed
-├── github.yaml          # Your encrypted secrets - committed (safe!)
-└── README.md            # This file
-```
+1. On the new machine after first rebuild: `sops-age-pubkey` to get its public key.
+2. Add the key to the `age:` list in `secrets/.sops.yaml`.
+3. On a machine that can already decrypt: `sops updatekeys secrets/*.yaml`.
+4. Commit the updated `.sops.yaml` and re-encrypted files.
+
+Until this is done, decrypt services exit with a warning and VMs start without secrets.
 
 ## Troubleshooting
 
-### sops: "no identity matched any of the recipients"
+**`sops: could not decrypt`**
 
-The age key isn't accessible. Set up CLI access (step 5 above) or use:
+The age key may not be set up yet. Run `rebuild` once to generate and install it.
+
+**Secret not appearing in VM**
+
+Check the host decrypt service:
 ```bash
-sudo SOPS_AGE_KEY_FILE=/var/lib/sops-nix/age-key.txt sops -d github.yaml
+journalctl -u hydrix-sops-decrypt-wifi
 ```
 
-### VM doesn't have ~/.ssh/id_ed25519
-
-Check if the provisioning service ran:
+Check the provisioning service:
 ```bash
-# On host
-sudo journalctl -u hydrix-secrets-microvm-browsing-test
-
-# In VM
-sudo journalctl -u hydrix-secrets-provision
+journalctl -u hydrix-secrets-microvm-router
 ```
 
-Check if the virtiofs mount exists:
+Check the virtiofs mount inside the VM:
 ```bash
-# In VM
-sudo ls -la /mnt/vm-secrets/ssh/
+ls /mnt/vm-secrets/
 ```
 
-### Secrets mount is empty
+**`wifi-sync list` shows 0 networks after setup**
 
-Ensure both sides are configured:
-- Host: `hydrix.microvmHost.vms.<name>.secrets.github = true`
-- Guest: `hydrix.microvm.secrets.github = true`
-
-Rebuild both host and VM after changes.
-
-### Permission denied on /mnt/vm-secrets
-
-This is expected - the mount is root-owned for security. The provisioning service copies keys to `~/.ssh/` with correct ownership.
-
-## Adding to Other VMs
-
-1. In `local/machines/host.nix`, add to the VM config:
-   ```nix
-   hydrix.microvmHost.vms.microvm-pentest-test = {
-     enable = true;
-     secrets.github = true;
-   };
-   ```
-
-2. In the VM module (e.g., `modules/microvm/microvm-pentest.nix`):
-   ```nix
-   hydrix.microvm.secrets.github = true;
-   ```
-
-3. Rebuild host and VM:
-   ```bash
-   rebuild
-   microvm build microvm-pentest-test
-   ```
-
-## Editing Encrypted Secrets
-
+The `secrets/wifi.yaml` may not be committed. sops files referenced via `wifiSecretsFile` must be git-tracked (Nix copies them into the store at eval time):
 ```bash
-cd ~/Hydrix/secrets
-sops github.yaml  # Opens in $EDITOR, saves encrypted
+git add -f secrets/wifi.yaml && git commit -m 'feat(secrets): add wifi credentials'
+rebuild
 ```
-
-Or decrypt, edit, re-encrypt:
-```bash
-sops -d github.yaml > /tmp/secrets.yaml
-# Edit /tmp/secrets.yaml
-sops -e /tmp/secrets.yaml > github.yaml
-rm /tmp/secrets.yaml
-```
-
-After editing, rebuild and restart VMs to pick up changes.
