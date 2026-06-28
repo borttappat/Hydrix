@@ -150,6 +150,10 @@ let
 
     # ===== WIFI =====
     wifi-sync = "wifi-sync.sh";
+    setup-wifi-secrets = "setup-wifi-secrets.sh";
+
+    # ===== SECRETS =====
+    hydrix-sops-setup = "hydrix-sops-setup.sh";
 
     # ===== UTILITIES =====
     # hydrix-lock: wired in theming/wm/i3/scripts.nix (gated on hydrix.i3.enable)
