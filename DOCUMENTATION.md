@@ -513,18 +513,16 @@ In **Administrative** mode:
 - Host gains internet via the router VM (`192.168.100.253` as default gateway)
 - All VM isolation properties remain unchanged; VMs still cannot reach the host on any other bridge
 
-### WiFi Credentials in Nix Store
+### WiFi Credentials and the Nix Store
 
-WiFi credentials declared in `modules/wifi.nix` are baked into the router VM's NixOS closure and end up in `/nix/store` as plaintext (or WPA PSK hashes). Because all VMs share the host's `/nix/store` via virtiofs, **any VM — including a compromised browsing or pentest VM — can read your WiFi credentials** by scanning the store.
+WiFi credentials declared directly in `modules/wifi.nix` are baked into the router VM's NixOS closure and end up in `/nix/store` as plaintext or WPA PSK hashes. Because all VMs share the host's `/nix/store` read-only via virtiofs, any VM (including a compromised browsing or pentest VM) can read those credentials by scanning the store.
 
-`wifi-sync` stores WPA PSK hashes (64-char hex strings derived from SSID + password via `wpa_passphrase`), not plaintext passwords — but a PSK hash is sufficient to authenticate to the network, so the exposure is equivalent.
+Hydrix solves this with sops-encrypted WiFi credentials stored in `secrets/wifi.yaml` and delivered only to the router VM at runtime via virtiofs. See [Secrets Management](#secrets-management) for setup, and [WiFi Credential Management](#wifi-credential-management-wifi-sync) for the `wifi-sync` workflow.
 
-**sops-nix integration is not yet implemented.** The `hydrix.router.wifi.networks` option takes plain strings at NixOS evaluation time, before sops secrets are decrypted. Wiring runtime secrets into this option would require changes to how the framework generates NM keyfiles (writing them at activation time rather than build time). This is tracked as future work.
-
-In the meantime, the pragmatic mitigations are:
+If you do not set up sops, credentials remain in `modules/wifi.nix` and the mitigations are:
 - Full-disk encryption on the host (protects the store at rest)
-- Minimise the trust you place in profile VMs — treat any VM as potentially able to read your WiFi PSKs
-- Home networks with WPA2-PSK are lower risk than corporate/sensitive networks; consider not declaring those here
+- Treat any profile VM as potentially able to read your WiFi PSKs
+- Avoid declaring sensitive network credentials (corporate VPN, etc.) in `wifi.nix`
 
 ---
 
@@ -884,7 +882,7 @@ mvm rebuild comms
 
 ### WiFi Credential Management (wifi-sync)
 
-`wifi-sync` is the host-side tool for managing the `hydrix.router.wifi.networks` list in `modules/wifi.nix`. It communicates with the router VM over vsock port 14506.
+`wifi-sync` manages WiFi networks stored in `secrets/wifi.yaml` (sops mode) or `modules/wifi.nix` (legacy mode). It communicates with the router VM over vsock port 14506. Sops mode is strongly recommended; see [Secrets Management](#secrets-management) for setup.
 
 #### How it works
 
@@ -892,54 +890,69 @@ The router VM maintains two NetworkManager connection directories:
 
 | Directory | Contents | Source |
 |---|---|---|
-| `/run/NetworkManager/system-connections/` | Declared networks — generated from `wifi.nix` at build time | NixOS build |
-| `/var/lib/NetworkManager/system-connections/` | Runtime-added networks — persists across restarts | `nmcli` at runtime |
+| `/run/NetworkManager/system-connections/` | Declared networks, generated from `wifi.nix` at build time | NixOS build |
+| `/var/lib/NetworkManager/system-connections/` | Runtime-added networks, persists across restarts | `nmcli` at runtime |
 
-`wifi-sync poll` (POLL command over vsock) reads both directories and returns a flat `connections` list. The host script diffs this against `wifi.nix` to identify which connections are already declared and which are pending (in `/var/lib/` but not yet in `wifi.nix`).
+`wifi-sync` (POLL command over vsock) reads both directories and diffs the result against your credential store to identify networks that are on the router but not yet saved locally.
+
+The waybar WiFi widget shows **+N** when the router has N connections that are not in your credential store. This is your signal to run `wifi-sync pull`.
 
 #### Commands
 
 ```bash
-wifi-sync                    # Admin: status + pending list. Fallback: capture current connection
-wifi-sync add SSID PASSWORD  # Push network to router NM + save PSK hash to wifi.nix
-wifi-sync pull               # Merge pending router connections into wifi.nix
-wifi-sync list               # Show networks declared in wifi.nix
-wifi-sync remove SSID        # Remove a network from wifi.nix
+wifi-sync                    # Admin: status + pending count. Fallback: capture current connection
+wifi-sync add SSID PASSWORD  # Push network to router NM and save to credential store
+wifi-sync pull               # Merge all router connections into credential store
+wifi-sync list               # Show saved networks
+wifi-sync remove SSID        # Remove from credential store and from router NM
 ```
 
-**Admin mode** — router VM is reachable via vsock (normal lockdown/administrative operation).
+**Admin mode** applies when the router VM is reachable via vsock (normal lockdown/administrative operation).
 
-**Fallback mode** — router VM is not running (e.g. fallback specialisation with direct host WiFi). `wifi-sync` reads the current connection from the host's `nmcli` and saves it.
+**Fallback mode** applies when the router VM is not running (fallback specialisation with direct host WiFi). `wifi-sync` reads the current connection from the host's `nmcli` and saves it to the credential store.
 
-#### Adding a new network
+#### Sops mode workflow (recommended)
+
+In sops mode, networks are stored in the age-encrypted `secrets/wifi.yaml`. Credentials never appear in the Nix store and are only decrypted at boot and delivered to the router VM. Other VMs have no access.
 
 ```bash
-# From host — pushes to router NM and saves to wifi.nix in one step:
+# Add a new network (pushes to router NM immediately, saves to secrets/wifi.yaml):
 wifi-sync add "NetworkName" "password"
-rebuild
-microvm purge microvm-router --force && microvm build microvm-router && microvm start microvm-router
+
+# If the router already has a connection you want to save:
+wifi-sync pull
+
+# Check what is saved:
+wifi-sync list
+
+# Remove a network from both the credential store and the router:
+wifi-sync remove "NetworkName"
 ```
 
-Or connect manually on the router console first, then pull:
+No rebuild is needed to apply credential changes. The router sees updates via its persistent NM state (for `add`) or on next boot via virtiofs (for connections loaded from `wifi.yaml`).
+
+#### Legacy mode workflow (wifi.nix)
+
+In legacy mode, credentials live in `modules/wifi.nix` as WPA PSK hashes and are baked into the Nix store at build time.
 
 ```bash
-# On router console:
-nmcli device wifi connect "NetworkName" password "password"
-# Then on host:
-wifi-sync pull
+wifi-sync add "NetworkName" "password"   # saves hash to wifi.nix
 rebuild
+# Purge is required because NM runtime state in /var/lib/ takes precedence over
+# freshly built /run/ connections. Only a purge guarantees a clean NM state.
 microvm purge microvm-router --force && microvm build microvm-router && microvm start microvm-router
 ```
 
-#### Why purge is required
+To migrate from legacy to sops mode:
 
-`rebuild` + `mvm rebuild router` alone is **not sufficient** when adding or removing networks. NetworkManager's runtime state in `/var/lib/` persists across VM restarts and takes precedence over the freshly generated `/run/` connections. Only a full purge clears this state, after which the new NixOS-declared connections in `/run/` are the only ones NM sees.
-
-This is a known limitation — ideally NM should reconcile its state with the declared connections on activation. For now, purge is the reliable path whenever you change `wifi.nix` and need the router to connect to a different or newly added network.
-
-#### Password storage
-
-Passwords are stored as 64-char WPA PSK hashes derived via `wpa_passphrase SSID PASSWORD`. NM accepts these directly and the plaintext password is never written to disk. However, see [WiFi Credentials in Nix Store](#wifi-credentials-in-nix-store) — the hashes are still readable by all VMs via the shared `/nix/store`.
+```bash
+setup-wifi-secrets    # reads modules/wifi.nix, encrypts to secrets/wifi.yaml
+git add -f secrets/wifi.yaml && git commit -m 'feat(secrets): add encrypted wifi credentials'
+# In machines/<serial>.nix: set wifiSecretsFile + wifi.enable, empty modules/wifi.nix networks list
+rebuild
+sudo rm /var/lib/microvms/microvm-router/var-lib.qcow2
+microvm purge microvm-router --force && mvm rebuild router
+```
 
 ### Networking
 
@@ -993,7 +1006,7 @@ Advanced networking options (rarely needed):
     vms = {
       microbrowse = { enable = true; autostart = false; };
       microhack = { enable = true; };
-      microdev = { enable = true; secrets.github = true; };
+      microdev = { enable = true; secrets = [ "github" ]; };
       microcomms = { enable = true; };
       microlurk = { enable = true; };
     };
@@ -1311,17 +1324,115 @@ Note: on Hyprland, waybar is used instead of polybar.
 
 ### Secrets Management
 
-```nix
-{
-  hydrix.secrets = {
-    enable = true;
-    github.enable = true;           # Provision GitHub SSH keys to VMs
-  };
+Hydrix uses [sops](https://github.com/getsops/sops) with age keys derived from the SSH host key. Encrypted files are safe to commit to your hydrix-config repo; only your machine can decrypt them.
 
-  # Per-VM secret provisioning
-  hydrix.microvmHost.vms.microdev.secrets.github = true;
-}
+#### Initial setup
+
+```bash
+# 1. Enable secrets and rebuild to generate the age key
+#    In machines/<serial>.nix:
+#      hydrix.secrets.enable = true;
+rebuild
+
+# 2. Initialize secrets/.sops.yaml with your machine's age public key
+hydrix-sops-setup
+
+# 3. Commit the sops config
+cd ~/hydrix-config && git add -f secrets/.sops.yaml && git commit -m 'feat(secrets): init sops'
 ```
+
+After the first rebuild, the age key is automatically made available to user-level sops commands via `~/.config/sops/age/keys.txt`. No manual key management is required.
+
+#### Declaring secret files
+
+```nix
+hydrix.secrets = {
+  enable = true;
+
+  # Convenience shorthands
+  githubSecretsFile = ../secrets/github.yaml;   # provisions ssh/ to declared VMs
+  wifiSecretsFile   = ../secrets/wifi.yaml;     # provisions wifi/ to the router VM
+
+  # Arbitrary secrets (generic files attrset)
+  files.discord = {
+    file  = ../secrets/discord.yaml;
+    vmDir = "browser";                          # delivered to VM at /mnt/vm-secrets/browser/
+    # No 'keys' = whole-file mode: decrypts discord.yaml as-is
+  };
+};
+
+# Per-VM opt-in: only listed VMs receive each secret type
+hydrix.microvmHost.vms."microvm-browsing".secrets = [ "discord" ];
+hydrix.microvmHost.vms."microvm-router".secrets   = [ "wifi" ];
+hydrix.microvmHost.vms."microvm-dev".secrets      = [ "github" ];
+```
+
+Each entry in `hydrix.secrets.files` auto-generates a `hydrix-sops-decrypt-<name>.service` on the host. Secrets are decrypted to `/run/secrets/<name>/` and provisioned to each VM's virtiofs share at `/run/hydrix-secrets/<vmname>/<vmDir>/`. Inside the VM they appear at `/mnt/vm-secrets/<vmDir>/`.
+
+#### Per-key extraction mode
+
+When `keys` is specified, individual YAML keys are extracted to separate files:
+
+```nix
+hydrix.secrets.files.github = {
+  file  = ../secrets/github.yaml;
+  vmDir = "ssh";
+  keys  = {
+    "id_ed25519"     = { outFile = "id_ed25519";     mode = "0600"; };
+    "id_ed25519_pub" = { outFile = "id_ed25519.pub"; mode = "0644"; };
+  };
+};
+```
+
+#### Whole-file mode
+
+When `keys` is omitted (or left empty), the entire sops file is decrypted as-is and written as a single file named after the attrset key. Use this for arbitrary credential formats:
+
+```nix
+hydrix.secrets.files.discord = {
+  file  = ../secrets/discord.yaml;
+  vmDir = "browser";
+};
+# Result inside VM: /mnt/vm-secrets/browser/discord.yaml (plaintext YAML)
+```
+
+#### Creating and editing secrets
+
+```bash
+# Create a new encrypted file (opens in $EDITOR, saves encrypted):
+sops ~/hydrix-config/secrets/discord.yaml
+
+# Edit an existing file:
+sops ~/hydrix-config/secrets/github.yaml
+```
+
+#### Applying secret changes without a full rebuild
+
+When the content of a secrets file changes (new network, updated password, etc.), restart the relevant host services instead of rebuilding:
+
+```bash
+sudo systemctl restart hydrix-sops-decrypt-wifi
+sudo systemctl restart hydrix-secrets-microvm-router
+# The router VM sees the change immediately via virtiofs.
+# If the VM has a consuming oneshot service, restart it too:
+# (inside router VM) systemctl restart hydrix-wifi-from-sops
+```
+
+#### Adding a new machine
+
+On a fresh machine, the age key is derived automatically at first boot. To decrypt existing secrets on the new machine:
+
+```bash
+# On the new machine after first rebuild:
+sops-age-pubkey           # prints the machine's age public key
+
+# On a machine that can already decrypt:
+# Add the new key to secrets/.sops.yaml recipients, then:
+sops updatekeys secrets/*.yaml
+git add secrets/.sops.yaml secrets/*.yaml && git commit -m 'feat(secrets): add new machine key'
+```
+
+Until re-keyed, decrypt services exit with a warning and VMs start without secrets.
 
 ### Disk Configuration (Disko)
 
