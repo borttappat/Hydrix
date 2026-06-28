@@ -62,4 +62,8 @@ in
 
   # Startup homepage — set to your preferred URL, or leave null for about:home
   # hydrix.graphical.firefox.homepage = lib.mkDefault "https://example.com";
+
+  # New tab page — null = Firefox activity stream, "about:blank" = blank
+  # Custom URLs require the "New Tab Override" extension in your profile's extension list
+  # hydrix.graphical.firefox.newTab = lib.mkDefault "about:blank";
 }
