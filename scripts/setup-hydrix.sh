@@ -1694,6 +1694,9 @@ main() {
             fi
 
             echo ""
+            echo "Generate a personal age key (works across machines, bridge until Yubikey):"
+            echo "  hydrix-sops-setup --gen-key"
+            echo ""
             echo "Commit the sops config:"
             echo "  cd $CONFIG_DIR && git add -f secrets/.sops.yaml && git commit -m 'feat(secrets): init sops'"
         fi
