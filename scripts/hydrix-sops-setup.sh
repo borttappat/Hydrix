@@ -9,9 +9,10 @@
 # the script prints the command to re-key them for this machine.
 #
 # Usage:
-#   hydrix-sops-setup               # create/check .sops.yaml
-#   hydrix-sops-setup --print-key   # just print the host age public key and exit
-#   hydrix-sops-setup --enroll-fido2  # enroll a FIDO2 key (Titan, Yubikey, etc.)
+#   hydrix-sops-setup                # create/check .sops.yaml
+#   hydrix-sops-setup --print-key    # just print the host age public key and exit
+#   hydrix-sops-setup --gen-key      # generate a personal age key usable across machines
+#   hydrix-sops-setup --enroll-fido2 # enroll a FIDO2 key (Titan, Yubikey, etc.)
 #
 set -euo pipefail
 
@@ -46,6 +47,107 @@ if [[ "${1:-}" == "--print-key" ]]; then
     exit 1
   fi
   echo "$HOST_PUBKEY"
+  exit 0
+fi
+
+# ── --gen-key ────────────────────────────────────────────────────────────────
+#
+# Generates a personal age key not tied to any machine's SSH host key.
+# The private key goes into plugin-identities.txt (persists across rebuilds).
+# The public key is added to .sops.yaml so any machine holding the private
+# key can decrypt secrets immediately -- no sops updatekeys required.
+#
+# Transfer the private key to new machines by copying plugin-identities.txt
+# (or just the age key lines) before first rebuild. Keep a copy in your
+# password manager or on an encrypted USB as a backup.
+#
+# When a Yubikey is later set up it replaces this key as the portable
+# recipient -- at that point this key can be removed from .sops.yaml.
+
+if [[ "${1:-}" == "--gen-key" ]]; then
+  mkdir -p "$SOPS_AGE_DIR"
+  chmod 700 "$SOPS_AGE_DIR"
+
+  # Check if a personal key already exists in plugin-identities.txt
+  if [[ -f "$PLUGIN_IDS" ]] && grep -qE '^AGE-SECRET-KEY-1' "$PLUGIN_IDS" 2>/dev/null; then
+    EXISTING=$(grep -oP '(?<=# public key: )age1\S+' "$PLUGIN_IDS" | head -1 || true)
+    echo -e "${YELLOW}A personal age key is already enrolled.${NC}"
+    [[ -n "$EXISTING" ]] && echo "Public key: $EXISTING"
+    echo "Remove the AGE-SECRET-KEY-1 line from $PLUGIN_IDS to re-generate."
+    exit 0
+  fi
+
+  # Generate the key (mktemp creates the file; age-keygen refuses to overwrite, so remove first)
+  TMPKEY=$(mktemp)
+  trap 'rm -f "$TMPKEY"' EXIT
+  rm -f "$TMPKEY"
+  age-keygen -o "$TMPKEY"
+  PERSONAL_PUBKEY=$(age-keygen -y "$TMPKEY")
+
+  # Append to plugin-identities.txt (persists across rebuilds)
+  {
+    echo ""
+    echo "# Personal age key generated $(date -I) — transfer to new machines"
+    echo "# public key: $PERSONAL_PUBKEY"
+    cat "$TMPKEY"
+  } >> "$PLUGIN_IDS"
+  chmod 600 "$PLUGIN_IDS"
+
+  # Also append to keys.txt immediately so sops can use it now
+  if [[ -f "$KEYS_FILE" ]]; then
+    echo "" >> "$KEYS_FILE"
+    cat "$TMPKEY" >> "$KEYS_FILE"
+  fi
+
+  rm -f "$TMPKEY"
+
+  echo -e "${GREEN}Personal age key generated.${NC}"
+  echo -e "Public key: ${BOLD}$PERSONAL_PUBKEY${NC}"
+  echo ""
+
+  # Add to .sops.yaml if it exists
+  if [[ -f "$SOPS_YAML" ]]; then
+    if grep -qF "$PERSONAL_PUBKEY" "$SOPS_YAML"; then
+      echo -e "${GREEN}Key already in $SOPS_YAML.${NC}"
+    else
+      awk -v key="$PERSONAL_PUBKEY" '
+        /^[[:space:]]+-[[:space:]]+age1/ { last=NR; indent=$0; sub(/-.*/, "", indent) }
+        { lines[NR]=$0 }
+        END {
+          for (i=1; i<=NR; i++) {
+            print lines[i]
+            if (i==last) print indent "- " key
+          }
+        }
+      ' "$SOPS_YAML" > "$SOPS_YAML.tmp" && mv "$SOPS_YAML.tmp" "$SOPS_YAML"
+      echo -e "${GREEN}Added to $SOPS_YAML.${NC}"
+
+      existing=$(find "$SECRETS_DIR" -name "*.yaml" ! -name ".sops.yaml" 2>/dev/null | head -5)
+      if [[ -n "$existing" ]]; then
+        echo ""
+        echo "Re-encrypting existing secrets for the personal key..."
+        cd "$SECRETS_DIR"
+        for f in *.yaml; do
+          [[ "$f" == ".sops.yaml" ]] && continue
+          sops updatekeys --yes "$f"
+        done
+        cd "$CONFIG_DIR"
+        echo ""
+        echo -e "${GREEN}Done. Commit the updated secrets:${NC}"
+        echo "  git add secrets/.sops.yaml secrets/*.yaml && git commit -m 'feat(secrets): add personal age key as recipient'"
+      else
+        echo "  git add -f secrets/.sops.yaml && git commit -m 'feat(secrets): add personal age key as recipient'"
+      fi
+    fi
+  else
+    echo "No .sops.yaml yet. Run 'hydrix-sops-setup' first, then re-run --gen-key."
+  fi
+
+  echo ""
+  echo -e "${YELLOW}Keep a copy of $PLUGIN_IDS (or just the AGE-SECRET-KEY-1 line) in your"
+  echo -e "password manager. On a new machine, append it to ~/.config/sops/age/plugin-identities.txt"
+  echo -e "before the first rebuild.${NC}"
+
   exit 0
 fi
 
