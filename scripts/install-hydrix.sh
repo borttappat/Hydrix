@@ -2877,6 +2877,113 @@ partition_and_mount() {
     success "Disk partitioned and mounted"
 }
 
+# Initialize sops during install:
+#   1. Generate SSH host key at /mnt/etc/ssh/ so it persists into the installed system
+#      and the activation-script-derived age key matches what we encrypt to here.
+#   2. Derive the age public key from that SSH host key.
+#   3. Write secrets/.sops.yaml with the host pubkey as recipient.
+#   4. If WiFi credentials were collected, encrypt them to secrets/wifi.yaml and
+#      update the machine config (enable sops, set wifiSecretsFile, add wifi to
+#      router VM secrets list). Clear plaintext credentials from modules/wifi.nix.
+#
+# Gracefully skipped (with a warning) if ssh-to-age or sops cannot be obtained,
+# or if the SSH key generation fails. In that case, sops can be initialized
+# post-boot with: hydrix-sops-setup && hydrix-sops-setup --gen-key
+init_sops_during_install() {
+    local config_dir="$1"
+
+    log "Initializing sops secrets..."
+
+    # Generate SSH host key at target — persists into installed system.
+    # On first boot, the sops-nix activation script finds this key and derives
+    # the age key from it, matching the pubkey we encrypt to here.
+    mkdir -p /mnt/etc/ssh
+    chmod 755 /mnt/etc/ssh
+    if [[ ! -f /mnt/etc/ssh/ssh_host_ed25519_key ]]; then
+        ssh-keygen -t ed25519 -f /mnt/etc/ssh/ssh_host_ed25519_key -N "" -C "" -q
+        chmod 600 /mnt/etc/ssh/ssh_host_ed25519_key
+        chmod 644 /mnt/etc/ssh/ssh_host_ed25519_key.pub
+        log "  Generated SSH host key"
+    else
+        log "  SSH host key already exists"
+    fi
+
+    # Derive the age public key using ssh-to-age
+    local host_pubkey
+    host_pubkey=$(nix run --no-write-lock-file nixpkgs#ssh-to-age -- \
+        -i /mnt/etc/ssh/ssh_host_ed25519_key.pub 2>/dev/null) || true
+
+    if [[ -z "$host_pubkey" ]]; then
+        warn "  Could not derive age public key — run hydrix-sops-setup after first boot"
+        return 0
+    fi
+
+    log "  Host age public key: $host_pubkey"
+
+    # Write secrets/.sops.yaml (catch-all rule, host key as recipient)
+    mkdir -p "$config_dir/secrets"
+    printf 'creation_rules:\n  - path_regex: .*\\.yaml$\n    age:\n      - %s\n' \
+        "$host_pubkey" > "$config_dir/secrets/.sops.yaml"
+    log "  Created secrets/.sops.yaml"
+
+    # Encrypt WiFi credentials if available
+    if [[ -n "${CONFIG[wifiSsid]:-}" ]] && [[ -n "${CONFIG[wifiPassword]:-}" ]]; then
+        local plain_yaml
+        plain_yaml=$(mktemp --suffix=.yaml)
+
+        # Build JSON safely via env vars — handles any special chars in SSID/PSK
+        WIFI_SSID="${CONFIG[wifiSsid]}" WIFI_PSK="${CONFIG[wifiPassword]}" \
+        python3 -c '
+import json, os
+ssid = os.environ["WIFI_SSID"]
+psk  = os.environ["WIFI_PSK"]
+wifi_json = json.dumps([{"ssid": ssid, "psk": psk, "priority": 50}])
+print("networks: " + json.dumps(wifi_json))
+' > "$plain_yaml"
+
+        if SOPS_AGE_RECIPIENTS="$host_pubkey" \
+           nix run --no-write-lock-file nixpkgs#sops -- \
+               --encrypt "$plain_yaml" > "$config_dir/secrets/wifi.yaml" 2>/dev/null; then
+            rm -f "$plain_yaml"
+            log "  WiFi credentials encrypted to secrets/wifi.yaml"
+
+            # Enable sops in machine config and point to wifi.yaml
+            local machine_nix="$config_dir/machines/${CONFIG[serial]}.nix"
+            sed -i \
+                's|secrets = {|secrets = {\n      enable = true;|' \
+                "$machine_nix"
+            sed -i \
+                's|# wifiSecretsFile   = ../secrets/wifi.yaml;|wifiSecretsFile = ../secrets/wifi.yaml;|' \
+                "$machine_nix"
+            # Deliver wifi secrets into the router VM
+            sed -i \
+                's|"microvm-router"   = { autostart = true; };|"microvm-router"   = { autostart = true; secrets = [ "wifi" ]; };|' \
+                "$machine_nix"
+
+            # Replace wifi.nix with an empty module — credentials are now in sops
+            cat > "$config_dir/modules/wifi.nix" << 'WIFI_EMPTY'
+# WiFi credentials are managed via sops (secrets/wifi.yaml).
+# Use wifi-sync to add or remove networks.
+{ ... }: {}
+WIFI_EMPTY
+            log "  modules/wifi.nix cleared (credentials moved to sops)"
+        else
+            rm -f "$plain_yaml"
+            warn "  sops encryption failed — WiFi credentials left in modules/wifi.nix (plaintext)"
+        fi
+    fi
+
+    # Amend the initial commit to include secrets setup
+    (
+        cd "$config_dir"
+        git add secrets/ modules/wifi.nix "machines/${CONFIG[serial]}.nix" 2>/dev/null || true
+        git -c user.name="Hydrix Installer" -c user.email="installer@hydrix" \
+            commit --amend --no-edit 2>/dev/null || true
+    )
+
+    success "  Sops initialized — secrets will decrypt on first boot"
+}
+
 install_nixos() {
     local config_dir="/mnt/home/${CONFIG[username]}/hydrix-config"
 
@@ -2905,6 +3012,9 @@ install_nixos() {
             git -c user.name="Hydrix Installer" -c user.email="installer@hydrix" commit -m "Initial Hydrix configuration for ${CONFIG[serial]}"
         fi
     )
+
+    # Initialize sops: generate SSH host key, write .sops.yaml, encrypt WiFi credentials
+    init_sops_during_install "$config_dir"
 
     # Create user home
     mkdir -p "/mnt/home/${CONFIG[username]}"
@@ -3544,6 +3654,19 @@ access-tokens = github.com=$gh_token"
         echo "  2. On new machine: run installer and select 'Clone existing repo'"
         echo ""
     fi
+
+    echo "=========================================="
+    echo "                  SECRETS               "
+    echo "=========================================="
+    echo "  sops was initialized during install."
+    echo "  WiFi credentials are encrypted in secrets/wifi.yaml."
+    echo "  Secrets will decrypt automatically on first boot."
+    echo ""
+    echo "  After first boot, add a personal age key for cross-machine access:"
+    echo "    hydrix-sops-setup --gen-key"
+    echo "    (save the private key to your password manager)"
+    echo "=========================================="
+    echo ""
 }
 
 # Brace block forces bash to buffer the entire script before executing,
