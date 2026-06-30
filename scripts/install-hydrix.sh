@@ -85,6 +85,7 @@ TEMP_CONFIG=""
 
 # Set when flake.nix uses a local path: input for hydrix — target path on /mnt
 HYDRIX_LOCAL_TARGET=""
+HYDRIX_REMOTE_BRANCH=""
 
 # Remote URL of the local Hydrix repo (if it has one) — used to clone it on the new machine
 HYDRIX_REMOTE_URL=""
@@ -454,6 +455,10 @@ cleanup_temp_ssh_key() {
 try_clone_with_auth() {
     local repo_url="$1"
     local dest_dir="$2"
+    local branch="${3:-}"  # optional branch; empty = default branch
+
+    local -a branch_args=()
+    [[ -n "$branch" ]] && branch_args=(--branch "$branch")
 
     # Prompt for auth method before any clone attempt so the user
     # knows their options and doesn't face a silent fail-first sequence.
@@ -471,7 +476,7 @@ try_clone_with_auth() {
                     token_url=$(convert_to_token_url "$repo_url" "$gh_token")
                     unset gh_token
                     log "Cloning with GitHub token..."
-                    git clone "$token_url" "$dest_dir"
+                    git clone "${branch_args[@]}" "$token_url" "$dest_dir"
                     local rc=$?
                     unset token_url
                     [[ $rc -eq 0 ]] || warn "Clone with gh token failed"
@@ -502,7 +507,7 @@ try_clone_with_auth() {
             token_url=$(convert_to_token_url "$repo_url" "$token")
             unset token
             log "Cloning with token..."
-            git clone "$token_url" "$dest_dir"
+            git clone "${branch_args[@]}" "$token_url" "$dest_dir"
             local rc=$?
             unset token_url
             [[ $rc -eq 0 ]] || warn "Token authentication failed"
@@ -514,7 +519,7 @@ try_clone_with_auth() {
                 local ssh_url
                 ssh_url=$(convert_to_ssh_url "$repo_url")
                 log "Cloning with SSH..."
-                if git clone "$ssh_url" "$dest_dir"; then
+                if git clone "${branch_args[@]}" "$ssh_url" "$dest_dir"; then
                     cleanup_temp_ssh_key
                     return 0
                 fi
@@ -541,7 +546,7 @@ try_clone_with_auth() {
             token_url=$(convert_to_token_url "$repo_url" "$file_token")
             unset file_token
             log "Cloning with token from file..."
-            git clone "$token_url" "$dest_dir"
+            git clone "${branch_args[@]}" "$token_url" "$dest_dir"
             local rc=$?
             unset token_url
             [[ $rc -eq 0 ]] || warn "Token authentication failed"
@@ -550,7 +555,7 @@ try_clone_with_auth() {
         5|*)
             # No auth — works for public repos
             log "Attempting unauthenticated clone..."
-            if git clone "$repo_url" "$dest_dir"; then
+            if git clone "${branch_args[@]}" "$repo_url" "$dest_dir"; then
                 return 0
             fi
             warn "Clone failed (is the repo private? try option 1-4)"
@@ -608,11 +613,13 @@ clone_existing_repo() {
         return
     fi
 
+    read -p "Branch [leave empty for default branch]: " repo_branch
+
     local temp_dir
     temp_dir=$(mktemp -d)
 
     # Try clone with authentication handling
-    if ! try_clone_with_auth "$repo_url" "$temp_dir/hydrix-config"; then
+    if ! try_clone_with_auth "$repo_url" "$temp_dir/hydrix-config" "$repo_branch"; then
         rm -rf "$temp_dir"
         warn "Failed to clone repository - proceeding with fresh installation"
         MODE="fresh"
@@ -2092,7 +2099,7 @@ handle_local_hydrix_path() {
     target_path=$(echo "$original_path" | sed "s|/home/[^/]*/|/home/${CONFIG[username]}/|")
     HYDRIX_LOCAL_TARGET="$target_path"
 
-    # Detect remote URL of the local Hydrix repo so we can clone it (not the public one)
+    # Detect remote URL and current branch of the local Hydrix repo
     local hydrix_src
     hydrix_src=$(_installer_hydrix_source)
     if [[ -n "$hydrix_src" ]]; then
@@ -2101,6 +2108,12 @@ handle_local_hydrix_path() {
         if [[ -n "$remote_url" ]]; then
             HYDRIX_REMOTE_URL="$remote_url"
             log "  Detected Hydrix remote: $HYDRIX_REMOTE_URL"
+        fi
+        local current_branch
+        current_branch=$(git -C "$hydrix_src" rev-parse --abbrev-ref HEAD 2>/dev/null || true)
+        if [[ -n "$current_branch" ]] && [[ "$current_branch" != "HEAD" ]] && [[ "$current_branch" != "main" ]]; then
+            HYDRIX_REMOTE_BRANCH="$current_branch"
+            log "  Detected Hydrix branch: $HYDRIX_REMOTE_BRANCH"
         fi
     fi
 
@@ -3180,15 +3193,16 @@ EOF
             while true; do
                 local deploy_ok=0
                 if [[ -n "$HYDRIX_REMOTE_URL" ]]; then
-                    log "  Cloning from $HYDRIX_REMOTE_URL (authenticate if prompted)..."
-                    try_clone_with_auth "$HYDRIX_REMOTE_URL" "$mnt_hydrix" && deploy_ok=1
+                    log "  Cloning from $HYDRIX_REMOTE_URL${HYDRIX_REMOTE_BRANCH:+ (branch: $HYDRIX_REMOTE_BRANCH)} (authenticate if prompted)..."
+                    try_clone_with_auth "$HYDRIX_REMOTE_URL" "$mnt_hydrix" "$HYDRIX_REMOTE_BRANCH" && deploy_ok=1
                 else
                     local src
                     src=$(_installer_hydrix_source)
                     if [[ -n "$src" ]]; then
                         cp -r "$src" "$mnt_hydrix" && deploy_ok=1
                     else
-                        git clone https://github.com/borttappat/Hydrix.git "$mnt_hydrix" && deploy_ok=1
+                        git clone ${HYDRIX_REMOTE_BRANCH:+--branch "$HYDRIX_REMOTE_BRANCH"} \
+                            https://github.com/borttappat/Hydrix.git "$mnt_hydrix" && deploy_ok=1
                     fi
                 fi
                 [[ $deploy_ok -eq 1 ]] && break
