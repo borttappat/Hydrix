@@ -2122,11 +2122,11 @@ handle_local_hydrix_path() {
     src=$(_installer_hydrix_source)
     if [[ -n "$src" ]]; then
         log "  flake.nix uses local Hydrix ($original_path) — redirecting validation to $src"
-        sed -i "s|hydrix\\.url = \"[^\"]*\"|hydrix.url = \"path:$src\"|" "$flake_file"
+        sed -i "s|^\([[:space:]]*\)hydrix\.url = \"[^\"]*\"|\1hydrix.url = \"path:$src\"|" "$flake_file"
     else
         warn "  flake.nix uses local Hydrix but no source available for validation"
         warn "  Falling back to github:borttappat/Hydrix for validation"
-        sed -i "s|hydrix\\.url = \"[^\"]*\"|hydrix.url = \"github:borttappat/Hydrix\"|" "$flake_file"
+        sed -i "s|^\([[:space:]]*\)hydrix\.url = \"[^\"]*\"|\1hydrix.url = \"github:borttappat/Hydrix\"|" "$flake_file"
     fi
     log "  Will clone Hydrix to $target_path on the installed system"
 }
@@ -3198,7 +3198,7 @@ EOF
         fi
         # Restore the local path URL in the installed config
         local installed_flake="$config_dir/flake.nix"
-        sed -i "s|hydrix\\.url = \"[^\"]*\"|hydrix.url = \"path:$HYDRIX_LOCAL_TARGET\"|" "$installed_flake"
+        sed -i "s|^\([[:space:]]*\)hydrix\.url = \"[^\"]*\"|\1hydrix.url = \"path:$HYDRIX_LOCAL_TARGET\"|" "$installed_flake"
         log "Restored flake.nix hydrix.url to path:$HYDRIX_LOCAL_TARGET"
         (cd "$config_dir" && git -c user.name="Hydrix Installer" -c user.email="installer@hydrix" add flake.nix && \
             git -c user.name="Hydrix Installer" -c user.email="installer@hydrix" commit --amend --no-edit)
@@ -3425,9 +3425,29 @@ check_resume() {
     elif (( mem_gb >= 24 )); then max_jobs=2; cores=4
     elif (( mem_gb >= 16 )); then max_jobs=2; cores=2
     fi
+    # Rewrite any local path: hydrix URL before nixos-install evaluates the flake.
+    # The resume path skips generate_config_to_temp, so handle_local_hydrix_path
+    # was never called on this config. Detect and replace inline.
+    local flake_file="$config_dir/flake.nix"
+    local active_hydrix_url
+    active_hydrix_url=$(grep -oP '^\s*hydrix\.url\s*=\s*"\K[^"]+' "$flake_file" 2>/dev/null || true)
+    if [[ "$active_hydrix_url" == path:* ]] || [[ "$active_hydrix_url" == git+file://* ]]; then
+        local github_url="github:borttappat/Hydrix"
+        [[ -n "${HYDRIX_REMOTE_BRANCH:-}" ]] && github_url="github:borttappat/Hydrix/${HYDRIX_REMOTE_BRANCH}"
+        warn "  flake.nix has local path URL ($active_hydrix_url) — rewriting to $github_url for install"
+        sed -i "s|hydrix\\.url = \"[^\"]*\"|hydrix.url = \"$github_url\"|" "$flake_file"
+        git -C "$config_dir" -c user.name="Hydrix Installer" -c user.email="installer@hydrix" \
+            add flake.nix
+        git -C "$config_dir" -c user.name="Hydrix Installer" -c user.email="installer@hydrix" \
+            commit --amend --no-edit 2>/dev/null || true
+        HYDRIX_LOCAL_TARGET=""  # path is now resolved via GitHub; no local deploy needed
+    fi
+
     log "Running nixos-install (max-jobs=$max_jobs cores=$cores)..."
-    nixos-install --flake "$config_dir#${CONFIG[serial]}" --no-root-passwd \
-        --max-jobs "$max_jobs" --cores "$cores"
+    if ! nixos-install --flake "$config_dir#${CONFIG[serial]}" --no-root-passwd \
+        --max-jobs "$max_jobs" --cores "$cores"; then
+        error "nixos-install failed — check errors above. Run the installer again to retry."
+    fi
 
     # Post-install steps (Hydrix clone, ownership, etc.)
     log "Removing infrastructureOnly from machine config..."
