@@ -2087,7 +2087,8 @@ handle_local_hydrix_path() {
     [[ -f "$flake_file" ]] || return 0
 
     local hydrix_url
-    hydrix_url=$(grep -oP 'hydrix\.url\s*=\s*"\K[^"]+' "$flake_file" 2>/dev/null || true)
+    # Match only uncommented lines (^\s*hydrix.url, not #hydrix.url)
+    hydrix_url=$(grep -oP '^\s*hydrix\.url\s*=\s*"\K[^"]+' "$flake_file" 2>/dev/null || true)
 
     [[ "$hydrix_url" == path:* ]] || [[ "$hydrix_url" == git+file://* ]] || return 0
 
