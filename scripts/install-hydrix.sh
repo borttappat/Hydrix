@@ -2816,33 +2816,10 @@ partition_and_mount() {
         wipefs -a "$dev" 2>/dev/null || true
         sgdisk --zap-all "$dev" 2>/dev/null || true
 
-        # Remove stale EFI NVRAM boot entries. On a full-disk install every
-        # previous OS on this machine is being replaced, so all existing entries
-        # should be cleared. We keep:
-        #   - The current boot entry (live USB / installer)
-        #   - Entries that have no HD() path (removable media, firmware setup)
-        # We delete:
-        #   - VenHw() entries — always stale shortcuts left by previous installers
-        #   - HD() entries referencing a partition on the target device
-        log "Removing stale EFI boot entries..."
-        local current_boot efi_verbose
-        current_boot=$(timeout 5 efibootmgr 2>/dev/null | awk '/^BootCurrent:/{print $2}')
-        efi_verbose=$(timeout 10 efibootmgr -v 2>/dev/null)
-        if [[ -z "$efi_verbose" ]]; then
-            warn "efibootmgr timed out or returned nothing — skipping EFI cleanup"
-        else
-            local dev_base="${dev##*/}"
-            while IFS= read -r bootnum; do
-                [[ "$bootnum" == "$current_boot" ]] && continue
-                local full_entry
-                full_entry=$(echo "$efi_verbose" | grep "^Boot${bootnum}")
-                if echo "$full_entry" | grep -q "VenHw(" || \
-                   echo "$full_entry" | grep -qP "HD\(.*${dev_base}"; then
-                    timeout 5 efibootmgr -B -b "$bootnum" 2>/dev/null || true
-                fi
-            done < <(echo "$efi_verbose" | grep -oP '^Boot\K[0-9A-Fa-f]{4}')
-            log "EFI NVRAM cleaned."
-        fi
+        # EFI boot entry cleanup intentionally omitted.
+        # GRUB registers its own entry during nixos-install; old entries from
+        # previous installs are harmless and efibootmgr is unreliable in VM
+        # and some firmware environments.
     fi
     sleep 1
 
