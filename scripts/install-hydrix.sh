@@ -2920,20 +2920,49 @@ init_sops_during_install() {
 
     log "  Host age public key: $host_pubkey"
 
-    # Write secrets/.sops.yaml (catch-all rule, host key as recipient)
+    local sops_yaml="$config_dir/secrets/.sops.yaml"
     mkdir -p "$config_dir/secrets"
-    printf 'creation_rules:\n  - path_regex: .*\\.yaml$\n    age:\n      - %s\n' \
-        "$host_pubkey" > "$config_dir/secrets/.sops.yaml"
-    log "  Created secrets/.sops.yaml"
 
-    # Encrypt WiFi credentials if available
-    if [[ -n "${CONFIG[wifiSsid]:-}" ]] && [[ -n "${CONFIG[wifiPassword]:-}" ]]; then
-        local plain_yaml
-        plain_yaml=$(mktemp --suffix=.yaml)
+    if [[ -f "$sops_yaml" ]]; then
+        # Existing repo: .sops.yaml already has recipients from the original machine.
+        # Add this machine's key to the age list so it becomes a valid recipient.
+        # Do not touch existing encrypted files — the caller cannot decrypt them yet.
+        # The user must run 'sops updatekeys' from a machine that already has access.
+        awk -v key="$host_pubkey" '
+            /^[[:space:]]+-[[:space:]]+age1/ { last=NR; indent=$0; sub(/-[^-].*/, "", indent) }
+            { lines[NR]=$0 }
+            END {
+                for (i=1; i<=NR; i++) {
+                    print lines[i]
+                    if (i==last) print indent "- " key
+                }
+            }
+        ' "$sops_yaml" > "${sops_yaml}.tmp" && mv "${sops_yaml}.tmp" "$sops_yaml"
 
-        # Build JSON safely via env vars — handles any special chars in SSID/PSK
-        WIFI_SSID="${CONFIG[wifiSsid]}" WIFI_PSK="${CONFIG[wifiPassword]}" \
-        python3 -c '
+        log "  Added this machine to existing secrets/.sops.yaml"
+        log ""
+        log "  IMPORTANT: existing secrets are not yet re-keyed for this machine."
+        log "  From your original machine, run:"
+        log "    cd ~/hydrix-config/secrets"
+        log "    sops updatekeys --yes wifi.yaml"
+        log "    sops updatekeys --yes github.yaml"
+        log "    git add secrets/ && git commit -m 'feat(secrets): add $(hostname) as recipient'"
+        log "    git push"
+        log "  Then on this machine: cd ~/hydrix-config && git pull && rebuild"
+    else
+        # Fresh repo: create .sops.yaml and encrypt WiFi credentials from scratch
+        printf 'creation_rules:\n  - path_regex: .*\\.yaml$\n    age:\n      - %s\n' \
+            "$host_pubkey" > "$sops_yaml"
+        log "  Created secrets/.sops.yaml"
+
+        # Encrypt WiFi credentials if available
+        if [[ -n "${CONFIG[wifiSsid]:-}" ]] && [[ -n "${CONFIG[wifiPassword]:-}" ]]; then
+            local plain_yaml
+            plain_yaml=$(mktemp --suffix=.yaml)
+
+            # Build JSON safely via env vars — handles any special chars in SSID/PSK
+            WIFI_SSID="${CONFIG[wifiSsid]}" WIFI_PSK="${CONFIG[wifiPassword]}" \
+            python3 -c '
 import json, os
 ssid = os.environ["WIFI_SSID"]
 psk  = os.environ["WIFI_PSK"]
@@ -2941,35 +2970,36 @@ wifi_json = json.dumps([{"ssid": ssid, "psk": psk, "priority": 50}])
 print("networks: " + json.dumps(wifi_json))
 ' > "$plain_yaml"
 
-        if SOPS_AGE_RECIPIENTS="$host_pubkey" \
-           nix run --no-write-lock-file nixpkgs#sops -- \
-               --encrypt "$plain_yaml" > "$config_dir/secrets/wifi.yaml" 2>/dev/null; then
-            rm -f "$plain_yaml"
-            log "  WiFi credentials encrypted to secrets/wifi.yaml"
+            if SOPS_AGE_RECIPIENTS="$host_pubkey" \
+               nix run --no-write-lock-file nixpkgs#sops -- \
+                   --encrypt "$plain_yaml" > "$config_dir/secrets/wifi.yaml" 2>/dev/null; then
+                rm -f "$plain_yaml"
+                log "  WiFi credentials encrypted to secrets/wifi.yaml"
 
-            # Enable sops in machine config and point to wifi.yaml
-            local machine_nix="$config_dir/machines/${CONFIG[serial]}.nix"
-            sed -i \
-                's|secrets = {|secrets = {\n      enable = true;|' \
-                "$machine_nix"
-            sed -i \
-                's|# wifiSecretsFile   = ../secrets/wifi.yaml;|wifiSecretsFile = ../secrets/wifi.yaml;|' \
-                "$machine_nix"
-            # Deliver wifi secrets into the router VM
-            sed -i \
-                's|"microvm-router"   = { autostart = true; };|"microvm-router"   = { autostart = true; secrets = [ "wifi" ]; };|' \
-                "$machine_nix"
+                # Enable sops in machine config and point to wifi.yaml
+                local machine_nix="$config_dir/machines/${CONFIG[serial]}.nix"
+                sed -i \
+                    's|secrets = {|secrets = {\n      enable = true;|' \
+                    "$machine_nix"
+                sed -i \
+                    's|# wifiSecretsFile   = ../secrets/wifi.yaml;|wifiSecretsFile = ../secrets/wifi.yaml;|' \
+                    "$machine_nix"
+                # Deliver wifi secrets into the router VM
+                sed -i \
+                    's|"microvm-router"   = { autostart = true; };|"microvm-router"   = { autostart = true; secrets = [ "wifi" ]; };|' \
+                    "$machine_nix"
 
-            # Replace wifi.nix with an empty module — credentials are now in sops
-            cat > "$config_dir/modules/wifi.nix" << 'WIFI_EMPTY'
+                # Replace wifi.nix with an empty module — credentials are now in sops
+                cat > "$config_dir/modules/wifi.nix" << 'WIFI_EMPTY'
 # WiFi credentials are managed via sops (secrets/wifi.yaml).
 # Use wifi-sync to add or remove networks.
 { ... }: {}
 WIFI_EMPTY
-            log "  modules/wifi.nix cleared (credentials moved to sops)"
-        else
-            rm -f "$plain_yaml"
-            warn "  sops encryption failed — WiFi credentials left in modules/wifi.nix (plaintext)"
+                log "  modules/wifi.nix cleared (credentials moved to sops)"
+            else
+                rm -f "$plain_yaml"
+                warn "  sops encryption failed — WiFi credentials left in modules/wifi.nix (plaintext)"
+            fi
         fi
     fi
 
@@ -2981,7 +3011,7 @@ WIFI_EMPTY
             commit --amend --no-edit 2>/dev/null || true
     )
 
-    success "  Sops initialized — secrets will decrypt on first boot"
+    success "  Sops initialized"
 }
 
 install_nixos() {
