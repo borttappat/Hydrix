@@ -229,6 +229,18 @@ throttle_cores() {
         *)       echo "0" ;;
     esac
 }
+# Populates a named array with --option flags for extra binary caches.
+# Apply to all nixos-install and nix build calls so Hyprland/microvm/etc come from cache.
+extra_substituter_options() {
+    local -n _opts="$1"
+    _opts=(
+        --option substituters
+            "https://cache.nixos.org https://hyprland.cachix.org https://microvm.cachix.org https://nix-community.cachix.org"
+        --option trusted-public-keys
+            "cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY= hyprland.cachix.org-1:a7pgxzMz7+chwVL3/pzj6jIBMioiJM7ypFP8PwtkuGc= microvm.cachix.org-1:oXnBc6hRE3eX5rSYdRyMYXnfzcCxC7yB6c2OM6+G5hU= nix-community.cachix.org-1:mB9FSh9qf2dCimDSUo8Zy7bkq5CX+/rkCWyvRCUSeBc="
+    )
+}
+
 # Populates a named array with the nice/ionice prefix for the current throttle mode
 throttle_prefix() {
     local -n _arr="$1"
@@ -3094,11 +3106,14 @@ EOF
 
     local -a nix_prefix=()
     throttle_prefix nix_prefix
+    local -a cache_opts=()
+    extra_substituter_options cache_opts
 
     "${nix_prefix[@]}" nixos-install --flake "$config_dir#${CONFIG[serial]}" --no-root-passwd \
         --option max-jobs "$(throttle_max_jobs)" \
         --option cores "$(throttle_cores)" \
-        --option http-connections 128
+        --option http-connections 128 \
+        "${cache_opts[@]}"
 
     # Verify the install actually landed — nixos-install can exit 0 despite
     # bootloader or activation failures (e.g. "Failed to create stream fd").
@@ -3283,12 +3298,15 @@ prebuild_microvms() {
 
         # --store /mnt ensures outputs go to the target system's nix store
         # --eval-store auto evaluates using the live ISO's daemon
+        local -a _vm_cache_opts=()
+        extra_substituter_options _vm_cache_opts
         nix build "$config_dir#nixosConfigurations.${vm_name}.config.microvm.declaredRunner" \
             --no-link \
             --store /mnt --eval-store auto \
             --print-build-logs \
             --option max-jobs "$(throttle_max_jobs)" \
             --option cores "$(throttle_cores)" \
+            "${_vm_cache_opts[@]}" \
             > "/tmp/hydrix-build-${vm_name}.log" 2>&1 &
         build_pids["$vm_name"]=$!
         build_descs["$vm_name"]="$vm_desc"
@@ -3312,12 +3330,15 @@ prebuild_microvms() {
 
         log "Building ${vm_desc} [optional]..."
 
+        local -a _opt_cache_opts=()
+        extra_substituter_options _opt_cache_opts
         if nix build "$config_dir#nixosConfigurations.${vm_name}.config.microvm.declaredRunner" \
             --no-link \
             --store /mnt --eval-store auto \
             --print-build-logs \
             --option max-jobs "$(throttle_max_jobs)" \
-            --option cores "$(throttle_cores)"; then
+            --option cores "$(throttle_cores)" \
+            "${_opt_cache_opts[@]}"; then
             success "  ${vm_name} built successfully"
         else
             warn "  ${vm_name} build failed (can be built later)"
@@ -3443,9 +3464,12 @@ check_resume() {
         HYDRIX_LOCAL_TARGET=""  # path is now resolved via GitHub; no local deploy needed
     fi
 
+    local -a resume_cache_opts=()
+    extra_substituter_options resume_cache_opts
     log "Running nixos-install (max-jobs=$max_jobs cores=$cores)..."
     if ! nixos-install --flake "$config_dir#${CONFIG[serial]}" --no-root-passwd \
-        --max-jobs "$max_jobs" --cores "$cores"; then
+        --max-jobs "$max_jobs" --cores "$cores" \
+        "${resume_cache_opts[@]}"; then
         error "nixos-install failed — check errors above. Run the installer again to retry."
     fi
 
