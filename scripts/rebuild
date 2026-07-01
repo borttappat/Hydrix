@@ -23,6 +23,7 @@ REBUILD_STALE=false
 VERBOSE=false
 IGNORE_ACTIVATION=false
 SPEC_OVERRIDE=""
+DEV_OVERRIDE=""
 
 usage() {
     cat <<EOF
@@ -45,6 +46,8 @@ Options:
   -r, --rebuild-stale   Rebuild stale base images
   -i, --ignore-activation  Continue even if activation fails (exit code 4)
   -v, --verbose         Show verbose output
+  --dev [path]          Override hydrix input with local path (for testing unpushed changes)
+                        Defaults to ~/Hydrix-sops or ~/Hydrix if path not specified
   -h, --help            Show this help
 EOF
     exit 0
@@ -61,6 +64,20 @@ while [[ $# -gt 0 ]]; do
         -r|--rebuild-stale) REBUILD_STALE=true; shift ;;
         -i|--ignore-activation) IGNORE_ACTIVATION=true; shift ;;
         -v|--verbose) VERBOSE=true; shift ;;
+        --dev)
+            if [[ -n "${2:-}" ]] && [[ "${2:-}" != -* ]]; then
+                DEV_OVERRIDE="$2"; shift 2
+            else
+                # Auto-detect local Hydrix worktree
+                for _candidate in "$HOME/Hydrix-sops" "$HOME/Hydrix"; do
+                    if [[ -f "$_candidate/flake.nix" ]]; then
+                        DEV_OVERRIDE="$_candidate"; break
+                    fi
+                done
+                [[ -z "$DEV_OVERRIDE" ]] && { err "--dev: no local Hydrix found; specify a path"; exit 1; }
+                shift
+            fi
+            ;;
         -h|--help) usage ;;
         lockdown|administrative|fallback) SPEC_OVERRIDE="$1"; shift ;;
         admin) SPEC_OVERRIDE="administrative"; shift ;;
@@ -348,8 +365,14 @@ do_build() {
     # which loses all other specialisations from the profile
     local nh_args=("os" "switch" "$FLAKE_DIR" "-H" "$target")
     local exit_code
+    local extra_nix_args=("--impure")
 
-    nh_args+=("--" "--impure")
+    if [[ -n "$DEV_OVERRIDE" ]]; then
+        log "Dev override: hydrix = $DEV_OVERRIDE"
+        extra_nix_args+=("--override-input" "hydrix" "path:$DEV_OVERRIDE")
+    fi
+
+    nh_args+=("--" "${extra_nix_args[@]}")
 
     log "Building $target${spec:+ ($spec)}"
 
