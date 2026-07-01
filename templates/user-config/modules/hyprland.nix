@@ -451,6 +451,18 @@ in lib.mkIf config.hydrix.hyprland.enable {
   environment.systemPackages = [ lockTimeout ];
   security.pam.services.hyprlock = {};
 
+  # Allow wheel users to suspend from Hyprland keybinds (exec runs outside logind session context).
+  # suspend-multiple-sessions covers the common case where VMs are running as separate sessions.
+  security.polkit.extraConfig = ''
+    polkit.addRule(function(action, subject) {
+      if ((action.id == "org.freedesktop.login1.suspend" ||
+           action.id == "org.freedesktop.login1.suspend-multiple-sessions") &&
+          subject.isInGroup("wheel")) {
+        return polkit.Result.YES;
+      }
+    });
+  '';
+
   # Send Lock signal to all sessions before the system goes to sleep.
   # swayidle's `lock` event fires in response and starts hyprlock.
   # The 1s pause gives hyprlock time to grab input before suspend completes.
