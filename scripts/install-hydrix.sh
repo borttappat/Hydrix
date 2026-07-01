@@ -2136,9 +2136,23 @@ handle_local_hydrix_path() {
         log "  flake.nix uses local Hydrix ($original_path) — redirecting validation to $src"
         sed -i "s|^\([[:space:]]*\)hydrix\.url = \"[^\"]*\"|\1hydrix.url = \"path:$src\"|" "$flake_file"
     else
-        warn "  flake.nix uses local Hydrix but no source available for validation"
-        warn "  Falling back to github:borttappat/Hydrix for validation"
-        sed -i "s|^\([[:space:]]*\)hydrix\.url = \"[^\"]*\"|\1hydrix.url = \"github:borttappat/Hydrix\"|" "$flake_file"
+        warn "  flake.nix uses local Hydrix ($original_path) — that path is not available on this machine."
+        echo ""
+        echo "  What remote URL should be used for the Hydrix framework?"
+        echo "  Examples:"
+        echo "    github:borttappat/Hydrix/sops-secrets"
+        echo "    github:borttappat/Hydrix"
+        echo "    git+https://github.com/yourfork/Hydrix.git?ref=main"
+        echo ""
+        local user_hydrix_url
+        while true; do
+            read -r -p "  Hydrix URL: " user_hydrix_url
+            [[ -n "$user_hydrix_url" ]] && break
+            warn "  URL cannot be empty."
+        done
+        sed -i "s|^\([[:space:]]*\)hydrix\.url = \"[^\"]*\"|\1hydrix.url = \"$user_hydrix_url\"|" "$flake_file"
+        HYDRIX_LOCAL_TARGET=""  # no local clone needed; using remote URL
+        return 0
     fi
     log "  Will clone Hydrix to $target_path on the installed system"
 }
@@ -3448,15 +3462,26 @@ check_resume() {
     fi
     # Rewrite any local path: hydrix URL before nixos-install evaluates the flake.
     # The resume path skips generate_config_to_temp, so handle_local_hydrix_path
-    # was never called on this config. Detect and replace inline.
+    # was never called on this config. Detect and prompt inline.
     local flake_file="$config_dir/flake.nix"
     local active_hydrix_url
     active_hydrix_url=$(grep -oP '^\s*hydrix\.url\s*=\s*"\K[^"]+' "$flake_file" 2>/dev/null || true)
     if [[ "$active_hydrix_url" == path:* ]] || [[ "$active_hydrix_url" == git+file://* ]]; then
-        local github_url="github:borttappat/Hydrix"
-        [[ -n "${HYDRIX_REMOTE_BRANCH:-}" ]] && github_url="github:borttappat/Hydrix/${HYDRIX_REMOTE_BRANCH}"
-        warn "  flake.nix has local path URL ($active_hydrix_url) — rewriting to $github_url for install"
-        sed -i "s|hydrix\\.url = \"[^\"]*\"|hydrix.url = \"$github_url\"|" "$flake_file"
+        warn "  flake.nix has local path URL ($active_hydrix_url) — cannot use on install target."
+        echo ""
+        echo "  What remote URL should be used for the Hydrix framework?"
+        echo "  Examples:"
+        echo "    github:borttappat/Hydrix/sops-secrets"
+        echo "    github:borttappat/Hydrix"
+        echo "    git+https://github.com/yourfork/Hydrix.git?ref=main"
+        echo ""
+        local resume_hydrix_url
+        while true; do
+            read -r -p "  Hydrix URL: " resume_hydrix_url
+            [[ -n "$resume_hydrix_url" ]] && break
+            warn "  URL cannot be empty."
+        done
+        sed -i "s|^\([[:space:]]*\)hydrix\.url = \"[^\"]*\"|\1hydrix.url = \"$resume_hydrix_url\"|" "$flake_file"
         git -C "$config_dir" -c user.name="Hydrix Installer" -c user.email="installer@hydrix" \
             add flake.nix
         git -C "$config_dir" -c user.name="Hydrix Installer" -c user.email="installer@hydrix" \
