@@ -88,7 +88,8 @@ in {
           {
             # Nix
             nsp  = "nix-shell --run fish -p";
-            nfu  = "nix flake update";
+            nfu  = "nix flake update --flake ${config.hydrix.paths.configDir}";
+            nfuh = "nix flake update --flake ${config.hydrix.paths.configDir} hydrix";
 
             # System
             reboot   = "systemctl reboot";
