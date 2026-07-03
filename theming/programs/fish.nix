@@ -103,15 +103,16 @@ in {
         } // lib.optionalAttrs (!isVM) {
           # Router console shortcut (host-only infrastructure)
           rc = ''
-            if systemctl is-active --quiet microvm@microvm-router.service
-              echo "Connecting to microvm-router (Ctrl+] to disconnect)..."
-              sudo socat -,rawer,escape=0x1d unix-connect:/var/lib/microvms/microvm-router/console.sock
+            set _router_vm (jq -r '.routerVmName // "microvm-router"' /etc/hydrix/host-config.json 2>/dev/null; or echo "microvm-router")
+            if systemctl is-active --quiet microvm@$_router_vm.service
+              echo "Connecting to $_router_vm (Ctrl+] to disconnect)..."
+              sudo socat -,rawer,escape=0x1d unix-connect:/var/lib/microvms/$_router_vm/console.sock
             else if sudo virsh domstate router-vm 2>/dev/null | grep -q running
               echo "Connecting to router-vm via Spice..."
               virt-viewer --connect qemu:///system router-vm
             else
               echo "No router running. Start with:"
-              echo "  microvm: sudo systemctl start microvm@microvm-router"
+              echo "  microvm: sudo systemctl start microvm@$_router_vm"
               echo "  libvirt: sudo virsh start router-vm"
             end
           '';

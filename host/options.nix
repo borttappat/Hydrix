@@ -617,7 +617,12 @@ in {
         router = lib.mkOption {
           type = lib.types.str;
           default = "microvm-router";
-          description = "Name for the router VM";
+          description = "Name for the router VM. Set per-machine in flake.nix to enable per-machine router configs with correct wifiPciAddress.";
+        };
+        routerStable = lib.mkOption {
+          type = lib.types.str;
+          default = "microvm-router-stable";
+          description = "Name for the stable fallback router VM.";
         };
         gitsync = lib.mkOption {
           type = lib.types.str;

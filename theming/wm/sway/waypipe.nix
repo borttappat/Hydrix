@@ -177,9 +177,10 @@ let
 
     if [[ "$WS" -eq 10 ]]; then
       log "WS10 (router) → opening console"
-      if systemctl is-active --quiet "microvm@microvm-router.service" 2>/dev/null; then
+      _router_vm=$(${pkgs.jq}/bin/jq -r '.routerVmName // "microvm-router"' /etc/hydrix/host-config.json 2>/dev/null || echo "microvm-router")
+      if systemctl is-active --quiet "microvm@$_router_vm.service" 2>/dev/null; then
         exec alacritty -e sudo socat -,rawer \
-          unix-connect:/var/lib/microvms/microvm-router/console.sock
+          unix-connect:/var/lib/microvms/$_router_vm/console.sock
       else
         notify "Router VM not running"
         exec "$@"
@@ -341,9 +342,10 @@ let
 
     if [[ "$WS" -eq 10 ]]; then
       log "WS10 (router) → opening console"
-      if systemctl is-active --quiet "microvm@microvm-router.service" 2>/dev/null; then
+      _router_vm=$(${pkgs.jq}/bin/jq -r '.routerVmName // "microvm-router"' /etc/hydrix/host-config.json 2>/dev/null || echo "microvm-router")
+      if systemctl is-active --quiet "microvm@$_router_vm.service" 2>/dev/null; then
         exec alacritty -e sudo socat -,rawer \
-          unix-connect:/var/lib/microvms/microvm-router/console.sock
+          unix-connect:/var/lib/microvms/$_router_vm/console.sock
       else
         notify "Router VM not running"
         exec "$@"

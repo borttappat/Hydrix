@@ -353,7 +353,8 @@ in {
         echo "============="
         echo "Type: ${cfg.router.type}"
         ${if cfg.router.type == "microvm" then ''
-          echo "MicroVM: $(systemctl is-active microvm@microvm-router 2>/dev/null || echo 'inactive')"
+          _router_vm=$(jq -r '.routerVmName // "microvm-router"' /etc/hydrix/host-config.json 2>/dev/null || echo "microvm-router")
+          echo "MicroVM: $(systemctl is-active "microvm@$_router_vm" 2>/dev/null || echo 'inactive')"
         '' else ''
           echo "Libvirt: $(sudo virsh domstate router 2>/dev/null || echo 'not defined')"
         ''}

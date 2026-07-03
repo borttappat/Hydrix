@@ -17,7 +17,7 @@ in {
     (lib.mkIf (cfg.vmType == "host" && routerCfg.type == "microvm") {
       # MicroVM router is handled by microvmHost module
       # Just ensure it's enabled when router.type == "microvm"
-      hydrix.microvmHost.vms."microvm-router" = {
+      hydrix.microvmHost.vms."${cfg.microvmHost.vmNames.router}" = {
         enable = lib.mkDefault true;
         autostart = lib.mkDefault routerCfg.autostart;
       };

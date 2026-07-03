@@ -20,8 +20,13 @@ let
   secretsCfg = config.hydrix.secrets;
   username = config.hydrix.username;
 
+  # Per-machine router VM names (set in flake.nix so each machine gets its own
+  # router nixosConfiguration with the correct wifiPciAddress baked in).
+  routerVmName = cfg.vmNames.router;
+  stableRouterVmName = cfg.vmNames.routerStable;
+
   # VMs built/declared during a fresh install (infrastructureOnly=true)
-  infrastructureVMs = [ "microvm-router" "microvm-router-stable" "microvm-builder" ];
+  infrastructureVMs = [ routerVmName stableRouterVmName "microvm-builder" ];
 
   # Merge: knownVms auto-enabled with defaults; explicit cfg.vms entries override.
   allVms =
@@ -39,10 +44,10 @@ let
 
   # Check if router microVM is enabled
   routerEnabled =
-    (allVms ? "microvm-router" && allVms."microvm-router".enable);
+    builtins.hasAttr routerVmName allVms && allVms.${routerVmName}.enable;
 
   stableRouterEnabled =
-    (allVms ? "microvm-router-stable" && allVms."microvm-router-stable".enable);
+    builtins.hasAttr stableRouterVmName allVms && allVms.${stableRouterVmName}.enable;
 
   # Stable router TAP → bridge mapping.
   # Derived from profileNetworks (uses vmRegistry for correct bridge names)
@@ -211,13 +216,15 @@ in {
     # Default: enable microvm-router and microvm-router-stable when microvmHost is enabled
     # Note: autostart is controlled by router.nix via hydrix.router.autostart
     (lib.mkIf cfg.enable {
-      hydrix.microvmHost.vms."microvm-router" = {
-        enable = lib.mkDefault true;
-      };
-      # Stable router: always declared, never autostarts — manual "break glass" fallback only
-      hydrix.microvmHost.vms."microvm-router-stable" = {
-        enable = lib.mkDefault true;
-        autostart = lib.mkDefault false;
+      hydrix.microvmHost.vms = {
+        "${routerVmName}" = {
+          enable = lib.mkDefault true;
+        };
+        # Stable router: always declared, never autostarts — manual "break glass" fallback only
+        "${stableRouterVmName}" = {
+          enable = lib.mkDefault true;
+          autostart = lib.mkDefault false;
+        };
       };
     })
 
@@ -256,8 +263,10 @@ in {
     # Host network config — scripts read from here instead of hardcoding
     environment.etc."hydrix/host-config.json" = {
       text = builtins.toJSON {
-        hostIp     = config.hydrix.networking.hostIp;
-        hostPrefix = 24;
+        hostIp        = config.hydrix.networking.hostIp;
+        hostPrefix    = 24;
+        routerVmName  = routerVmName;
+        stableRouterVmName = stableRouterVmName;
       };
       mode = "0644";
     };
@@ -415,7 +424,7 @@ in {
 
       # Router MicroVM needs to run as root for VFIO PCI passthrough
       (lib.mkIf routerEnabled {
-        "microvm@microvm-router" = {
+        "microvm@${routerVmName}" = {
           serviceConfig = {
             User = lib.mkForce "root";
             Group = lib.mkForce "root";
@@ -426,13 +435,13 @@ in {
       # Stable router: root for VFIO, conflicts with main router (can't share WiFi card).
       # Never auto-starts — launch manually with: microvm start router-stable
       (lib.mkIf stableRouterEnabled {
-        "microvm@microvm-router-stable" = {
+        "microvm@${stableRouterVmName}" = {
           serviceConfig = {
             User = lib.mkForce "root";
             Group = lib.mkForce "root";
           };
           unitConfig = {
-            Conflicts = "microvm@microvm-router.service";
+            Conflicts = "microvm@${routerVmName}.service";
             After = lib.mkForce [ "microvm-router-stable-taps.service" ];
           };
         };
@@ -446,8 +455,8 @@ in {
       (lib.mkIf routerEnabled {
         microvm-router-taps = {
           description = "Ensure bridges are ready before router microVM starts";
-          requiredBy = [ "microvm@microvm-router.service" ];
-          before = [ "microvm@microvm-router.service" ];
+          requiredBy = [ "microvm@${routerVmName}.service" ];
+          before = [ "microvm@${routerVmName}.service" ];
           after = [ "network.target" ];
 
           serviceConfig = {
@@ -463,8 +472,8 @@ in {
       (lib.mkIf stableRouterEnabled {
         microvm-router-stable-taps = {
           description = "Create TAP interfaces for stable router microVM";
-          requiredBy = [ "microvm@microvm-router-stable.service" ];
-          before = [ "microvm@microvm-router-stable.service" ];
+          requiredBy = [ "microvm@${stableRouterVmName}.service" ];
+          before = [ "microvm@${stableRouterVmName}.service" ];
           after = [ "network.target" ];
 
           serviceConfig = {
