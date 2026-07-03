@@ -203,14 +203,25 @@ in {
   # Options for hydrix.microvmHost are declared in modules/options.nix
 
   config = lib.mkMerge [
-    # Custom microvm CLI — always available regardless of microvmHost.enable
-    # so fallback mode and fresh installs can still manage VMs
+    # Always available — fallback mode and fresh installs need these to manage VMs
     {
       environment.systemPackages = [
         (lib.hiPrio (pkgs.writeShellScriptBin "microvm"
           (builtins.readFile ../../scripts/microvm)
         ))
       ];
+
+      # Machine identity for scripts — present in all modes (fallback, administrative, lockdown)
+      # so 'microvm build router' resolves the correct per-machine VM name everywhere.
+      environment.etc."hydrix/host-config.json" = {
+        text = builtins.toJSON {
+          hostIp             = config.hydrix.networking.hostIp;
+          hostPrefix         = 24;
+          routerVmName       = routerVmName;
+          stableRouterVmName = stableRouterVmName;
+        };
+        mode = "0644";
+      };
     }
 
     # Default: enable microvm-router and microvm-router-stable when microvmHost is enabled
@@ -257,17 +268,6 @@ in {
     # vsock port assignments — scripts read from here instead of hardcoding
     environment.etc."hydrix/ports.json" = {
       text = builtins.toJSON config.hydrix.networking.vsockPorts;
-      mode = "0644";
-    };
-
-    # Host network config — scripts read from here instead of hardcoding
-    environment.etc."hydrix/host-config.json" = {
-      text = builtins.toJSON {
-        hostIp        = config.hydrix.networking.hostIp;
-        hostPrefix    = 24;
-        routerVmName  = routerVmName;
-        stableRouterVmName = stableRouterVmName;
-      };
       mode = "0644";
     };
 
