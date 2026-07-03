@@ -70,6 +70,11 @@ readonly BUILDER_NAME="microvm-builder"
 readonly BUILDER_BUILD_PORT=$(load_port builderBuild 14510)
 readonly BUILDER_STATUS_PORT=$(load_port builderStatus 14511)
 readonly GITSYNC_NAME="microvm-gitsync"
+
+# Router VM names — read from host-config.json so per-machine names work.
+# Falls back to the default names for fresh installs / pre-activation.
+readonly ROUTER_NAME=$(jq -r '.routerVmName // "microvm-router"' /etc/hydrix/host-config.json 2>/dev/null || echo "microvm-router")
+readonly STABLE_ROUTER_NAME=$(jq -r '.stableRouterVmName // "microvm-router-stable"' /etc/hydrix/host-config.json 2>/dev/null || echo "microvm-router-stable")
 readonly GITSYNC_GIT_PORT=$(load_port gitsyncGit 14512)
 readonly GITSYNC_STATUS_PORT=$(load_port gitsyncStatus 14513)
 
@@ -122,7 +127,7 @@ detect_current_specialisation() {
     fi
 
     # Method 3: Infer from running services
-    if systemctl is-active --quiet "microvm@microvm-router.service" 2>/dev/null; then
+    if systemctl is-active --quiet "microvm@${ROUTER_NAME}.service" 2>/dev/null; then
         echo "administrative"
         return
     fi
@@ -1518,10 +1523,10 @@ resolve_builder_target() {
             echo "${builder_flake}#nixosConfigurations.microvm-lurking.config.microvm.declaredRunner"
             ;;
         router)
-            echo "${builder_flake}#nixosConfigurations.microvm-router.config.microvm.declaredRunner"
+            echo "${builder_flake}#nixosConfigurations.${ROUTER_NAME}.config.microvm.declaredRunner"
             ;;
         router-stable|stable-router|stable)
-            echo "${builder_flake}#nixosConfigurations.microvm-router-stable.config.microvm.declaredRunner"
+            echo "${builder_flake}#nixosConfigurations.${STABLE_ROUTER_NAME}.config.microvm.declaredRunner"
             ;;
         builder)
             echo "${builder_flake}#nixosConfigurations.microvm-builder.config.microvm.declaredRunner"
@@ -1572,10 +1577,10 @@ get_vm_name_from_target() {
             echo "microvm-lurking"
             ;;
         router)
-            echo "microvm-router"
+            echo "$ROUTER_NAME"
             ;;
         router-stable|stable-router|stable)
-            echo "microvm-router-stable"
+            echo "$STABLE_ROUTER_NAME"
             ;;
         builder)
             echo "microvm-builder"
