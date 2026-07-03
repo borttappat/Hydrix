@@ -183,6 +183,7 @@ in rec {
   #                 Pass it here so the router VM can use it for PCI passthrough.
   mkMicrovmRouter = {
     system ? "x86_64-linux",
+    hostname ? "microvm-router",
     wifiPciAddress ? "",
     extraNetworks ? [],       # { name, subnet, routerTap } — user-defined extra networks needing new bridges
     profileNetworks ? [],     # { name, subnet, routerTap } — all profile networks from meta.nix
@@ -195,7 +196,7 @@ in rec {
     ] ++ optionsModules ++ [
       microvm.nixosModules.microvm
       ../vm/microvm/infra/microvm-router.nix
-      { networking.hostName = "microvm-router"; }
+      { networking.hostName = hostname; }
     ] ++ nixpkgs.lib.optional (wifiPciAddress != "") {
       hydrix.hardware.vfio.wifiPciAddress = wifiPciAddress;
     } ++ nixpkgs.lib.optional (extraNetworks != []) {
@@ -225,6 +226,7 @@ in rec {
   # autostart = false; starts only via OnFailure on the main router.
   mkMicrovmRouterStable = {
     system ? "x86_64-linux",
+    hostname ? "microvm-router-stable",
     wifiPciAddress ? "",
     extraNetworks ? [],
     profileNetworks ? [],
@@ -237,7 +239,7 @@ in rec {
     ] ++ optionsModules ++ [
       microvm.nixosModules.microvm
       ../vm/microvm/infra/microvm-router-stable.nix
-      { networking.hostName = "microvm-router-stable"; }
+      { networking.hostName = hostname; }
     ] ++ nixpkgs.lib.optional (wifiPciAddress != "") {
       hydrix.hardware.vfio.wifiPciAddress = wifiPciAddress;
     } ++ nixpkgs.lib.optional (extraNetworks != []) {
