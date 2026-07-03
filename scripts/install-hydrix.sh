@@ -79,6 +79,7 @@ HYDRIX_CLONE_DIR=""
 # Mode: "fresh" | "add" | "use-existing"
 MODE="fresh"
 CLONED_REPO=""
+CLONED_REPO_URL=""
 
 # Temp directory for config generation and validation (set during install)
 TEMP_CONFIG=""
@@ -624,6 +625,7 @@ clone_existing_repo() {
         MODE="fresh"
         return
     fi
+    CLONED_REPO_URL="$repo_url"
 
     read -p "Branch [leave empty for default branch]: " repo_branch
 
@@ -2325,12 +2327,12 @@ generate_machine_nix() {
     log "Generated: $config_dir/machines/${CONFIG[serial]}.nix"
 }
 
-# Write machines/grub-entries.nix with chainboot entries for existing encrypted OSes.
+# Write machines/<serial>-grub-entries.nix with chainboot entries for existing encrypted OSes.
 # Using a separate file avoids Nix string quoting issues that arise from substituting
 # GRUB stanzas (which contain double quotes) directly into a template.
 generate_grub_entries_nix() {
     local config_dir="$1"
-    local outfile="$config_dir/machines/grub-entries.nix"
+    local outfile="$config_dir/machines/${CONFIG[serial]}-grub-entries.nix"
 
     if [[ -z "${CONFIG[grubExtraEntries]}" ]]; then
         # No entries — write an empty module so the import still resolves
@@ -2349,7 +2351,7 @@ generate_grub_entries_nix() {
         printf '}\n'
     } > "$outfile"
 
-    log "Generated: $config_dir/machines/grub-entries.nix"
+    log "Generated: $config_dir/machines/${CONFIG[serial]}-grub-entries.nix"
 }
 
 # ========== DUAL BOOT SPACE PREPARATION ==========
@@ -2993,12 +2995,12 @@ WIFI_EMPTY
         fi
     fi
 
-    # Amend the initial commit to include secrets setup
+    # Commit secrets setup as a separate commit so history is never rewritten
     (
         cd "$config_dir"
         git add secrets/ modules/wifi.nix "machines/${CONFIG[serial]}.nix" 2>/dev/null || true
         git -c user.name="Hydrix Installer" -c user.email="installer@hydrix" \
-            commit --amend --no-edit 2>/dev/null || true
+            commit -m "feat(secrets): initialize sops for ${CONFIG[serial]}" 2>/dev/null || true
     )
 
     success "  Sops initialized"
@@ -3030,6 +3032,9 @@ install_nixos() {
             git -c user.name="Hydrix Installer" -c user.email="installer@hydrix" commit -m "Add machine: ${CONFIG[serial]}"
         else
             git -c user.name="Hydrix Installer" -c user.email="installer@hydrix" commit -m "Initial Hydrix configuration for ${CONFIG[serial]}"
+        fi
+        if [[ -n "$CLONED_REPO_URL" ]]; then
+            git remote add origin "$CLONED_REPO_URL"
         fi
     )
 

@@ -315,7 +315,7 @@ detect_machine_config() {
     product_name=$(cat /sys/class/dmi/id/product_name 2>/dev/null | xargs || echo "")
     if [[ -n "$product_name" ]]; then
         sanitized=$(echo "$product_name" | tr '[:upper:]' '[:lower:]' | tr ' _' '-')
-        sanitized=$(echo "$sanitized" | sed 's/[^a-z0-9-]//g; s/-\+/-/g; s/^-//; s/-$//')
+        sanitized=$(echo "$sanitized" | sed 's/[^a-z0-9-]//g; s/^-//; s/-$//')
 
         for candidate in "prod-${sanitized}" "${sanitized}" "mb-${sanitized}"; do
             if [[ -f "$flake_dir/machines/${candidate}.nix" ]]; then

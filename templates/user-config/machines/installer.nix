@@ -24,7 +24,7 @@
   imports = [
     ./@SERIAL@-hardware.nix
     ../specialisations/lockdown.nix
-    ./grub-entries.nix
+    ./@SERIAL@-grub-entries.nix
     ../modules/usb-blocking.nix
     ../modules/eww.nix            # eww widget daemon + exit-nodes/vm-status overlay
   ];
