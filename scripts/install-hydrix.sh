@@ -2794,34 +2794,22 @@ partition_and_mount() {
     #      inside disko can inform the kernel of the new table without hitting
     #      "device in use" on the old partition 2
     local dev="${CONFIG[device]}"
-    # Deactivate swapfile first — it keeps /mnt busy and blocks umount
     swapoff /mnt/.swapfile 2>/dev/null || true
-    # Also deactivate any swap partitions on the target device
-    swapoff "${dev}"* 2>/dev/null || true
+    swapoff "${dev}"?* 2>/dev/null || true
     umount -R /mnt 2>/dev/null || true
-    # Close all dm-crypt mappings on the target device
-    for mapper in /dev/mapper/*; do
-        [[ "$mapper" == "/dev/mapper/control" ]] && continue
-        dmsetup info "$mapper" 2>/dev/null | grep -q "${dev##*/}" && \
-            cryptsetup close "${mapper##*/}" 2>/dev/null || true
-    done
     cryptsetup close cryptroot 2>/dev/null || true
-    # Drop kernel partition refs — without this, partprobe inside disko fails
-    # with "unable to inform the kernel" and the old partition stays "in use"
     partx -d "$dev" 2>/dev/null || true
 
-    # For full-disk layouts, wipe any existing partition table so disko starts
-    # clean. Without this, stale GPT/partition signatures can cause disko to
-    # skip formatting or leave stale EFI entries that break subsequent installs.
     if [[ "$layout" == full-disk-* ]]; then
         log "Wiping existing partition table on ${dev}..."
         wipefs -a "$dev" 2>/dev/null || true
         sgdisk --zap-all "$dev" 2>/dev/null || true
-
-        # EFI boot entry cleanup intentionally omitted.
-        # GRUB registers its own entry during nixos-install; old entries from
-        # previous installs are harmless and efibootmgr is unreliable in VM
-        # and some firmware environments.
+        # wipefs only erases the GPT; LUKS headers survive inside the partition
+        # data area at a fixed offset. Disko detects them with 'cryptsetup isLuks'
+        # on the re-created partition and skips luksFormat, going straight to
+        # luksOpen with the new password -- "No key available with this passphrase".
+        # Zero the first 2G to guarantee no old headers remain at any EFI size.
+        dd if=/dev/zero of="$dev" bs=1M count=2048 status=none 2>/dev/null || true
     fi
     sleep 1
 
@@ -2837,18 +2825,17 @@ partition_and_mount() {
         echo "" >&2
         read -p "  [r] Retry  [q] Quit: " disko_choice < /dev/tty
         [[ "${disko_choice,,}" == q* ]] && exit 1
-        # Clean up before retrying — LUKS mappings left open cause luksFormat to fail
         log "Cleaning up before retry..."
         swapoff /mnt/.swapfile 2>/dev/null || true
-        swapoff "${dev}"* 2>/dev/null || true
+        swapoff "${dev}"?* 2>/dev/null || true
         umount -R /mnt 2>/dev/null || true
-        for mapper in /dev/mapper/*; do
-            [[ "$mapper" == "/dev/mapper/control" ]] && continue
-            dmsetup info "$mapper" 2>/dev/null | grep -q "${dev##*/}" && \
-                cryptsetup close "${mapper##*/}" 2>/dev/null || true
-        done
         cryptsetup close cryptroot 2>/dev/null || true
         partx -d "$dev" 2>/dev/null || true
+        if [[ "$layout" == full-disk-* ]]; then
+            wipefs -a "$dev" 2>/dev/null || true
+            sgdisk --zap-all "$dev" 2>/dev/null || true
+            dd if=/dev/zero of="$dev" bs=1M count=2048 status=none 2>/dev/null || true
+        fi
         sleep 1
     done
 
