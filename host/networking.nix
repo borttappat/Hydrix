@@ -53,6 +53,25 @@ in {
         "${routerCfg.wan.device}".useDHCP = false;
       };
 
+    # NixOS's network-setup silently skips bridge member enslaving in some cases.
+    # This service runs after network-setup and guarantees the WAN device is
+    # enslaved to br-wan before any microVMs start.
+    systemd.services.wan-bridge-member = lib.mkIf (ethernetWanEnabled && routerCfg.wan.device != null) {
+      description = "Enslave ${routerCfg.wan.device} to br-wan";
+      after = [ "network-setup.service" ];
+      before = [ "microvm@.service" "network-online.target" ];
+      wantedBy = [ "network-online.target" ];
+      serviceConfig = {
+        Type = "oneshot";
+        RemainAfterExit = true;
+      };
+      path = [ pkgs.iproute2 ];
+      script = ''
+        ip link set ${routerCfg.wan.device} master br-wan 2>/dev/null || true
+        ip link set ${routerCfg.wan.device} up
+      '';
+    };
+
     # NOTE: No default gateway in base config.
     # Base config = lockdown mode (host has no internet access).
     # The 'administrative' specialisation adds the default gateway.
