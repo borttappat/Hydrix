@@ -2939,15 +2939,12 @@ init_sops_during_install() {
             local plain_yaml
             plain_yaml=$(mktemp --suffix=.yaml)
 
-            # Build JSON safely via env vars — handles any special chars in SSID/PSK
-            WIFI_SSID="${CONFIG[wifiSsid]}" WIFI_PSK="${CONFIG[wifiPassword]}" \
-            python3 -c '
-import json, os
-ssid = os.environ["WIFI_SSID"]
-psk  = os.environ["WIFI_PSK"]
-wifi_json = json.dumps([{"ssid": ssid, "psk": psk, "priority": 50}])
-print("networks: " + json.dumps(wifi_json))
-' > "$plain_yaml"
+            # Build the YAML value in pure bash -- escape \ and " for JSON embedding
+            local ssid_esc psk_esc
+            ssid_esc=$(printf '%s' "${CONFIG[wifiSsid]}"   | sed 's/\\/\\\\/g; s/"/\\"/g')
+            psk_esc=$(printf  '%s' "${CONFIG[wifiPassword]}" | sed 's/\\/\\\\/g; s/"/\\"/g')
+            printf 'networks: "[{\\"ssid\\": \\"%s\\", \\"psk\\": \\"%s\\", \\"priority\\": 50}]"\n' \
+                "$ssid_esc" "$psk_esc" > "$plain_yaml"
 
             if SOPS_AGE_RECIPIENTS="$host_pubkey" \
                nix run --no-write-lock-file nixpkgs#sops -- \
