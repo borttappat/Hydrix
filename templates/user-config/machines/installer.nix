@@ -329,8 +329,8 @@
     };
   };
 
-  # SSH is disabled globally by default - uncomment to enable on this machine
-  # services.openssh.enable = true;
+  # Required for sops age key derivation (SSH host key -> age key)
+  services.openssh.enable = true;
 
   # Uncomment to enable libvirt/QEMU/virt-manager (pentest VMs, Windows VMs, etc.)
   # hydrix.libvirt.enable = true;

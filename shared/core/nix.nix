@@ -81,8 +81,7 @@
   ];
   systemd.services.nix-daemon.serviceConfig.LimitNOFILE = lib.mkDefault 524288;
 
-  # SSH disabled by default — enable explicitly per-VM or per-machine
-  services.openssh.enable = lib.mkDefault false;
+  services.openssh.enable = lib.mkDefault true;
 
   # Firmware
   hardware.enableAllFirmware = lib.mkDefault true;
