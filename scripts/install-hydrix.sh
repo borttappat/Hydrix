@@ -2955,7 +2955,7 @@ init_sops_during_install() {
                 # Enable sops in machine config and point to wifi.yaml
                 local machine_nix="$config_dir/machines/${CONFIG[serial]}.nix"
                 sed -i \
-                    's|secrets = {|secrets = {\n      enable = true;|' \
+                    's/      enable = false;/      enable = true;/' \
                     "$machine_nix"
                 sed -i \
                     's|# wifiSecretsFile   = ../secrets/wifi.yaml;|wifiSecretsFile = ../secrets/wifi.yaml;|' \
