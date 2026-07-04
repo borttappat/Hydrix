@@ -20,6 +20,11 @@
 #   ├── specialisations/      # Boot mode configurations
 #   └── modules/common.nix    # Shared settings (locale, timezone)
 
+# Move to a known-good directory immediately. When the user's shell CWD is
+# inside a previously-unmounted /mnt, bash and git both fail getcwd() before
+# any install logic runs. This must come before set -euo pipefail.
+cd /tmp 2>/dev/null || cd / 2>/dev/null || true
+
 set -euo pipefail
 
 _fail_banner() {
@@ -2800,6 +2805,10 @@ partition_and_mount() {
     #      inside disko can inform the kernel of the new table without hitting
     #      "device in use" on the old partition 2
     local dev="${CONFIG[device]}"
+    # Step out of /mnt before unmounting — getcwd() will fail for any process
+    # (including nix subprocesses) if their CWD is inside a mounted path that
+    # gets torn down. cd to /tmp first so the installer itself is safe.
+    cd /tmp
     swapoff /mnt/.swapfile 2>/dev/null || true
     swapoff "${dev}"?* 2>/dev/null || true
     # Kill any processes (e.g. shells with CWD inside /mnt) that would make
