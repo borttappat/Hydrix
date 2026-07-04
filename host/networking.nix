@@ -46,7 +46,12 @@ in {
     # Ensure all VM bridges are up with no DHCP — derived from the same set
     # used to create the bridges so new profiles are covered automatically.
     networking.interfaces = lib.mapAttrs (_: _: { useDHCP = false; })
-      (bridgeConfigs // extraBridgeConfigs // infraBridgeConfigs // wanBridgeConfig);
+      (bridgeConfigs // extraBridgeConfigs // infraBridgeConfigs // wanBridgeConfig)
+      # Explicitly declare the WAN physical device so network-setup brings it up
+      # and NixOS's scripted networking properly enslaves it to br-wan.
+      // lib.optionalAttrs (ethernetWanEnabled && routerCfg.wan.device != null) {
+        "${routerCfg.wan.device}".useDHCP = false;
+      };
 
     # NOTE: No default gateway in base config.
     # Base config = lockdown mode (host has no internet access).
