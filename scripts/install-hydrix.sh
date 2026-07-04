@@ -2324,6 +2324,12 @@ generate_machine_nix() {
     # Write GRUB extra entries as a separate Nix file to avoid quoting issues
     generate_grub_entries_nix "$config_dir"
 
+    # Full-disk installs have no other OSes to chainboot -- remove the grub-entries
+    # import so the machine config doesn't reference a file that's always empty.
+    if [[ "${CONFIG[layout]}" == full-disk-* ]]; then
+        sed -i '/grub-entries\.nix/d' "$config_dir/machines/${CONFIG[serial]}.nix"
+    fi
+
     log "Generated: $config_dir/machines/${CONFIG[serial]}.nix"
 }
 

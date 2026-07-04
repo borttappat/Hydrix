@@ -142,7 +142,7 @@
       machineFiles = builtins.filter
         (name:
           builtins.match ".*-hardware\\.nix" name == null &&
-          name != "grub-entries.nix"
+          builtins.match ".*-grub-entries\\.nix" name == null
         )
         allNixFiles;
     in builtins.listToAttrs (map (file: {

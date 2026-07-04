@@ -1519,7 +1519,7 @@ detect_host_config() {
         local base
         base=$(basename "$f" .nix)
         [[ "$base" == *-hardware ]] && continue
-        [[ "$base" == "grub-entries" ]] && continue
+        [[ "$base" == *-grub-entries ]] && continue
         configs+=("$base")
     done
     if [[ ${#configs[@]} -eq 1 ]]; then
