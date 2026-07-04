@@ -2802,7 +2802,11 @@ partition_and_mount() {
     local dev="${CONFIG[device]}"
     swapoff /mnt/.swapfile 2>/dev/null || true
     swapoff "${dev}"?* 2>/dev/null || true
+    # Kill any processes (e.g. shells with CWD inside /mnt) that would make
+    # umount fail with "target is busy". Lazy-unmount as final fallback.
+    fuser -km /mnt 2>/dev/null || true
     umount -R /mnt 2>/dev/null || true
+    umount -Rl /mnt 2>/dev/null || true
     cryptsetup close cryptroot 2>/dev/null || true
     partx -d "$dev" 2>/dev/null || true
 
