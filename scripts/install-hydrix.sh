@@ -2288,7 +2288,6 @@ generate_flake_nix() {
     sed \
         -e "s|@USERNAME@|${CONFIG[username]}|g" \
         -e "s|@HYDRIX_URL@|${CONFIG[hydrixUrl]}|g" \
-        -e "s|@SERIAL@|${CONFIG[serial]}|g" \
         "$template_file" > "$config_dir/flake.nix"
 
     log "Generated: $config_dir/flake.nix"

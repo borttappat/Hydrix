@@ -79,18 +79,6 @@
     vmThemeSyncModule = "${hydrix}/host/vm-theme-sync.nix";
 
     # =========================================================================
-    # WIFI PCI ADDRESS (auto-detected from machine configs)
-    # =========================================================================
-    # Extracted from the first machine config that sets hydrix.hardware.vfio.wifiPciAddress.
-    # Override manually if auto-detection doesn't work for your setup:
-    #   wifiPciAddress = "00:14.3";  # from: lspci -D | grep -i wireless
-    wifiPciAddress = let
-      configs = builtins.attrValues machineConfigs;
-      addresses = map (c: c.config.hydrix.hardware.vfio.wifiPciAddress) configs;
-      nonEmpty = builtins.filter (a: a != "") addresses;
-    in if nonEmpty != [] then builtins.head nonEmpty else "";
-
-    # =========================================================================
     # HOST CONFIG FOR VMS
     # =========================================================================
     # Settings inherited by all VMs at build time.
@@ -145,50 +133,56 @@
           builtins.match ".*-grub-entries\\.nix" name == null
         )
         allNixFiles;
-    in builtins.listToAttrs (map (file: {
-      name = builtins.replaceStrings [ ".nix" ] [ "" ] file;
-      value = hydrix.lib.mkHost {
-        specialArgs = { inherit self hydrix; };
-        extraInputs = { inherit (inputs) disko sops-nix nix-index-database burpsuite-nix; };
-        inherit userColorschemesDir;
-        modules = [
-          (machinesDir + "/${file}")
-          ./modules/wifi.nix         # WiFi networks (legacy: move to secrets/wifi.yaml via setup-wifi-secrets)
-          ./modules/repos.nix        # Declarative git repos (add yours, or leave repos = {})
-          ./modules/fonts.nix        # Font packages and profiles
-          ./modules/hyprland.nix     # Hyprland keybindings + config (user-customizable)
-          ./modules/waybar.nix       # Waybar layout and modules (user-customizable)
-          ./modules/i3.nix           # i3 keybindings (user-customizable)
-          ./modules/sway.nix         # sway keybindings (user-customizable)
-          vmThemeSyncModule         # VM theme sync (host-side)
-          { hydrix.vmThemeSync.enable = true;
-            hydrix.networking.vmRegistry      = vmRegistry;
-            hydrix.networking.profileNetworks = allProfileNetworks;
-            hydrix.networking.extraNetworks   = extraNetworks;
-            hydrix.networking.infraTapBridges = infraTapBridges;
-            hydrix.microvmHost.knownVms =
-              map (m: "microvm-${m._profileName}") discoveredMetas
-              ++ map (m: "microvm-${m._infraName}") discoveredInfra
-              ++ map (m: "microvm-pentest-${m._taskName}") discoveredTasks; }
-          ./modules/common.nix       # Locale + shared settings (all machines)
-          ./modules/graphical.nix    # UI preferences (opacity, bluelight, etc.)
-          ./modules/polybar.nix      # Polybar style, workspace labels, module layout
-          ./modules/waybar.nix       # Waybar module
-          ./modules/fish.nix         # Shell abbreviations + functions (user additions)
-          ./modules/alacritty.nix    # Terminal cursor, keyboard overrides
-          ./modules/dunst.nix        # Notification sound + size preferences
-          ./modules/ranger.nix       # File manager mappings + rifle rules
-          ./modules/rofi.nix         # Launcher keybindings + extraConfig
-          ./modules/zathura.nix      # PDF viewer settings
-          ./modules/starship.nix     # Prompt env vars (config is in configs/starship/)
-          ./modules/vim.nix          # Vim plugins (config is in configs/vim/)
-          ./modules/helix.nix
-          ./modules/firefox.nix      # Host Firefox toggle + user-agent
-          ./modules/obsidian.nix     # Host Obsidian toggle + vault paths
-          ./modules/vault.nix        # Vault VM credential launcher (vault-cli + vault-pick)
-        ];
-      };
-    }) machineFiles);
+    in builtins.listToAttrs (map (file:
+      let machineName = builtins.replaceStrings [ ".nix" ] [ "" ] file;
+      in {
+        name = machineName;
+        value = hydrix.lib.mkHost {
+          specialArgs = { inherit self hydrix; };
+          extraInputs = { inherit (inputs) disko sops-nix nix-index-database burpsuite-nix; };
+          inherit userColorschemesDir;
+          modules = [
+            (machinesDir + "/${file}")
+            ./modules/wifi.nix         # WiFi networks (legacy: move to secrets/wifi.yaml via setup-wifi-secrets)
+            ./modules/repos.nix        # Declarative git repos (add yours, or leave repos = {})
+            ./modules/fonts.nix        # Font packages and profiles
+            ./modules/hyprland.nix     # Hyprland keybindings + config (user-customizable)
+            ./modules/waybar.nix       # Waybar layout and modules (user-customizable)
+            ./modules/i3.nix           # i3 keybindings (user-customizable)
+            ./modules/sway.nix         # sway keybindings (user-customizable)
+            vmThemeSyncModule          # VM theme sync (host-side)
+            { hydrix.vmThemeSync.enable = true;
+              hydrix.networking.vmRegistry      = vmRegistry;
+              hydrix.networking.profileNetworks = allProfileNetworks;
+              hydrix.networking.extraNetworks   = extraNetworks;
+              hydrix.networking.infraTapBridges = infraTapBridges;
+              hydrix.microvmHost.knownVms =
+                map (m: "microvm-${m._profileName}") discoveredMetas
+                ++ map (m: "microvm-${m._infraName}") discoveredInfra
+                ++ map (m: "microvm-pentest-${m._taskName}") discoveredTasks;
+              # Per-machine router VM names — each machine gets its own router
+              # nixosConfiguration with the correct wifiPciAddress baked in.
+              hydrix.microvmHost.vmNames.router       = "microvm-router-${machineName}";
+              hydrix.microvmHost.vmNames.routerStable = "microvm-router-stable-${machineName}"; }
+            ./modules/common.nix       # Locale + shared settings (all machines)
+            ./modules/graphical.nix    # UI preferences (opacity, bluelight, etc.)
+            ./modules/polybar.nix      # Polybar style, workspace labels, module layout
+            ./modules/waybar.nix       # Waybar module
+            ./modules/fish.nix         # Shell abbreviations + functions (user additions)
+            ./modules/alacritty.nix    # Terminal cursor, keyboard overrides
+            ./modules/dunst.nix        # Notification sound + size preferences
+            ./modules/ranger.nix       # File manager mappings + rifle rules
+            ./modules/rofi.nix         # Launcher keybindings + extraConfig
+            ./modules/zathura.nix      # PDF viewer settings
+            ./modules/starship.nix     # Prompt env vars (config is in configs/starship/)
+            ./modules/vim.nix          # Vim plugins (config is in configs/vim/)
+            ./modules/helix.nix
+            ./modules/firefox.nix      # Host Firefox toggle + user-agent
+            ./modules/obsidian.nix     # Host Obsidian toggle + vault paths
+            ./modules/vault.nix        # Vault VM credential launcher (vault-cli + vault-pick)
+          ];
+        };
+      }) machineFiles);
 
     # =========================================================================
     # PROFILE AUTO-DISCOVERY
@@ -331,6 +325,48 @@
         };
       }) discoveredTasks);
 
+    # Per-machine router configs — each reads wifiPciAddress from that machine's own config.
+    # Avoids cross-machine pollution of a single shared wifiPciAddress, and ensures
+    # multiple machines in the same flake each get their own router nixosConfiguration.
+    routerModules = [
+      { hydrix.router.microvm.infraLans = infraLans; }
+      ./modules/common.nix
+      ./modules/wifi.nix
+      "${hydrix}/vm/microvm/infra/router-lan-control.nix"
+      ./infra/router/default.nix
+    ] ++ (if builtins.pathExists ./vpn/mullvad.nix
+          then [{ hydrix.router.vpn.mullvad = import ./vpn/mullvad.nix; }]
+          else []);
+
+    stableRouterModules = [
+      { hydrix.router.microvm.infraLans = infraLans; }
+      ./modules/common.nix
+      ./modules/wifi.nix
+      ./infra/router-stable/default.nix
+    ];
+
+    perMachineRouterConfigs = builtins.listToAttrs (map (machineName: {
+      name  = "microvm-router-${machineName}";
+      value = hydrix.lib.mkMicrovmRouter {
+        hostname       = "microvm-router-${machineName}";
+        wifiPciAddress = (builtins.getAttr machineName machineConfigs).config.hydrix.hardware.vfio.wifiPciAddress;
+        inherit extraNetworks;
+        profileNetworks = allProfileNetworks;
+        modules = routerModules;
+      };
+    }) (builtins.attrNames machineConfigs));
+
+    perMachineStableRouterConfigs = builtins.listToAttrs (map (machineName: {
+      name  = "microvm-router-stable-${machineName}";
+      value = hydrix.lib.mkMicrovmRouterStable {
+        hostname       = "microvm-router-stable-${machineName}";
+        wifiPciAddress = (builtins.getAttr machineName machineConfigs).config.hydrix.hardware.vfio.wifiPciAddress;
+        inherit extraNetworks;
+        profileNetworks = allProfileNetworks;
+        modules = stableRouterModules;
+      };
+    }) (builtins.attrNames machineConfigs));
+
     # One nixosConfiguration per discovered profile
     autoVMConfigs = builtins.listToAttrs (map (m: {
       name  = "microvm-${m._profileName}";
@@ -378,41 +414,9 @@
     # HOST CONFIGURATIONS
     # =========================================================================
     # Machines are auto-discovered from machines/*.nix
-    nixosConfigurations = machineConfigs // taskConfigs // autoVMConfigsWithOverrides // infraVMConfigs // {
-
-      # MicroVM Router — named per machine so multiple machines can share this flake
-      # without nixosConfiguration conflicts. Each machine's router has its serial
-      # in the name so wifiPciAddress is baked in correctly per machine.
-      # User settings: edit infra/router/default.nix
-      "microvm-router-@SERIAL@" = hydrix.lib.mkMicrovmRouter {
-        hostname = "microvm-router-@SERIAL@";
-        inherit wifiPciAddress extraNetworks;
-        profileNetworks = allProfileNetworks;
-        modules = [
-          ./modules/common.nix
-          ./modules/wifi.nix
-          ./infra/router/default.nix
-          { hydrix.router.microvm.infraLans = infraLans; }
-          # Mullvad VPN — place .conf files in vpn/, edit vpn/mullvad.nix,
-          # set enable = true, then rebuild the router.
-        ] ++ (if builtins.pathExists ./vpn/mullvad.nix
-              then [{ hydrix.router.vpn.mullvad = import ./vpn/mullvad.nix; }]
-              else []);
-      };
-
-      # MicroVM Router Stable (immutable fallback — starts automatically if main router fails)
-      # Intentionally minimal — leave infra/router-stable/default.nix empty for a clean fallback
-      "microvm-router-stable-@SERIAL@" = hydrix.lib.mkMicrovmRouterStable {
-        hostname = "microvm-router-stable-@SERIAL@";
-        inherit wifiPciAddress extraNetworks;
-        profileNetworks = allProfileNetworks;
-        modules = [
-          ./modules/common.nix
-          ./modules/wifi.nix
-          ./infra/router-stable/default.nix
-          { hydrix.router.microvm.infraLans = infraLans; }
-        ];
-      };
+    nixosConfigurations =
+      machineConfigs // taskConfigs // autoVMConfigsWithOverrides // infraVMConfigs
+      // perMachineRouterConfigs // perMachineStableRouterConfigs // {
 
       # MicroVM Builder (for lockdown mode rebuilds)
       # User settings: edit infra/builder/default.nix

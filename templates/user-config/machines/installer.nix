@@ -204,8 +204,6 @@
     # ─────────────────────────────────────────────────────────────────────
     microvmHost = {
       enable = true;
-      vmNames.router       = "microvm-router-@SERIAL@";
-      vmNames.routerStable = "microvm-router-stable-@SERIAL@";
       vms = {
         "microvm-router-@SERIAL@" = { autostart = true; };
         # hostsync requires ~/vm-inbox on the host (created automatically when enabled).
