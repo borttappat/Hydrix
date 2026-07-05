@@ -380,10 +380,12 @@
     # Machines are auto-discovered from machines/*.nix
     nixosConfigurations = machineConfigs // taskConfigs // autoVMConfigsWithOverrides // infraVMConfigs // {
 
-      # MicroVM Router (WiFi PCI address auto-detected from machine configs)
-      # extraNetworks flows from profile meta.nix files automatically
+      # MicroVM Router — named per machine so multiple machines can share this flake
+      # without nixosConfiguration conflicts. Each machine's router has its serial
+      # in the name so wifiPciAddress is baked in correctly per machine.
       # User settings: edit infra/router/default.nix
-      "microvm-router" = hydrix.lib.mkMicrovmRouter {
+      "microvm-router-@SERIAL@" = hydrix.lib.mkMicrovmRouter {
+        hostname = "microvm-router-@SERIAL@";
         inherit wifiPciAddress extraNetworks;
         profileNetworks = allProfileNetworks;
         modules = [
@@ -400,7 +402,8 @@
 
       # MicroVM Router Stable (immutable fallback — starts automatically if main router fails)
       # Intentionally minimal — leave infra/router-stable/default.nix empty for a clean fallback
-      "microvm-router-stable" = hydrix.lib.mkMicrovmRouterStable {
+      "microvm-router-stable-@SERIAL@" = hydrix.lib.mkMicrovmRouterStable {
+        hostname = "microvm-router-stable-@SERIAL@";
         inherit wifiPciAddress extraNetworks;
         profileNetworks = allProfileNetworks;
         modules = [

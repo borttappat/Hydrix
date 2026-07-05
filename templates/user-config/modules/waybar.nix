@@ -624,7 +624,7 @@ let
     "custom/vm-sync-stg"   = { exec = "${vmSyncStgScript}";    interval = lib.toInt hostPollInterval; format = "{}"; tooltip = false; escape = false; };
     "custom/vm-tun"        = { exec = "${vmTunScript}";        interval = lib.toInt hostPollInterval; format = "{}"; tooltip = false; escape = false; };
     "custom/vm-up"         = { exec = "${vmUpScript}";         interval = 30; format = "{}"; tooltip = false; escape = false; };
-    "custom/wifi-sync"     = { exec = "${wifiSyncScript}";     interval = 10; format = "{}"; tooltip = false; escape = false; };
+    "custom/wifi-sync"     = { exec = "${wifiSyncScript}";     interval = 10; format = "{}"; tooltip = false; escape = false; "return-type" = "json"; };
   };
 
   monoBar = {
@@ -672,7 +672,6 @@ let
       "custom/vm-sync-dev"
       "custom/vm-sync-stg"
       "custom/vm-tun"
-      "custom/vm-up"
       "custom/sep"
       "custom/wifi-sync"
       "custom/sep"
@@ -712,7 +711,7 @@ let
     "custom/vm-sync-stg" = { exec = "${vmSyncStgScript}"; interval = lib.toInt hostPollInterval; format = "{}"; tooltip = false; escape = false; };
     "custom/vm-tun"      = { exec = "${vmTunScript}";     interval = lib.toInt hostPollInterval; format = "{}"; tooltip = false; escape = false; };
     "custom/vm-up"       = { exec = "${vmUpScript}";      interval = 30;                        format = "{}"; tooltip = false; escape = false; };
-    "custom/wifi-sync"   = { exec = "${wifiSyncScript}";  interval = 10;                        format = "{}"; tooltip = false; escape = false; };
+    "custom/wifi-sync"   = { exec = "${wifiSyncScript}";  interval = 10;                        format = "{}"; tooltip = true; escape = false; "return-type" = "json"; };
   };
 
   configJson = builtins.toJSON (

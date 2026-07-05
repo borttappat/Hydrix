@@ -204,8 +204,10 @@
     # ─────────────────────────────────────────────────────────────────────
     microvmHost = {
       enable = true;
+      vmNames.router       = "microvm-router-@SERIAL@";
+      vmNames.routerStable = "microvm-router-stable-@SERIAL@";
       vms = {
-        "microvm-router"   = { autostart = true; };
+        "microvm-router-@SERIAL@" = { autostart = true; };
         # hostsync requires ~/vm-inbox on the host (created automatically when enabled).
         # Disabled by default - enable when you need secure inter-VM file transfers.
         "microvm-hostsync" = { enable = false; };

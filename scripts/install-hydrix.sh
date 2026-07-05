@@ -2047,11 +2047,18 @@ copy_wallpapers() {
     mkdir -p "$home_dir/wallpapers"
     # Copy wallpapers from Hydrix repo (bundled in nix store or local clone)
     local hydrix_wp="$SCRIPT_DIR/../theming/wallpapers"
-    if [[ -d "$hydrix_wp" ]] && ls "$hydrix_wp"/*.{png,jpg} &>/dev/null; then
-        cp "$hydrix_wp"/*.png "$hydrix_wp"/*.jpg "$home_dir/wallpapers/" 2>/dev/null || true
-        local count
-        count=$(ls "$home_dir/wallpapers/" 2>/dev/null | wc -l)
-        log "  Copied $count wallpaper(s) from Hydrix"
+    if [[ -d "$hydrix_wp" ]]; then
+        # nullglob: unmatched globs expand to nothing rather than failing
+        local -a wps
+        shopt -s nullglob
+        wps=("$hydrix_wp"/*.png "$hydrix_wp"/*.jpg "$hydrix_wp"/*.jpeg)
+        shopt -u nullglob
+        if [[ ${#wps[@]} -gt 0 ]]; then
+            cp "${wps[@]}" "$home_dir/wallpapers/"
+            log "  Copied ${#wps[@]} wallpaper(s) from Hydrix"
+        else
+            log "  Created $home_dir/wallpapers/ (no wallpapers found in $hydrix_wp)"
+        fi
     else
         log "  Created $home_dir/wallpapers/ (add wallpapers here)"
     fi
@@ -2281,6 +2288,7 @@ generate_flake_nix() {
     sed \
         -e "s|@USERNAME@|${CONFIG[username]}|g" \
         -e "s|@HYDRIX_URL@|${CONFIG[hydrixUrl]}|g" \
+        -e "s|@SERIAL@|${CONFIG[serial]}|g" \
         "$template_file" > "$config_dir/flake.nix"
 
     log "Generated: $config_dir/flake.nix"
