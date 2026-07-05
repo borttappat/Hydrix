@@ -2986,9 +2986,9 @@ init_sops_during_install() {
                 sed -i \
                     's|# wifiSecretsFile   = ../secrets/wifi.yaml;|wifiSecretsFile = ../secrets/wifi.yaml;|' \
                     "$machine_nix"
-                # Deliver wifi secrets into the router VM
+                # Deliver wifi secrets into the router VM (key is serial-specific)
                 sed -i \
-                    's|"microvm-router"   = { autostart = true; };|"microvm-router"   = { autostart = true; secrets = [ "wifi" ]; };|' \
+                    "s|\"microvm-router-${CONFIG[serial]}\" = { autostart = true; };|\"microvm-router-${CONFIG[serial]}\" = { autostart = true; secrets = [ \"wifi\" ]; };|" \
                     "$machine_nix"
 
                 # Replace wifi.nix with an empty module — credentials are now in sops
