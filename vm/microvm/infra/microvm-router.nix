@@ -90,8 +90,15 @@
   vmName = config.networking.hostName;
   extraNetworks = cfg.networking.extraNetworks;
   profileNetworks = cfg.networking.profileNetworks;
-  # All networks the router serves: declared profiles + user-defined extra networks
-  allNetworks = profileNetworks ++ extraNetworks;
+  # extraNetworks may contain user-defined profiles that are already in
+  # profileNetworks (profileNetworks = ALL discovered profiles; extraNetworks =
+  # non-framework profiles + infra VMs).  Filter out duplicates to avoid double
+  # QEMU TAP entries (EBUSY) and duplicate dnsmasq/nftables config.
+  extraOnlyNetworks = lib.filter (n:
+    !(builtins.any (pn: pn.routerTap == n.routerTap) profileNetworks)
+  ) extraNetworks;
+  # All networks the router serves: declared profiles + extra-only (infra VMs)
+  allNetworks = profileNetworks ++ extraOnlyNetworks;
 
   # LAN interface names — all statically known at build time via MAC→name links.
   # Used in nftables to identify WAN/VPN egress by negation so the firewall
@@ -257,7 +264,7 @@ in {
             "virtio-net-pci,netdev=net-infra-${builtins.toString i},mac=02:00:00:03:${lib.fixedWidthString 2 "0" (builtins.toString i)}:01"
           ])
           infraQemuTaps)
-        # Extra user-defined network TAPs (custom profiles + non-builtin infra VMs).
+        # Extra network TAPs (infra VMs not already covered by profileNetworks).
         # MACs: 02:00:00:02:XX:01
         ++ lib.concatLists (lib.imap0 (i: n: [
             "-netdev"
@@ -265,7 +272,7 @@ in {
             "-device"
             "virtio-net-pci,netdev=net-extra-${n.name},mac=02:00:00:02:${lib.fixedWidthString 2 "0" (builtins.toString i)}:01"
           ])
-          extraNetworks);
+          extraOnlyNetworks);
 
       # Limit virtiofsd threads: default spawns nproc threads per share, wasteful when idle
       virtiofsd.threadPoolSize = 1;
