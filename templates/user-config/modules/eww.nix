@@ -134,7 +134,7 @@ let
         echo '{"current":"","connections":[],"pending":0}'
       else
         known=$(grep -oP '(?<=ssid = ")[^"]+' "/home/${username}/hydrix-config/modules/wifi.nix" 2>/dev/null \
-          | jq -Rrs 'split("\n") | map(select(length > 0))')
+          | jq -Rrs 'split("\n") | map(select(length > 0))') || known="[]"
         pending=$(echo "$result" | jq --argjson l "$known" \
           '[.connections[] | select(.ssid as $s | $l | index($s) == null)] | length' \
           2>/dev/null || echo 0)
