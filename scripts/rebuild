@@ -347,7 +347,7 @@ detect_machine_config() {
     err ""
     err "Available configs:"
     for c in "${configs[@]}"; do
-        echo "  - $c"
+        echo "  - $c" >&2
     done
     exit 1
 }
@@ -585,7 +585,7 @@ main() {
     clean_hm_backups
 
     local machine_config
-    machine_config=$(detect_machine_config "$FLAKE_DIR")
+    machine_config=$(detect_machine_config "$FLAKE_DIR") || exit 1
 
     log "Machine: $machine_config"
 

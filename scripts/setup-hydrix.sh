@@ -679,15 +679,14 @@ detect_current_config() {
     CONFIG[username]="${USER:-$(whoami)}"
     log "  Username: ${CONFIG[username]}"
 
-    # Hardware serial (for config file naming)
+    # Board identifier (for config file naming — matches rebuild's non-root detection)
     local serial
-    serial=$(detect_serial) || true
-    if [[ "$serial" == "unknown-machine" ]]; then
-        warn "  Could not detect hardware serial"
-        serial=$(generate_fallback_id)
-        warn "  Using fallback identifier: $serial"
+    serial=$(generate_fallback_id)
+    if [[ -z "$serial" ]] || [[ "$serial" == unknown-* ]]; then
+        serial="hydrix-$(head -c 4 /dev/urandom | xxd -p)"
+        warn "  Could not detect board name, using random identifier: $serial"
     else
-        log "  Hardware serial: $serial"
+        log "  Board identifier: $serial"
     fi
     CONFIG[serial]="$serial"
 

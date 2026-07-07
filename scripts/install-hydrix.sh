@@ -967,21 +967,22 @@ detect_display_resolution() {
 }
 
 detect_hardware_serial() {
-    log "Detecting hardware serial for machine identification..."
+    log "Detecting hardware identifier for machine identification..."
 
+    # Always use board_name (mb-*) so the identifier matches what the rebuild
+    # script sees when running as a non-root user (product_serial is root-only).
     local serial
-    serial=$(detect_serial) || true
+    serial=$(generate_fallback_id)
 
-    if [[ "$serial" == "unknown-machine" ]]; then
-        warn "  Could not detect hardware serial"
-        serial=$(generate_fallback_id)
-        warn "  Using fallback identifier: $serial"
+    if [[ -z "$serial" ]] || [[ "$serial" == unknown-* ]]; then
+        warn "  Could not detect board name, using random identifier"
+        serial="hydrix-$(head -c 4 /dev/urandom | xxd -p)"
     else
-        log "  Detected serial: $serial"
+        log "  Detected board identifier: $serial"
     fi
 
     CONFIG[serial]="$serial"
-    # Visual hostname is always "hydrix" - serial is for config file identification
+    # Visual hostname is always "hydrix" - board id is for config file identification
     CONFIG[hostname]="hydrix"
 }
 
@@ -3681,7 +3682,7 @@ access-tokens = github.com=$gh_token"
     success "=========================================="
     echo ""
     echo "Your config is at: /home/${CONFIG[username]}/hydrix-config/"
-    echo "  ├── machines/${CONFIG[serial]}.nix   (identified by hardware serial)"
+    echo "  ├── machines/${CONFIG[serial]}.nix   (identified by board name)"
     echo "  ├── profiles/"
     echo "  └── specialisations/"
     echo ""
