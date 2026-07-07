@@ -109,18 +109,22 @@ ensure_hydrix_source() {
     fi
 
     echo "Hydrix source tree not found — fetching via shallow clone..."
+    echo ""
+    local _branch
+    read -r -p "Hydrix branch to use (leave empty for main): " _branch < /dev/tty
+    _branch="${_branch:-main}"
 
     HYDRIX_CLONE_DIR="$(mktemp -d)"
 
     if command -v gh &>/dev/null && gh auth status &>/dev/null; then
-        gh repo clone borttappat/Hydrix "$HYDRIX_CLONE_DIR/Hydrix" -- --depth 1 \
+        gh repo clone borttappat/Hydrix "$HYDRIX_CLONE_DIR/Hydrix" -- --depth 1 --branch "$_branch" \
             || { echo "gh clone failed, trying git..."; HYDRIX_CLONE_DIR="$(mktemp -d)"; }
     fi
 
     # Fallback (or primary if gh unavailable)
     if [[ ! -d "$HYDRIX_CLONE_DIR/Hydrix/scripts" ]]; then
-        git clone --depth 1 https://github.com/borttappat/Hydrix.git "$HYDRIX_CLONE_DIR/Hydrix" \
-            || { echo "ERROR: Failed to clone Hydrix repository."; exit 1; }
+        git clone --depth 1 --branch "$_branch" https://github.com/borttappat/Hydrix.git "$HYDRIX_CLONE_DIR/Hydrix" \
+            || { echo "ERROR: Failed to clone Hydrix repository (branch: $_branch)."; exit 1; }
     fi
 
     SCRIPT_DIR="$HYDRIX_CLONE_DIR/Hydrix/scripts"
