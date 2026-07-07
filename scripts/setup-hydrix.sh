@@ -1566,7 +1566,7 @@ main() {
     echo ""
     echo "This will:"
     echo "  1. Validate the configuration"
-    echo "  2. Build microvm-router VM"
+    echo "  2. Build microvm-router-${CONFIG[serial]} VM"
     echo "  3. Build microvm-builder VM"
     echo "  4. Apply host configuration (nixos-rebuild switch)"
     echo ""
@@ -1580,7 +1580,7 @@ main() {
         echo ""
         echo "Skipped. To build manually later:"
         echo "  cd $CONFIG_DIR"
-        echo "  nix build .#nixosConfigurations.microvm-router.config.microvm.declaredRunner"
+        echo "  nix build .#nixosConfigurations.microvm-router-${CONFIG[serial]}.config.microvm.declaredRunner"
         echo "  nix build .#nixosConfigurations.microvm-builder.config.microvm.declaredRunner"
         echo "  rebuild"
         echo ""
@@ -1604,20 +1604,21 @@ main() {
     success "Host evaluation OK"
 
     # --- Step 2: Build microvm-router ---
-    log "Building microvm-router..."
-    local router_out="/tmp/microvm-router"
-    if nix build "${flake_ref}#nixosConfigurations.microvm-router.config.microvm.declaredRunner" \
+    local router_name="microvm-router-${CONFIG[serial]}"
+    log "Building ${router_name}..."
+    local router_out="/tmp/${router_name}"
+    if nix build "${flake_ref}#nixosConfigurations.${router_name}.config.microvm.declaredRunner" \
          -o "$router_out" 2>&1; then
         local router_store
         router_store=$(readlink -f "$router_out")
-        sudo mkdir -p /var/lib/microvms/microvm-router/config
-        sudo chown microvm:kvm /var/lib/microvms/microvm-router 2>/dev/null || true
-        sudo chown root:root /var/lib/microvms/microvm-router/config 2>/dev/null || true
-        sudo chmod 755 /var/lib/microvms/microvm-router /var/lib/microvms/microvm-router/config
-        sudo ln -sfn "$router_store" /var/lib/microvms/microvm-router/current
-        success "microvm-router built: $router_store"
+        sudo mkdir -p /var/lib/microvms/${router_name}/config
+        sudo chown microvm:kvm /var/lib/microvms/${router_name} 2>/dev/null || true
+        sudo chown root:root /var/lib/microvms/${router_name}/config 2>/dev/null || true
+        sudo chmod 755 /var/lib/microvms/${router_name} /var/lib/microvms/${router_name}/config
+        sudo ln -sfn "$router_store" /var/lib/microvms/${router_name}/current
+        success "${router_name} built: $router_store"
     else
-        warn "microvm-router build failed (WiFi may not be configured yet)"
+        warn "${router_name} build failed (WiFi may not be configured yet)"
     fi
 
     # --- Step 3: Build microvm-builder ---

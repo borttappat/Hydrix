@@ -3277,8 +3277,8 @@ prebuild_microvms() {
 
     # Critical VMs - required for lockdown mode
     local critical_vms=(
-        "microvm-router:Router VM (WiFi passthrough)"
-        "microvm-router-stable:Router stable VM (break-glass fallback)"
+        "microvm-router-${CONFIG[serial]}:Router VM (WiFi passthrough)"
+        "microvm-router-stable-${CONFIG[serial]}:Router stable VM (break-glass fallback)"
         "microvm-builder:Builder VM (lockdown mode builds)"
     )
 
@@ -3370,18 +3370,9 @@ prebuild_microvms() {
         echo "  - Network issues during package download"
         echo "  - Insufficient memory (need ~8GB)"
         echo ""
-        echo "To fix after installation:"
-        echo "  1. Select 'fallback' from the boot menu (has direct WiFi)"
-        echo "  2. Run: microvm build microvm-router"
-        echo "  3. Run: microvm build microvm-builder"
-        echo "  4. Reboot and select 'lockdown' mode"
-        echo ""
         echo "========================================"
         echo ""
-        echo "NixOS is installed. You can fix these VMs after first boot:"
-        echo "  1. Select 'fallback' from the GRUB menu (direct WiFi)"
-        echo "  2. Run: microvm build <vm-name>"
-        echo "  3. Reboot into lockdown mode"
+        echo "NixOS is installed. Failed VMs will be rebuilt automatically on first boot."
         echo ""
         read -p "Continue to finish installation? [Y/n]: " continue_anyway < /dev/tty
         if [[ "${continue_anyway,,}" =~ ^n ]]; then
