@@ -1285,7 +1285,7 @@ prompt_wifi() {
 
 prompt_colorscheme() {
     echo ""
-    log "Available colorschemes: hydrix, nord, nvid, punk"
+    log "Available colorschemes: hydrix, nord"
     read -p "Colorscheme [hydrix]: " cs
     CONFIG[colorscheme]="${cs:-hydrix}"
 }

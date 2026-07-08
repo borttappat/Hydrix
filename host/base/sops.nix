@@ -1,23 +1,30 @@
 # Sops-nix Secrets Management for Hydrix
 #
-# This module configures sops-nix for secure secrets management:
-# - Derives age key from SSH host key (no additional key management)
-# - Decrypts secrets at boot via hydrix-sops-decrypt-<name>.service (non-fatal on fresh install)
-# - Provides sops-age-pubkey helper to get the age public key
+# This module configures sops-nix for secure secrets management.
 #
-# Fresh install behaviour:
-#   On the first boot after a fresh install, the SSH host key is new so the
-#   derived age key won't match the recipients in the encrypted files.
-#   Decrypt services handle this gracefully: they create empty /run/secrets/<name>/
-#   directories and log a warning instead of failing. VMs start normally without
-#   secrets until the operator re-encrypts for the new age key.
+# Two key sources, in priority order:
+#   1. Master key  — /var/lib/sops-nix/master-age-key.txt
+#      Written by 'hydrix-sops-setup --unlock' (password-protected, portable).
+#      Survives reinstalls and works across machines without sops updatekeys.
+#      Generate once with 'hydrix-sops-setup --gen-master-key'.
+#   2. SSH host key — /etc/ssh/ssh_host_ed25519_key (derived to age key)
+#      Automatic fallback when no master key is present.
+#      Changes on reinstall — needs sops updatekeys for each new machine.
 #
-# Usage:
+# Decrypt services are non-fatal: they create empty /run/secrets/<name>/
+# directories and log a warning instead of failing. VMs start normally without
+# secrets until the correct key is available.
+#
+# Quick start (fresh install):
 #   1. Enable: hydrix.secrets.enable = true;
-#   2. Set: hydrix.secrets.githubSecretsFile = ../secrets/github.yaml;
-#   3. Rebuild to generate age key: rebuild
-#   4. Get public key: sops-age-pubkey
-#   5. Re-encrypt secrets for new key: SOPS_AGE_KEY_FILE=/var/lib/sops-nix/age-key.txt sops rotate -i secrets/github.yaml
+#   2. Rebuild to generate age key: rebuild
+#   3. Run: hydrix-sops-setup               (creates secrets/.sops.yaml)
+#   4. (Optional, recommended) Run: hydrix-sops-setup --gen-master-key
+#   5. Create secrets: sops secrets/github.yaml
+#   6. Set githubSecretsFile and rebuild
+#
+# Multi-machine / reinstall (with master key):
+#   New machine: hydrix-sops-setup --unlock   (enter passphrase, secrets decrypt immediately)
 #
 { config, lib, pkgs, ... }:
 
@@ -25,10 +32,14 @@ let
   cfg      = config.hydrix.secrets;
   username = config.hydrix.username;
 
-  # Path where age key will be stored (derived from SSH host key)
+  # Path where age key will be stored (active key used by sops services)
   ageKeyPath = "/var/lib/sops-nix/age-key.txt";
 
-  # SSH host key to derive age key from
+  # Path where the password-unlocked master key lives (written by hydrix-sops-setup --unlock)
+  # This file is never in the Nix store and survives rebuilds.
+  masterKeyPath = "/var/lib/sops-nix/master-age-key.txt";
+
+  # SSH host key to derive age key from (fallback when no master key is present)
   sshHostKeyPath = "/etc/ssh/ssh_host_ed25519_key";
 
 in {
@@ -36,13 +47,22 @@ in {
     # Ensure SSH host key exists before we try to derive age key
     services.openssh.enable = lib.mkDefault true;
 
-    # Activation script to derive age key from SSH host key
+    # Activation script: prefer master key over SSH-derived key.
+    # Master key is written by 'hydrix-sops-setup --unlock' and persists
+    # across rebuilds at /var/lib/sops-nix/master-age-key.txt.
+    # When present it takes priority so secrets survive machine reinstalls
+    # and multi-machine setups without needing 'sops updatekeys'.
     system.activationScripts.sops-age-key = {
       text = ''
         mkdir -p /var/lib/sops-nix
         chmod 700 /var/lib/sops-nix
 
-        if [ -f "${sshHostKeyPath}" ]; then
+        if [ -f "${masterKeyPath}" ]; then
+          # Master key unlocked by user — use it as the active key
+          cp "${masterKeyPath}" "${ageKeyPath}"
+          chmod 600 "${ageKeyPath}"
+        elif [ -f "${sshHostKeyPath}" ]; then
+          # No master key — fall back to SSH host key derivation
           ${pkgs.ssh-to-age}/bin/ssh-to-age -private-key -i "${sshHostKeyPath}" > "${ageKeyPath}" 2>/dev/null || true
           if [ -f "${ageKeyPath}" ]; then
             chmod 600 "${ageKeyPath}"
@@ -154,19 +174,23 @@ in {
     # Helper script to get age public key
     environment.systemPackages = [
       (pkgs.writeShellScriptBin "sops-age-pubkey" ''
+        MASTER_KEY="${masterKeyPath}"
         SSH_KEY="${sshHostKeyPath}"
         AGE_KEY="${ageKeyPath}"
 
-        if [ ! -f "$SSH_KEY" ]; then
-          echo "Error: SSH host key not found at $SSH_KEY" >&2
-          echo "Run 'sudo ssh-keygen -A' or rebuild the system first." >&2
-          exit 1
-        fi
-
         if [ -f "$AGE_KEY" ]; then
+          if [ -f "$MASTER_KEY" ]; then
+            echo "# source: master key (hydrix-sops-setup --unlock)" >&2
+          else
+            echo "# source: SSH host key (machine-specific)" >&2
+          fi
           ${pkgs.age}/bin/age-keygen -y "$AGE_KEY" 2>/dev/null
-        else
+        elif [ -f "$SSH_KEY" ]; then
+          echo "# source: SSH host key (age-key.txt not yet generated, run rebuild)" >&2
           ${pkgs.ssh-to-age}/bin/ssh-to-age -i "$SSH_KEY.pub" 2>/dev/null
+        else
+          echo "Error: no age key available. Run 'rebuild' first." >&2
+          exit 1
         fi
       '')
 

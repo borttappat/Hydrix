@@ -9,10 +9,21 @@
 # the script prints the command to re-key them for this machine.
 #
 # Usage:
-#   hydrix-sops-setup                # create/check .sops.yaml
-#   hydrix-sops-setup --print-key    # just print the host age public key and exit
-#   hydrix-sops-setup --gen-key      # generate a personal age key usable across machines
-#   hydrix-sops-setup --enroll-fido2 # enroll a FIDO2 key (Titan, Yubikey, etc.)
+#   hydrix-sops-setup                  # create/check .sops.yaml
+#   hydrix-sops-setup --print-key      # just print the host age public key and exit
+#   hydrix-sops-setup --gen-key        # generate a personal age key usable across machines
+#   hydrix-sops-setup --enroll-fido2   # enroll a FIDO2 key (Titan, Yubikey, etc.)
+#   hydrix-sops-setup --gen-master-key # generate password-protected portable master key
+#   hydrix-sops-setup --unlock         # decrypt master key and activate it on this machine
+#
+# Master key workflow (for multi-machine / reinstall use):
+#   First machine:
+#     hydrix-sops-setup --gen-master-key   # creates secrets/master-age-key.age
+#     # Add printed public key to secrets/.sops.yaml, re-encrypt, commit
+#     git add -f secrets/master-age-key.age secrets/.sops.yaml && git commit
+#   New machine or reinstall (after cloning hydrix-config and first rebuild):
+#     hydrix-sops-setup --unlock           # prompts for passphrase, activates key
+#     # Secrets decrypt immediately without sops updatekeys
 #
 set -euo pipefail
 
@@ -272,6 +283,112 @@ if [[ "${1:-}" == "--enroll-fido2" ]]; then
     echo "the FIDO2 key will be added automatically as a recipient."
   fi
 
+  exit 0
+fi
+
+# ── --gen-master-key ─────────────────────────────────────────────────────────
+#
+# Generates a portable age key encrypted with a passphrase. The encrypted file
+# is committed to the hydrix-config repo. On new machines or reinstalls, run
+# --unlock to decrypt it (password required) and activate it as the sops key.
+# The private key is never written to the Nix store or to disk unencrypted.
+#
+# To replace this key with a YubiKey later:
+#   1. hydrix-sops-setup --enroll-fido2
+#   2. Remove master key from secrets/.sops.yaml recipients
+#   3. sops updatekeys --yes secrets/*.yaml
+#   4. Optionally remove secrets/master-age-key.age from the repo
+
+if [[ "${1:-}" == "--gen-master-key" ]]; then
+  MASTER_KEY_ENC="$SECRETS_DIR/master-age-key.age"
+
+  if [[ -f "$MASTER_KEY_ENC" ]]; then
+    echo -e "${YELLOW}Master key already exists at $MASTER_KEY_ENC${NC}"
+    echo "Remove it first to regenerate (and re-encrypt all secrets afterwards)."
+    exit 0
+  fi
+
+  mkdir -p "$SECRETS_DIR"
+
+  TMPKEY=$(mktemp)
+  trap 'rm -f "$TMPKEY"' EXIT
+  rm -f "$TMPKEY"
+  age-keygen -o "$TMPKEY" 2>/dev/null
+  MASTER_PUBKEY=$(age-keygen -y "$TMPKEY" 2>/dev/null)
+
+  echo ""
+  echo -e "${CYAN}Set a passphrase to protect the master key.${NC}"
+  echo "You will need this passphrase when setting up new machines or reinstalling."
+  echo ""
+  age --passphrase -o "$MASTER_KEY_ENC" "$TMPKEY"
+  rm -f "$TMPKEY"
+  trap - EXIT
+
+  echo ""
+  echo -e "${GREEN}Master key encrypted and saved to:${NC} $MASTER_KEY_ENC"
+  echo -e "${CYAN}Master key public key:${NC} ${BOLD}$MASTER_PUBKEY${NC}"
+  echo ""
+  echo "Next steps:"
+  echo "1. Add the master key as a recipient in secrets/.sops.yaml:"
+  echo -e "   Under 'age:', add a new line:  ${BOLD}- $MASTER_PUBKEY${NC}"
+  echo ""
+  echo "2. Re-encrypt all existing secrets for the master key:"
+  echo -e "   ${BOLD}cd $CONFIG_DIR && sops updatekeys --yes secrets/*.yaml${NC}"
+  echo ""
+  echo "3. Commit the encrypted key and updated secrets:"
+  echo -e "   ${BOLD}git add -f secrets/master-age-key.age secrets/.sops.yaml secrets/*.yaml${NC}"
+  echo -e "   ${BOLD}git commit -m 'feat(secrets): add password-protected master age key'${NC}"
+  echo ""
+  echo "On a new machine or reinstall, after cloning hydrix-config and first rebuild:"
+  echo -e "   ${BOLD}hydrix-sops-setup --unlock${NC}"
+  exit 0
+fi
+
+# ── --unlock ──────────────────────────────────────────────────────────────────
+#
+# Decrypts the master age key (created with --gen-master-key) using the
+# passphrase and writes the private key to /var/lib/sops-nix/master-age-key.txt.
+# The sops.nix activation script prioritises this key over the SSH-derived one,
+# so secrets decrypt immediately after the next rebuild (or service restart).
+
+if [[ "${1:-}" == "--unlock" ]]; then
+  MASTER_KEY_ENC="$SECRETS_DIR/master-age-key.age"
+  MASTER_KEY_DEST="/var/lib/sops-nix/master-age-key.txt"
+
+  if [[ ! -f "$MASTER_KEY_ENC" ]]; then
+    echo -e "${RED}Error: $MASTER_KEY_ENC not found.${NC}" >&2
+    echo "Run 'hydrix-sops-setup --gen-master-key' on another machine first," >&2
+    echo "then commit secrets/master-age-key.age and pull it here." >&2
+    exit 1
+  fi
+
+  echo -e "${CYAN}Unlocking master age key...${NC}"
+  echo "(Enter the passphrase you set when generating the master key)"
+  echo ""
+
+  # age prompts for the passphrase interactively on the terminal
+  TMPUNLOCK=$(mktemp)
+  trap 'rm -f "$TMPUNLOCK"' EXIT
+  if ! age -d -o "$TMPUNLOCK" "$MASTER_KEY_ENC"; then
+    echo -e "${RED}Decryption failed — wrong passphrase?${NC}" >&2
+    exit 1
+  fi
+
+  sudo mkdir -p /var/lib/sops-nix
+  sudo chmod 700 /var/lib/sops-nix
+  sudo cp "$TMPUNLOCK" "$MASTER_KEY_DEST"
+  sudo chmod 600 "$MASTER_KEY_DEST"
+  rm -f "$TMPUNLOCK"
+  trap - EXIT
+
+  echo ""
+  echo -e "${GREEN}Master key installed at $MASTER_KEY_DEST${NC}"
+  echo "Restarting sops decrypt services..."
+  sudo systemctl restart hydrix-sops-decrypt-*.service 2>/dev/null || true
+  echo -e "${GREEN}Done. Secrets are now available.${NC}"
+  echo ""
+  echo "The master key persists at $MASTER_KEY_DEST across reboots."
+  echo "It is not in the Nix store and survives rebuilds."
   exit 0
 fi
 

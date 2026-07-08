@@ -215,6 +215,8 @@ declare -A CONFIG=(
     [hydrixUrl]="github:borttappat/Hydrix"
     [hydrixLocalPath]=""
     [cpuThrottle]="normal"
+    [gitName]=""
+    [gitEmail]=""
 )
 
 # ========== UTILITY FUNCTIONS ==========
@@ -276,7 +278,7 @@ prompt_auth_method() {
     if command_exists gh || (eval "$_gh_check_cmd auth status" &>/dev/null 2>&1); then
         echo "  1) GitHub CLI (gh auth login) - recommended" >&2
     else
-        echo "  1) GitHub CLI - not installed (run: nix-shell -p gh, then gh auth login)" >&2
+        echo "  1) GitHub CLI - not installed, will be loaded temporarily via nix-shell" >&2
     fi
     echo "  2) Personal Access Token (type or paste)" >&2
     echo "  3) SSH key" >&2
@@ -1621,6 +1623,15 @@ gather_user_info() {
             unset pass1 pass2
         fi
     done
+
+    # Git identity (used to pre-populate ~/.gitconfig on the new system)
+    echo ""
+    log "=== Git Identity ==="
+    log "  Pre-populates ~/.gitconfig so commits work out of the box after first boot."
+    read -p "Git user name [${CONFIG[username]}]: " git_name
+    CONFIG[gitName]="${git_name:-${CONFIG[username]}}"
+    read -p "Git email [leave blank to skip]: " git_email
+    CONFIG[gitEmail]="${git_email:-}"
 }
 
 gather_locale() {
@@ -3018,6 +3029,41 @@ WIFI_EMPTY
             commit -m "feat(secrets): initialize sops for ${CONFIG[serial]}" 2>/dev/null || true
     )
 
+    # If the repo contains a password-protected master age key, offer to
+    # decrypt it now so secrets work on the very first boot — no post-install
+    # unlock step required.
+    local master_enc="$config_dir/secrets/master-age-key.age"
+    local master_dest="/mnt/var/lib/sops-nix/master-age-key.txt"
+    if [[ -f "$master_enc" ]]; then
+        echo ""
+        log "  Found secrets/master-age-key.age in the repo."
+        echo "  Unlocking it now means secrets will decrypt on first boot."
+        echo "  If you skip, run 'hydrix-sops-setup --unlock' after first boot."
+        read -p "  Unlock master key now? [Y/n]: " unlock_yn
+        if [[ "${unlock_yn:-y}" =~ ^[Yy] ]]; then
+            echo "  (Enter the master key passphrase)"
+            local tmpunlock
+            tmpunlock=$(mktemp)
+            local age_ok=0
+            if command -v age &>/dev/null; then
+                age -d -o "$tmpunlock" "$master_enc" && age_ok=1 || true
+            else
+                nix run --no-write-lock-file nixpkgs#age -- -d -o "$tmpunlock" "$master_enc" && age_ok=1 || true
+            fi
+            if [[ $age_ok -eq 1 ]]; then
+                mkdir -p /mnt/var/lib/sops-nix
+                chmod 700 /mnt/var/lib/sops-nix
+                cp "$tmpunlock" "$master_dest"
+                chmod 600 "$master_dest"
+                rm -f "$tmpunlock"
+                log "  Master key written to $master_dest — secrets will decrypt on first boot."
+            else
+                rm -f "$tmpunlock"
+                warn "  Decryption failed. Run 'hydrix-sops-setup --unlock' after first boot."
+            fi
+        fi
+    fi
+
     success "  Sops initialized"
 }
 
@@ -3234,6 +3280,38 @@ EOF
     uid=$(nixos-enter -c "id -u ${CONFIG[username]}" 2>/dev/null || echo "1000")
     gid=$(nixos-enter -c "id -g ${CONFIG[username]}" 2>/dev/null || echo "100")
     chown -R "$uid:$gid" "/mnt/home/${CONFIG[username]}"
+
+    # Provision GitHub CLI config so gh auth is ready on first boot
+    local gh_config_src=""
+    if [[ -n "${SUDO_USER:-}" ]]; then
+        local sudo_home
+        sudo_home=$(getent passwd "$SUDO_USER" | cut -d: -f6)
+        gh_config_src="$sudo_home/.config/gh"
+    else
+        gh_config_src="$HOME/.config/gh"
+    fi
+    if [[ -d "$gh_config_src" ]]; then
+        log "Provisioning GitHub CLI config to new system..."
+        install -d -o "$uid" -g "$gid" -m 700 "/mnt/home/${CONFIG[username]}/.config"
+        cp -r "$gh_config_src" "/mnt/home/${CONFIG[username]}/.config/gh"
+        chown -R "$uid:$gid" "/mnt/home/${CONFIG[username]}/.config/gh"
+        chmod 700 "/mnt/home/${CONFIG[username]}/.config/gh"
+    fi
+
+    # Write ~/.gitconfig with the user's git identity
+    if [[ -n "${CONFIG[gitName]:-}" ]]; then
+        local gitconfig_path="/mnt/home/${CONFIG[username]}/.gitconfig"
+        log "Writing ~/.gitconfig for ${CONFIG[gitName]}..."
+        {
+            echo "[user]"
+            echo "	name = ${CONFIG[gitName]}"
+            if [[ -n "${CONFIG[gitEmail]:-}" ]]; then
+                echo "	email = ${CONFIG[gitEmail]}"
+            fi
+        } > "$gitconfig_path"
+        chown "$uid:$gid" "$gitconfig_path"
+        chmod 644 "$gitconfig_path"
+    fi
 
     # Remove installer swapfile if we created one
     if [[ -f /mnt/.swapfile ]]; then
@@ -3516,6 +3594,23 @@ check_resume() {
     uid=$(nixos-enter -c "id -u ${CONFIG[username]}" 2>/dev/null || echo "1000")
     gid=$(nixos-enter -c "id -g ${CONFIG[username]}" 2>/dev/null || echo "100")
     chown -R "$uid:$gid" "/mnt/home/${CONFIG[username]}"
+
+    # Provision GitHub CLI config so gh auth is ready on first boot
+    local gh_config_src_r=""
+    if [[ -n "${SUDO_USER:-}" ]]; then
+        local sudo_home_r
+        sudo_home_r=$(getent passwd "$SUDO_USER" | cut -d: -f6)
+        gh_config_src_r="$sudo_home_r/.config/gh"
+    else
+        gh_config_src_r="$HOME/.config/gh"
+    fi
+    if [[ -d "$gh_config_src_r" ]]; then
+        log "Provisioning GitHub CLI config to new system..."
+        install -d -o "$uid" -g "$gid" -m 700 "/mnt/home/${CONFIG[username]}/.config"
+        cp -r "$gh_config_src_r" "/mnt/home/${CONFIG[username]}/.config/gh"
+        chown -R "$uid:$gid" "/mnt/home/${CONFIG[username]}/.config/gh"
+        chmod 700 "/mnt/home/${CONFIG[username]}/.config/gh"
+    fi
 
     local _hydrix_symlink=""
     if [[ -n "$HYDRIX_LOCAL_TARGET" ]] && [[ ! -e "$HYDRIX_LOCAL_TARGET" ]]; then
