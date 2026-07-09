@@ -316,22 +316,26 @@ GLSL
   hyprFloatTerminal = pkgs.writeShellScriptBin "hypr-float-terminal" ''
     STATE_FILE="/tmp/hypr_float_state"
     X_OFFSET=50; Y_OFFSET=50; MAX_WINDOWS=5; WIN_W=800; WIN_H=550
-    CURSOR=$(${pkgs.hyprland}/bin/hyprctl cursorpos -j 2>/dev/null)
-    CX=$(printf '%s' "$CURSOR" | ${pkgs.jq}/bin/jq '.x')
-    CY=$(printf '%s' "$CURSOR" | ${pkgs.jq}/bin/jq '.y')
-    MON=$(${pkgs.hyprland}/bin/hyprctl monitors -j 2>/dev/null \
-      | ${pkgs.jq}/bin/jq -r --argjson cx "$CX" --argjson cy "$CY" \
-          '.[] | select(.x <= $cx and $cx < (.x + .width) and .y <= $cy and $cy < (.y + .height)) | "\(.x) \(.y) \(.width) \(.height)"' | head -1)
-    read -r MON_X MON_Y MON_W MON_H <<< "''${MON:-0 0 1920 1080}"
+    # Use the focused monitor -- more reliable for keybinds than cursor position.
+    # hyprctl returns physical pixels for width/height; divide by scale for logical coords,
+    # since movewindowpixel exact works in logical pixel space.
+    MON_JSON=$(${pkgs.hyprland}/bin/hyprctl monitors -j 2>/dev/null \
+      | ${pkgs.jq}/bin/jq '[.[] | select(.focused)] | .[0]')
+    [ -z "$MON_JSON" ] || [ "$MON_JSON" = "null" ] && exit 1
+    MON_X=$(printf '%s' "$MON_JSON" | ${pkgs.jq}/bin/jq '.x')
+    MON_Y=$(printf '%s' "$MON_JSON" | ${pkgs.jq}/bin/jq '.y')
+    MON_W=$(printf '%s' "$MON_JSON" | ${pkgs.jq}/bin/jq '(.width / .scale) | floor')
+    MON_H=$(printf '%s' "$MON_JSON" | ${pkgs.jq}/bin/jq '(.height / .scale) | floor')
     INIT_X=$(( (MON_W - WIN_W) / 2 - MAX_WINDOWS * X_OFFSET / 2 ))
     INIT_Y=$(( (MON_H - WIN_H) / 2 - MAX_WINDOWS * Y_OFFSET / 2 ))
     [ "$INIT_X" -lt 50 ] && INIT_X=50; [ "$INIT_Y" -lt 50 ] && INIT_Y=50
     WS=$(${pkgs.hyprland}/bin/hyprctl activeworkspace -j 2>/dev/null | ${pkgs.jq}/bin/jq '.id')
     NFLOAT=$(${pkgs.hyprland}/bin/hyprctl clients -j 2>/dev/null \
       | ${pkgs.jq}/bin/jq --argjson ws "$WS" '[.[] | select(.workspace.id == $ws and .floating)] | length')
-    if [ -f "$STATE_FILE" ]; then read -r saved_count CUR_X CUR_Y < "$STATE_FILE"
-    else saved_count=0 CUR_X=$((MON_X + INIT_X)) CUR_Y=$((MON_Y + INIT_Y)); fi
-    if [ "''${NFLOAT:-0}" -eq 0 ]; then
+    # State file: saved_count MON_X MON_Y CUR_X CUR_Y -- reset when monitor changes
+    if [ -f "$STATE_FILE" ]; then read -r saved_count SAVED_MON_X SAVED_MON_Y CUR_X CUR_Y < "$STATE_FILE"
+    else saved_count=0 SAVED_MON_X="" SAVED_MON_Y=""; fi
+    if [ "''${NFLOAT:-0}" -eq 0 ] || [ "''${SAVED_MON_X}" != "$MON_X" ] || [ "''${SAVED_MON_Y}" != "$MON_Y" ]; then
       saved_count=0 CUR_X=$((MON_X + INIT_X)) CUR_Y=$((MON_Y + INIT_Y))
     else
       saved_count=$(( saved_count + 1 ))
@@ -341,7 +345,7 @@ GLSL
         saved_count=1 CUR_X=$((MON_X + INIT_X)) CUR_Y=$((MON_Y + INIT_Y))
       else CUR_X=$NX CUR_Y=$NY; fi
     fi
-    printf '%s %s %s\n' "$saved_count" "$CUR_X" "$CUR_Y" > "$STATE_FILE"
+    printf '%s %s %s %s %s\n' "$saved_count" "$MON_X" "$MON_Y" "$CUR_X" "$CUR_Y" > "$STATE_FILE"
     TITLE="hypr-float-$$"
     alacritty --class hypr-float --title "$TITLE" &
     for _ in $(seq 30); do
@@ -431,6 +435,14 @@ GLSL
 
 in
   lib.mkIf (cfg.enable && config.hydrix.hyprland.enable) {
+    # Ensure ~/.config/hypr exists with correct ownership before home-manager runs.
+    # On fresh machines the directory (or files within) can be created by root during
+    # early system activation, causing home.activation.hyprlandGenerated to fail with EPERM.
+    systemd.tmpfiles.rules = [
+      "d /home/${username}/.config/hypr 0755 ${username} users -"
+      "Z /home/${username}/.config/hypr - ${username} users -"
+    ];
+
     environment.systemPackages = [
       hyprlandGapsAdjust
       hyprApplyColors
@@ -439,7 +451,7 @@ in
       hyprVmBorders
       hyprFloatTerminal
       hyprFocusDaemon
-      pkgs.swayidle
+      pkgs.hypridle
       pkgs.swaybg
     ];
 

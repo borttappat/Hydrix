@@ -1055,7 +1055,7 @@ in {
     lockscreen = {
       idleTimeout = lib.mkOption {
         type = lib.types.nullOr lib.types.int;
-        default = 600;
+        default = 300;
         description = "Seconds before auto-lock (null to disable)";
       };
 

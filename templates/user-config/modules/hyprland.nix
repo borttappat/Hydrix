@@ -27,7 +27,7 @@ let
   lkRounding  = toString (if (ui.cornerRadius or 0) > 0 then ui.cornerRadius * 2 else 2);
 
   lk          = config.hydrix.graphical.lockscreen;
-  idleTimeout = toString (lk.idleTimeout or 600);
+  idleTimeout = toString (lk.idleTimeout or 300);
   configDir   = config.hydrix.paths.configDir;
   kb          = config.hydrix.graphical.keyboard;
 
@@ -90,16 +90,31 @@ let
     fi
   '';
 
-  # Wrapper that reads the user-adjustable timeout from a state file at startup.
-  # Falls back to the compiled-in idleTimeout when no override is set.
-  startWaylandIdle = pkgs.writeShellScript "start-wayland-idle" ''
-    _t=$(cat "$HOME/.local/state/lock-timeout" 2>/dev/null || echo "${idleTimeout}")
-    exec ${pkgs.swayidle}/bin/swayidle -w \
-      timeout "$_t" '${pkgs.systemd}/bin/loginctl lock-session' \
-      lock 'pidof hyprlock || ${pkgs.hyprlock}/bin/hyprlock'
+  # Idempotent lock script: flock prevents duplicate hyprlock instances.
+  lockScreen = pkgs.writeShellScript "hypr-lock" ''
+    exec ${pkgs.util-linux}/bin/flock -n "$XDG_RUNTIME_DIR/hyprlock.lock" \
+      ${pkgs.hyprlock}/bin/hyprlock
   '';
 
-  # lock-timeout [seconds] — read or adjust the idle lock timeout at runtime.
+  # Writes ~/.config/hypr/hypridle.conf with the current timeout then starts hypridle.
+  # hypridle uses a config file rather than CLI args, so we regenerate it each time.
+  startHypridle = pkgs.writeShellScript "start-hypridle" ''
+    _t=$(cat "$HOME/.local/state/lock-timeout" 2>/dev/null || echo "${idleTimeout}")
+    mkdir -p "$HOME/.config/hypr"
+    cat > "$HOME/.config/hypr/hypridle.conf" <<EOF
+general {
+  lock_cmd = ${lockScreen}
+}
+
+listener {
+  timeout = $_t
+  on-timeout = ${pkgs.systemd}/bin/loginctl lock-session
+}
+EOF
+    exec ${pkgs.hypridle}/bin/hypridle
+  '';
+
+  # lock-timeout [seconds] -- read or adjust the idle lock timeout at runtime.
   # Persists across Hyprland restarts via ~/.local/state/lock-timeout.
   # Compile-time default: ${idleTimeout}s. Run without args to show current value.
   lockTimeout = pkgs.writeShellScriptBin "lock-timeout" ''
@@ -111,9 +126,9 @@ let
     fi
     mkdir -p "$(dirname "$state")"
     echo "$1" > "$state"
-    pkill -x swayidle 2>/dev/null || true
+    pkill -x hypridle 2>/dev/null || true
     sleep 0.1
-    nohup ${startWaylandIdle} >/dev/null 2>&1 &
+    nohup ${startHypridle} >/dev/null 2>&1 &
     disown
     ${pkgs.libnotify}/bin/notify-send -t 2000 "Lock timeout" "''${1}s"
   '';
@@ -130,7 +145,7 @@ let
     exec-once = sh -c 'WALL=$(cat "$HOME/.cache/wal/wal" 2>/dev/null); [ -n "$WALL" ] && swaybg -i "$WALL" -m fill'
     exec-once = ${pkgs.dunst}/bin/dunst
     exec-once = sh -c 'sleep 2 && hypr-apply-colors'
-    exec-once = ${startWaylandIdle}
+    exec-once = ${startHypridle}
 
     # ── General ────────────────────────────────────────────────────────────────
     general {
@@ -464,8 +479,8 @@ in lib.mkIf config.hydrix.hyprland.enable {
   '';
 
   # Send Lock signal to all sessions before the system goes to sleep.
-  # swayidle's `lock` event fires in response and starts hyprlock.
-  # The 1s pause gives hyprlock time to grab input before suspend completes.
+  # hypridle's lock_cmd fires in response and starts hyprlock.
+  # The 2s pause gives hyprlock time to grab input before suspend completes.
   systemd.services."lock-before-sleep" = {
     description = "Lock screen before sleep";
     before = [ "sleep.target" "suspend.target" "hibernate.target" "hybrid-sleep.target" "suspend-then-hibernate.target" ];
@@ -474,9 +489,9 @@ in lib.mkIf config.hydrix.hyprland.enable {
       Type = "oneshot";
       ExecStart = pkgs.writeShellScript "lock-before-sleep" ''
         ${pkgs.systemd}/bin/loginctl lock-sessions
-        sleep 1
+        sleep 2
       '';
-      TimeoutSec = 10;
+      TimeoutSec = 15;
     };
   };
 
