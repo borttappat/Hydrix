@@ -221,7 +221,7 @@ in {
       "random.trust_cpu=on"
     ];
 
-    boot.kernelPackages = pkgs.linuxPackages_latest;
+    boot.kernelPackages = lib.mkDefault pkgs.linuxPackages_latest;
 
     boot.kernelModules = [
       "virtio_blk" "virtio_pci" "virtio_rng"
