@@ -18,6 +18,10 @@ Hydrix is an options-driven NixOS framework that provides complete network isola
 - [Architecture Overview](#architecture-overview)
 - [Security Model](#security-model)
 - [Installation](#installation)
+  - [Installer Modes](#installer-modes)
+  - [Fresh Install](#fresh-install-from-live-environment)
+  - [Migration from Existing NixOS](#migration-from-existing-nixos)
+  - [Adding a Machine to an Existing Config](#adding-a-machine-to-an-existing-config)
 - [Configuration](#configuration)
 - [Colorscheme System](#colorscheme-system)
 - [VM Theme Sync](#vm-theme-sync)
@@ -515,20 +519,32 @@ In **Administrative** mode:
 
 ### WiFi Credentials in Nix Store
 
-WiFi credentials declared in `modules/wifi.nix` are baked into the router VM's NixOS closure and end up in `/nix/store` as plaintext (or WPA PSK hashes). Because all VMs share the host's `/nix/store` via virtiofs, **any VM — including a compromised browsing or pentest VM — can read your WiFi credentials** by scanning the store.
+WiFi credentials declared in `modules/wifi.nix` are baked into the router VM's NixOS closure and end up in `/nix/store` as plaintext (or WPA PSK hashes). Because all VMs share the host's `/nix/store` via virtiofs, **any VM - including a compromised browsing or pentest VM - can read your WiFi credentials** by scanning the store.
 
-`wifi-sync` stores WPA PSK hashes (64-char hex strings derived from SSID + password via `wpa_passphrase`), not plaintext passwords — but a PSK hash is sufficient to authenticate to the network, so the exposure is equivalent.
+`wifi-sync` stores WPA PSK hashes (64-char hex strings derived from SSID + password via `wpa_passphrase`), not plaintext passwords - but a PSK hash is sufficient to authenticate to the network, so the exposure is equivalent.
 
 **sops-nix integration is not yet implemented.** The `hydrix.router.wifi.networks` option takes plain strings at NixOS evaluation time, before sops secrets are decrypted. Wiring runtime secrets into this option would require changes to how the framework generates NM keyfiles (writing them at activation time rather than build time). This is tracked as future work.
 
 In the meantime, the pragmatic mitigations are:
 - Full-disk encryption on the host (protects the store at rest)
-- Minimise the trust you place in profile VMs — treat any VM as potentially able to read your WiFi PSKs
+- Minimise the trust you place in profile VMs - treat any VM as potentially able to read your WiFi PSKs
 - Home networks with WPA2-PSK are lower risk than corporate/sensitive networks; consider not declaring those here
 
 ---
 
 ## Installation
+
+### Installer Modes
+
+Both installer scripts (`install-hydrix.sh` for fresh installs, `setup-hydrix.sh` for migrations) support three modes:
+
+| Mode | When it triggers | What it does |
+|------|-----------------|--------------|
+| **fresh** | No existing `hydrix-config` found | Prompts for everything: username, colorscheme, disk layout, WiFi. Generates the full config tree from templates. |
+| **add** | Existing repo detected, hardware serial not in it | Skips user/locale prompts - they're already in `modules/user.nix` and `modules/common.nix`. Only generates `machines/<serial>.nix` for the new hardware. |
+| **use-existing** | Hardware serial already in the repo | Re-runs hardware detection and regenerates the machine config. No prompts. |
+
+The **add** mode is the normal path when bringing a second (or third) machine into an existing `hydrix-config`. User identity, locale, colorscheme, and WM choice are already shared across machines - only hardware-specific values need to be generated.
 
 ### Fresh Install (From Live Environment)
 
@@ -538,16 +554,18 @@ curl -sL https://raw.githubusercontent.com/borttappat/Hydrix/main/scripts/instal
 ```
 
 The installer will:
-1. **Auto-detect hardware**: CPU (Intel/AMD), WiFi PCI address, ASUS features
-2. **Prompt for configuration**: Username, hostname, disk, WiFi credentials
-3. **Detect locale**: Timezone, keyboard layout, and locale are read from the running system and written into `modules/common.nix` - one file that applies to both host and all VMs
-4. **Partition disk**: GPT with EFI, optional LUKS encryption
+1. **Auto-detect hardware**: CPU (Intel/AMD), WiFi PCI address, ASUS features, hardware serial
+2. **Prompt for identity**: Username, colorscheme, disk, WiFi credentials - written to `modules/user.nix` and `modules/common.nix`
+3. **Detect locale**: Timezone, keyboard layout, and locale read from the running system - written into `modules/common.nix`
+4. **Partition disk**: GPT with EFI, optional LUKS encryption via disko
 5. **Generate config** in `~/hydrix-config/`:
    - `flake.nix` - Main flake importing Hydrix
-   - `machines/<hostname>.nix` - Your machine configuration
-   - `modules/common.nix` - Locale, timezone, scaling (auto-populated)
+   - `machines/<serial>.nix` - Hardware config (platform, VFIO, disko, display scaling)
+   - `modules/user.nix` - Shared identity: username, colorscheme, WM choice, services
+   - `modules/common.nix` - Shared locale, timezone, keyboard (applies to host and all VMs)
    - `specialisations/` - Boot mode configurations
-5. **Pre-build infrastructure VMs**: `microvm-router`, `microvm-router-stable`, `microvm-builder`
+   - `profiles/`, `infra/`, `tasks/` - VM configs copied from templates
+6. **Pre-build infrastructure VMs**: `microvm-router`, `microvm-router-stable`, `microvm-builder`
 
 Profile VMs (`microvm-browsing`, `microvm-pentest`, `microvm-dev`, `microvm-comms`, `microvm-lurking`) are **not** built during install. Build them on demand after first boot:
 
@@ -557,16 +575,9 @@ microvm build microvm-pentest
 # etc.
 ```
 
-The installer pre-builds `microvm-router`, `microvm-router-stable`, and `microvm-builder` during installation. On first boot:
-
+On first boot:
 - **Router starts automatically** (controlled by `router.autostart = true`)
-- **Other VMs are declared but not started**. Build them on demand:
-
-```bash
-microvm build microvm-browsing
-microvm start microvm-browsing
-# etc.
-```
+- **Other VMs are declared but not started** - build them on demand
 
 To customize VMs per-machine, edit `machines/<serial>.nix`:
 
@@ -601,50 +612,110 @@ hydrix.microvmHost.profileOverrides = {
 ./scripts/setup-hydrix.sh
 ```
 
-This auto-detects your current system configuration and generates a minimal Hydrix config preserving your existing disk layout.
+This auto-detects your current system configuration and generates a minimal Hydrix config preserving your existing disk layout. Same three installer modes apply - if `~/hydrix-config/` already exists, it detects the serial and selects add or use-existing automatically.
+
+### Adding a Machine to an Existing Config
+
+When you have a working `hydrix-config` on one machine and want to bring a second machine in without repeating all the setup steps:
+
+1. **Boot the new machine** from the NixOS ISO
+
+2. **Run the installer** - it detects the existing repo and enters **add** mode automatically:
+
+   ```bash
+   curl -sL https://raw.githubusercontent.com/borttappat/Hydrix/main/scripts/install-hydrix.sh | sudo bash
+   # When prompted: provide your hydrix-config git URL
+   ```
+
+   The installer clones your repo, detects the hardware serial, and generates only `machines/<serial>.nix`. It does **not** prompt for username, colorscheme, or locale - those are already in `modules/user.nix` and `modules/common.nix`.
+
+3. **After first boot** - provision secrets for the new machine. The new machine has a new SSH host key, so a new age key:
+
+   ```bash
+   # On the new machine:
+   hydrix-sops-setup --print-key   # prints the new host's age pubkey
+
+   # On any existing machine (or wherever you manage secrets):
+   # Add the key to secrets/.sops.yaml, then re-key all secrets:
+   cd ~/hydrix-config/secrets
+   sops updatekeys --yes wifi.yaml github.yaml
+   git add secrets/.sops.yaml secrets/wifi.yaml secrets/github.yaml
+   git commit -m "feat(secrets): add <machine-serial> as sops recipient"
+   git push
+   ```
+
+4. **Pull the updated secrets** on the new machine:
+
+   ```bash
+   git -C ~/hydrix-config pull
+   rebuild
+   ```
+
+   Once rebuilt with the updated `.sops.yaml`, all secrets decrypt automatically on that machine.
+
+**What the installer skips in add mode:**
+- Username, hostname, colorscheme prompts (already in `modules/user.nix`)
+- Locale, timezone, keyboard prompts (already in `modules/common.nix`)
+- Template provisioning (profiles/, infra/, tasks/ already exist in the repo)
+
+**What it generates:**
+- `machines/<new-serial>.nix` - hardware config: VFIO WiFi passthrough, platform, disko layout, display scaling
 
 ### Generated Configuration Structure
 
 ```
 ~/hydrix-config/
-├── flake.nix                    # Imports Hydrix, defines machines and VMs
+├── flake.nix                    # Imports Hydrix, auto-discovers all VMs
 ├── machines/
-│   └── <serial>.nix             # Your machine config (named by hardware serial)
-├── profiles/                    # VM profile customizations (overlay on Hydrix base)
-│   ├── browsing/
-│   │   ├── meta.nix             # CID, bridge, subnet, workspace, label, focusBorder
-│   │   ├── default.nix          # NixOS config (colorscheme, resources)
-│   │   ├── packages.nix         # Profile-specific packages
-│   │   └── packages/            # Custom packages (via vm-sync)
-│   ├── pentest/
-│   ├── dev/
-│   ├── comms/
-│   └── lurking/
-├── colorschemes/                # Custom colorschemes (pywal JSON format)
-├── modules/                      # Settings shared across all machines and VMs
-│   ├── common.nix               # Locale, shared packages
-│   ├── wifi.nix                 # WiFi credentials
-│   ├── fonts.nix                # Font packages and profiles
-│   ├── graphical.nix            # UI preferences (opacity, bluelight, DPI)
-│   ├── polybar.nix              # Bar style, workspace labels, module layout
-│   ├── i3.nix                   # i3 keybindings
+│   └── <serial>.nix             # Hardware config (one per machine, named by serial)
+├── modules/                     # Settings shared across all machines
+│   ├── user.nix                 # Identity: username, colorscheme, WM, services
+│   ├── common.nix               # Locale, timezone, keyboard (host + all VMs)
+│   ├── graphical.nix            # UI: gaps, bar height, opacity, lockscreen
+│   ├── wifi.nix                 # WiFi credentials (managed by wifi-sync)
+│   ├── fonts.nix                # Font packages and per-app profiles
 │   ├── fish.nix                 # Shell abbreviations and functions
 │   ├── alacritty.nix            # Terminal cursor, keyboard overrides
-│   ├── dunst.nix                # Notification preferences
+│   ├── dunst.nix                # Notification dimensions and urgency
 │   ├── ranger.nix               # File manager keybindings and rifle rules
-│   ├── rofi.nix                 # Launcher keybindings and extraConfig
-│   ├── zathura.nix              # PDF viewer settings
+│   ├── rofi.nix                 # Launcher dimensions, key bindings
 │   ├── starship.nix             # Prompt configuration
 │   ├── vim.nix                  # Editor configuration
 │   ├── firefox.nix              # Host Firefox toggle and user-agent
 │   └── obsidian.nix             # Host Obsidian toggle and vault paths
-├── custom/                     # Local NixOS modules
-├── tasks/                       # Pentest task VM slots (task1.nix, task2.nix, ...)
-└── specialisations/
-    ├── _base.nix                # Shared base packages
-    ├── lockdown.nix             # Lockdown mode config
-    ├── administrative.nix       # Admin mode config
-    └── fallback.nix             # Fallback mode config
+├── profiles/                    # Graphical VM customizations (overlay on Hydrix base)
+│   ├── browsing/
+│   │   ├── meta.nix             # CID, bridge, subnet, workspace, label, focusBorder
+│   │   ├── default.nix          # NixOS config: colorscheme, RAM, vCPUs, packages
+│   │   └── packages/            # vm-sync managed packages
+│   ├── pentest/
+│   ├── dev/
+│   ├── comms/
+│   └── lurking/
+├── infra/                       # Headless infrastructure VM configs
+│   ├── router/default.nix       # Router: DNS servers, firewall, extra packages
+│   ├── builder/default.nix      # Builder: lockdown-mode nix build settings
+│   ├── files/default.nix        # Files VM: accessFrom list, storage size
+│   ├── gitsync/default.nix      # Gitsync: repo paths and remote URLs
+│   ├── hostsync/default.nix     # Hostsync: inbox path
+│   ├── vault/default.nix        # Vault: KeePassXC database path
+│   └── usb-sandbox/default.nix  # USB sandbox settings
+├── tasks/                       # Pentest task VM slots
+│   ├── task1/                   # CID 115, mv-task-1
+│   ├── task2/                   # CID 116, mv-task-2
+│   └── task3/                   # CID 117, mv-task-3
+├── colorschemes/                # Custom pywal colorschemes (JSON)
+├── specialisations/
+│   ├── _base.nix                # Packages present in all modes
+│   ├── lockdown.nix             # Default: hardened, no host internet
+│   ├── administrative.nix       # Full functionality, router VM gateway
+│   └── fallback.nix             # Emergency: direct WiFi, no VMs
+├── secrets/                     # sops-encrypted credentials
+│   ├── .sops.yaml               # Recipient list (age keys per machine + personal key)
+│   ├── wifi.yaml                # WiFi credentials (encrypted)
+│   └── github.yaml              # GitHub SSH key (encrypted)
+└── vpn/
+    └── mullvad.nix              # Per-bridge Mullvad exit node mapping
 ```
 
 ### Profile Customization
@@ -860,7 +931,7 @@ mvm rebuild comms
       ];
     };
 
-    # Use wifi-sync to manage networks — see "WiFi Credential Management" section below
+    # Use wifi-sync to manage networks - see "WiFi Credential Management" section below
 
     # Mullvad VPN integration
     vpn.mullvad = {
@@ -892,8 +963,8 @@ The router VM maintains two NetworkManager connection directories:
 
 | Directory | Contents | Source |
 |---|---|---|
-| `/run/NetworkManager/system-connections/` | Declared networks — generated from `wifi.nix` at build time | NixOS build |
-| `/var/lib/NetworkManager/system-connections/` | Runtime-added networks — persists across restarts | `nmcli` at runtime |
+| `/run/NetworkManager/system-connections/` | Declared networks - generated from `wifi.nix` at build time | NixOS build |
+| `/var/lib/NetworkManager/system-connections/` | Runtime-added networks - persists across restarts | `nmcli` at runtime |
 
 `wifi-sync poll` (POLL command over vsock) reads both directories and returns a flat `connections` list. The host script diffs this against `wifi.nix` to identify which connections are already declared and which are pending (in `/var/lib/` but not yet in `wifi.nix`).
 
@@ -907,14 +978,14 @@ wifi-sync list               # Show networks declared in wifi.nix
 wifi-sync remove SSID        # Remove a network from wifi.nix
 ```
 
-**Admin mode** — router VM is reachable via vsock (normal lockdown/administrative operation).
+**Admin mode** - router VM is reachable via vsock (normal lockdown/administrative operation).
 
-**Fallback mode** — router VM is not running (e.g. fallback specialisation with direct host WiFi). `wifi-sync` reads the current connection from the host's `nmcli` and saves it.
+**Fallback mode** - router VM is not running (e.g. fallback specialisation with direct host WiFi). `wifi-sync` reads the current connection from the host's `nmcli` and saves it.
 
 #### Adding a new network
 
 ```bash
-# From host — pushes to router NM and saves to wifi.nix in one step:
+# From host - pushes to router NM and saves to wifi.nix in one step:
 wifi-sync add "NetworkName" "password"
 rebuild
 microvm purge microvm-router --force && microvm build microvm-router && microvm start microvm-router
@@ -935,11 +1006,11 @@ microvm purge microvm-router --force && microvm build microvm-router && microvm 
 
 `rebuild` + `mvm rebuild router` alone is **not sufficient** when adding or removing networks. NetworkManager's runtime state in `/var/lib/` persists across VM restarts and takes precedence over the freshly generated `/run/` connections. Only a full purge clears this state, after which the new NixOS-declared connections in `/run/` are the only ones NM sees.
 
-This is a known limitation — ideally NM should reconcile its state with the declared connections on activation. For now, purge is the reliable path whenever you change `wifi.nix` and need the router to connect to a different or newly added network.
+This is a known limitation - ideally NM should reconcile its state with the declared connections on activation. For now, purge is the reliable path whenever you change `wifi.nix` and need the router to connect to a different or newly added network.
 
 #### Password storage
 
-Passwords are stored as 64-char WPA PSK hashes derived via `wpa_passphrase SSID PASSWORD`. NM accepts these directly and the plaintext password is never written to disk. However, see [WiFi Credentials in Nix Store](#wifi-credentials-in-nix-store) — the hashes are still readable by all VMs via the shared `/nix/store`.
+Passwords are stored as 64-char WPA PSK hashes derived via `wpa_passphrase SSID PASSWORD`. NM accepts these directly and the plaintext password is never written to disk. However, see [WiFi Credentials in Nix Store](#wifi-credentials-in-nix-store) - the hashes are still readable by all VMs via the shared `/nix/store`.
 
 ### Networking
 
@@ -1155,25 +1226,30 @@ hydrix.graphical.standalone = false;  # microVM -> theming only, display forward
 
 The `modules/` directory in your `hydrix-config` holds settings that apply to all machines. Each file is a NixOS module imported by every machine (and, where relevant, by VMs via `hostConfig`). Settings use `lib.mkDefault` so individual machine configs can override with plain assignment.
 
-| File | What it controls |
-|------|-----------------|
-| `common.nix` | Locale, shared system packages |
-| `wifi.nix` | WiFi credentials for the router VM |
-| `fonts.nix` | Font packages and per-app size relations |
-| `graphical.nix` | Opacity, bluelight filter, DPI scaling |
-| `polybar.nix` | Bar style, workspace labels, module layout |
-| `i3.nix` | i3 keybindings |
-| `fish.nix` | Shell abbreviations and functions |
-| `alacritty.nix` | Terminal cursor shape, keyboard overrides |
-| `dunst.nix` | Notification dimensions and urgency settings |
-| `ranger.nix` | File manager keybindings and rifle rules |
-| `rofi.nix` | Launcher dimensions, key bindings, fuzzy matching |
-| `zathura.nix` | PDF viewer options |
-| `starship.nix` | Full prompt configuration (TOML inlined as Nix string) |
-| `vim.nix` | Editor configuration (vimrc inlined as Nix string) |
-| `firefox.nix` | Host Firefox toggle and user-agent spoofing |
-| `obsidian.nix` | Host Obsidian toggle and vault CSS theme deployment |
-| `tor-hardening.nix` | Tor anonymity: bridges, Firefox hardening, no-swap enforcement |
+| File | What it controls | Populated by |
+|------|-----------------|-------------|
+| `user.nix` | Username, colorscheme, WM choice, shared services | Installer (fresh/add) |
+| `common.nix` | Locale, timezone, keyboard layout, system packages | Installer (auto-detected) |
+| `wifi.nix` | WiFi credentials for the router VM | `wifi-sync` |
+| `fonts.nix` | Font packages and per-app size relations | User |
+| `graphical.nix` | Opacity, bluelight filter, bar layout, lockscreen | User |
+| `polybar.nix` | Bar style, workspace labels, module layout (i3 only) | User |
+| `waybar.nix` | Waybar config (Hyprland/Sway) | User |
+| `hyprland.nix` | Hyprland keybindings and per-machine rules | User |
+| `i3.nix` | i3 keybindings | User |
+| `fish.nix` | Shell abbreviations and functions | User |
+| `alacritty.nix` | Terminal cursor shape, keyboard overrides | User |
+| `dunst.nix` | Notification dimensions and urgency settings | User |
+| `ranger.nix` | File manager keybindings and rifle rules | User |
+| `rofi.nix` | Launcher dimensions, key bindings, fuzzy matching | User |
+| `zathura.nix` | PDF viewer options | User |
+| `starship.nix` | Full prompt configuration (TOML inlined as Nix string) | User |
+| `vim.nix` | Editor configuration (vimrc inlined as Nix string) | User |
+| `firefox.nix` | Host Firefox toggle and user-agent spoofing | User |
+| `obsidian.nix` | Host Obsidian toggle and vault CSS theme deployment | User |
+| `tor-hardening.nix` | Tor anonymity: bridges, Firefox hardening, no-swap enforcement | User |
+
+`user.nix` and `common.nix` are the only two files the installer writes to. All other modules are copied from templates with sensible defaults and are edited manually by the user.
 
 #### firefox.nix
 
@@ -2104,6 +2180,32 @@ Profile/infra VMs: static .10 IPs on their bridge
 ```
 
 The files VM's TAP list is **auto-discovered** at build time from `infra/files/meta.nix`, which reads `profiles/*/meta.nix` and includes explicit entries for infra VMs like usb-sandbox and hostsync. Adding a new profile automatically adds a new TAP after rebuilding the files VM.
+
+### Files VM - Implementation Details
+
+Two cooperating agents handle all file operations:
+
+**Files VM orchestrator** (`infra/files/default.nix`, vsock 14505) - multi-homed, one TAP per allowed profile. `ifaceMap` reads each profile's `meta.nix` at build time to derive the TAP name, MAC address, and subnet IP - fully dynamic for all profiles listed in `accessFrom`. Which VMs participate is the only hardcoded part:
+
+```nix
+# infra/files/default.nix
+accessFrom = [ "pentest" "browsing" "dev" "comms" ];  # lurking intentionally excluded
+```
+
+Adding a new profile to `accessFrom` is sufficient - `ifaceMap` auto-derives the TAP name, MAC, and `.2` IP from that profile's `meta.nix`. No other changes needed.
+
+**Per-VM agent** (`modules/vm/files-agent.nix`, vsock 14506) - runs inside every profile VM. Handles `ENCRYPT`, `DECRYPT`, `SERVE`, `RECEIVE_PREPARE`, `CLEANUP` on behalf of the host. Opens port 8888 exclusively to the files VM's `.2` address on the VM's own bridge subnet - that address is derived from `vmSubnet` in the VM's config, which itself comes from `meta.nix`. No hardcoded IPs anywhere in the per-VM agent.
+
+**What is dynamic vs explicit:**
+
+| Thing | How it's determined |
+|-------|-------------------|
+| Which VMs participate | Explicit in `accessFrom` in `infra/files/default.nix` |
+| TAP names, MACs, IPs for those VMs | Fully dynamic - derived from each profile's `meta.nix` at build time |
+| Bridge attachment (`tapBridges`) | Auto-derived from `accessFrom` profiles |
+| Port 8888 firewall rule (per VM) | Dynamic - uses `vmSubnet` from that VM's own config, traced back to `meta.nix` |
+
+Traffic between the files VM and profile VMs never touches the router. The files VM reaches each profile VM directly over the shared bridge via its dedicated per-bridge TAP.
 
 ### Hostsync VM (Host File Inbox)
 
@@ -3102,6 +3204,87 @@ The `display-mode` service on each VM accepts these commands:
 **Known gotcha \- STATUS false positive:**
 
 `STATUS` checks both `[[ -S /run/user/1000/waypipe-0 ]]` AND `systemctl is-active --quiet waypipe-vsock`. Checking only the socket file is insufficient, it can persist after the service has stopped (crashed, or stopped by `stop` push). If STATUS incorrectly returns `"waypipe"`, the ws-app script proceeds to launch the app which then fails silently (app starts in VM but no window appears on host).
+
+### waypipe - VM-Side Services
+
+Three systemd services run in each graphical profile VM:
+
+**`display-mode.service`** - runs as root, listens on vsock:14509. Handles mode switching and readiness signalling. Accepts: `PING` (returns `OK`), `STATUS` (returns `waypipe`/`xpra`/`none`), `waypipe` (stops xpra, starts waypipe-vsock + waypipe-launch), `xpra` (stops waypipe services, starts xpra-vsock), `waypipe-reconnect` (restarts waypipe-vsock if socket missing, leaves running apps alive otherwise), `stop` (stops all display services, leaves VM in neutral state ready for next WM's mode push), `JOURNAL_WAYPIPE` (returns waypipe-vsock journal for remote diagnostics).
+
+Runs as root because starting/stopping system services requires it. STATUS returns `"waypipe"` only when both `/run/user/1000/waypipe-0` exists AND `waypipe-vsock` is active - checking the socket file alone is insufficient since it can persist after the service crashes.
+
+**`waypipe-vsock.service`** - runs as the user, started on-demand by display-mode. Connects outward to the host (CID 2) on the per-VM waypipe port (`14600 + CID - 100`). Key details:
+- `ExecStartPre`: creates `/run/user/1000/` and removes any stale `waypipe-0` socket from a previous session
+- `--display waypipe-0`: creates the Wayland proxy socket that apps inside the VM connect to via `WAYLAND_DISPLAY=waypipe-0`
+- `--title-prefix "[vmname] "`: derived at build time from the VM hostname (`lib.removePrefix "microvm-" hostname`), e.g. `[browsing] `. This prefix is how the host compositor routes VM windows to the correct workspace via `for_window` rules
+- `Restart=always`, `RestartSec=5s`: self-heals if the tunnel drops
+
+**`waypipe-launch.service`** - runs as the user, listens on vsock:14508. Receives one-line app launch commands from the host. On receipt:
+1. Waits up to 5s for `/run/user/1000/waypipe-0` to exist
+2. Runs the command with `WAYLAND_DISPLAY=waypipe-0`, `XDG_RUNTIME_DIR=/run/user/1000`, and correct nix profile `PATH`
+3. Uses `setsid` to detach the launched app from the socat connection - the app keeps running after socat closes
+
+### waypipe - Host-Side Scripts
+
+**`waypipe-connect <vm-name>`** - establishes and maintains the host-side tunnel:
+1. Looks up the VM's CID from `/etc/hydrix/vm-registry.json`
+2. Kills any stale waypipe process on the per-VM port
+3. Starts `waypipe --vsock --socket PORT client` (listening for VM's outbound connection)
+4. After 1s (background), pushes `waypipe` mode to the VM via vsock:14509
+5. Restart loop: if waypipe exits (VM disconnect/restart), restarts it automatically - requires `waypipe client || true` so the `set -euo pipefail` wrapper does not exit on non-zero waypipe exit
+
+**`hypr-ws-app <command>`** / **`sway-ws-app <command>`** - workspace-aware app launcher:
+1. Detects focused workspace (via `hyprctl activeworkspace -j` or `swaymsg -t get_workspaces`)
+2. Looks up which VM owns that workspace in `vm-registry.json`
+3. If `waypipe-connect` is not running for that VM, starts it and waits for the tunnel
+4. Polls vsock:14509 `STATUS` up to 20s until it returns `"waypipe"`
+5. Sends the command to vsock:14508 (`waypipe-launch`)
+
+**`vm-push-display-mode`** - detects the current compositor (`$WAYLAND_DISPLAY` set = Wayland, otherwise X11) and pushes the appropriate mode (`waypipe` or `xpra`) to all running profile VMs via vsock:14509. Called at compositor startup so VMs already running when the WM starts get the correct mode immediately.
+
+### waypipe - Window Routing
+
+VM windows are routed to the correct workspace by the compositor via title-prefix matching. The title prefix is set by `waypipe --title-prefix "[browsing] "` in `waypipe-vsock.service`. Compositor config:
+
+```nix
+# Hyprland - windowrulev2 in modules/hyprland.nix
+windowrulev2 = [
+  "workspace 3, title:^\[browsing\]"
+  "workspace 2, title:^\[pentest\]"
+  # etc - generated from vm-registry at build time
+];
+
+# Sway - for_window in modules/sway.nix
+extraConfig = ''
+  for_window [title="^\[browsing\] "] move to workspace 3
+  for_window [title="^\[pentest\] "] move to workspace 2
+'';
+```
+
+Rules are generated at build time from `vm-registry.json` so adding a new profile VM automatically adds the corresponding window routing rule after a rebuild.
+
+### waypipe - Session Cleanup
+
+A persistent `WAYLAND_DISPLAY` in the systemd user environment after the compositor exits causes problems - picom refuses to start in i3 (`ConditionEnvironment=!WAYLAND_DISPLAY`). The session wrappers handle cleanup:
+
+**`sway-session`** / **`hyprland-session`** - wrapper scripts that start the compositor and on exit:
+1. Kill all `waypipe-connect` processes
+2. Push `stop` to all running VMs via vsock:14509 (VMs stop display services, return to neutral state)
+3. Unset `WAYLAND_DISPLAY` and `DISPLAY` from the systemd user environment
+4. Drop back to TTY
+
+**`exit-wayland`** - can be called from any terminal to perform the same cleanup without killing the compositor, then sends the compositor an exit signal.
+
+**`exit-i3`** - equivalent for i3: pushes `stop` to VMs, kills xpra processes, exits i3.
+
+Session transitions that work cleanly as a result:
+
+| Transition | Steps |
+|-----------|-------|
+| Sway/Hyprland -> TTY | Close session or call `exit-wayland` |
+| TTY -> i3 | Start normally - clean env, picom starts |
+| i3 -> TTY | Call `exit-i3` |
+| TTY -> Sway/Hyprland | Start session - `vm-push-display-mode` fires on startup |
 
 ### Adding a New Profile VM
 

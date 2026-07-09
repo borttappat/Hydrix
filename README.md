@@ -81,7 +81,9 @@ Specialisation files live in `hydrix-config/specialisations/`. Add extra package
 curl -sL https://raw.githubusercontent.com/borttappat/Hydrix/main/scripts/install-hydrix.sh | sudo bash
 ```
 
-The script partitions the disk via disko, auto-detects hardware (CPU, WiFi PCI address, ASUS features), generates `machines/<serial>.nix`, runs `nixos-install`, and pre-builds the router and builder VMs.
+The script partitions the disk via disko, auto-detects hardware (CPU, WiFi PCI address, ASUS features), prompts for username and colorscheme, generates `machines/<serial>.nix` + `modules/user.nix` + `modules/common.nix`, runs `nixos-install`, and pre-builds the router and builder VMs.
+
+**If you already have a `hydrix-config` on another machine**, provide the repo URL when prompted. The installer enters **add** mode: it clones your repo and generates only `machines/<serial>.nix` for the new hardware. User identity, locale, and VM configs are already in the repo - no re-prompting.
 
 ### Migrate existing NixOS
 
@@ -89,7 +91,7 @@ The script partitions the disk via disko, auto-detects hardware (CPU, WiFi PCI a
 curl -sL https://raw.githubusercontent.com/borttappat/Hydrix/main/scripts/setup-hydrix.sh | bash
 ```
 
-The script detects your current system (user, locale, WiFi), creates `~/hydrix-config/`, generates your machine config, and handles multi-machine setups.
+The script detects your current system (user, locale, WiFi), creates `~/hydrix-config/`, generates your machine config, and handles multi-machine setups. Same three modes apply: **fresh** (new config), **add** (new machine to existing repo), **use-existing** (serial already present).
 
 
 # Start a profile VM (display tunnel starts automatically)
