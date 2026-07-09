@@ -211,7 +211,7 @@ is_headless() {
     if [[ -f "$VM_REGISTRY" ]]; then
         local has_display
         has_display=$(jq -r --arg v "$vm_name" \
-            'to_entries[] | select(.value.vmName == $v) | .value.hasDisplay' \
+            'to_entries[] | select(.value.vmName == $v or ($v | startswith(.value.vmName + "-"))) | .value.hasDisplay' \
             "$VM_REGISTRY" 2>/dev/null | head -1)
         if [[ -n "$has_display" ]]; then
             [[ "$has_display" != "true" ]]
