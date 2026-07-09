@@ -42,16 +42,10 @@
     nmap
     netcat-gnu
     socat
-    curl
-    wget
     bind.dnsutils
 
     # Development
-    git
-    gh
     gnumake
-    gcc
-    python3
 
     # File management
     rsync

@@ -21,17 +21,13 @@ in {
     nano
 
     # Compilers/Languages (basic)
-    gcc
     python3
 
     # Media
     mpv
 
-    # VPN
-
     # File management
     ranger
-    joshuto
     file
     tree
 
@@ -39,7 +35,6 @@ in {
     htop
 
     # Network tools
-    wget
     curl
     iw
     wirelesstools
@@ -56,7 +51,6 @@ in {
 
     # Archive tools
     unzip
-    rar
     p7zip
 
     # System utilities
@@ -64,9 +58,7 @@ in {
     pciutils
     usbutils
     lshw
-    toybox
     findutils
-    busybox
     inetutils
     udisks
     tealdeer
