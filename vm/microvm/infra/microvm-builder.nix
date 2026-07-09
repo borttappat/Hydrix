@@ -37,8 +37,6 @@
 in {
   imports = [
     ../../options.nix
-    # Shared system defaults: kernel, nix settings, gc, earlyoom, fd limits
-    ../../shared/core/nix.nix
     # QEMU Guest profile for virtio modules
     (modulesPath + "/profiles/qemu-guest.nix")
     # Live NixOS switch via vsock:14504 (microvm update / microvm switch)
