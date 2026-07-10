@@ -25,6 +25,7 @@
 
 let
   cfg = config.hydrix;
+  platform = cfg.hardware.platform;
 
   # Power mode toggle script (ASUS-specific: controls CPU governor + ASUS fan profiles)
   powerModeScript = pkgs.writeShellScriptBin "power-mode" ''
@@ -66,22 +67,34 @@ let
           for epp in /sys/devices/system/cpu/cpu*/cpufreq/energy_performance_preference; do
             echo power | sudo tee "$epp" > /dev/null 2>&1 || true
           done
-          # Cap max performance to 60% for quieter operation
-          echo 60 | sudo tee /sys/devices/system/cpu/intel_pstate/max_perf_pct > /dev/null 2>&1 || true
-          # Disable turbo boost
-          echo 1 | sudo tee /sys/devices/system/cpu/intel_pstate/no_turbo > /dev/null 2>&1 || true
+          # Cap max performance / disable turbo (platform-specific)
+          ${lib.optionalString (platform == "intel") ''
+            echo 60 | sudo tee /sys/devices/system/cpu/intel_pstate/max_perf_pct > /dev/null 2>&1 || true
+            echo 1 | sudo tee /sys/devices/system/cpu/intel_pstate/no_turbo > /dev/null 2>&1 || true
+          ''}
+          ${lib.optionalString (platform == "amd") ''
+            # AMD: no max_perf_pct equivalent; EPP controls performance ceiling
+            # Disable boost (AMD: 1=on, 0=off — inverted vs Intel)
+            echo 0 | sudo tee /sys/devices/system/cpu/cpufreq/boost > /dev/null 2>&1 || true
+          ''}
           # Set ASUS platform profile to Quiet for minimal fan noise
           if command -v asusctl >/dev/null 2>&1; then
             sudo asusctl profile -P Quiet >/dev/null 2>&1 || true
           fi
           echo "powersave" > "$STATE_FILE"
-          echo "Mode: powersave — CPU 60%, turbo off, fans quiet"
+          ${lib.optionalString (platform == "intel") ''echo "Mode: powersave — CPU 60%, turbo off, fans quiet"''}
+          ${lib.optionalString (platform == "amd") ''echo "Mode: powersave — turbo off, EPP power, fans quiet"''}
           ;;
         balanced|auto)
           echo "Restoring balanced mode..."
           sudo systemctl stop auto-cpufreq.service 2>/dev/null || true
-          echo 100 | sudo tee /sys/devices/system/cpu/intel_pstate/max_perf_pct > /dev/null 2>&1 || true
-          echo 0 | sudo tee /sys/devices/system/cpu/intel_pstate/no_turbo > /dev/null 2>&1 || true
+          ${lib.optionalString (platform == "intel") ''
+            echo 100 | sudo tee /sys/devices/system/cpu/intel_pstate/max_perf_pct > /dev/null 2>&1 || true
+            echo 0 | sudo tee /sys/devices/system/cpu/intel_pstate/no_turbo > /dev/null 2>&1 || true
+          ''}
+          ${lib.optionalString (platform == "amd") ''
+            echo 1 | sudo tee /sys/devices/system/cpu/cpufreq/boost > /dev/null 2>&1 || true
+          ''}
           for cpu in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do
             echo powersave | sudo tee "$cpu" > /dev/null
           done
@@ -97,10 +110,14 @@ let
         performance|high)
           echo "Setting performance mode..."
           sudo systemctl stop auto-cpufreq.service 2>/dev/null || true
-          # Restore max performance to 100%
-          echo 100 | sudo tee /sys/devices/system/cpu/intel_pstate/max_perf_pct > /dev/null 2>&1 || true
-          # Re-enable turbo
-          echo 0 | sudo tee /sys/devices/system/cpu/intel_pstate/no_turbo > /dev/null 2>&1 || true
+          ${lib.optionalString (platform == "intel") ''
+            # Restore max performance to 100% and re-enable turbo
+            echo 100 | sudo tee /sys/devices/system/cpu/intel_pstate/max_perf_pct > /dev/null 2>&1 || true
+            echo 0 | sudo tee /sys/devices/system/cpu/intel_pstate/no_turbo > /dev/null 2>&1 || true
+          ''}
+          ${lib.optionalString (platform == "amd") ''
+            echo 1 | sudo tee /sys/devices/system/cpu/cpufreq/boost > /dev/null 2>&1 || true
+          ''}
           for cpu in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do
             echo performance | sudo tee "$cpu" > /dev/null
           done
@@ -175,12 +192,19 @@ let
         current=$(get_current)
         gov=$(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor)
         epp=$(cat /sys/devices/system/cpu/cpu0/cpufreq/energy_performance_preference 2>/dev/null || echo "n/a")
-        turbo_off=$(cat /sys/devices/system/cpu/intel_pstate/no_turbo 2>/dev/null || echo "n/a")
+        ${lib.optionalString (platform == "intel") ''
+          turbo_raw=$(cat /sys/devices/system/cpu/intel_pstate/no_turbo 2>/dev/null || echo "n/a")
+          turbo_display=$([ "$turbo_raw" = "0" ] && echo "on" || echo "off")
+        ''}
+        ${lib.optionalString (platform == "amd") ''
+          turbo_raw=$(cat /sys/devices/system/cpu/cpufreq/boost 2>/dev/null || echo "n/a")
+          turbo_display=$([ "$turbo_raw" = "1" ] && echo "on" || echo "off")
+        ''}
         freq=$(( $(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq) / 1000 ))
         fan_profile=$(get_fan_profile)
 
         echo "Mode:     $current  |  Governor: $gov  |  EPP: $epp"
-        echo "Turbo:    $([ "$turbo_off" = "0" ] && echo "on" || echo "off")  |  Freq: $freq MHz  |  Fans: $fan_profile"
+        echo "Turbo:    $turbo_display  |  Freq: $freq MHz  |  Fans: $fan_profile"
         echo ""
         echo "Usage: power-mode [powersave|balanced|performance|toggle|fans|status]"
         echo "  powersave   - Minimal power, limited CPU"
@@ -287,9 +311,14 @@ in {
             for epp in /sys/devices/system/cpu/cpu*/cpufreq/energy_performance_preference; do
               echo power > "$epp" 2>/dev/null || true
             done
-            # Cap max perf to 60% for quieter operation
-            echo 60 > /sys/devices/system/cpu/intel_pstate/max_perf_pct 2>/dev/null || true
-            echo 1 > /sys/devices/system/cpu/intel_pstate/no_turbo 2>/dev/null || true
+            # Cap max perf / disable turbo (platform-specific)
+            ${lib.optionalString (platform == "intel") ''
+              echo 60 > /sys/devices/system/cpu/intel_pstate/max_perf_pct 2>/dev/null || true
+              echo 1 > /sys/devices/system/cpu/intel_pstate/no_turbo 2>/dev/null || true
+            ''}
+            ${lib.optionalString (platform == "amd") ''
+              echo 0 > /sys/devices/system/cpu/cpufreq/boost 2>/dev/null || true
+            ''}
             # Set ASUS platform profile to Quiet
             if command -v asusctl >/dev/null 2>&1; then
               asusctl profile -P Quiet 2>/dev/null || true
@@ -299,8 +328,13 @@ in {
           performance)
             echo "Applying default power profile: performance"
             ${pkgs.systemd}/bin/systemctl stop auto-cpufreq.service 2>/dev/null || true
-            echo 100 > /sys/devices/system/cpu/intel_pstate/max_perf_pct 2>/dev/null || true
-            echo 0 > /sys/devices/system/cpu/intel_pstate/no_turbo 2>/dev/null || true
+            ${lib.optionalString (platform == "intel") ''
+              echo 100 > /sys/devices/system/cpu/intel_pstate/max_perf_pct 2>/dev/null || true
+              echo 0 > /sys/devices/system/cpu/intel_pstate/no_turbo 2>/dev/null || true
+            ''}
+            ${lib.optionalString (platform == "amd") ''
+              echo 1 > /sys/devices/system/cpu/cpufreq/boost 2>/dev/null || true
+            ''}
             for cpu in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do
               echo performance > "$cpu"
             done
@@ -315,7 +349,12 @@ in {
             ;;
           balanced|*)
             # Default: let auto-cpufreq manage
-            echo 100 > /sys/devices/system/cpu/intel_pstate/max_perf_pct 2>/dev/null || true
+            ${lib.optionalString (platform == "intel") ''
+              echo 100 > /sys/devices/system/cpu/intel_pstate/max_perf_pct 2>/dev/null || true
+            ''}
+            ${lib.optionalString (platform == "amd") ''
+              echo 1 > /sys/devices/system/cpu/cpufreq/boost 2>/dev/null || true
+            ''}
             # Set ASUS platform profile to Balanced
             if command -v asusctl >/dev/null 2>&1; then
               asusctl profile -P Balanced 2>/dev/null || true
