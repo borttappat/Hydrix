@@ -47,7 +47,7 @@ Options:
   -i, --ignore-activation  Continue even if activation fails (exit code 4)
   -v, --verbose         Show verbose output
   --dev [path]          Override hydrix input with local path (for testing unpushed changes)
-                        Defaults to ~/Hydrix-sops or ~/Hydrix if path not specified
+                        Defaults to ~/Hydrix if path not specified
   -h, --help            Show this help
 EOF
     exit 0
@@ -68,8 +68,8 @@ while [[ $# -gt 0 ]]; do
             if [[ -n "${2:-}" ]] && [[ "${2:-}" != -* ]]; then
                 DEV_OVERRIDE="$2"; shift 2
             else
-                # Auto-detect local Hydrix worktree
-                for _candidate in "$HOME/Hydrix-sops" "$HOME/Hydrix"; do
+                # Auto-detect local Hydrix
+                for _candidate in "$HOME/Hydrix"; do
                     if [[ -f "$_candidate/flake.nix" ]]; then
                         DEV_OVERRIDE="$_candidate"; break
                     fi
