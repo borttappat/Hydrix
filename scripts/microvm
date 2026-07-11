@@ -216,7 +216,7 @@ is_headless() {
     if [[ -f "$VM_REGISTRY" ]]; then
         local has_display
         has_display=$(jq -r --arg v "$vm_name" \
-            'to_entries[] | select(.value.vmName == $v or ($v | startswith(.value.vmName + "-"))) | .value.hasDisplay' \
+            'to_entries[] | .value.vmName as $name | select($name == $v or ($v | startswith($name + "-"))) | .value.hasDisplay' \
             "$VM_REGISTRY" 2>/dev/null | head -1)
         if [[ -n "$has_display" ]]; then
             [[ "$has_display" != "true" ]]
@@ -849,6 +849,13 @@ cmd_status() {
         echo -e "${BOLD}MicroVM Status${NC}"
         echo ""
 
+        # If builder is running, the nix daemon is paused and flake eval will fail.
+        if is_running "$BUILDER_NAME"; then
+            echo -e "${YELLOW}Builder VM is active — nix daemon paused, VM list unavailable${NC}"
+            echo -e "${DIM}Stop the builder first: microvm stop microvm-builder${NC}"
+            return
+        fi
+
         local all_vms
         all_vms=$(nix eval "$FLAKE_DIR#nixosConfigurations" --apply 'builtins.attrNames' --json 2>/dev/null | jq -r '.[]' | grep '^microvm-' || true)
 
@@ -897,6 +904,10 @@ cmd_status() {
 
 # List declared microVMs
 cmd_list() {
+    if is_running "$BUILDER_NAME"; then
+        echo -e "${YELLOW}Builder VM is active — nix daemon paused, VM list unavailable${NC}"
+        return
+    fi
     local all_vms
     all_vms=$(nix eval "$FLAKE_DIR#nixosConfigurations" --apply 'builtins.attrNames' --json 2>/dev/null | \
         jq -r '.[]' | grep '^microvm-' || true)
