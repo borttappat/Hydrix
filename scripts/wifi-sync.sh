@@ -81,7 +81,7 @@ hash_psk() {
 read_nix() {
   if [[ -f "$WIFI_YAML" ]]; then
     local raw
-    raw=$(sops --decrypt --extract '["networks"]' "$WIFI_YAML" 2>/dev/null || echo "[]")
+    raw=$(SOPS_AGE_KEY_FILE="$HOME/.config/sops/age/keys.txt" sops --decrypt --extract '["networks"]' "$WIFI_YAML" 2>/dev/null || echo "[]")
     # Ensure each entry has a priority field
     echo "$raw" | jq '[.[] | . + {"priority": (.priority // 100)}]' 2>/dev/null || echo "[]"
     return
@@ -121,7 +121,7 @@ write_nix() {
     # The value argument must be a JSON-encoded string (networks is a JSON array stored as string).
     local json_str
     json_str=$(python3 -c "import sys, json; print(json.dumps(sys.argv[1]))" "$json")
-    if ! sops --set '["networks"] '"$json_str" "$WIFI_YAML" 2>/tmp/wifi-sync-sops-err; then
+    if ! SOPS_AGE_KEY_FILE="$HOME/.config/sops/age/keys.txt" sops --set '["networks"] '"$json_str" "$WIFI_YAML" 2>/tmp/wifi-sync-sops-err; then
       error "Failed to write to $WIFI_YAML: $(cat /tmp/wifi-sync-sops-err)"
       return 1
     fi
