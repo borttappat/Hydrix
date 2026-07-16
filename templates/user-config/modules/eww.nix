@@ -124,20 +124,16 @@ let
   };
 
   # Polling script: queries wifi-sync vsock 14506 (already used by wifi-sync tool).
-  # Returns router POLL JSON enriched with "pending": N (connections not yet in wifi.nix).
+  # Returns router POLL JSON enriched with "pending": N (connections not yet in credential store).
   ewwRouterStats = pkgs.writeShellApplication {
     name = "eww-router-stats";
-    runtimeInputs = [ pkgs.socat pkgs.jq pkgs.gnugrep ];
+    runtimeInputs = [ pkgs.socat pkgs.jq ];
     text = ''
       result=$(echo "POLL" | socat -T3 - VSOCK-CONNECT:200:14506 2>/dev/null || true)
       if [ -z "$result" ]; then
         echo '{"current":"","connections":[],"pending":0}'
       else
-        known=$(grep -oP '(?<=ssid = ")[^"]+' "/home/${username}/hydrix-config/modules/wifi.nix" 2>/dev/null \
-          | jq -Rrs 'split("\n") | map(select(length > 0))') || known="[]"
-        pending=$(echo "$result" | jq --argjson l "$known" \
-          '[.connections[] | select(.ssid as $s | $l | index($s) == null)] | length' \
-          2>/dev/null || echo 0)
+        pending=$(wifi-sync count 2>/dev/null || echo 0)
         echo "$result" | jq --argjson p "$pending" '. + {"pending": $p}'
       fi
     '';
