@@ -1019,11 +1019,36 @@ To migrate from legacy to sops mode:
 ```bash
 setup-wifi-secrets    # reads modules/wifi.nix, encrypts to secrets/wifi.yaml
 git add -f secrets/wifi.yaml && git commit -m 'feat(secrets): add encrypted wifi credentials'
-# In machines/<serial>.nix: set wifiSecretsFile + wifi.enable, empty modules/wifi.nix networks list
+```
+
+In `machines/<serial>.nix`, wire up the secret and deliver it to the router VM:
+
+```nix
+hydrix.secrets = {
+  enable = true;
+  wifi.enable = true;
+  wifiSecretsFile = ../secrets/wifi.yaml;
+};
+
+hydrix.microvmHost.vms = {
+  "microvm-router-<serial>" = { autostart = true; secrets = [ "wifi" ]; };
+};
+```
+
+Empty the networks list in `modules/wifi.nix` (credentials now come from the sops secret):
+
+```nix
+hydrix.router.wifi.networks = [];
+```
+
+Then apply:
+
+```bash
 rebuild
-sudo rm /var/lib/microvms/microvm-router/var-lib.qcow2
 microvm purge microvm-router --force && mvm rebuild router
 ```
+
+After this the router VM receives credentials at boot via virtiofs — they are never baked into the Nix store and survive purges cleanly.
 
 #### Password storage
 
