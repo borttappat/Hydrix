@@ -6,16 +6,46 @@
 /_/ /_/\__, /\__,_/_/  /_/_/|_|
       /____/  
                 An attempt at a somewhat secure workstation framework
-                Based on NixOS, MicroVMs and compartmentalization
+                Based on NixOS and MicroVMs 
+                Heavily inspired by Qubes OS
   </pre>
 
 Discl **AI** mer - **AI** was used in setting this project up, do not use unless you feel comfortable with that piece of information
 
 **Everything** seen here is still under development. Once I end up with a solid prototype that has been more battle-tested and ran on different hardware, I will try to make some sort of numbered release.
 
+UPDATE 1 - 10/07
+Setup with installer should now produce a working system, after testing on a different set of laptops(all Intel-based, still needs testing with AMD hardwar[testers needed]).  
+
+
 Hydrix is an options-driven NixOS framework that provides complete network isolation through VM compartmentalization. Your WiFi hardware is passed directly to a router VM via VFIO, giving you granular control over network traffic while maintaining a hardened host. Qubes will always be a better setup, and from a security and segmentation standpoint, Hydrix makes(at least as of now) sacrifices such as a shared Host -> Guest shared /nix/store. Further development is neccessary to fully find ways of approximating Qubes, but expect manually reading through all of the code of this setup and tweaking things yourself to tailor settings to your security preferences. The heavy lifting here is all done with [MicroVMs](https://github.com/microvm-nix/microvm.nix), huge shoutout to Astro. 
 
 For full documentation see [DOCUMENTATION.md](DOCUMENTATION.md).
+
+---
+
+## Status & Known Issues
+
+Things being actively worked on or not yet verified. Checked off once resolved and tested.
+
+**Blocking / in progress**
+
+- [ ] **Dual-boot**: single-boot installs work; dual-boot broken
+- [ ] **Router VM in VM installations**: works on real laptop hardware; breaks when Hydrix is running inside a VM (for testing purposes)
+- [ ] **Desktop / USB WiFi**: designed for laptops with native WiFi cards; desktops without one are untested; USB WiFi card behaviour unknown
+- [ ] **AMD hardware**: currently Intel/ASUS-specific (VFIO, ASUS driver, ZenBook audio); needs AMD parity and hardware testing
+- [ ] **LUKS encryption for all profile VMs**: encryption works for pentest; should extend to every profile type
+- [ ] **Encrypted VM launch via wofi**: starting an encrypted VM from a terminal works; `mod+d` launcher on profile workspaces silently fails instead of prompting for password
+- [ ] **Builder build progress**: `microvm builder build X` shows no output; should display progress like `microvm build X` does in administrative mode
+- [ ] **Setup script** (`setup-hydrix.sh`): not fully end-to-end tested
+- [ ] **Installer post-reboot, gh auth**: persistence is implemented but untested; git config is not yet declarative (requires manual `git config` after reboot)
+- [ ] **Clipboard isolation**: clipboard is currently forwarded automatically across VMs via waypipe; a VM can read clipboard contents without an explicit host paste action (observed: magnet URL copied in lurking auto-pastes into another VM). Clipboard should live only in host RAM and be delivered to a VM only on explicit paste, not on focus or selection events.
+
+**Polish / lower priority**
+
+- [ ] **Socat terminal output**: improved but not verified clean; may need further work
+- [ ] **Phase out xpra**: waypipe is fully working and the primary stack; xpra still supported but should be deprecated
+- [ ] **Live-switch edge cases** (`microvm update`): generally works; worth investigating failure paths
 
 ---
 
