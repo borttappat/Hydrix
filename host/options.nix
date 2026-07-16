@@ -481,7 +481,7 @@ in {
 
     power = {
       defaultProfile = lib.mkOption {
-        type = lib.types.enum ["powersave" "balanced" "performance"];
+        type = lib.types.enum ["powersave" "balanced" "performance" "cooldown"];
         default = "balanced";
         description = ''
           Default power profile applied at boot.
@@ -492,8 +492,10 @@ in {
             and power source (battery vs AC).
           - performance: Stops auto-cpufreq, sets performance governor, enables turbo.
             Maximum performance, higher power consumption.
+          - cooldown: Throttles CPU like powersave but runs fans at maximum.
+            Actively reduces temperature when machine is running hot.
 
-          Can be changed at runtime with: power-mode <powersave|balanced|performance>
+          Can be changed at runtime with: power-mode <powersave|balanced|performance|cooldown>
         '';
         example = "powersave";
       };

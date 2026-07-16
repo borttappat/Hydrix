@@ -769,6 +769,11 @@
         # Red/alert underline for high power
         echo "%{F$color_prefix}PWR %{F-}%{u$color_alert}%{+u}PERF%{-u}"
         ;;
+      cooldown)
+        # Cyan/blue underline for active cooling
+        color_mode=$(get_color "color6" "#88c0d0")
+        echo "%{F$color_prefix}PWR %{F-}%{u$color_mode}%{+u}COOL%{-u}"
+        ;;
       balanced|auto|*)
         # Normal underline for balanced
         echo "%{F$color_prefix}PWR %{F-}%{u$color_normal}%{+u}AUTO%{-u}"

@@ -17,9 +17,11 @@
 #     - powersave: 60% max perf, turbo off, powersave governor, Quiet ASUS profile
 #     - balanced: auto-cpufreq manages dynamically, Balanced ASUS profile
 #     - performance: 100% max perf, turbo on, performance governor, Performance ASUS profile
+#     - cooldown: 60% max perf, turbo off, powersave governor, Performance ASUS profile (max fans)
 #
 # For quietest operation: power-mode powersave (sets both CPU + ASUS Quiet profile)
 # For maximum performance: power-mode performance (sets both CPU + ASUS Performance profile)
+# For active cooling: power-mode cooldown (throttled CPU + max fans)
 
 { config, lib, pkgs, ... }:
 
@@ -131,9 +133,32 @@ let
           echo "performance" > "$STATE_FILE"
           echo "Mode: performance — 100% CPU, turbo on, fans high"
           ;;
+        cooldown|cool)
+          echo "Setting cooldown mode..."
+          sudo systemctl stop auto-cpufreq.service 2>/dev/null || true
+          for cpu in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do
+            echo powersave | sudo tee "$cpu" > /dev/null
+          done
+          for epp in /sys/devices/system/cpu/cpu*/cpufreq/energy_performance_preference; do
+            echo power | sudo tee "$epp" > /dev/null 2>&1 || true
+          done
+          ${lib.optionalString (platform == "intel") ''
+            echo 60 | sudo tee /sys/devices/system/cpu/intel_pstate/max_perf_pct > /dev/null 2>&1 || true
+            echo 1 | sudo tee /sys/devices/system/cpu/intel_pstate/no_turbo > /dev/null 2>&1 || true
+          ''}
+          ${lib.optionalString (platform == "amd") ''
+            echo 0 | sudo tee /sys/devices/system/cpu/cpufreq/boost > /dev/null 2>&1 || true
+          ''}
+          # Set ASUS platform profile to Performance for maximum fan cooling
+          if command -v asusctl >/dev/null 2>&1; then
+            sudo asusctl profile -P Performance >/dev/null 2>&1 || true
+          fi
+          echo "cooldown" > "$STATE_FILE"
+          echo "Mode: cooldown — CPU throttled, fans max (active cooling)"
+          ;;
         *)
           echo "Unknown mode: $mode"
-          echo "Use: powersave, balanced, performance"
+          echo "Use: powersave, balanced, performance, cooldown"
           return 1
           ;;
       esac
@@ -145,6 +170,7 @@ let
         powersave) set_mode balanced ;;
         auto|balanced) set_mode powersave ;;
         performance) set_mode balanced ;;
+        cooldown) set_mode balanced ;;
         *) set_mode balanced ;;
       esac
     }
@@ -186,6 +212,7 @@ let
       powersave|save) set_mode powersave ;;
       balanced|auto) set_mode balanced ;;
       performance) set_mode performance ;;
+      cooldown|cool) set_mode cooldown ;;
       toggle) toggle ;;
       fans) set_fans "''${2:-status}" ;;
       status|*)
@@ -206,10 +233,11 @@ let
         echo "Mode:     $current  |  Governor: $gov  |  EPP: $epp"
         echo "Turbo:    $turbo_display  |  Freq: $freq MHz  |  Fans: $fan_profile"
         echo ""
-        echo "Usage: power-mode [powersave|balanced|performance|toggle|fans|status]"
-        echo "  powersave   - Minimal power, limited CPU"
+        echo "Usage: power-mode [powersave|balanced|performance|cooldown|toggle|fans|status]"
+        echo "  powersave   - Minimal power, limited CPU, quiet fans"
         echo "  balanced    - Auto management (default)"
-        echo "  performance - Maximum speed"
+        echo "  performance - Maximum speed, maximum fans"
+        echo "  cooldown    - Throttled CPU, maximum fans (active cooling)"
         echo "  toggle      - Cycle between powersave and balanced"
         echo "  fans <low|medium|high> - Set fan speed independently"
         ;;
@@ -232,11 +260,15 @@ let
         ${pkgs.asusctl}/bin/asusctl profile -P Performance >/dev/null 2>&1
         ${powerModeScript}/bin/power-mode performance
         ;;
+      cooldown|cool)
+        ${pkgs.asusctl}/bin/asusctl profile -P Performance >/dev/null 2>&1
+        ${powerModeScript}/bin/power-mode cooldown
+        ;;
       status|*)
         ${powerModeScript}/bin/power-mode status
         if [ "$1" != "status" ]; then
           echo ""
-          echo "Usage: power-profile <quiet|balanced|performance|status>"
+          echo "Usage: power-profile <quiet|balanced|performance|cooldown|status>"
         fi
         ;;
     esac
@@ -346,6 +378,28 @@ in {
               asusctl profile -P Performance 2>/dev/null || true
             fi
             echo "performance" > "$STATE_FILE"
+            ;;
+          cooldown)
+            echo "Applying default power profile: cooldown"
+            ${pkgs.systemd}/bin/systemctl stop auto-cpufreq.service 2>/dev/null || true
+            for cpu in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do
+              echo powersave > "$cpu"
+            done
+            for epp in /sys/devices/system/cpu/cpu*/cpufreq/energy_performance_preference; do
+              echo power > "$epp" 2>/dev/null || true
+            done
+            ${lib.optionalString (platform == "intel") ''
+              echo 60 > /sys/devices/system/cpu/intel_pstate/max_perf_pct 2>/dev/null || true
+              echo 1 > /sys/devices/system/cpu/intel_pstate/no_turbo 2>/dev/null || true
+            ''}
+            ${lib.optionalString (platform == "amd") ''
+              echo 0 > /sys/devices/system/cpu/cpufreq/boost 2>/dev/null || true
+            ''}
+            # Max fans via Performance profile for active cooling
+            if command -v asusctl >/dev/null 2>&1; then
+              asusctl profile -P Performance 2>/dev/null || true
+            fi
+            echo "cooldown" > "$STATE_FILE"
             ;;
           balanced|*)
             # Default: let auto-cpufreq manage
