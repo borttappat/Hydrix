@@ -90,12 +90,12 @@ readonly DIM=$'\e[2m'
 readonly NC=$'\e[0m'
 
 # Timing helpers (LC_ALL=C for consistent decimal handling)
-timer_start() { date +%s.%N; }
+timer_start() { date +%s; }
 timer_end() {
     local start="$1"
     local end
-    end=$(date +%s.%N)
-    LC_ALL=C printf "%.2f" "$(echo "$end - $start" | bc)"
+    end=$(date +%s)
+    echo "$(( end - start ))"
 }
 
 log() { echo -e "${CYAN}::${NC} $*"; }
