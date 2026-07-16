@@ -338,14 +338,7 @@ let
     current=$(echo "$poll" | ${pkgs.jq}/bin/jq -r '.current // ""' 2>/dev/null)
     [ -z "$current" ] && exit 0
 
-    local_ssids=$(${pkgs.gnugrep}/bin/grep -oP '(?<=ssid = ")[^"]+' \
-      "${homeDir}/hydrix-config/modules/wifi.nix" 2>/dev/null \
-      | ${pkgs.jq}/bin/jq -Rrs 'split("\n") | map(select(length > 0))')
-
-    pending=$(echo "$poll" | ${pkgs.jq}/bin/jq \
-      --argjson l "$local_ssids" \
-      '[.connections[] | select(.ssid as $s | $l | index($s) == null)] | length' \
-      2>/dev/null || echo 0)
+    pending=$(wifi-sync count 2>/dev/null || echo 0)
 
     if [ "$pending" -gt 0 ]; then
       ${pkgs.jq}/bin/jq -cn \
@@ -368,14 +361,20 @@ let
   '';
 
   powerProfileScript = pkgs.writeShellScript "waybar-power-profile" ''
-    profile=$(powerprofilesctl get 2>/dev/null \
-      || cat /sys/firmware/acpi/platform_profile 2>/dev/null \
-      || echo "?")
+    STATE_FILE="/run/hydrix/power-mode-state"
+    if [ -f "$STATE_FILE" ]; then
+      profile=$(cat "$STATE_FILE")
+    else
+      profile=$(powerprofilesctl get 2>/dev/null \
+        || cat /sys/firmware/acpi/platform_profile 2>/dev/null \
+        || echo "?")
+    fi
     case "$profile" in
-      performance) echo "PWR PERF" ;;
-      balanced)    echo "PWR BAL"  ;;
-      power-saver|low-power) echo "PWR SAVE" ;;
-      *)           echo "PWR $profile" ;;
+      performance)    echo "PWR PERF" ;;
+      balanced|auto)  echo "PWR BAL"  ;;
+      powersave|power-saver|low-power) echo "PWR SAVE" ;;
+      cooldown)       echo "PWR COOL" ;;
+      *)              echo "PWR $(echo "$profile" | tr '[:lower:]' '[:upper:]')" ;;
     esac
   '';
 
