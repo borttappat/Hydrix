@@ -23,7 +23,7 @@
 # │                                                                     │
 # │ STARTUP (boot-time, before any terminal opens):                     │
 # │   wal-cache-link service:                                           │
-# │     1. Ensures ~/.cache/wal is a real directory (removes symlink     │
+# │     1. Ensures ~/.cache/wal is a real directory (removes symlink    │
 # │        if present from older installs)                              │
 # │     2. Copies /mnt/wal-cache/* → ~/.cache/wal/ (host colors)        │
 # │     3. Generates ~/.config/alacritty/colors-runtime.toml via jq     │
@@ -33,7 +33,7 @@
 # │     └→ general.import = ["~/.config/alacritty/colors-runtime.toml"] │
 # │          └→ all 16 ANSI colors + primary fg/bg loaded from TOML     │
 # │   fish starts → NO escape sequences applied (Stylix fish disabled,  │
-# │                  wal sequences not sourced — VMs use config import)  │
+# │                  wal sequences not sourced — VMs use config import) │
 # │   starship renders prompt                                           │
 # │                                                                     │
 # │ RUNTIME REFRESH (host changes wallpaper while VM is running):       │
@@ -42,8 +42,8 @@
 # │        (new terminals will pick up new colors on start)             │
 # │     2. Runs refresh-colors script for existing terminals:           │
 # │        - OSC escape sequences to running terminals                  │
-# │        - pywalfox, dunst, xsetroot updates                         │
-# │        Note: SIGUSR1 to alacritty is NOT used (crashes xpra)       │
+# │        - pywalfox, dunst, xsetroot updates                          │
+# │        Note: SIGUSR1 to alacritty is NOT used (crashes xpra)        │
 # └─────────────────────────────────────────────────────────────────────┘
 #
 # ═══════════════════════════════════════════════════════════════════════
@@ -419,7 +419,10 @@ in {
         '')
       ];
 
-      # 5. Enhanced vm-focus-daemon with static/dynamic modes
+    })
+
+    # 5. Enhanced vm-focus-daemon with static/dynamic modes (i3/X11 only)
+    (lib.mkIf (isHost && config.hydrix.i3.enable) {
       systemd.user.services.vm-focus-daemon.serviceConfig.ExecStart = let
         focusDaemon = pkgs.writers.writePython3Bin "vm-focus-daemon" {
           libraries = [ pkgs.python3Packages.i3ipc ];

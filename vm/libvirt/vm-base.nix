@@ -53,7 +53,6 @@ in {
     ./bake-config.nix
     ../display/xpra-shared.nix  # Unified xpra module for all VMs
     ../display/waypipe-vm.nix   # waypipe display mode handler (vsock:14509); coexists with xpra
-    ../theming/vm-scaling.nix
     ../dev/vm-dev.nix       # vm-dev, vm-sync scripts for package development
 
     # Core desktop environment (i3, X11)
@@ -180,8 +179,7 @@ in {
     hydrix.vm.sharedStore.enable = lib.mkDefault true;
 
     # ===== Dynamic scaling for VMs =====
-    # Handled by vm-scaling.nix which provides wrapper scripts
-    # that read from /mnt/hydrix-config/scaling.json (shared from host)
+    # Handled by theming/wm/i3/vm-scaling.nix (gated behind hydrix.i3.enable)
 
     # ===== Rebuild script =====
     # Parameterized based on hydrix.vm.rebuildTarget

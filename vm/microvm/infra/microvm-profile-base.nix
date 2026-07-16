@@ -44,10 +44,6 @@ in {
     # Also provides VM color sync scripts (wal-sync, refresh-colors, set-colorscheme-mode)
     ../../../theming/graphical
 
-    # VM scaling wrappers (alacritty, firefox, rofi, obsidian)
-    # Reads scaling.json from host for consistent font sizes
-    ../../theming/vm-scaling.nix
-
     # Xpra guest for seamless app forwarding (unified module for all VMs)
     ../../display/xpra-shared.nix
 

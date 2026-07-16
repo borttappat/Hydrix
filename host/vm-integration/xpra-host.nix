@@ -1968,23 +1968,22 @@ I3CONFIG
         main()
   '';
 
-in {
+in lib.mkIf config.hydrix.i3.enable {
   environment.systemPackages = [
     pkgs.xpra
-    pkgs.jq  # For parsing colorscheme JSON
-    pkgs.fzf  # For TUI
-    pkgs.bc  # For DPI calculation in vm-app
-    pkgs.python3Packages.i3ipc  # For focus daemon
-  ] ++ lib.optionals config.hydrix.i3.enable [
-    alacrittyDpi  # DPI-aware alacritty (used by ws-app fallback and i3 keybindings)
+    pkgs.jq
+    pkgs.fzf
+    pkgs.bc
+    pkgs.python3Packages.i3ipc
+    alacrittyDpi
     vmApp
-    wsApp      # Workspace-aware app launcher
+    wsApp
     vmStatus
     vmI3Config
     i3FocusDaemon
-    xpraPreAttach  # Pre-attach to all running VMs at session startup
-    vmLaunch    # xpra launcher (Wayland: wofi.nix provides vm-launch)
-    wsRofi      # workspace rofi (X11 only)
+    xpraPreAttach
+    vmLaunch
+    wsRofi
   ];
 
   systemd.user.services.vm-focus-daemon = {

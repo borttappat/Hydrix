@@ -229,6 +229,10 @@ EOF
       focus_on_activate        = true
     }
 
+    ecosystem {
+      no_update_news = true
+    }
+
     # ── Variables ──────────────────────────────────────────────────────────────
     $mod = SUPER
 

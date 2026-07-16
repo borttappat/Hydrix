@@ -1,20 +1,10 @@
-# VM Scaling Module - Dynamic scaling from host's scaling.json
+# VM Scaling Module - Dynamic scaling from host's scaling.json (i3/X11 only)
 #
-# This module ensures VMs use the same font sizes and scaling as the host.
-# It reads from /mnt/hydrix-config/scaling.json (mounted from host).
+# Provides wrapper scripts (alacritty-scaled, rofi-scaled, obsidian-scaled) that
+# read font sizes from scaling.json for consistent DPI across VMs using xpra.
+# Only activates in VMs — the host handles scaling natively.
 #
-# Provides:
-#   - Wrapper scripts for apps that need DPI-aware launching (firefox, rofi, obsidian)
-#   - Environment variables for xpra service (optional, for libvirt VMs)
-#   - Shell aliases as backup mechanism
-#   - Helper script to verify scaling configuration
-#
-# NOTE: Alacritty font scaling for xpra is handled HOST-SIDE in xpra-host.nix.
-# The vm-app script reads scaling.json and applies xpra_font_offset when
-# launching alacritty via xpra. This is simpler than VM-side wrappers.
-#
-# For microVMs: set hydrix.vmScaling.configureXpraService = false since
-# microvm-xpra-guest.nix defines its own xpra-vsock service.
+# Gated behind hydrix.i3.enable via the i3 default.nix import.
 #
 { config, lib, pkgs, ... }:
 
@@ -140,7 +130,7 @@ in {
     };
   };
 
-  config = lib.mkIf (isVM && cfg.enable) {
+  config = lib.mkIf isVM {
     # Add wrapper scripts and dependencies
     environment.systemPackages = [
       alacrittyWrapper
