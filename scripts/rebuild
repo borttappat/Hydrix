@@ -569,7 +569,17 @@ post_build() {
     # Restart tailscaled once activation has fully settled — a restart mid-activation
     # (even correctly ordered) can still race the bridge coming up and cache a dead DNS upstream.
     if systemctl list-units --type=service 2>/dev/null | grep -q "tailscaled.service"; then
-        sudo systemctl restart tailscaled.service 2>/dev/null || true
+        log "Restarting tailscaled..."
+        if sudo systemctl restart tailscaled.service; then
+            sleep 2
+            if getent hosts google.com >/dev/null 2>&1; then
+                log "DNS OK"
+            else
+                err "DNS still broken after tailscaled restart"
+            fi
+        else
+            err "tailscaled restart failed"
+        fi
     fi
 
     if $PREBUILD_MICROVMS; then
