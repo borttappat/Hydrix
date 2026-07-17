@@ -338,6 +338,8 @@ in {
     home-manager.users.${username} = { pkgs, config, ... }: {
       programs.firefox = {
         enable = lib.mkDefault true;
+        # Keep legacy path to avoid needing to move existing profiles
+        configPath = ".mozilla/firefox";
         # Plain Firefox on Wayland (Sway/Hyprland); DPI/pywalfox wrapper only on X11 (i3)
         package = lib.mkDefault (if useFirefoxWrapped then firefoxWrapped else pkgs.firefox);
 

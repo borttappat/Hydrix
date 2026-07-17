@@ -471,7 +471,7 @@ Check with: virt-viewer $vm_name"
         local name="$1"
         local fallback="$2"
         local color
-        color=$(${pkgs.xorg.xrdb}/bin/xrdb -query 2>/dev/null | ${pkgs.gnugrep}/bin/grep -E "^\*\.?$name:" | head -1 | ${pkgs.gawk}/bin/awk '{print $2}')
+        color=$(${pkgs.xrdb}/bin/xrdb -query 2>/dev/null | ${pkgs.gnugrep}/bin/grep -E "^\*\.?$name:" | head -1 | ${pkgs.gawk}/bin/awk '{print $2}')
         echo "''${color:-$fallback}"
     }
 
@@ -721,7 +721,7 @@ EOF
         local name="$1"
         local fallback="$2"
         local color
-        color=$(${pkgs.xorg.xrdb}/bin/xrdb -query 2>/dev/null | ${pkgs.gnugrep}/bin/grep -E "^\*\.?$name:" | head -1 | ${pkgs.gawk}/bin/awk '{print $2}')
+        color=$(${pkgs.xrdb}/bin/xrdb -query 2>/dev/null | ${pkgs.gnugrep}/bin/grep -E "^\*\.?$name:" | head -1 | ${pkgs.gawk}/bin/awk '{print $2}')
         echo "''${color:-$fallback}"
     }
 
@@ -1165,7 +1165,7 @@ EOF
         local name="$1"
         local fallback="$2"
         local color
-        color=$(${pkgs.xorg.xrdb}/bin/xrdb -query 2>/dev/null | ${pkgs.gnugrep}/bin/grep -E "^\*\.?$name:" | head -1 | ${pkgs.gawk}/bin/awk '{print $2}')
+        color=$(${pkgs.xrdb}/bin/xrdb -query 2>/dev/null | ${pkgs.gnugrep}/bin/grep -E "^\*\.?$name:" | head -1 | ${pkgs.gawk}/bin/awk '{print $2}')
         echo "''${color:-$fallback}"
     }
 
@@ -1791,7 +1791,7 @@ I3CONFIG
 
     # Paths to binaries (interpolated from Nix)
     I3_MSG = "${pkgs.i3}/bin/i3-msg"
-    XRDB = "${pkgs.xorg.xrdb}/bin/xrdb"
+    XRDB = "${pkgs.xrdb}/bin/xrdb"
 
 
     # Directories for layered lookup (user config first, then framework)

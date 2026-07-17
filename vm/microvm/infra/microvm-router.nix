@@ -462,7 +462,7 @@ in {
             };
           });
       };
-      wireless.enable = false; # NetworkManager handles WiFi
+      wireless.enable = lib.mkForce false; # NetworkManager handles WiFi
       firewall.enable = false; # We use nftables directly
 
       # LAN TAPs managed by systemd-networkd — tell NM to leave them alone

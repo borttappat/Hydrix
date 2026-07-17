@@ -293,7 +293,7 @@ in {
         };
       };
 
-      wireless.enable = false;
+      wireless.enable = lib.mkForce false;
     };
 
     # ===== LAN Interface Configuration (systemd-networkd) =====

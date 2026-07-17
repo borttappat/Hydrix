@@ -54,7 +54,7 @@
   isVM = vmType != null && vmType != "host";
   colorschemeInheritance = config.hydrix.colorschemeInheritance;
   jq = "${pkgs.jq}/bin/jq";
-  xrdb = "${pkgs.xorg.xrdb}/bin/xrdb";
+  xrdb = "${pkgs.xrdb}/bin/xrdb";
   i3msg = "${pkgs.i3}/bin/i3-msg";
 
   # Package colorschemes for runtime access
@@ -756,7 +756,7 @@
     # This hides the resize_increments gap in alacritty windows
     if [ -f "$WAL_CACHE/colors.json" ] && [ -S /tmp/.X11-unix/X100 ]; then
         BG_COLOR=$(${jq} -r '.special.background // .colors.color0 // "#000000"' "$WAL_CACHE/colors.json" 2>/dev/null)
-        ${pkgs.xorg.xsetroot}/bin/xsetroot -display :100 -solid "$BG_COLOR" 2>/dev/null || true
+        ${pkgs.xsetroot}/bin/xsetroot -display :100 -solid "$BG_COLOR" 2>/dev/null || true
     fi
   '';
 
@@ -937,7 +937,7 @@
     # Update xpra X background to match (hides resize_increments gaps in alacritty)
     if [ -n "''${DISPLAY:-}" ] || [ -S /tmp/.X11-unix/X100 ]; then
         BG_COLOR=$(${jq} -r '.special.background // .colors.color0 // "#000000"' "$WAL_COLORS" 2>/dev/null)
-        ${pkgs.xorg.xsetroot}/bin/xsetroot -display :100 -solid "$BG_COLOR" 2>/dev/null || true
+        ${pkgs.xsetroot}/bin/xsetroot -display :100 -solid "$BG_COLOR" 2>/dev/null || true
     fi
 
     # Save hash to avoid re-syncing unchanged colors
@@ -1194,7 +1194,7 @@ in {
         walSyncScript
         setColorschemeModeScript
         getColorschemeModeScript
-        pkgs.xorg.xsetroot # For updating xpra background when colors change
+        pkgs.xsetroot # For updating xpra background when colors change
       ]
       ++ lib.optionals (!isVM) [
         pushColorsToVmsScript # Push colors to VMs via vsock (instant sync)

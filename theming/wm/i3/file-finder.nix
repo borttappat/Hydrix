@@ -26,7 +26,7 @@ let
 
     get_color() {
         local name="$1" fallback="$2" color
-        color=$(${pkgs.xorg.xrdb}/bin/xrdb -query 2>/dev/null \
+        color=$(${pkgs.xrdb}/bin/xrdb -query 2>/dev/null \
             | ${pkgs.gnugrep}/bin/grep -E "^\*\.?$name:" \
             | head -1 \
             | ${pkgs.gawk}/bin/awk '{print $2}')

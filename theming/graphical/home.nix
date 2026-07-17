@@ -37,7 +37,8 @@ in {
     # Note: xsession is configured in xsession.nix
     # Note: i3 window manager is configured in i3.nix
     home-manager.users.${username} = { pkgs, ... }: {
-      home.stateVersion = "25.05";
+      home.stateVersion = "26.05";
+      stylix.enableReleaseChecks = false;
 
       # Make variables available to program modules
       home.sessionVariables = {

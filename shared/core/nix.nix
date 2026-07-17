@@ -27,7 +27,7 @@
 
   # Disable man-cache generation (very slow, not worth the build time)
   # Plain assignment intentional: overrides fish module's lib.mkDefault true
-  documentation.man.generateCaches = false;
+  documentation.man.cache.enable = false;
 
   # Weekly garbage collection
   nix.gc = {

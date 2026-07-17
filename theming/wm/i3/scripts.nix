@@ -88,7 +88,7 @@
 
     get_color() {
       local name="$1" fallback="$2" color
-      color=$(${pkgs.xorg.xrdb}/bin/xrdb -query 2>/dev/null | grep -E "^\*\.?''${name}:" | head -1 | awk '{print $2}')
+      color=$(${pkgs.xrdb}/bin/xrdb -query 2>/dev/null | grep -E "^\*\.?''${name}:" | head -1 | awk '{print $2}')
       echo "''${color:-$fallback}"
     }
 

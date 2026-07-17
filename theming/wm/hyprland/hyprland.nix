@@ -38,7 +38,7 @@
   vmWindowRules = lib.concatStringsSep "\n" (
     lib.mapAttrsToList (key: v:
       lib.optionalString ((v.hasDisplay or true) && v.workspace != null)
-      "windowrulev2 = workspace ${toString v.workspace}, title:^\\[${key}\\]")
+      "windowrule = workspace ${toString v.workspace}, match:title ^\\[${key}\\]")
     vmRegistry
   );
 
@@ -60,14 +60,14 @@
         && (v ? focusBorder)
         && v.focusBorder != null
       )
-      "windowrulev2 = bordercolor rgba(${namedColorToRgba (v.focusBorder or "")}), title:^\\[${key}\\]")
+      "windowrule = border_color rgba(${namedColorToRgba (v.focusBorder or "")}), match:title ^\\[${key}\\]")
     vmRegistry
   );
 
   workspaceColors = config.hydrix.hyprland.workspaceColors;
   workspaceColorRules = lib.concatStringsSep "\n" (
     lib.mapAttrsToList (ws: color:
-      "windowrulev2 = bordercolor rgba(${color}), workspace ${ws}")
+      "windowrule = border_color rgba(${color}), match:workspace ${ws}")
     workspaceColors
   );
 
@@ -125,10 +125,10 @@
 
     # Disable blur and restore full opacity for Steam game windows and any
     # fullscreen surface — avoids compositor overhead on those frames.
-    windowrulev2 = noblur,   class:^(steam_app_.*)$
-    windowrulev2 = opacity 1.0 override, class:^(steam_app_.*)$
-    windowrulev2 = noblur,   fullscreen:1
-    windowrulev2 = opacity 1.0 override, fullscreen:1
+    windowrule = no_blur 1, match:class ^(steam_app_.*)$
+    windowrule = opacity 1.0 override, match:class ^(steam_app_.*)$
+    windowrule = no_blur 1, match:fullscreen 1
+    windowrule = opacity 1.0 override, match:fullscreen 1
     ''}
   '';
 
@@ -285,12 +285,12 @@ GLSL
     }
     _generate() {
       while IFS=' ' read -r key color; do
-        echo "windowrulev2 = bordercolor rgba($(_rgba "$color")), tag:vm-$key"
+        echo "windowrule = border_color rgba($(_rgba "$color")), match:tag vm-$key"
       done < <(${pkgs.jq}/bin/jq -r 'to_entries[] | select(.value.focusBorder != null) | "\(.key) \(.value.focusBorder)"' "$REGISTRY")
     }
     _apply_keyword() {
       while IFS= read -r rule; do
-        ${pkgs.hyprland}/bin/hyprctl keyword windowrulev2 "''${rule#windowrulev2 = }" 2>/dev/null || true
+        ${pkgs.hyprland}/bin/hyprctl keyword windowrule "''${rule#windowrule = }" 2>/dev/null || true
       done < <(_generate)
     }
     _tag_existing() {
@@ -465,6 +465,7 @@ in
       # Config file management is handled via home.activation below — not extraConfig.
       wayland.windowManager.hyprland = {
         enable = true;
+        configType = "hyprlang";
         # Minimal comment suppresses HM's "no configuration" warning.
         # The actual config is written as a plain editable file by home.activation.
         extraConfig = "# config written by home.activation — edit ~/.config/hypr/hyprland.conf";
@@ -511,7 +512,7 @@ in
       '';
 
       # VM window border rules — oneshot that seeds vm-borders.conf and applies
-      # windowrulev2 keywords for all VMs that have focusBorder set.
+      # windowrule keywords for all VMs that have focusBorder set.
       systemd.user.services.hypr-vm-borders-init = {
         Unit = {
           Description = "Initialize Hyprland VM window border rules";

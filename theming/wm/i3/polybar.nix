@@ -100,7 +100,7 @@
   amixer = "${pkgs.alsa-utils}/bin/amixer";
   git = "${pkgs.git}/bin/git";
   virsh = "virsh";  # Resolved from PATH at runtime — avoids pulling libvirt closure into template
-  xrdb = "${pkgs.xorg.xrdb}/bin/xrdb";
+  xrdb = "${pkgs.xrdb}/bin/xrdb";
   df = "${pkgs.coreutils}/bin/df";
   free = "${pkgs.procps}/bin/free";
   ps = "${pkgs.procps}/bin/ps";

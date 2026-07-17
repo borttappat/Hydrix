@@ -217,7 +217,6 @@ EOF
 
     # ── Layout ─────────────────────────────────────────────────────────────────
     dwindle {
-      pseudotile     = false
       preserve_split = true
       force_split    = 2
     }
@@ -383,27 +382,27 @@ EOF
     submap = reset
 
     # ── Window rules ─────────────────────────────────────────────────────────
-    windowrulev2 = float, class:^(pavucontrol)$
-    windowrulev2 = float, class:^(lxappearance)$
-    windowrulev2 = float, class:^(nm-connection-editor)$
+    windowrule = float 1, match:class ^(pavucontrol)$
+    windowrule = float 1, match:class ^(lxappearance)$
+    windowrule = float 1, match:class ^(nm-connection-editor)$
     # hypr-float-terminal ($mod+S) — float + fixed size; position set by script
-    windowrulev2 = float, class:^(hypr-float)$
-    windowrulev2 = size 800 550, class:^(hypr-float)$
+    windowrule = float 1, match:class ^(hypr-float)$
+    windowrule = size 800 550, match:class ^(hypr-float)$
     # Alacritty manages its own opacity
-    windowrulev2 = opacity 1.0 override, class:^(Alacritty)$
-    windowrulev2 = opacity 1.0 override, class:^(alacritty)$
-    windowrulev2 = opacity 1.0 override, class:^(hypr-float)$
-    windowrulev2 = rounding ${lkRounding}, class:^(Dunst)$
-    windowrulev2 = rounding ${lkRounding}, class:^(wofi)$
-    windowrulev2 = noanim,                class:^(wofi)$
-    layerrule = noanim, ^(wofi)$
+    windowrule = opacity 1.0 override, match:class ^(Alacritty)$
+    windowrule = opacity 1.0 override, match:class ^(alacritty)$
+    windowrule = opacity 1.0 override, match:class ^(hypr-float)$
+    windowrule = rounding ${lkRounding}, match:class ^(Dunst)$
+    windowrule = rounding ${lkRounding}, match:class ^(wofi)$
+    windowrule = no_anim 1,             match:class ^(wofi)$
+    layerrule = no_anim 1, match:namespace ^(wofi)$
 
     # VM windows forwarded via waypipe — titles start with [vm-name].
     # Blur and alpha compositing are recomputed on every frame during scrolling;
     # disabling them removes GPU overhead that causes scroll jank.
-    windowrulev2 = noblur,                             title:^\[
-    windowrulev2 = opacity 1.0 override 1.0 override, title:^\[
-    windowrulev2 = noanim,                             title:^\[
+    windowrule = no_blur 1,                          match:title ^\[
+    windowrule = opacity 1.0 override 1.0 override, match:title ^\[
+    windowrule = no_anim 1,                          match:title ^\[
 
     ${config.hydrix.hyprland.extraBinds}
   '';

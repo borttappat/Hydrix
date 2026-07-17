@@ -1180,7 +1180,7 @@ in {
         "3" = "98c379ff";
       };
       description = ''
-        Per-workspace active border color overrides for Hyprland windowrulev2.
+        Per-workspace active border color overrides for Hyprland windowrule.
         Keys are workspace numbers (as strings), values are RGBA hex color strings
         (8 characters, e.g. "7aa2f7ff"). When empty (the default), no workspace
         color rules are generated. Set in your hydrix-config to taste.

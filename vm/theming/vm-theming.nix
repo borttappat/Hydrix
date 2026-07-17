@@ -190,7 +190,7 @@ in {
       walSyncScript
       pkgs.jq
       pkgs.pywal
-      pkgs.xorg.xsetroot
+      pkgs.xsetroot
     ];
 
     # Poll for host color changes (fallback if vsock push doesn't work)

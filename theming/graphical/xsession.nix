@@ -257,11 +257,11 @@ in {
           ${pkgs.unclutter}/bin/unclutter -grab &
 
           # Merge Xresources
-          ${pkgs.xorg.xrdb}/bin/xrdb -merge ~/.Xresources 2>/dev/null || true
+          ${pkgs.xrdb}/bin/xrdb -merge ~/.Xresources 2>/dev/null || true
 
           # Merge pywal colors if available
           if [ -f ~/.cache/wal/colors.Xresources ]; then
-            ${pkgs.xorg.xrdb}/bin/xrdb -merge ~/.cache/wal/colors.Xresources
+            ${pkgs.xrdb}/bin/xrdb -merge ~/.cache/wal/colors.Xresources
           fi
 
           # Apply xmodmap if exists
@@ -335,7 +335,7 @@ in {
     # Ensure required packages are available system-wide for scripts
     environment.systemPackages = with pkgs; [
       xorg.xrandr
-      xorg.xrdb
+      xrdb
       xorg.xmodmap
       procps
       unclutter

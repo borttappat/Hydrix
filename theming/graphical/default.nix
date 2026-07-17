@@ -57,6 +57,7 @@ in {
     # When graphical is enabled
     (lib.mkIf cfg.enable {
       stylix.enable = true;
+      stylix.enableReleaseChecks = false;
       home-manager.backupFileExtension = "hm-backup";
 
       # Required when any home-manager module enables xdg.portal (e.g. Hyprland)

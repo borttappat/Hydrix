@@ -61,7 +61,7 @@
   };
   polybar = "${polybarPkg}/bin/polybar";
   polybarMsg = "${polybarPkg}/bin/polybar-msg";
-  xrdb = "${pkgs.xorg.xrdb}/bin/xrdb";
+  xrdb = "${pkgs.xrdb}/bin/xrdb";
   awk = "${pkgs.gawk}/bin/awk";
 
   # The main display-setup script

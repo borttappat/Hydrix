@@ -45,7 +45,7 @@ in {
       xorg.xmessage
       xorg.xcursorthemes
       xorg.xdpyinfo
-      xorg.xrdb
+      xrdb
     ] ++ lib.optionals isHost [
       # Host: DDC/CI monitor control (WM-agnostic)
       ddcutil

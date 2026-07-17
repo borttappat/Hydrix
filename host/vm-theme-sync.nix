@@ -438,7 +438,7 @@ from pathlib import Path
 
 # Paths to binaries (interpolated from Nix)
 I3_MSG = "${pkgs.i3}/bin/i3-msg"
-XRDB = "${pkgs.xorg.xrdb}/bin/xrdb"
+XRDB = "${pkgs.xrdb}/bin/xrdb"
 
 # Focus daemon mode
 MODE = "${cfg.focusDaemon.mode}"

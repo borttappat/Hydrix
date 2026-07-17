@@ -281,7 +281,7 @@ in {
     # NOTE: thermald is disabled in intel.nix - asusd handles thermal management
     services.asusd = {
       enable = true;
-      enableUserService = true;
+      #enableUserService = true;
     };
 
     # Apply ASUS AC/battery profiles at boot from hydrix.hardware.asus options
