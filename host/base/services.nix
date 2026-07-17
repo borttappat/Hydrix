@@ -64,6 +64,19 @@ in {
   # Enabling tailscale VPN
   services.tailscale.enable = lib.mkIf cfg.services.tailscale.enable true;
 
+  # Tailscale's MagicDNS resolver caches the OS's upstream nameservers when it
+  # recomputes DNS on a route change (e.g. router VM default gateway coming up
+  # on rebuild/specialisation switch). If that recompute races ahead of
+  # resolvconf.service writing networking.nameservers, it caches an empty
+  # upstream and every non-tailnet lookup SERVFAILs until tailscaled happens
+  # to restart for some other reason. Force it to always restart after
+  # resolvconf and whenever the nameserver list changes so it recaptures the
+  # correct upstream on every switch.
+  systemd.services.tailscaled = lib.mkIf cfg.services.tailscale.enable {
+    after = [ "resolvconf.service" ];
+    restartTriggers = [ (toString config.networking.nameservers) ];
+  };
+
   # Enable i2c-bus
   hardware.i2c.enable = lib.mkIf cfg.hardware.i2c.enable true;
 
