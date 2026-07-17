@@ -566,6 +566,12 @@ post_build() {
         sudo systemctl restart hydrix-colorscheme.service 2>/dev/null || true
     fi
 
+    # Restart tailscaled once activation has fully settled — a restart mid-activation
+    # (even correctly ordered) can still race the bridge coming up and cache a dead DNS upstream.
+    if systemctl list-units --type=service 2>/dev/null | grep -q "tailscaled.service"; then
+        sudo systemctl restart tailscaled.service 2>/dev/null || true
+    fi
+
     if $PREBUILD_MICROVMS; then
         prebuild_microvms
     fi
