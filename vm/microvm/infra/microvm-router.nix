@@ -462,7 +462,11 @@ in {
             };
           });
       };
-      wireless.enable = lib.mkForce false; # NetworkManager handles WiFi
+      # Not set here: NetworkManager's own module (networking.networkmanager)
+      # sets wireless.enable = true + dbusControlled = true itself, to spin up
+      # the wpa_supplicant backend it drives over D-Bus. Overriding it false
+      # (even via mkForce) starves NM of that backend -> wifi device stuck
+      # "unavailable". Let NM's module own this value.
       firewall.enable = false; # We use nftables directly
 
       # LAN TAPs managed by systemd-networkd — tell NM to leave them alone

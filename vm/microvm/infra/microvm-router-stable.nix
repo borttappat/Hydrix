@@ -293,7 +293,8 @@ in {
         };
       };
 
-      wireless.enable = lib.mkForce false;
+      # Not set here — see microvm-router.nix for why: NetworkManager's own
+      # module supplies wireless.enable = true + dbusControlled = true itself.
     };
 
     # ===== LAN Interface Configuration (systemd-networkd) =====
