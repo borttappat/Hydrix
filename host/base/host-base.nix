@@ -4,6 +4,9 @@
 { config, lib, pkgs, ... }:
 
 {
+  # Boot menu / os-release branding
+  system.nixos.distroName = lib.mkDefault "Hydrix";
+
   # GTK dark theme default for host apps (virt-manager, file pickers, etc.)
   # Overridden by Stylix when hydrix.graphical.enable = true
   environment.etc."gtk-3.0/settings.ini".text = lib.mkDefault ''

@@ -1733,7 +1733,7 @@ cmd_builder_build() {
             log "Host config (specialisation: ${BOLD}${current_spec}${NC})..."
             local host_start
             host_start=$(timer_start)
-            if sudo nixos-rebuild build --flake "${FLAKE_DIR}#$(detect_host_config)"; then
+            if sudo --preserve-env=HYDRIX_BUILD_TIME,HYDRIX_BUILD_TAG nixos-rebuild build --flake "${FLAKE_DIR}#$(detect_host_config)" --impure; then
                 log_time "Host build: ${BOLD}$(timer_end "$host_start")s${NC}"
             else
                 log_error "Host build failed"
@@ -1878,7 +1878,7 @@ cmd_builder_switch() {
 
     # Step 2: Switch with specialisation
     log "Applying configuration..."
-    local switch_cmd="sudo nixos-rebuild switch --flake ${FLAKE_DIR}#$(detect_host_config)"
+    local switch_cmd="sudo --preserve-env=HYDRIX_BUILD_TIME,HYDRIX_BUILD_TAG nixos-rebuild switch --flake ${FLAKE_DIR}#$(detect_host_config) --impure"
     if [[ "$target_spec" != "lockdown" ]]; then
         switch_cmd="$switch_cmd --specialisation ${target_spec}"
     fi

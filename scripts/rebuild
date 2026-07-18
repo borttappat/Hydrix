@@ -24,6 +24,7 @@ VERBOSE=false
 IGNORE_ACTIVATION=false
 SPEC_OVERRIDE=""
 DEV_OVERRIDE=""
+BUILD_TAG=""
 
 usage() {
     cat <<EOF
@@ -46,6 +47,8 @@ Options:
   -r, --rebuild-stale   Rebuild stale base images
   -i, --ignore-activation  Continue even if activation fails (exit code 4)
   -v, --verbose         Show verbose output
+  -t, --tag TAG         Tag this build for easier identification in the GRUB menu
+                        (letters, numbers, ':', '_', '.', '-' only)
   --dev [path]          Override hydrix input with local path (for testing unpushed changes)
                         Defaults to ~/Hydrix if path not specified
   -h, --help            Show this help
@@ -64,6 +67,9 @@ while [[ $# -gt 0 ]]; do
         -r|--rebuild-stale) REBUILD_STALE=true; shift ;;
         -i|--ignore-activation) IGNORE_ACTIVATION=true; shift ;;
         -v|--verbose) VERBOSE=true; shift ;;
+        -t|--tag)
+            [[ -z "${2:-}" ]] && { echo "!! --tag requires a value" >&2; exit 1; }
+            BUILD_TAG="$2"; shift 2 ;;
         --dev)
             if [[ -n "${2:-}" ]] && [[ "${2:-}" != -* ]]; then
                 DEV_OVERRIDE="$2"; shift 2
@@ -87,6 +93,11 @@ done
 
 log() { echo ":: $*"; }
 err() { echo "!! $*" >&2; }
+
+if [[ -n "$BUILD_TAG" ]] && [[ ! "$BUILD_TAG" =~ ^[a-zA-Z0-9:_.-]+$ ]]; then
+    err "--tag: only letters, numbers, ':', '_', '.', '-' allowed (got: $BUILD_TAG)"
+    exit 1
+fi
 
 HOST_CONFIG="/etc/hydrix/host-config.json"
 
@@ -616,6 +627,11 @@ main() {
     target_spec=$(mode_to_spec "$target_mode")
 
     log "Mode: $current_mode -> $target_mode"
+
+    # Build metadata for GRUB entries (read via builtins.getEnv, see host/specialisations.nix)
+    export HYDRIX_BUILD_TIME="$(date '+%Y-%m-%d %H:%M')"
+    export HYDRIX_BUILD_TAG="$BUILD_TAG"
+    [[ -n "$BUILD_TAG" ]] && log "Tag: $BUILD_TAG"
 
     # Lockdown mode: use builder VM (host has no network)
     if [[ "$current_mode" == "lockdown" ]]; then
