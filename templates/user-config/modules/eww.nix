@@ -1,10 +1,10 @@
-# shared/eww.nix — eww widget daemon + unified left-side overlay
+# modules/eww.nix — eww widget daemon + unified left-side overlay
 #
 # Single left-overlay window (center left) with three stacked sections:
-#   - VMS:        running/stopped VM overview (parses `microvm status`)
+#   - VMS:      running/stopped VM overview (parses `microvm status`)
 #   - EXIT NODES: active WireGuard exit nodes with session totals
 #                 (queries router CID 200 vsock 14515)
-#   - NETWORK:    connected SSID, unsaved count, WAN + per-VM bandwidth
+#   - NETWORK:  connected SSID, unsaved count, WAN + per-VM bandwidth
 #                 (wifi-sync vsock 14506; net-stats vsock 14517)
 #
 # Panel is gated by :visible so it appears fully-formed once data arrives.
@@ -22,8 +22,17 @@ let
   fontSize = let v = config.hydrix.graphical.font.size or null; in if v != null then v else 10;
 
   # Polling script: queries router vsock 14515 for wg dump JSON, then
-  # cross-references /tmp/hydrix-metrics-* to filter down to running VMs with
-  # active tunnels. Returns JSON array for eww defpoll.
+  # cross-references currently-running VMs to filter down to active tunnels.
+  # Returns JSON array for eww defpoll. Reads the running-VM list from
+  # eww-mvm-status's cache file (VM_STATUS_CACHE) instead of independently
+  # re-invoking `microvm status` — both widgets polled the same data every
+  # 5s, and `microvm status` is not cheap (full VM enumeration + per-VM CID
+  # lookup). Falls back to `microvm status` directly if the cache is missing
+  # (e.g. before eww-mvm-status has run once). Deliberately does not depend
+  # on /tmp/hydrix-metrics-* — those files are workspace-focus-driven (only
+  # the currently-focused VM's file gets (re)written) and wiped on every
+  # reboot, so this widget would stay empty until every relevant workspace
+  # had been focused at least once.
   ewwWgStatus = pkgs.writeShellApplication {
     name = "eww-wg-status";
     runtimeInputs = [ pkgs.socat pkgs.jq pkgs.coreutils pkgs.gnused ];
@@ -51,12 +60,23 @@ let
         fi
       }
 
+      cache="/tmp/hydrix-eww-vm-status.json"
+      if [ -f "$cache" ]; then
+        running_vms=$(jq -r '.running[].name' "$cache" 2>/dev/null | tr '\n' ' ' || true)
+      else
+        running_vms=""
+        while read -r name status _; do
+          case "$name" in microvm-*) ;; *) continue ;; esac
+          [ "$status" = "running" ] || continue
+          running_vms="$running_vms ''${name#microvm-}"
+        done < <(/run/current-system/sw/bin/microvm status 2>/dev/null \
+          | sed -E 's/\x1b\[[0-9;]*[a-zA-Z]//g' \
+          || true)
+      fi
+
       result="["; sep=""
 
-      for f in /tmp/hydrix-metrics-*; do
-        [ -f "$f" ] || continue
-        vm=$(basename "$f" | sed 's/hydrix-metrics-//')
-
+      for vm in $running_vms; do
         iface="wg-$vm"
         iface_json=$(echo "$router_json" \
           | jq -c --arg i "$iface" '.[] | select(.iface == $i)' 2>/dev/null || true)
@@ -86,14 +106,14 @@ let
   };
 
   # Polling script: parses `microvm status` table output (NAME STATUS CID columns).
-  # microvm status uses ANSI color codes in the STATUS field — strip them before parsing.
-  # CID = subnet last octet, so running VM IP = 192.168.<cid>.2.
-  # Returns {"running":[{name,ip},...], "stopped":[{name},...]} for eww.
+  # Also writes its result to a cache file so eww-wg-status can reuse the
+  # running-VM list instead of independently re-running `microvm status`.
   ewwMvmStatus = pkgs.writeShellApplication {
     name = "eww-mvm-status";
     runtimeInputs = [ pkgs.jq pkgs.coreutils pkgs.gnused ];
     text = ''
       microvm=/run/current-system/sw/bin/microvm
+      cache="/tmp/hydrix-eww-vm-status.json"
 
       running_json="[]"
       stopped_json="[]"
@@ -119,12 +139,13 @@ let
         | sed -E 's/\x1b\[[0-9;]*[a-zA-Z]//g' \
         || true)
 
-      echo "{\"running\":$running_json,\"stopped\":$stopped_json}"
+      result="{\"running\":$running_json,\"stopped\":$stopped_json}"
+      printf '%s' "$result" > "''${cache}.tmp" && mv "''${cache}.tmp" "$cache"
+      echo "$result"
     '';
   };
 
-  # Polling script: queries wifi-sync vsock 14506 (already used by wifi-sync tool).
-  # Returns router POLL JSON enriched with "pending": N (connections not yet in credential store).
+  # Polling script: queries wifi-sync vsock 14506.
   ewwRouterStats = pkgs.writeShellApplication {
     name = "eww-router-stats";
     runtimeInputs = [ pkgs.socat pkgs.jq ];

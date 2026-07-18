@@ -152,7 +152,14 @@
             ./modules/sway.nix         # sway keybindings (user-customizable)
             vmThemeSyncModule          # VM theme sync (host-side)
             { hydrix.vmThemeSync.enable = true;
-              hydrix.networking.vmRegistry      = vmRegistry;
+              # Registry's router/router-stable vmName defaults to the generic
+              # infra dir name ("microvm-router"), but the real nixosConfigurations
+              # key is per-machine ("microvm-router-${machineName}") — override here
+              # so get_cid's registry lookup hits instead of falling back to nix eval.
+              hydrix.networking.vmRegistry      = vmRegistry // {
+                router        = vmRegistry.router        // { vmName = "microvm-router-${machineName}"; };
+                router-stable = vmRegistry.router-stable // { vmName = "microvm-router-stable-${machineName}"; };
+              };
               hydrix.networking.profileNetworks = allProfileNetworks;
               hydrix.networking.extraNetworks   = extraNetworks;
               hydrix.networking.infraTapBridges = infraTapBridges;
