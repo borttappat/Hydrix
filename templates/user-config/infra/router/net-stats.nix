@@ -1,8 +1,9 @@
 # Network stats vsock endpoint (port 14517)
 #
 # Two-service design:
-#   net-stats-poller  — background loop, samples /proc/net/dev every 1s,
-#                       writes delta JSON to /tmp/net-stats.json
+#   net-stats-poller  — background loop, samples /proc/net/dev every
+#                       SAMPLE_INTERVAL seconds, writes rate JSON to
+#                       /tmp/net-stats.json
 #   net-stats-vsock   — socat VSOCK-LISTEN, handler just cats that file (instant)
 #
 # Response format:
@@ -18,6 +19,12 @@ let
     name = "net-stats-poller";
     runtimeInputs = [ pkgs.gawk pkgs.iproute2 pkgs.coreutils ];
     text = ''
+      # Only consumer is eww's net_stats defpoll, which reads this file every
+      # 5s — sampling more often than that just burns CPU forking awk/ip every
+      # single second for no one. Deltas are divided by SAMPLE_INTERVAL below
+      # so the output stays true bytes/second regardless of this value.
+      SAMPLE_INTERVAL=5
+
       sample_dev() {
         awk -F: 'NR>2 {
           gsub(/^[[:space:]]+/, "", $1)
@@ -26,7 +33,10 @@ let
         }' /proc/net/dev
       }
 
-      clamp() { local v=$(( $1 - $2 )); [ "$v" -lt 0 ] && echo 0 || echo "$v"; }
+      clamp_rate() {
+        local v=$(( ($1 - $2) / SAMPLE_INTERVAL ))
+        [ "$v" -lt 0 ] && echo 0 || echo "$v"
+      }
 
       while true; do
         declare -A rx1 tx1
@@ -34,7 +44,7 @@ let
           rx1["$iface"]=$rx; tx1["$iface"]=$tx
         done < <(sample_dev)
 
-        sleep 1
+        sleep "$SAMPLE_INTERVAL"
 
         declare -A rx2 tx2
         while read -r iface rx tx; do
@@ -42,8 +52,8 @@ let
         done < <(sample_dev)
 
         wan=$(ip route show default 2>/dev/null | awk '/^default/{print $5; exit}' || true)
-        wan_rx=$(clamp "''${rx2[$wan]:-0}" "''${rx1[$wan]:-0}")
-        wan_tx=$(clamp "''${tx2[$wan]:-0}" "''${tx1[$wan]:-0}")
+        wan_rx=$(clamp_rate "''${rx2[$wan]:-0}" "''${rx1[$wan]:-0}")
+        wan_tx=$(clamp_rate "''${tx2[$wan]:-0}" "''${tx1[$wan]:-0}")
 
         result="{\"wan\":{\"iface\":\"''${wan}\",\"rx\":''${wan_rx},\"tx\":''${wan_tx}},\"vms\":["
         sep=""
@@ -51,8 +61,8 @@ let
         for iface in "''${!rx2[@]}"; do
           case "$iface" in mv-router-*) ;; *) continue ;; esac
           vm="''${iface#mv-router-}"
-          rx=$(clamp "''${rx2[$iface]:-0}" "''${rx1[$iface]:-0}")
-          tx=$(clamp "''${tx2[$iface]:-0}" "''${tx1[$iface]:-0}")
+          rx=$(clamp_rate "''${rx2[$iface]:-0}" "''${rx1[$iface]:-0}")
+          tx=$(clamp_rate "''${tx2[$iface]:-0}" "''${tx1[$iface]:-0}")
           result+="''${sep}{\"vm\":\"''${vm}\",\"rx\":''${rx},\"tx\":''${tx}}"
           sep=","
         done
@@ -83,7 +93,7 @@ in {
 
   config = lib.mkIf cfg.enable {
     systemd.services.net-stats-poller = {
-      description = "Network stats background poller (writes /tmp/net-stats.json every 1s)";
+      description = "Network stats background poller (writes /tmp/net-stats.json every 5s)";
       wantedBy    = [ "multi-user.target" ];
       after       = [ "network.target" ];
       serviceConfig = {
