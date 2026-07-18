@@ -48,6 +48,11 @@ struct sockaddr_vm {
 #define COMM_LEN   16    /* kernel TASK_COMM_LEN: 15 chars + NUL */
 #define SNAP_TMP_SUFFIX ".tmp"
 
+/* read_top_procs() walks all of /proc every call (3 file opens per process) —
+ * too expensive to run on every tick. Only rescan every TOP_SCAN_EVERY ticks;
+ * cpu/ram/fs stay on the fast `interval` cadence since those are cheap. */
+#define TOP_SCAN_EVERY 6
+
 static long sc_clk_tck;
 static long sc_page_kb;
 static char snap_path[256];   /* empty = stdout mode */
@@ -441,7 +446,11 @@ int main(int argc, char *argv[]) {
     /* Prime deltas — without this, first sample shows cpu=0 / top=- 0 */
     CpuStat cpu_prev;
     read_cpu_stat(&cpu_prev);
-    { char d1[48], d2[48]; read_top_procs(interval, d1, d2); }
+    char top_cpu[48] = "- 0", top_mem[48] = "- 0";
+    read_top_procs(interval, top_cpu, top_mem);
+    int tick = 1; /* starts at 1: next full top-procs rescan lands at TOP_SCAN_EVERY
+                     ticks after the priming call above, keeping the elapsed-time
+                     math below accurate in steady state */
 
     for (;;) {
         sleep((unsigned)interval);
@@ -451,9 +460,12 @@ int main(int argc, char *argv[]) {
         int cpu = cpu_percent(&cpu_prev, &cpu_curr);
         cpu_prev = cpu_curr;
 
-        char up[32], top_cpu[48], top_mem[48], tun[32];
+        char up[32], tun[32];
         uptime_str(up, sizeof(up));
-        read_top_procs(interval, top_cpu, top_mem);
+        if (tick % TOP_SCAN_EVERY == 0) {
+            read_top_procs(interval * TOP_SCAN_EVERY, top_cpu, top_mem);
+        }
+        tick++;
         read_tun(tun, sizeof(tun));
 
         int dev = pkg_count(home, "dev/packages", "flake.nix");
