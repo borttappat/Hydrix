@@ -349,8 +349,8 @@ in {
       grub = {
         gfxmodeEfi = lib.mkOption {
           type = lib.types.str;
-          default = "1920x1200";
-          description = "GRUB EFI graphics mode";
+          default = "auto";
+          description = "GRUB EFI graphics mode (auto = native resolution)";
         };
       };
 
@@ -697,6 +697,9 @@ in {
           device = "nodev";
           efiSupport = true;
           useOSProber = true;
+          # Small EFI System Partitions (often ~1G) fill up with kernel/initrd
+          # copies once enough generations x specialisations accumulate.
+          configurationLimit = 10;
         };
         efi = {
           canTouchEfiVariables = true;
