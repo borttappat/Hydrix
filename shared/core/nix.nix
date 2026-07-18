@@ -26,8 +26,14 @@
   };
 
   # Disable man-cache generation (very slow, not worth the build time)
-  # Plain assignment intentional: overrides fish module's lib.mkDefault true
+  # Plain assignment intentional: overrides fish module's lib.mkDefault true.
+  # generateAtRuntime is the actual expensive part: a systemd service (mandb.service)
+  # that rsyncs and reindexes every package's man pages on every activation where
+  # the systemPackages closure changed at all (even unrelated packages). cache.enable
+  # alone only skips baking a cache into the store, it doesn't stop this. Both must
+  # be disabled together; fish's module sets both to true by default.
   documentation.man.cache.enable = false;
+  documentation.man.cache.generateAtRuntime = false;
 
   # Weekly garbage collection
   nix.gc = {
