@@ -4,9 +4,12 @@
 # USB devices are passed through via QEMU USB hotplug (no network bridge to host).
 # The host sends device_add/device_del commands to the QEMU monitor socket.
 #
-# Files can be transferred out via the files VM:
-#   microvm files store usb-sandbox/<path>
-#   microvm files transfer usb-sandbox/<path> dev/<dest>
+# File transfer to/from other VMs uses the shared files-agent (vsock 14506),
+# imported via flake.nix (hydrix.microvm.filesAgent = true in meta.nix) —
+# same agent every profile VM uses, no separate copy here.
+#
+#   microvm files transfer <src-vm>/<path> usb-sandbox/shared/
+#   microvm files transfer usb-sandbox/shared/<path> <dst-vm>/<dest>
 #
 # Paths are relative to /home/sandbox/ inside the VM.
 # Mount USB drives at /home/sandbox/usb/ for convenient access.
@@ -19,191 +22,23 @@ let
   sandboxHome = "/home/${sandboxUser}";
   vmName      = "microvm-usb-sandbox";
 
-  receiveScript = pkgs.writeShellScript "usb-files-receive" ''
-    set -euo pipefail
-    DEST_DIR="$1"
-    ${pkgs.python3}/bin/python3 - "$DEST_DIR" <<'PYEOF'
-import sys, http.server, os
-dest_dir = sys.argv[1]
-os.makedirs(dest_dir, exist_ok=True)
-dest_file = os.path.join(dest_dir, 'xfer.enc')
-class Handler(http.server.BaseHTTPRequestHandler):
-    def do_PUT(self):
-        if self.path != '/xfer.enc':
-            self.send_response(404); self.end_headers(); return
-        length = int(self.headers.get('Content-Length', 0))
-        with open(dest_file, 'wb') as f:
-            remaining = length
-            while remaining > 0:
-                chunk = self.rfile.read(min(65536, remaining))
-                if not chunk: break
-                f.write(chunk)
-                remaining -= len(chunk)
-        self.send_response(200)
-        self.end_headers()
-        self.wfile.write(b'OK\n')
-        raise SystemExit(0)
-    def log_message(self, *_): pass
-http.server.HTTPServer(("", 8888), Handler).handle_request()
-PYEOF
-  '';
-
-  serveScript = pkgs.writeShellScript "usb-files-serve" ''
-    set -euo pipefail
-    XFER_FILE="${sandboxHome}/shared/xfer.enc"
-    if [ ! -f "$XFER_FILE" ]; then
-      echo "ERROR: $XFER_FILE not found" >&2
-      exit 1
-    fi
-    ${pkgs.python3}/bin/python3 - "$XFER_FILE" <<'PYEOF'
-import sys, http.server, os
-xfer_file = sys.argv[1]
-class Handler(http.server.BaseHTTPRequestHandler):
-    def do_GET(self):
-        if self.path != '/xfer.enc':
-            self.send_response(404); self.end_headers(); return
-        size = os.path.getsize(xfer_file)
-        self.send_response(200)
-        self.send_header('Content-Length', str(size))
-        self.send_header('Content-Type', 'application/octet-stream')
-        self.end_headers()
-        with open(xfer_file, 'rb') as f:
-            while True:
-                chunk = f.read(65536)
-                if not chunk: break
-                self.wfile.write(chunk)
-        raise SystemExit(0)
-    def log_message(self, *_): pass
-http.server.HTTPServer(("", 8888), Handler).handle_request()
-PYEOF
-  '';
-
-  handlerScript = pkgs.writeShellScript "usb-files-handler" ''
-    set -euo pipefail
-    SHARED_DIR="${sandboxHome}/shared"
-    XFER_FILE="$SHARED_DIR/xfer.enc"
-    SERVE_PID_FILE="$SHARED_DIR/.serve.pid"
-    mkdir -p "$SHARED_DIR"
-    read -r CMD REST
-
-    case "$CMD" in
-
-      ENCRYPT)
-        PASSPHRASE=$(echo "$REST" | cut -d' ' -f1)
-        SOURCE=$(echo "$REST" | cut -d' ' -f2-)
-        SOURCE_FULL="${sandboxHome}/$SOURCE"
-        rm -f "$XFER_FILE"
-        if [ -d "$SOURCE_FULL" ] || [ -f "$SOURCE_FULL" ]; then
-          ${pkgs.gnutar}/bin/tar \
-            --use-compress-program=${pkgs.gzip}/bin/gzip \
-            -cf - \
-            -C "$(${pkgs.coreutils}/bin/dirname "$SOURCE_FULL")" \
-            "$(${pkgs.coreutils}/bin/basename "$SOURCE_FULL")" \
-            | ${pkgs.openssl}/bin/openssl enc -aes-256-cbc -pbkdf2 \
-                -pass pass:"$PASSPHRASE" -out "$XFER_FILE"
-        else
-          echo "ERROR: source not found: $SOURCE_FULL"
-          exit 1
-        fi
-        HASH=$(${pkgs.coreutils}/bin/sha256sum "$XFER_FILE" | cut -d' ' -f1)
-        echo "SHA256=$HASH"
-        ;;
-
-      SERVE)
-        if [ -f "$SERVE_PID_FILE" ]; then
-          kill "$(cat "$SERVE_PID_FILE")" 2>/dev/null || true
-          rm -f "$SERVE_PID_FILE"
-        fi
-        ${serveScript} &
-        SERVE_PID=$!
-        echo "$SERVE_PID" > "$SERVE_PID_FILE"
-        echo "READY"
-        ;;
-
-      SERVE_STOP)
-        if [ -f "$SERVE_PID_FILE" ]; then
-          kill "$(cat "$SERVE_PID_FILE")" 2>/dev/null || true
-          rm -f "$SERVE_PID_FILE"
-        fi
-        echo "OK"
-        ;;
-
-      DECRYPT)
-        PASSPHRASE=$(echo "$REST" | cut -d' ' -f1)
-        ARCHIVE=$(echo "$REST" | cut -d' ' -f2)
-        EXTRACT_PARENT=$(echo "$REST" | cut -d' ' -f3-)
-        ARCHIVE_FULL="${sandboxHome}/$ARCHIVE"
-        if [ -z "$EXTRACT_PARENT" ]; then
-          EXTRACT_FULL="${sandboxHome}"
-        else
-          EXTRACT_FULL="${sandboxHome}/$EXTRACT_PARENT"
-        fi
-        mkdir -p "$EXTRACT_FULL"
-        ${pkgs.openssl}/bin/openssl enc -d -aes-256-cbc -pbkdf2 \
-          -pass pass:"$PASSPHRASE" -in "$ARCHIVE_FULL" \
-          | ${pkgs.gnutar}/bin/tar --use-compress-program=${pkgs.gzip}/bin/gzip -xf - -C "$EXTRACT_FULL"
-        rm -f "$ARCHIVE_FULL"
-        echo "OK"
-        ;;
-
-      RECEIVE_PREPARE)
-        ${receiveScript} "$SHARED_DIR" &
-        RECV_PID=$!
-        echo "$RECV_PID" > "$SHARED_DIR/.recv.pid"
-        echo "READY"
-        ;;
-
-      RECEIVE_STOP)
-        if [ -f "$SHARED_DIR/.recv.pid" ]; then
-          kill "$(cat "$SHARED_DIR/.recv.pid")" 2>/dev/null || true
-          rm -f "$SHARED_DIR/.recv.pid"
-        fi
-        echo "OK"
-        ;;
-
-      CLEANUP)
-        rm -f "$XFER_FILE"
-        if [ -f "$SERVE_PID_FILE" ]; then
-          kill "$(cat "$SERVE_PID_FILE")" 2>/dev/null || true
-          rm -f "$SERVE_PID_FILE"
-        fi
-        if [ -f "$SHARED_DIR/.recv.pid" ]; then
-          kill "$(cat "$SHARED_DIR/.recv.pid")" 2>/dev/null || true
-          rm -f "$SHARED_DIR/.recv.pid"
-        fi
-        echo "OK"
-        ;;
-
-      CHECKSUM)
-        PATH_ARG=$(echo "$REST" | cut -d' ' -f1-)
-        PATH_FULL="${sandboxHome}/$PATH_ARG"
-        if [ -f "$PATH_FULL" ]; then
-          HASH=$(${pkgs.coreutils}/bin/sha256sum "$PATH_FULL" | cut -d' ' -f1)
-          echo "SHA256=$HASH"
-        else
-          echo "ERROR: file not found: $PATH_FULL"
-          exit 1
-        fi
-        ;;
-
-      PING)
-        echo "PONG"
-        ;;
-
-      *)
-        echo "ERROR: unknown command: $CMD"
-        exit 1
-        ;;
-    esac
-  '';
-
 in {
+  # The shared files-agent.nix (imported externally via flake.nix) expects
+  # config.hydrix.username to match this VM's actual user/home directory —
+  # override the host-username default that mkInfraVm applies to all infra VMs.
+  hydrix.username = lib.mkForce sandboxUser;
+  # Scopes the files-agent's port-8888 firewall rule to the files VM's IP on
+  # this bridge, same as every profile VM's default.nix does from its own meta.nix.
+  hydrix.networking.vmSubnet = meta.subnet;
 
   # =========================================================================
   # MICROVM CONFIGURATION
   # =========================================================================
   microvm = {
-    mem  = 1023;
+    # Ephemeral rootfs is tmpfs, sized ~50% of this by microvm-nix — needs real
+    # headroom since transient transfer blobs (~/shared/xfer.enc) land there
+    # before extraction. 4096 gives ~2GB of usable space for that.
+    mem  = 4096;
 
     interfaces = [{
       type = "tap";
@@ -243,31 +78,16 @@ in {
   };
 
   # =========================================================================
-  # FILES AGENT (vsock 14506)
+  # HOME LAYOUT
+  # Files agent (vsock 14506) is imported externally via flake.nix — it owns
+  # ~/shared and the port-8888 HTTP transfer service itself.
   # =========================================================================
   systemd.tmpfiles.rules = [
-    "d ${sandboxHome}        0750 ${sandboxUser} users -"
-    "d ${sandboxHome}/shared 0750 ${sandboxUser} users -"
-    "d ${sandboxHome}/usb    0750 ${sandboxUser} users -"
+    "d ${sandboxHome}     0750 ${sandboxUser} users -"
+    "d ${sandboxHome}/usb 0750 ${sandboxUser} users -"
   ];
 
-  systemd.services.usb-files-agent = {
-    description = "USB sandbox files agent (vsock 14506)";
-    wantedBy    = [ "multi-user.target" ];
-    after       = [ "local-fs.target" ];
-    serviceConfig = {
-      Type       = "simple";
-      Restart    = "always";
-      RestartSec = "1s";
-      User       = sandboxUser;
-      ExecStart  = "${pkgs.socat}/bin/socat VSOCK-LISTEN:14506,reuseaddr,fork EXEC:${handlerScript}";
-    };
-  };
-
-  networking.firewall = {
-    enable = lib.mkForce true;
-    allowedTCPPorts = [ 8888 ];  # HTTP file serving to files VM
-  };
+  networking.firewall.enable = lib.mkForce true;
 
   # =========================================================================
   # USERS
@@ -288,20 +108,24 @@ in {
     ║              USB SANDBOX  —  microvm-usb-sandbox     ║
     ╚══════════════════════════════════════════════════════╝
 
-    The USB drive has been passed in as /dev/vdb (read-only).
+    The USB drive appears as /dev/vdb once attached from the host.
+    Read-only unless the host ran 'usb attach <busid> --rw'.
     Files leave only via the files VM — nothing else has egress.
 
     COMMANDS
-      usb list              — show attached block devices
-      usb scan              — detect filesystems on /dev/vdb*
-      usb mount /dev/vdbX   — mount partition under ~/usb/
-      usb umount /dev/vdbX  — unmount
-      lsusb                 — USB device info
-      lsblk                 — block device tree
+      usb list                    — show block devices + mount state
+      usb scan                    — detect filesystems on /dev/vdb*
+      usb mount /dev/vdbX         — mount under ~/usb/ (reports read-only/read-write)
+      usb mount /dev/vdbX --owner — as above + own the files as $(whoami) (FAT/exFAT only)
+      usb umount /dev/vdbX        — unmount
+      lsusb                       — USB device info
+      lsblk                       — block device tree
 
-    FILE TRANSFER (from host)
-      microvm files store usb-sandbox/usb/vdbX/<path>
-      microvm files transfer usb-sandbox/usb/vdbX/<path> <vm>/<dest>
+    FILE TRANSFER (from host, via the files VM)
+      microvm files transfer <src-vm>/<path> usb-sandbox/shared/
+        → lands at ~/shared/<name> here; 'cp' it into ~/usb/vdbX/ once mounted read-write
+      microvm files transfer usb-sandbox/shared/<path> <dst-vm>/<dest>
+        → send a file back out the same way
 
     Ctrl+] to detach console (VM keeps running)
 
@@ -313,17 +137,34 @@ in {
   environment.systemPackages = with pkgs; [
     # USB & filesystem inspection
     usbutils exfatprogs ntfs3g
-    # File transfer
-    socat openssl python3 coreutils gnutar gzip
+    # Partitioning/formatting
+    dosfstools util-linux
     # Utilities
     gawk gnugrep gnused unzip p7zip iproute2 file
     # USB helper
     (writeShellScriptBin "usb" ''
+      set -uo pipefail
       USB_DIR="${sandboxHome}/usb"
       mkdir -p "$USB_DIR"
+
+      usage() {
+        echo "Usage: usb <command>"
+        echo ""
+        echo "  list                    show block devices + mount state"
+        echo "  scan                    detect filesystems on /dev/vdb*"
+        echo "  mount /dev/vdbX [--owner]"
+        echo "                          mount under ~/usb/, reports read-only/read-write"
+        echo "                          --owner: add uid=/gid=$(id -u) (FAT/exFAT only)"
+        echo "  umount /dev/vdbX        unmount"
+        echo ""
+        echo "File transfer (run on the host, not in here):"
+        echo "  microvm files transfer <src-vm>/<path> usb-sandbox/shared/"
+        echo "  microvm files transfer usb-sandbox/shared/<path> <dst-vm>/<dest>"
+      }
+
       case "''${1:-}" in
         list)
-          lsblk -o NAME,SIZE,FSTYPE,LABEL,MOUNTPOINT 2>/dev/null || echo "No block devices"
+          lsblk -o NAME,SIZE,FSTYPE,LABEL,RO,MOUNTPOINT 2>/dev/null || echo "No block devices"
           ;;
         scan)
           for dev in /dev/sd[a-z] /dev/sd[a-z][0-9] /dev/vd[b-z] /dev/vd[b-z][0-9]; do
@@ -335,13 +176,22 @@ in {
         mount)
           DEV="$2"
           if [ -z "$DEV" ]; then
-            echo "Usage: usb mount /dev/vdbX"
+            usage
             exit 1
           fi
+          OWNER_OPT=""
+          [ "''${3:-}" = "--owner" ] && OWNER_OPT="-o uid=$(id -u),gid=$(id -g)"
           MP="$USB_DIR/$(basename "$DEV")"
           mkdir -p "$MP"
-          sudo mount -t auto "$DEV" "$MP"
-          echo "Mounted $DEV at $MP"
+          if ! sudo mount -t auto $OWNER_OPT "$DEV" "$MP"; then
+            echo "Mount failed — run 'usb scan' to check the filesystem was detected"
+            exit 1
+          fi
+          if [ "$(sudo blockdev --getro "$DEV" 2>/dev/null)" = "1" ]; then
+            echo "Mounted $DEV at $MP (READ-ONLY — host must run 'usb attach <busid> --rw' for write access)"
+          else
+            echo "Mounted $DEV at $MP (read-write)"
+          fi
           ;;
         umount)
           DEV="$2"
@@ -352,7 +202,7 @@ in {
           sudo umount "$USB_DIR/$(basename "$DEV")"
           ;;
         *)
-          echo "Usage: usb {list|scan|mount /dev/vdbX|umount /dev/vdbX}"
+          usage
           ;;
       esac
     '')

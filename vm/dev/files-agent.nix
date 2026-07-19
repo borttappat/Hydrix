@@ -204,7 +204,13 @@ PYEOF
 
       RECEIVE_PREPARE)
         # Always receive into ~/shared/ — DECRYPT places files at the right path
-        # Start receive server in background, return READY immediately
+        # Kill any stale listener first — a previous attempt that never got its
+        # PUT would otherwise still hold port 8888, and this command would
+        # report READY regardless of whether the new listener actually bound.
+        if [ -f "$SHARED_DIR/.recv.pid" ]; then
+          kill "$(cat "$SHARED_DIR/.recv.pid")" 2>/dev/null || true
+          rm -f "$SHARED_DIR/.recv.pid"
+        fi
         ${receiveScript} "$SHARED_DIR" &
         RECV_PID=$!
         echo "$RECV_PID" > "$SHARED_DIR/.recv.pid"

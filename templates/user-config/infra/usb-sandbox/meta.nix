@@ -8,7 +8,8 @@
 {
   vsockCid   = 209;
   hasDisplay = false;
-  bridge     = "br-usb-sandbox";
+  filesAgent = true;  # opt into the shared files-transfer agent (vm/dev/files-agent.nix)
+  bridge    = "br-usb-sandbox";
   tapId     = "mv-usb-sandbox";
   tapMac    = "02:00:00:02:6d:01";  # CID 209 - 100 = 109 = 0x6d
   # No routerTap - usb-sandbox uses a built-in subnet, isolated from router

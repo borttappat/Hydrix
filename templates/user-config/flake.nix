@@ -288,7 +288,8 @@
       name  = "microvm-${m._infraName}";
       value = hydrix.lib.mkInfraVm {
         name    = m._infraName;
-        modules = [ (./infra + "/${m._infraName}/default.nix") ];
+        modules = [ (./infra + "/${m._infraName}/default.nix") ]
+          ++ nixpkgs.lib.optional (m.filesAgent or false) "${hydrix}/vm/dev/files-agent.nix";
       };
     }) (builtins.filter (m: !(m.builtinVm or false)) discoveredInfra));
 
