@@ -7,5 +7,8 @@
 {
   imports = [
     ./graphical
+    ./boot/grub-theme.nix
+    ./boot/plymouth.nix
+    ./dm/greetd.nix
   ];
 }

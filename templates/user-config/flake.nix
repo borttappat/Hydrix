@@ -150,6 +150,9 @@
             ./modules/waybar.nix       # Waybar layout and modules (user-customizable)
             ./modules/i3.nix           # i3 keybindings (user-customizable)
             ./modules/sway.nix         # sway keybindings (user-customizable)
+            ./modules/grub-theme.nix   # Hydrix-themed GRUB bootloader
+            ./modules/plymouth.nix     # Hydrix boot animation
+            ./modules/greetd.nix       # greetd login manager (tuigreet/regreet)
             vmThemeSyncModule          # VM theme sync (host-side)
             { hydrix.vmThemeSync.enable = true;
               # Registry's router/router-stable vmName defaults to the generic
