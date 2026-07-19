@@ -72,6 +72,33 @@ in {
     restartTriggers = [ (toString config.networking.nameservers) ];
   };
 
+  # The ordering above only guards the moment of activation. Tailscale's DNS
+  # manager snapshots its upstream resolvers once, whenever it (re)configures
+  # DNS, and never retries on its own - if that snapshot lands during any
+  # later network flap (not just a rebuild), it caches an empty upstream and
+  # SERVFAILs everything outside the tailnet until something restarts it.
+  # This watchdog checks real resolution and forces a fresh snapshot on failure.
+  systemd.timers.tailscaled-dns-watchdog = lib.mkIf cfg.services.tailscale.enable {
+    description = "Check tailscaled DNS forwarding and restart on failure";
+    wantedBy = [ "timers.target" ];
+    timerConfig = {
+      OnBootSec = "2min";
+      OnUnitActiveSec = "60s";
+    };
+  };
+
+  systemd.services.tailscaled-dns-watchdog = lib.mkIf cfg.services.tailscale.enable {
+    description = "Tailscale DNS forwarding watchdog";
+    serviceConfig.Type = "oneshot";
+    path = [ pkgs.getent ];
+    script = ''
+      if ! getent hosts google.com >/dev/null 2>&1; then
+        echo "DNS resolution failing, restarting tailscaled to recompute upstream"
+        systemctl restart tailscaled.service
+      fi
+    '';
+  };
+
   # Enable i2c-bus
   hardware.i2c.enable = lib.mkIf cfg.hardware.i2c.enable true;
 
