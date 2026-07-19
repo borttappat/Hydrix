@@ -333,6 +333,25 @@ in rec {
       {
         image.efiSupport = false;
       }
+      # hydrix.microvm.* option declarations (real schema, shared with
+      # microvm-profile-base.nix) so profiles/<name>/default.nix's
+      # lib.mkDefault/lib.mkForce-wrapped settings resolve correctly here too
+      # — a plain freeform stub would leak the raw override wrapper through
+      # instead of unwrapping it, breaking any mkIf that reads these values.
+      # None of it is actually acted on by the libvirt/disk-image build.
+      ../vm/microvm/infra/microvm-profile-options.nix
+      # microvm.*: the real microvm-nix option tree (e.g. profiles/pentest's
+      # microvm.qemu.extraArgs USB passthrough flags) — only meaningful when
+      # microvm.nixosModules.microvm (a live QEMU launch) is actually wired
+      # in. No profile currently wraps this in mkDefault/mkForce, so a plain
+      # ignored freeform stub is sufficient.
+      {
+        options.microvm = nixpkgs.lib.mkOption {
+          type = nixpkgs.lib.types.attrs;
+          default = {};
+          description = "Ignored by libvirt image builds — real microvm-nix settings.";
+        };
+      }
     ] ++ modules
     # Host settings applied after base profile, before user overrides
     ++ nixpkgs.lib.optional (hostConfig != {}) hostConfig
