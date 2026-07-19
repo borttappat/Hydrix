@@ -469,6 +469,11 @@ in lib.mkIf config.hydrix.hyprland.enable {
   environment.systemPackages = [ lockTimeout ];
   security.pam.services.hyprlock = {};
 
+  # Qt apps default to xcb unless told otherwise, which fails outright when
+  # no XWayland client has started an X server yet. Prefer the native
+  # wayland platform plugin, falling back to xcb only if unavailable.
+  environment.variables.QT_QPA_PLATFORM = "wayland;xcb";
+
   # Allow wheel users to suspend from Hyprland keybinds (exec runs outside logind session context).
   # suspend-multiple-sessions covers the common case where VMs are running as separate sessions.
   security.polkit.extraConfig = ''

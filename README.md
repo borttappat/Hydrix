@@ -245,7 +245,7 @@ On a VM workspace, pressing `Super+Return` launches the terminal in that VM. Und
 | VM forwarding | waypipe (vsock) |
 
 ```bash
-hyprland-session              # start Hyprland session from TTY
+hyprland-launch                # start Hyprland session from TTY
 hypr-ws-app alacritty        # launch app in VM on current workspace
 hypr-ws-app firefox
 ```

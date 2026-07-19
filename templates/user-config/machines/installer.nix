@@ -73,7 +73,7 @@
 
     # Window manager selection - all are off by default; enable exactly one here.
     # i3.enable also gates the X11/xpra stack in all VMs (waypipe used otherwise).
-    hyprland.enable = true;   # Wayland/Hyprland stack - start with: hyprland-session
+    hyprland.enable = true;   # Wayland/Hyprland stack - start with: hyprland-launch
     # sway.enable = true;     # Wayland/Sway stack     - start with: sway-session
     # i3.enable = true;       # X11/i3 stack           - start with: startx
 

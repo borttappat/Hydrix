@@ -165,7 +165,7 @@ in {
           // lib.optionalAttrs (!isVM) {
             suspend = "systemctl suspend";
             x       = "startx";
-            w       = "Hyprland";
+            w       = "hyprland-launch";
             rb      = "rebuild";
             machine = "vim ${config.hydrix.paths.configDir}/machines/${config.hydrix.hostname}.nix";
           };
@@ -282,7 +282,7 @@ in {
             # Start X session
             x = "startx";
             # Start Hyprland
-            w = "Hyprland";
+            w = "hyprland-launch";
           };
       };
     };

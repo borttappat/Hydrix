@@ -8,34 +8,21 @@
 # Wofi launcher lives in:
 #   modules/wm/hyprland/wofi.nix
 #
-# Use `hyprland-session` instead of `Hyprland` to start Hyprland — it cleans
-# up WAYLAND_DISPLAY from the systemd user environment on exit, allowing
-# picom to restart correctly when returning to i3/X11.
+# Use `hyprland-launch` to start Hyprland — it runs Hyprland's own
+# `start-hyprland` watchdog (crash-detect + restart supervision) with stdout/
+# stderr piped to the journal instead of the controlling TTY. Login managers
+# (greetd, SDDM) exec a raw binary via argv with no shell, so there's no way
+# to redirect output at the Exec= level — without this, Hyprland's startup
+# log (incl. its "Welcome to Hyprland!" banner) briefly flashes on the VT
+# before the compositor takes over the display.
 #
 { config, pkgs, lib, ... }:
 
 let
   cfg = config.hydrix.graphical;
 
-  hyprlandSession = pkgs.writeShellScriptBin "hyprland-session" ''
-    # Mask sway-polybar-hotplug.path for this session so polybar never auto-starts
-    # under Hyprland (including during nixos-rebuild switch daemon-reloads).
-    # --runtime means the mask lives only in /run — removed automatically on session end.
-    systemctl --user mask --runtime display-hotplug.path 2>/dev/null || true
-
-    Hyprland "$@"
-    EXIT=$?
-
-    # Remove Wayland env vars from the persistent systemd user environment.
-    # Without this, picom refuses to start (ConditionEnvironment=!WAYLAND_DISPLAY).
-    systemctl --user unset-environment WAYLAND_DISPLAY DISPLAY 2>/dev/null || true
-    # Restart picom so i3 gets compositing back immediately.
-    systemctl --user restart picom 2>/dev/null || true
-
-    # Unmask polybar hotplug so it works again if user switches back to Sway.
-    systemctl --user unmask --runtime display-hotplug.path 2>/dev/null || true
-
-    exit $EXIT
+  hyprlandLaunch = pkgs.writeShellScriptBin "hyprland-launch" ''
+    exec ${pkgs.systemd}/bin/systemd-cat -t hyprland start-hyprland -- "$@"
   '';
 
 in {
@@ -62,7 +49,7 @@ in {
     environment.pathsToLink = [ "/share/applications" "/share/xdg-desktop-portal" ];
 
     environment.systemPackages = with pkgs; [
-      hyprlandSession    # Use this instead of bare `Hyprland` — cleans up on exit
+      hyprlandLaunch     # Use this instead of bare start-hyprland — silences TTY log spam
       hyprlock           # Screen locker
       hyprpicker         # Color picker (Wayland-native)
       wl-clipboard       # wl-copy / wl-paste
