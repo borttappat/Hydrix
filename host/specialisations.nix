@@ -32,12 +32,13 @@ let
   # Deliberately impure (builtins.getEnv) - Nix store paths are timestamp-normalized
   # to 1970-01-01, so a real build date/time can only come from the environment.
   buildTag = builtins.getEnv "HYDRIX_BUILD_TAG";
-  buildTime = let t = builtins.getEnv "HYDRIX_BUILD_TIME"; in if t != "" then t else "unknown-time";
+  buildTime = builtins.getEnv "HYDRIX_BUILD_TIME";
+  timeSegment = lib.optionalString (buildTime != "") " - ${buildTime}";
   # system.nixos.label only allows [a-zA-Z0-9:_.-], so the tag is appended as-is
   # (the rebuild script validates it against that charset before export).
   labelTagSuffix = lib.optionalString (buildTag != "") "-${buildTag}";
   # boot.loader.grub.configurationName has no charset restriction.
-  grubTagSuffix = lib.optionalString (buildTag != "") " - ${buildTag}";
+  tagSegment = lib.optionalString (buildTag != "") " (${buildTag})";
 in {
   config = lib.mkIf (cfg.vmType == "host" && cfg.router.type != "none") {
 
@@ -66,7 +67,7 @@ in {
       # GRUB reads mtime of the specialisation dir inside the (timestamp-normalized)
       # Nix store for its date, which always shows 1970-01-01. Setting
       # configurationName replaces the entry text outright, sidestepping that.
-      boot.loader.grub.configurationName = lib.mkForce "administrative - ${buildTime}${grubTagSuffix}";
+      boot.loader.grub.configurationName = lib.mkForce "administrative${timeSegment}${tagSegment}";
 
       environment.etc."HYDRIX_MODE".text = lib.mkForce ''
         MODE=administrative
@@ -106,7 +107,7 @@ in {
 
     specialisation.fallback.configuration = {
       system.nixos.label = lib.mkForce "fallback${labelTagSuffix}";
-      boot.loader.grub.configurationName = lib.mkForce "fallback - ${buildTime}${grubTagSuffix}";
+      boot.loader.grub.configurationName = lib.mkForce "fallback${timeSegment}${tagSegment}";
 
       environment.etc."HYDRIX_MODE".text = lib.mkForce ''
         MODE=fallback
