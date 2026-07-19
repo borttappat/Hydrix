@@ -551,7 +551,11 @@ post_build() {
     local hm_service="home-manager-$USER.service"
     if systemctl list-units --type=service 2>/dev/null | grep -q "$hm_service"; then
         local waited=0
-        while systemctl is-active --quiet "$hm_service" 2>/dev/null; do
+        # RemainAfterExit=yes keeps ActiveState=active forever after this
+        # oneshot service finishes, so `systemctl is-active` never reports
+        # completion. Poll SubState instead: "running"/"start" while the
+        # activation script executes, "exited" once it is actually done.
+        while [[ "$(systemctl show -p SubState --value "$hm_service" 2>/dev/null)" != "exited" ]]; do
             if [[ $waited -eq 0 ]]; then
                 log "Waiting for home-manager..."
             fi
