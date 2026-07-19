@@ -198,6 +198,9 @@ in {
         # the menu is shown, and is incorrect here since Hydrix kernel/initrd
         # are on the unencrypted EFI partition.)
         extraEntries = lib.mkIf (diskoCfg.grubExtraEntries != "") diskoCfg.grubExtraEntries;
+        # Small EFI System Partitions (often ~1G) fill up with kernel/initrd
+        # copies once enough generations x specialisations accumulate.
+        configurationLimit = 10;
         # Each install gets its own EFI directory and UEFI boot entry so that
         # a second install cannot overwrite the first's EFI binary.  The ID is
         # set per-machine in machines/<serial>.nix via hydrix.disko.efiBootloaderId.
