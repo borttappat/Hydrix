@@ -23,7 +23,7 @@ let
       # 10s — sampling more often than that just burns CPU forking awk/ip every
       # single second for no one. Deltas are divided by SAMPLE_INTERVAL below
       # so the output stays true bytes/second regardless of this value.
-      SAMPLE_INTERVAL=5
+      SAMPLE_INTERVAL=10
 
       sample_dev() {
         awk -F: 'NR>2 {

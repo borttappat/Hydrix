@@ -26,7 +26,9 @@ let
     name = "wg-status-poller";
     runtimeInputs = [ pkgs.wireguard-tools pkgs.coreutils pkgs.curl pkgs.jq ];
     text = ''
-      SAMPLE_INTERVAL=5
+      # Matches the 10s cadence eww's wg_nodes defpoll actually reads at —
+      # sampling faster just burns CPU on wg/geo lookups for no one.
+      SAMPLE_INTERVAL=10
 
       relay_cache="/tmp/wg-mullvad-relays.json"
 
