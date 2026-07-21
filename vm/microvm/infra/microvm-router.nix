@@ -276,6 +276,11 @@ in {
 
       # Limit virtiofsd threads: default spawns nproc threads per share, wasteful when idle
       virtiofsd.threadPoolSize = 1;
+      # Use auto cache mode (matches microvm-profile-base.nix): /nix/store files
+      # have stable mtimes so they stay cached indefinitely once faulted in —
+      # without this, poller-forked binaries (iw, grep, wg, jq...) re-validate
+      # with the host virtiofsd on every exec instead of hitting guest cache.
+      virtiofsd.extraArgs = [ "--cache" "auto" ];
 
       # ===== Shared Filesystems =====
       shares = [
@@ -837,15 +842,22 @@ in {
 
     # ===== WiFi Sync Service =====
     # Vsock server: host polls for WiFi credentials to sync to ~/hydrix-config
-    systemd.services.wifi-sync = {
-      description = "WiFi credential sync server (vsock port 14506)";
+    #
+    # POLL/STATUS is hit every 10s from three independent host pollers (eww
+    # router_stats, waybar custom/wifi-sync on two bars). Two-service design
+    # (mirrors wg-status.nix/net-stats.nix): a background poller samples
+    # `iw dev` + NM connection files every SAMPLE_INTERVAL seconds and writes
+    # /tmp/wifi-sync-status.json; the vsock handler just cats that file for
+    # POLL/STATUS. ADD/REMOVE are rare interactive mutations, not polled, so
+    # they still run inline against nmcli.
+    systemd.services.wifi-sync-poller = {
+      description = "WiFi status background poller (writes /tmp/wifi-sync-status.json)";
       wantedBy = ["multi-user.target"];
       after = ["NetworkManager.service" "network.target"];
-
       serviceConfig = {
         Type = "simple";
         ExecStart = let
-          handler = pkgs.writeShellScript "wifi-sync-handler" ''
+          poller = pkgs.writeShellScript "wifi-sync-poller" ''
             GREP="${pkgs.gnugrep}/bin/grep"
             SED="${pkgs.gnused}/bin/sed"
 
@@ -859,7 +871,7 @@ in {
               printf '%s' "''${line#*=}"
             }
 
-            # Read active SSID from kernel via iw — no D-Bus, works from socat EXEC context.
+            # Read active SSID from kernel via iw — no D-Bus.
             get_current() {
               local line
               line=$(${pkgs.iw}/bin/iw dev 2>/dev/null | $GREP -m1 $'\tssid ') || true
@@ -889,12 +901,41 @@ in {
               printf ']'
             }
 
+            sample() {
+              printf '{"current":"%s","connections":' "$(json_esc "$(get_current)")"
+              get_connections
+              printf '}'
+            }
+
+            # Matches the 10s cadence eww/waybar's wifi-sync widgets actually
+            # read at — sampling faster just burns CPU forking iw/grep for no one.
+            SAMPLE_INTERVAL=10
+            while true; do
+              sample > /tmp/wifi-sync-status.json.tmp \
+                && mv /tmp/wifi-sync-status.json.tmp /tmp/wifi-sync-status.json
+              sleep "$SAMPLE_INTERVAL"
+            done
+          '';
+        in "${poller}";
+        Restart = "always";
+        RestartSec = 5;
+      };
+    };
+
+    systemd.services.wifi-sync = {
+      description = "WiFi credential sync server (vsock port 14506)";
+      wantedBy = ["multi-user.target"];
+      after = ["wifi-sync-poller.service"];
+
+      serviceConfig = {
+        Type = "simple";
+        ExecStart = let
+          handler = pkgs.writeShellScript "wifi-sync-handler" ''
             read -r cmd
             case "$cmd" in
               POLL|STATUS)
-                printf '{"current":"%s","connections":' "$(json_esc "$(get_current)")"
-                get_connections
-                printf '}'
+                cat /tmp/wifi-sync-status.json 2>/dev/null \
+                  || printf '{"current":"","connections":[]}'
                 ;;
               ADD)
                 read -r ssid
