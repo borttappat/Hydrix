@@ -20,7 +20,7 @@ let
     runtimeInputs = [ pkgs.gawk pkgs.iproute2 pkgs.coreutils ];
     text = ''
       # Only consumer is eww's net_stats defpoll, which reads this file every
-      # 5s — sampling more often than that just burns CPU forking awk/ip every
+      # 10s — sampling more often than that just burns CPU forking awk/ip every
       # single second for no one. Deltas are divided by SAMPLE_INTERVAL below
       # so the output stays true bytes/second regardless of this value.
       SAMPLE_INTERVAL=5

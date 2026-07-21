@@ -26,7 +26,7 @@ let
   # Returns JSON array for eww defpoll. Reads the running-VM list from
   # eww-mvm-status's cache file (VM_STATUS_CACHE) instead of independently
   # re-invoking `microvm status` — both widgets polled the same data every
-  # 5s, and `microvm status` is not cheap (full VM enumeration + per-VM CID
+  # 10s, and `microvm status` is not cheap (full VM enumeration + per-VM CID
   # lookup). Falls back to `microvm status` directly if the cache is missing
   # (e.g. before eww-mvm-status has run once). Deliberately does not depend
   # on /tmp/hydrix-metrics-* — those files are workspace-focus-driven (only
@@ -194,22 +194,22 @@ let
 
   ewwYuck = ''
     (defpoll wg_nodes
-      :interval "5s"
+      :interval "10s"
       :initial "[]"
       `eww-wg-status`)
 
     (defpoll vm_status
-      :interval "5s"
+      :interval "10s"
       :initial "{\"running\":[],\"stopped\":[]}"
       `eww-mvm-status`)
 
     (defpoll router_stats
-      :interval "5s"
+      :interval "10s"
       :initial "{\"current\":\"\",\"connections\":[],\"pending\":0}"
       `eww-router-stats`)
 
     (defpoll net_stats
-      :interval "5s"
+      :interval "10s"
       :initial "{\"wan\":{\"iface\":\"\",\"down\":\"\",\"up\":\"\"},\"vms\":[]}"
       `eww-net-stats`)
 
@@ -265,10 +265,14 @@ let
         :orientation "v"
         :space-evenly false
         :spacing 0
-        :visible {arraylength(wg_nodes) > 0}
         (label
           :class "en-title"
           :text "EXIT NODES"
+          :halign "start")
+        (label
+          :class "node-meta"
+          :visible {arraylength(wg_nodes) == 0}
+          :text "none active"
           :halign "start")
         (for node in wg_nodes
           (node-row :node node))))
