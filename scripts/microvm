@@ -849,54 +849,33 @@ cmd_status() {
         echo -e "${BOLD}MicroVM Status${NC}"
         echo ""
 
-        # If builder is running, the nix daemon is paused and flake eval will fail.
-        if is_running "$BUILDER_NAME"; then
-            echo -e "${YELLOW}Builder VM is active — nix daemon paused, VM list unavailable${NC}"
-            echo -e "${DIM}Stop the builder first: microvm stop microvm-builder${NC}"
+        if [[ ! -f "$VM_REGISTRY" ]]; then
+            echo "VM registry not found — run 'rebuild' first"
             return
         fi
 
-        local all_vms
-        all_vms=$(nix eval "$FLAKE_DIR#nixosConfigurations" --apply 'builtins.attrNames' --json 2>/dev/null | jq -r '.[]' | grep '^microvm-' || true)
-
-        if [[ -z "$all_vms" ]]; then
-            echo "No microVMs declared in flake"
-            return
-        fi
-
-        # Filter to VMs relevant to this host:
-        # - Keep all non-router VMs (profile and infra VMs)
-        # - Keep microvm-router-user (shared, not per-machine)
-        # - Keep this machine's router and stable router
-        # - Drop per-machine router VMs belonging to other machines
-        local declared=""
-        while IFS= read -r vm; do
-            if [[ "$vm" =~ ^microvm-router(-stable)?- ]] && \
-               [[ "$vm" != "microvm-router-user" ]] && \
-               [[ "$vm" != "$ROUTER_NAME" ]] && \
-               [[ "$vm" != "$STABLE_ROUTER_NAME" ]]; then
-                continue
-            fi
-            declared+="$vm"$'\n'
-        done <<< "$all_vms"
-        declared="${declared%$'\n'}"
+        # vm-registry.json is already host-scoped (written by 'rebuild' for
+        # this machine only), so no per-machine router filtering is needed
+        # here — unlike a flake eval, which would return every machine's
+        # nixosConfigurations.
+        local declared
+        declared=$(jq -r '.[] | "\(.vmName) \(.cid)"' "$VM_REGISTRY" 2>/dev/null | sort -u)
 
         if [[ -z "$declared" ]]; then
-            echo "No microVMs declared in flake"
+            echo "No microVMs declared"
             return
         fi
 
         printf "  ${DIM}%-30s %-10s %-6s${NC}\n" "NAME" "STATUS" "CID"
         echo "  ────────────────────────────────────────────────"
 
-        while IFS= read -r vm; do
-            local status cid
+        while IFS=' ' read -r vm cid; do
+            local status
             if is_running "$vm"; then
                 status="${GREEN}running${NC}"
             else
                 status="${DIM}stopped${NC}"
             fi
-            cid=$(get_cid "$vm" 2>/dev/null || echo "?")
             printf "  %-30s %-18s %-6s\n" "$vm" "$status" "$cid"
         done <<< "$declared"
     fi
@@ -904,24 +883,11 @@ cmd_status() {
 
 # List declared microVMs
 cmd_list() {
-    if is_running "$BUILDER_NAME"; then
-        echo -e "${YELLOW}Builder VM is active — nix daemon paused, VM list unavailable${NC}"
+    if [[ ! -f "$VM_REGISTRY" ]]; then
+        echo "VM registry not found — run 'rebuild' first"
         return
     fi
-    local all_vms
-    all_vms=$(nix eval "$FLAKE_DIR#nixosConfigurations" --apply 'builtins.attrNames' --json 2>/dev/null | \
-        jq -r '.[]' | grep '^microvm-' || true)
-    [[ -z "$all_vms" ]] && { echo "No microVMs declared"; return; }
-
-    while IFS= read -r vm; do
-        if [[ "$vm" =~ ^microvm-router(-stable)?- ]] && \
-           [[ "$vm" != "microvm-router-user" ]] && \
-           [[ "$vm" != "$ROUTER_NAME" ]] && \
-           [[ "$vm" != "$STABLE_ROUTER_NAME" ]]; then
-            continue
-        fi
-        echo "$vm"
-    done <<< "$all_vms"
+    jq -r '.[].vmName' "$VM_REGISTRY" 2>/dev/null | sort -u
 }
 
 # View logs
