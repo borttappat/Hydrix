@@ -785,41 +785,9 @@ EOF
     fi
   '';
 
-  vmCopy = pkgs.writeShellScriptBin "vm-copy" ''
-    set -euo pipefail
-    notify() { ${pkgs.libnotify}/bin/notify-send -u "''${2:-normal}" -t "''${3:-2000}" "vm-copy" "$1" 2>/dev/null || true; }
-
-    CONTENT=$(${pkgs.wl-clipboard}/bin/wl-paste --no-newline 2>/dev/null || true)
-    if [ -z "$CONTENT" ]; then
-      CONTENT=$(${pkgs.wl-clipboard}/bin/wl-paste --primary --no-newline 2>/dev/null || true)
-    fi
-
-    if [ -n "$CONTENT" ]; then
-      printf '%s' "$CONTENT" | ${pkgs.cliphist}/bin/cliphist store
-      notify "Stored in cliphist" low 1500
-    else
-      notify "Nothing to copy" normal 2000
-    fi
-  '';
-
-  vmPaste = pkgs.writeShellScriptBin "vm-paste" ''
-    set -euo pipefail
-    notify() { ${pkgs.libnotify}/bin/notify-send -u "''${2:-normal}" -t "''${3:-2000}" "vm-paste" "$1" 2>/dev/null || true; }
-
-    CONTENT=$(${pkgs.cliphist}/bin/cliphist list 2>/dev/null | head -1 \
-      | ${pkgs.cliphist}/bin/cliphist decode 2>/dev/null || true)
-    if [ -n "$CONTENT" ]; then
-      printf '%s' "$CONTENT" | ${pkgs.wl-clipboard}/bin/wl-copy
-      notify "Clipboard set — Ctrl+V to paste" low 2000
-    else
-      notify "Cliphist empty" normal 1500
-    fi
-  '';
-
 in lib.mkIf (config.hydrix.sway.enable || config.hydrix.hyprland.enable) {
   environment.systemPackages = [
     waypipeConnect waypipeConnectAll hyprWsApp swayWsApp vmSelect vmPushDisplayMode exitI3 exitWayland
-    vmCopy vmPaste
     pkgs.waypipe pkgs.socat pkgs.cliphist pkgs.wl-clipboard
   ];
 

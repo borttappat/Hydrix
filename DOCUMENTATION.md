@@ -2602,11 +2602,11 @@ The master password is stored in `/run/vault-session/token` inside the vault VM.
 
 *Protects against:* A host process, even as root, cannot read the master password from disk. It exists only in vault VM RAM after `UNLOCK`.
 
-**Boundary 4 \- Wayland clipboard isolation**
+**Boundary 4 \- Wayland clipboard isolation (hypr-clip-guard)**
 
-Credentials flow: vault VM → vsock → host → `wl-copy`. The Wayland compositor manages clipboard access \- only the focused window can read it. The 30-second auto-clear (`wl-copy --clear`) limits the exposure window.
+Credentials flow: vault VM → vsock → host → `wl-copy`. The `hypr-clip-guard` Hyprland plugin enforces clipboard isolation at the protocol level — it hooks all 6 Wayland clipboard delivery methods and blocks cross-VM transfers. Credentials written by `vault-pick` have source group "host" and are delivered only to the currently focused VM. The 30-second auto-clear (`wl-copy --clear`) limits the exposure window.
 
-*Protects against:* Unfocused VM windows cannot silently harvest copied passwords.
+*Protects against:* Unfocused and background VM windows cannot read clipboard contents at all — the plugin blocks delivery before data reaches the Wayland client. Cross-VM clipboard leaks are impossible regardless of focus timing or selection events.
 
 **Boundary 5 \- AES-256 at rest**
 
@@ -2695,7 +2695,7 @@ VM reboot / shutdown → tmpfs destroyed → starts locked
 | `vault-cli sync` | Commit + push via gitsync VM |
 | `vault-cli pull` | Pull from git via gitsync VM |
 | `vault-cli ping` | Check vault VM connectivity |
-| `vault-pick` | Interactive Wayland picker (`Mod+Shift+P`) |
+| `vault-pick` | Interactive Wayland picker (`Mod+P`) |
 
 #### Setup
 
@@ -2721,8 +2721,8 @@ hydrix.microvmHost.vms."microvm-vault" = { autostart = true; };
 **4. Add keybind** in your WM keybindings module (`modules/hyprland.nix`, `modules/sway.nix`, or `modules/i3.nix`):
 
 ```
-bind = $mod SHIFT, P, exec, vault-pick        # Hyprland
-"${mod}+Shift+p" = "exec vault-pick";         # Sway
+bind = $mod, P, exec, vault-pick              # Hyprland
+"${mod}+p" = "exec vault-pick";               # Sway
 ```
 
 **5. Rebuild and initialize the database:**
@@ -3874,6 +3874,91 @@ vm-push-display-mode stop       # stop all display services in all VMs
 waypipe-connect <vm>            # manually start/restart waypipe for one VM
 waypipe-connect-all             # connect waypipe for all running profile VMs
 ```
+
+### Clipboard Isolation (hypr-clip-guard)
+
+waypipe forwards the Wayland clipboard protocol between VMs and the host compositor. Without isolation, copying text in one VM makes it available to every other VM — a compromised VM could silently harvest passwords or sensitive data from unrelated sessions.
+
+The `hypr-clip-guard` Hyprland C++ plugin hooks all clipboard delivery methods inside the compositor to enforce per-VM isolation. It is loaded automatically via `hydrix-generated.conf` — no user configuration needed.
+
+#### Policy
+
+| Source → Destination | Result |
+|----------------------|--------|
+| VM → same VM | **Allowed** (intra-VM copy/paste) |
+| VM → host | **Allowed** (paste on host terminal) |
+| Host → focused VM | **Allowed** (paste into active VM) |
+| VM-A → VM-B | **Blocked** (cross-VM isolation) |
+
+"Host" means any window without a `[vm-name]` title prefix. VM group identity comes from the waypipe `--title-prefix "[vm-name] "` convention — the plugin extracts the group from the window title, falling back to PID/PPID lineage for windowless clients (e.g. `wl-paste` through waypipe).
+
+#### Architecture
+
+```
+VM app copies text
+  └─ waypipe server (VM) → vsock → waypipe client (host)
+       └─ Hyprland compositor receives selection
+            └─ hypr-clip-guard hooks fire on delivery
+                 ├─ sendSelectionToDevice (4 protocols)
+                 │    └─ checks source group vs recipient group
+                 └─ sendInitialSelections (2 protocols)
+                      └─ blocks cross-VM delivery on device creation
+                           │
+                      ┌────┴────┐
+                    ALLOW     BLOCK
+                  (same group   (cross-VM
+                   or host)      transfer)
+```
+
+#### Protocols Hooked (6 total)
+
+**`sendSelectionToDevice`** — called when clipboard data is delivered to a requesting client:
+
+| Protocol | Used by |
+|----------|---------|
+| `CWLDataDeviceProtocol` | All apps (Ctrl+C/V) |
+| `CPrimarySelectionProtocol` | Text selection (middle-click paste) |
+| `CDataDeviceWLRProtocol` | wl-paste, cliphist (wlr-data-control) |
+| `CExtDataDeviceProtocol` | Newer wl-paste (ext-data-control) |
+
+**`sendInitialSelections`** — called when a new data device is created, delivering the current clipboard immediately:
+
+| Protocol | Purpose |
+|----------|---------|
+| `CExtDataDevice::sendInitialSelections` | Blocks cross-VM delivery on ext device creation |
+| `CWLRDataDevice::sendInitialSelections` | Blocks cross-VM delivery on wlr device creation |
+
+Without `sendInitialSelections` hooks, new data devices (created when e.g. wl-paste starts) would receive the current clipboard directly, bypassing the `sendSelectionToDevice` checks entirely.
+
+#### Source Tracking
+
+The plugin tracks clipboard ownership using weak pointers (`WP<IDataSource>`) to the last selection and primary sources. When a client sets a new selection, the plugin records its VM group. On delivery, the stored source group is compared against the recipient's group.
+
+Keyboard focus seeding: when keyboard focus changes, the plugin updates the source group from the focused client's group. This ensures the host→focused-VM path works correctly (host copies land in the focused VM on paste).
+
+#### Debug Interface
+
+```bash
+hyprctl clipguard
+```
+
+Shows:
+- Per-hook statistics (allowed/blocked counts for all 6 hooks)
+- Client → group mapping with PID/PPID
+- Current source groups (selection + primary)
+- Timestamped event log (last 256 entries with HH:MM:SS.mmm)
+
+#### Vault Interaction
+
+`vault-pick` writes credentials to the host clipboard via `wl-copy` on the host. The source group is "host", so the credential is delivered only to the currently focused VM — background VMs cannot read it. The 30-second auto-clear (`wl-copy --clear`) limits the exposure window further.
+
+#### Key Files
+
+| File | Purpose |
+|------|---------|
+| `theming/wm/hyprland/plugins/hypr-clip-guard/src/main.cpp` | Plugin source (C++) |
+| `theming/wm/hyprland/plugins/hypr-clip-guard/CMakeLists.txt` | CMake build config |
+| `theming/wm/hyprland/hyprland.nix` | Builds plugin via `mkHyprlandPlugin`, loads in `hydrix-generated.conf` |
 
 ### Keybindings
 

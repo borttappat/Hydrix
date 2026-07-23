@@ -27,6 +27,15 @@
 
   gaps = config.hydrix.graphical.ui.gaps or 10;
 
+  clipGuardPlugin = pkgs.hyprlandPlugins.mkHyprlandPlugin {
+    pluginName = "hypr-clip-guard";
+    version = "0.1.0";
+    src = ./plugins/hypr-clip-guard;
+    nativeBuildInputs = [ pkgs.cmake ];
+    meta.description = "VM clipboard isolation for Hyprland";
+    meta.license = lib.licenses.mit;
+  };
+
   hyprMonitorLine = let
     out = cfg.scaling.hyprInternalOutput or "eDP-1";
     scale = cfg.scaling.hyprInternalScale or null;
@@ -90,6 +99,9 @@
     # ── Monitor ──────────────────────────────────────────────────────────────
     ${hyprMonitorLine}
     monitor = ,preferred,auto,1
+
+    # ── Clipboard isolation plugin ───────────────────────────────────────────
+    plugin = ${clipGuardPlugin}/lib/hypr-clip-guard.so
 
     # ── Framework services (VM integration) ──────────────────────────────────
     # Export HYPRLAND_INSTANCE_SIGNATURE to systemd so hypr-vm-borders-init

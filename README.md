@@ -39,7 +39,7 @@ Things being actively worked on or not yet verified. Checked off once resolved a
 - [ ] **Builder build progress**: `microvm builder build X` shows no output; should display progress like `microvm build X` does in administrative mode
 - [ ] **Setup script** (`setup-hydrix.sh`): not fully end-to-end tested
 - [ ] **Installer post-reboot, gh auth**: persistence is implemented but untested; git config is not yet declarative (requires manual `git config` after reboot)
-- [ ] **Clipboard isolation**: clipboard is currently forwarded automatically across VMs via waypipe; a VM can read clipboard contents without an explicit host paste action (observed: magnet URL copied in lurking auto-pastes into another VM). Clipboard should live only in host RAM and be delivered to a VM only on explicit paste, not on focus or selection events.
+- [x] **Clipboard isolation**: handled by the `hypr-clip-guard` Hyprland plugin — hooks all Wayland clipboard protocols to enforce per-VM isolation. See [DOCUMENTATION.md § Clipboard Isolation](#clipboard-isolation-hypr-clip-guard).
 
 **Polish / lower priority**
 
