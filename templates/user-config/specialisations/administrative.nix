@@ -22,14 +22,6 @@
 
   hydrix.services.tailscale.enable = true;
 
-  # Gaming — uncomment to enable Steam and 32-bit graphics support
-  # hardware.graphics = {
-  #   enable = true;
-  #   enable32Bit = true;
-  # };
-  # programs.steam.enable = true;
-  # hydrix.hyprland.xwayland.enable = true;
-
   environment.systemPackages = with pkgs; [
     # VPN (administrative-only — not needed in lockdown)
     mullvad-vpn
