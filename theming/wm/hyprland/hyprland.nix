@@ -358,6 +358,20 @@ GLSL
     [ -n "$ADDR" ] && ${pkgs.hyprland}/bin/hyprctl dispatch movewindowpixel "exact $CUR_X $CUR_Y,address:$ADDR" >/dev/null 2>&1 || true
   '';
 
+  clipTestHost = pkgs.writeShellScriptBin "clip-test-host" ''
+    echo "=== Host Clipboard Test Runner ==="
+    echo "Watching host compositor clipboard..."
+    echo ""
+    ${pkgs.wl-clipboard}/bin/wl-paste --watch ${pkgs.bash}/bin/bash -c '
+      TS=$(date +%H:%M:%S.%3N)
+      TITLE=$(${pkgs.hyprland}/bin/hyprctl activewindow -j 2>/dev/null \
+        | ${pkgs.jq}/bin/jq -r ".title // \"?\"" | head -c 60)
+      CONTENT=$(${pkgs.wl-clipboard}/bin/wl-paste --no-newline 2>/dev/null | head -c 200)
+      LEN=''${#CONTENT}
+      echo "[$TS] focused=\"$TITLE\" ''${LEN}B content=\"''${CONTENT:0:80}\"..."
+    '
+  '';
+
   hyprFocusDaemon = pkgs.writeShellScriptBin "hypr-focus-daemon" ''
     REGISTRY=/etc/hydrix/vm-registry.json
     MARKER="$HOME/.cache/hydrix/focus-override-active"
@@ -452,8 +466,11 @@ in
       hyprVmBorders
       hyprFloatTerminal
       hyprFocusDaemon
+      clipTestHost
       pkgs.hypridle
       pkgs.swaybg
+      pkgs.wl-clipboard
+      pkgs.cliphist
     ];
 
     home-manager.users.${username} = {

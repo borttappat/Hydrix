@@ -256,8 +256,10 @@ EOF
     bind = $mod SHIFT, M, exec, vm-select
     bind = $mod,       Z, exec, zathura
 
-    # Vault
-    bind = $mod SHIFT, P, exec, vault-pick
+    # Clipboard isolation: explicit cross-VM transfer
+    bind = $mod,       P, exec, vm-copy
+    bind = $mod SHIFT, P, exec, vm-paste
+    bind = $mod CTRL,  P, exec, vault-pick
 
     # Brightness / Vibrancy
     bind = $mod,       F7, exec, hydrix-brightness-hypr -

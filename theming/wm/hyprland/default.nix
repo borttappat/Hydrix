@@ -31,7 +31,7 @@ in {
   config = lib.mkIf (cfg.enable && config.hydrix.hyprland.enable) {
     programs.hyprland = {
       enable = true;
-      xwayland.enable = lib.mkDefault false;  # opt-in: set hydrix.hyprland.xwayland.enable = true in your machine config
+      xwayland.enable = lib.mkDefault config.hydrix.hyprland.xwayland.enable;
     };
 
     # XDG portal for screen sharing, file pickers, etc.

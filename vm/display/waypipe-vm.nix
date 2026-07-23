@@ -109,7 +109,33 @@ let
 in {
   boot.kernelModules = [ "vmw_vsock_virtio_transport" ];
 
-  environment.systemPackages = [ pkgs.waypipe pkgs.socat ];
+  environment.systemPackages = [
+    pkgs.waypipe pkgs.socat pkgs.wl-clipboard
+    (pkgs.writeShellScriptBin "clip-test" ''
+      echo "=== VM Clipboard Test Runner ==="
+      echo "Watching clipboard events on ''${WAYLAND_DISPLAY:-waypipe-0}..."
+      echo "Press Ctrl+C to stop."
+      echo ""
+      export WAYLAND_DISPLAY="''${WAYLAND_DISPLAY:-waypipe-0}"
+      ${pkgs.wl-clipboard}/bin/wl-paste --watch ${pkgs.bash}/bin/bash -c '
+        TS=$(date +%H:%M:%S.%3N)
+        TYPES=$(${pkgs.wl-clipboard}/bin/wl-paste --list-types 2>/dev/null | tr "\n" ", ")
+        CONTENT=$(${pkgs.wl-clipboard}/bin/wl-paste --no-newline 2>/dev/null | head -c 200)
+        LEN=''${#CONTENT}
+        echo "[$TS] SELECTION: ''${LEN}B types=[$TYPES] content=\"''${CONTENT:0:80}\"..."
+      ' &
+      SEL_PID=$!
+      ${pkgs.wl-clipboard}/bin/wl-paste --primary --watch ${pkgs.bash}/bin/bash -c '
+        TS=$(date +%H:%M:%S.%3N)
+        CONTENT=$(${pkgs.wl-clipboard}/bin/wl-paste --primary --no-newline 2>/dev/null | head -c 200)
+        LEN=''${#CONTENT}
+        echo "[$TS] PRIMARY: ''${LEN}B content=\"''${CONTENT:0:80}\"..."
+      ' &
+      PRI_PID=$!
+      trap "kill $SEL_PID $PRI_PID 2>/dev/null; echo 'Stopped.'; exit 0" INT TERM
+      wait
+    '')
+  ];
 
   # XDG desktop portal — resolves file picker D-Bus calls immediately.
   # Without this, apps timeout (5-25s) waiting for a portal before falling back.
