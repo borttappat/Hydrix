@@ -446,8 +446,8 @@ let
       Full)     lbl="BAT"; class="full" ;;
       *)
         lbl="BAT"
-        if   [ "$cap" -le 5 ];  then class="critical"
-        elif [ "$cap" -le 15 ]; then class="warning"
+        if   [ "$cap" -lt 10 ]; then class="critical"
+        elif [ "$cap" -lt 20 ]; then class="warning"
         else class=""
         fi ;;
     esac
@@ -496,8 +496,8 @@ let
       *)
         lbl="BAT"
         if   [ "$cap" -ge 80 ]; then class="full"
-        elif [ "$cap" -le 5 ];  then class="critical"
-        elif [ "$cap" -le 15 ]; then class="warning"
+        elif [ "$cap" -lt 10 ]; then class="critical"
+        elif [ "$cap" -lt 20 ]; then class="warning"
         else class=""
         fi ;;
     esac
@@ -817,7 +817,7 @@ let
 
     /* Battery fills on low/charging states — base pill styling comes from the shared rule above */
     #custom-battery.warning  { color: @color8; }
-    #custom-battery.critical { color: @alert;  }
+    #custom-battery.critical { background: @alert; color: @background; }
     #custom-battery.charging { color: @accent; }
     #custom-battery.full     { color: @accent; }
 
