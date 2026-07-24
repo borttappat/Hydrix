@@ -189,6 +189,8 @@
     printf '@define-color color1     %s;\n' "$color1" >> "$BAR_OUT"
     printf '@define-color color2     %s;\n' "$color2" >> "$BAR_OUT"
     printf '@define-color color4     %s;\n' "$color4" >> "$BAR_OUT"
+    printf '@define-color vram       %s;\n' "$color1" >> "$BAR_OUT"
+    printf '@define-color vcpu       %s;\n' "$color1" >> "$BAR_OUT"
 
     LOCK_OUT="$HOME/.config/hypr/colors-lock.conf"
     mkdir -p "$(dirname "$LOCK_OUT")"

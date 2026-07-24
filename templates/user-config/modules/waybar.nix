@@ -42,6 +42,10 @@ let
   #   inner visual     = 2 * gaps_in ≈ gaps (exact for even gaps values)
   pillHMargin = 2;
   pillVMargin = gaps;
+  # Pill internal padding — vertical/horizontal found to look correct via live-editing
+  # ~/.config/waybar/style.css, then baked back in here as the single source of truth.
+  pillPaddingV = 3;
+  pillPaddingH = 10;
   # Island modules float with pillVMargin on each side — bar height scales accordingly
   barHeight   = (config.hydrix.graphical.ui.barHeight or 23) + 2 * pillVMargin;
   homeDir    = "/home/${username}";
@@ -195,14 +199,16 @@ let
     ${_vmCacheHeader}
     cpu=$(grep '^cpu=' "$CACHE" | awk -F= '{print $2}')
     [ -z "$cpu" ] && exit 0
-    echo "CPU $cpu%"
+    if [ "$cpu" -ge 50 ]; then class="high"; else class=""; fi
+    ${pkgs.jq}/bin/jq -cn --arg t "VCPU $cpu%" --arg c "$class" '{"text":$t,"class":$c}'
   '';
 
   vmRamScript = pkgs.writeShellScript "waybar-vm-ram" ''
     ${_vmCacheHeader}
     ram=$(grep '^ram=' "$CACHE" | awk -F= '{print $2}')
     [ -z "$ram" ] && exit 0
-    echo "RAM ''${ram}MB"
+    if [ "$ram" -ge 50 ]; then class="high"; else class=""; fi
+    ${pkgs.jq}/bin/jq -cn --arg t "VRAM ''${ram}MB" --arg c "$class" '{"text":$t,"class":$c}'
   '';
 
   vmFsScript = pkgs.writeShellScript "waybar-vm-fs" ''
@@ -380,19 +386,13 @@ let
 
   hostCpuScript = pkgs.writeShellScript "waybar-host-cpu" ''
     cpu=$(${pkgs.procps}/bin/vmstat 1 2 | awk 'END{printf "%.0f", 100-$15}')
-    if   [ "$cpu" -ge 75 ]; then class="high"
-    elif [ "$cpu" -ge 50 ]; then class="medium"
-    else class=""
-    fi
+    if [ "$cpu" -ge 50 ]; then class="high"; else class=""; fi
     ${pkgs.jq}/bin/jq -cn --arg t "CPU $cpu%" --arg c "$class" '{"text":$t,"class":$c}'
   '';
 
   hostMemScript = pkgs.writeShellScript "waybar-host-mem" ''
     pct=$(awk '/^MemTotal/{t=$2} /^MemAvailable/{a=$2} END{printf "%.0f", (t-a)*100/t}' /proc/meminfo)
-    if   [ "$pct" -ge 75 ]; then class="high"
-    elif [ "$pct" -ge 50 ]; then class="medium"
-    else class=""
-    fi
+    if [ "$pct" -ge 50 ]; then class="high"; else class=""; fi
     ${pkgs.jq}/bin/jq -cn --arg t "RAM $pct%" --arg c "$class" '{"text":$t,"class":$c}'
   '';
 
@@ -507,7 +507,7 @@ let
   # ── Bar layouts ────────────────────────────────────────────────────────────
 
   topBar = {
-    "reload_style_on_change" = false;
+    "reload_style_on_change" = true;
     layer    = "top";
     position = "top";
     height   = barHeight;
@@ -573,7 +573,7 @@ let
   };
 
   bottomBar = {
-    "reload_style_on_change" = false;
+    "reload_style_on_change" = true;
     layer    = "top";
     position = "bottom";
     height   = barHeight;
@@ -616,8 +616,8 @@ let
     "custom/cproc"         = { exec = "${cprocDynamicScript}"; interval = 3;  format = "{}"; tooltip = false; escape = false; };
     "custom/rproc-bottom"  = { exec = "${rprocBottomScript}";  interval = lib.toInt hostPollInterval; format = "{}"; tooltip = false; escape = false; };
     "custom/cproc-bottom"  = { exec = "${cprocBottomScript}";  interval = lib.toInt hostPollInterval; format = "{}"; tooltip = false; escape = false; };
-    "custom/vm-cpu"        = { exec = "${vmCpuScript}";        interval = lib.toInt hostPollInterval; format = "{}"; tooltip = false; escape = false; };
-    "custom/vm-ram"        = { exec = "${vmRamScript}";        interval = lib.toInt hostPollInterval; format = "{}"; tooltip = false; escape = false; };
+    "custom/vm-cpu"        = { exec = "${vmCpuScript}";        interval = lib.toInt hostPollInterval; format = "{}"; tooltip = false; escape = false; "return-type" = "json"; };
+    "custom/vm-ram"        = { exec = "${vmRamScript}";        interval = lib.toInt hostPollInterval; format = "{}"; tooltip = false; escape = false; "return-type" = "json"; };
     "custom/vm-fs"         = { exec = "${vmFsScript}";         interval = lib.toInt hostPollInterval; format = "{}"; tooltip = false; escape = false; };
     "custom/vm-sync-dev"   = { exec = "${vmSyncDevScript}";    interval = lib.toInt hostPollInterval; format = "{}"; tooltip = false; escape = false; };
     "custom/vm-sync-stg"   = { exec = "${vmSyncStgScript}";    interval = lib.toInt hostPollInterval; format = "{}"; tooltip = false; escape = false; };
@@ -627,7 +627,7 @@ let
   };
 
   monoBar = {
-    "reload_style_on_change" = false;
+    "reload_style_on_change" = true;
     layer    = "top";
     position = "top";
     height   = barHeight;
@@ -703,8 +703,8 @@ let
     "custom/power-profile" = { exec = "${powerProfileScript}"; interval = 10; format = "{}"; tooltip = false; escape = false; };
     "custom/battery"       = { exec = "${monoBatteryScript}";  interval = 30; format = "{}"; tooltip = false; escape = false; "return-type" = "json"; };
     "custom/battery-time"  = { exec = "${batteryTimeScript}";  interval = 60; format = "{}"; tooltip = false; escape = false; };
-    "custom/vm-cpu"      = { exec = "${vmCpuScript}";     interval = lib.toInt hostPollInterval; format = "{}"; tooltip = false; escape = false; };
-    "custom/vm-ram"      = { exec = "${vmRamScript}";     interval = lib.toInt hostPollInterval; format = "{}"; tooltip = false; escape = false; };
+    "custom/vm-cpu"      = { exec = "${vmCpuScript}";     interval = lib.toInt hostPollInterval; format = "{}"; tooltip = false; escape = false; "return-type" = "json"; };
+    "custom/vm-ram"      = { exec = "${vmRamScript}";     interval = lib.toInt hostPollInterval; format = "{}"; tooltip = false; escape = false; "return-type" = "json"; };
     "custom/vm-fs"       = { exec = "${monoVmFsScript}";  interval = lib.toInt hostPollInterval; format = "{}"; tooltip = false; escape = false; };
     "custom/vm-sync-dev" = { exec = "${vmSyncDevScript}"; interval = lib.toInt hostPollInterval; format = "{}"; tooltip = false; escape = false; };
     "custom/vm-sync-stg" = { exec = "${vmSyncStgScript}"; interval = lib.toInt hostPollInterval; format = "{}"; tooltip = false; escape = false; };
@@ -725,6 +725,8 @@ let
     @define-color alert      #bf616a;
     @define-color color6     #5e81ac;
     @define-color color8     #4c566a;
+    @define-color vram       #bf616a;
+    @define-color vcpu       #bf616a;
   '';
 
   styleCSS = ''
@@ -770,7 +772,7 @@ let
      *  Color semantics:                                                   *
      *   @accent     — active time state: clock (anchor), pomo (timer)    *
      *   @alert      — needs action: focus mode active, staged packages    *
-     *   @color8     — VM-sourced data: dim border distinguishes from host *
+     *   @color6     — VM-sourced data: text color distinguishes from host *
      *   @foreground — all neutral informational modules (default below)   *
      * ──────────────────────────────────────────────────────────────────── */
     #workspaces,
@@ -791,6 +793,7 @@ let
     #custom-vms,
     #custom-bluetooth,
     #custom-power-profile,
+    #custom-battery,
     #custom-battery-time,
     #custom-rproc,
     #custom-cproc,
@@ -806,48 +809,41 @@ let
     #custom-wifi-sync {
       background: @background;
       color: @foreground;
-      border: ${pillBorder}px solid alpha(@foreground, 0.25);
+      border: none;
       border-radius: ${pillRadius}px;
-      padding: 2px 14px;
+      padding: ${toString pillPaddingV}px ${toString pillPaddingH}px;
       margin: ${toString pillVMargin}px ${toString pillHMargin}px;
     }
 
-    /* Battery — standard pill; fills on low/charging states */
-    #custom-battery {
-      background: @background;
-      color: @foreground;
-      border: ${pillBorder}px solid alpha(@foreground, 0.25);
-      border-radius: ${pillRadius}px;
-      padding: 2px 14px;
-      margin: ${toString pillVMargin}px ${toString pillHMargin}px;
-    }
-
-    #custom-battery.warning  { background: @color8; color: @background; border-color: @color8; }
-    #custom-battery.critical { background: @alert;  color: @background; border-color: @alert;  }
-    #custom-battery.charging { background: @accent; color: @background; border-color: @accent; }
-    #custom-battery.full     { background: @accent; color: @background; border-color: @accent; }
+    /* Battery fills on low/charging states — base pill styling comes from the shared rule above */
+    #custom-battery.warning  { color: @color8; }
+    #custom-battery.critical { color: @alert;  }
+    #custom-battery.charging { color: @accent; }
+    #custom-battery.full     { color: @accent; }
 
     /* @accent — clock (time anchor) and pomo (active timer) */
-    #custom-clock { color: @accent; border-color: alpha(@accent, 0.45); }
-    #custom-pomo  { color: @accent; border-color: alpha(@accent, 0.45); }
+    #custom-clock { color: @accent; }
+    #custom-pomo  { color: @accent; }
 
     /* @alert — requires attention or action */
-    #custom-focus { background: @accent; color: @background; border-color: @accent; }
-    #custom-sync  { color: @alert; border-color: alpha(@alert, 0.45); }
+    #custom-focus { color: @accent; }
+    #custom-sync  { color: @alert; }
 
-    /* GIT active — DATE colors when ≥10 uncommitted */
-    #custom-git.active { color: @accent; border-color: alpha(@accent, 0.45); }
+    /* GIT active — accent when ≥10 uncommitted */
+    #custom-git.active { color: @accent; }
 
-    /* Bluetooth connected — accent fill to draw attention */
-    #custom-bluetooth.connected { color: @accent; border-color: alpha(@accent, 0.45); }
+    /* Bluetooth connected — accent to draw attention */
+    #custom-bluetooth.connected { color: @accent; }
 
-    /* CPU / RAM — foreground at normal, accent at ≥50%, alert fill at ≥75% */
-    #custom-cpu.medium,
-    #custom-memory.medium { color: @accent; border-color: alpha(@accent, 0.45); }
-    #custom-cpu.high,
-    #custom-memory.high   { background: @alert; color: @background; border-color: @alert; }
+    /* CPU / RAM — full color fill at ≥50% (host and VM alike) */
+    #custom-cpu.high    { background: @vcpu; color: @background; }
+    #custom-memory.high { background: @vram; color: @background; }
 
-    /* @color6 border — VM-sourced metrics (distinguishes VM data from host) */
+    /* VM CPU / RAM — inverted: colored text only, no fill (distinguishes VM readout from host) */
+    #custom-vm-cpu.high { color: @vcpu; }
+    #custom-vm-ram.high { color: @vram; }
+
+    /* @color6 text — VM-sourced metrics (distinguishes VM data from host) */
     #custom-rproc-bottom,
     #custom-cproc-bottom,
     #custom-vm-cpu,
@@ -857,7 +853,7 @@ let
     #custom-vm-sync-stg,
     #custom-vm-tun,
     #custom-vm-up,
-    #custom-wifi-sync { border-color: alpha(@color6, 0.6); }
+    #custom-wifi-sync { color: @color6; }
 
     /* Hover: invert any pill */
     #custom-clock:hover,
@@ -910,7 +906,7 @@ let
       border-right: 1px solid alpha(@foreground, 0.2);
     }
 
-    #workspaces button.active  { background: @accent; color: @background; border-color: @accent; }
+    #workspaces button.active  { color: @accent; }
     #workspaces button.empty   { color: alpha(@foreground, 0.35); }
     #workspaces button:hover   { background: alpha(@foreground, 0.9); color: @background; transition: 0.3s; }
 
