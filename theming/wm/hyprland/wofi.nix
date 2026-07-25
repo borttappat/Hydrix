@@ -213,6 +213,50 @@ EOF
         echo "--show-icons --width=${wofiWidth} --height=${wofiHeight} --define=font=${fontFamily} ${wofiSize} --define=icon_theme=Papirus"
     }
 
+    # ── Encrypted Volume Unlock ────────────────────────────────────────────
+    # Mirrors the LUKS unlock in scripts/microvm cmd_start, but captures the
+    # passphrase via wofi's own --password dmenu mode (same pattern as
+    # vault-pick.nix) instead of requiring a terminal. sudo is passwordless
+    # for the interactive host user (security.sudo.wheelNeedsPassword = false),
+    # so only the LUKS passphrase itself needs to be collected here.
+
+    unlock_encrypted_volume() {
+        local vm_name="$1"
+        local luks_path="/var/lib/microvms/''${vm_name}/home.luks"
+        local mapper_name="vm-''${vm_name}-home"
+
+        [[ -f "$luks_path" ]] || return 0
+        [[ -b "/dev/mapper/''${mapper_name}" ]] && return 0
+
+        local theme_file password
+        theme_file=$(${pkgs.coreutils}/bin/mktemp /tmp/wofi-luks-XXXXXX.css)
+        build_theme > "$theme_file"
+
+        password=$(echo | ${pkgs.wofi}/bin/wofi --show dmenu \
+            --style="$theme_file" \
+            $(wofi_args) \
+            --password \
+            --prompt="Unlock ''${vm_name}:" \
+            --no-search \
+            --lines=0 \
+            --hide-scroll \
+            2>/dev/null) || true
+
+        ${pkgs.coreutils}/bin/rm -f "$theme_file"
+
+        if [[ -z "$password" ]]; then
+            ${pkgs.libnotify}/bin/notify-send -t 3000 "MicroVM" "Unlock cancelled for ''${vm_name}"
+            return 1
+        fi
+
+        if ! printf '%s' "$password" | sudo ${pkgs.cryptsetup}/bin/cryptsetup luksOpen --key-file=- "$luks_path" "$mapper_name"; then
+            ${pkgs.libnotify}/bin/notify-send -t 3000 -u critical "MicroVM" "Failed to unlock ''${vm_name} — wrong passphrase?"
+            return 1
+        fi
+
+        return 0
+    }
+
     # ── VM Start Prompt ────────────────────────────────────────────────────
 
     show_vm_prompt() {
@@ -264,6 +308,8 @@ EOF
         ${pkgs.coreutils}/bin/rm -f "$theme_file"
 
         [[ -z "$selection" || "$selection" == "cancel" ]] && return
+
+        unlock_encrypted_volume "$selection" || return
 
         ${pkgs.libnotify}/bin/notify-send -t 2000 "MicroVM" "Starting ''${selection}..."
         "$MICROVM_SCRIPT" start "$selection" &

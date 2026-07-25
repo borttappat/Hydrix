@@ -53,16 +53,31 @@
               output=$("$path/bin/switch-to-configuration" switch 2>&1)
               exit_code=$?
 
-              if [[ $exit_code -eq 0 ]]; then
-                echo "OK: switched to $path"
-              elif [[ $exit_code -eq 1 ]]; then
-                echo "ERROR: switch failed"
-                echo "$output"
-              else
-                # Partial success: switch ran but some units failed
-                echo "OK: switched to $path (some units failed, exit $exit_code)"
-                echo "$output"
-              fi
+              # switch-to-configuration exit codes (see nixos/modules/system/
+              # activation/switch-to-configuration.pl): 0 = full success,
+              # 4 = activation ran but some units failed to restart/reload/start
+              # (genuine partial success), 100 = new init is incompatible with
+              # the running one — activation did NOT take effect until reboot.
+              # Anything else (2 = activate/daemon-reexec failed, 3 = daemon-
+              # reload failed, or unrecognized) is a hard failure and must not
+              # be reported as OK.
+              case "$exit_code" in
+                0)
+                  echo "OK: switched to $path"
+                  ;;
+                4)
+                  echo "OK: switched to $path (some units failed, exit 4)"
+                  echo "$output"
+                  ;;
+                100)
+                  echo "ERROR: switch requires reboot (incompatible init interface) — configuration NOT active"
+                  echo "$output"
+                  ;;
+                *)
+                  echo "ERROR: switch failed (exit $exit_code)"
+                  echo "$output"
+                  ;;
+              esac
               ;;
 
             TEST)

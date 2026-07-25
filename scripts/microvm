@@ -1309,7 +1309,12 @@ cmd_switch() {
     log "Registering store paths for VM..."
     local reg_start
     reg_start=$(timer_start)
-    nix-store -qR "$path" | xargs nix-store --dump-db | sudo tee "$reg_file" > /dev/null 2>&1
+    local reg_output
+    if ! reg_output=$(nix-store -qR "$path" | xargs nix-store --dump-db | sudo tee "$reg_file" 2>&1 >/dev/null); then
+        log_error "Failed to register store paths for VM — home-manager activation may fail during switch"
+        [[ -n "$reg_output" ]] && echo -e "${DIM}${reg_output}${NC}"
+        return 1
+    fi
     local reg_time
     reg_time=$(timer_end "$reg_start")
     log_time "Registration dump in ${BOLD}${reg_time}s${NC}"
