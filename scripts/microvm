@@ -926,13 +926,11 @@ cmd_console() {
         return 1
     fi
 
-    if command -v screen &>/dev/null; then
-        log "Attaching to ${BOLD}${vm_name}${NC} console (Ctrl+a d to detach)..."
-        sudo screen -t "${vm_name}" "${console_sock}"
-    else
-        log "Attaching to ${BOLD}${vm_name}${NC} console (Ctrl+] to detach)..."
-        TERM=linux sudo socat -,rawer,escape=0x1d "UNIX-CONNECT:${console_sock}"
-    fi
+    # screen can't attach to console.sock directly - it's a UNIX socket, not
+    # a character device, so screen's serial-line detection never fires and
+    # it tries (and fails) to exec the socket path as a command instead.
+    log "Attaching to ${BOLD}${vm_name}${NC} console (Ctrl+] to detach)..."
+    TERM=linux sudo socat -,rawer,escape=0x1d "UNIX-CONNECT:${console_sock}"
 }
 
 # Builder: execute build command

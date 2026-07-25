@@ -43,7 +43,7 @@ Things being actively worked on or not yet verified. Checked off once resolved a
 
 **Polish / lower priority**
 
-- [ ] **Socat terminal output**: improved but not verified clean; may need further work
+- [ ] **Socat terminal output**: raw-mode attach/detach (`microvm console <name>`) verified working. Removed the `screen` fallback: it was broken since `console.sock` is a UNIX socket rather than a character device, so screen tried to exec the socket path as a command instead of connecting to it. Remaining known limitation: the console renders in a small, fixed geometry, inherent to qemu's serial-over-socket transport having no window-size negotiation with the guest, not fixable via socat or screen alone.
 - [ ] **Phase out xpra**: waypipe is fully working and the primary stack; xpra still supported but should be deprecated
 - [x] **Live-switch edge cases** (`microvm update`): fixed two silent-failure paths: the host-side nix-store DB registration step now surfaces errors instead of swallowing them, and `vm-switch` no longer mislabels hard failures (e.g. exit 100, incompatible init requiring reboot) as "OK, some units failed". Other edge cases may still surface; report if found.
 
