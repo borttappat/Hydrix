@@ -76,6 +76,7 @@
     hyprland.enable = true;   # Wayland/Hyprland stack - start with: hyprland-launch
     # sway.enable = true;     # Wayland/Sway stack     - start with: sway-session
     # i3.enable = true;       # X11/i3 stack           - start with: startx
+    # hyprland.hideBorderOnSingleWindow = true;  # DEFAULT: false - hide border when a workspace has one tiled window
 
     # ── VM focus border colors ────────────────────────────────────────────
     # Controls how the active window border color changes when you switch to a VM workspace.

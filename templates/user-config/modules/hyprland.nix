@@ -397,6 +397,11 @@ EOF
     windowrule = no_anim 1,             match:class ^(wofi)$
     layerrule = no_anim 1, match:namespace ^(wofi)$
 
+    ${lib.optionalString config.hydrix.hyprland.hideBorderOnSingleWindow ''
+      # Hide the border when a workspace has exactly one tiled window.
+      windowrule = border_size 0, match:float 0, match:workspace w[tv1]
+    ''}
+
     # VM windows forwarded via waypipe — titles start with [vm-name].
     # Blur and alpha compositing are recomputed on every frame during scrolling;
     # disabling them removes GPU overhead that causes scroll jank.

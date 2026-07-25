@@ -1216,6 +1216,16 @@ in {
         brightness, special function keys).
       '';
     };
+
+    hideBorderOnSingleWindow = lib.mkOption {
+      type = lib.types.bool;
+      default = false;
+      description = ''
+        Hide the window border when a workspace has exactly one tiled window.
+        Border returns automatically once a second window opens. Off by default
+        to keep the border always visible; enable per-machine to taste.
+      '';
+    };
   };
 
   options.hydrix.sway = {
