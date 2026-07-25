@@ -1,9 +1,9 @@
 # waypipe host-side module
 #
 # Provides:
-#   waypipe-connect   — connect to a VM's waypipe server (run once per VM)
-#   hypr-ws-app       — workspace-aware app launcher (replaces ws-app for Hyprland)
-#   vm-push-display-mode — detect WM and push xpra/waypipe mode to VMs
+#   waypipe-connect   - connect to a VM's waypipe server (run once per VM)
+#   hypr-ws-app       - workspace-aware app launcher (replaces ws-app for Hyprland)
+#   vm-push-display-mode - detect WM and push xpra/waypipe mode to VMs
 #
 # Usage:
 #   waypipe-connect microvm-browsing     # start forwarding (keep running)
@@ -13,7 +13,7 @@
 # Architecture:
 #   VM:   waypipe --vsock --socket s14507 server  (listens on vsock:14507)
 #   HOST: waypipe --vsock --socket CID:14507 client  (connects host→VM, forwards to Hyprland)
-#   No socat needed — waypipe speaks vsock natively.
+#   No socat needed - waypipe speaks vsock natively.
 #
 { config, pkgs, lib, ... }:
 
@@ -55,7 +55,7 @@ let
     fi
 
     if [[ -z "$CID" ]]; then
-      echo "Cannot resolve CID for $VM — is it in ${VM_REGISTRY}?" >&2
+      echo "Cannot resolve CID for $VM - is it in ${VM_REGISTRY}?" >&2
       exit 1
     fi
 
@@ -63,7 +63,7 @@ let
     PORT=$((14600 + CID - 100))
 
     # Mutual exclusion: kill any other waypipe-connect for this VM.
-    # Multiple instances fight via pkill — each kills the other's waypipe.
+    # Multiple instances fight via pkill - each kills the other's waypipe.
     OTHER=$(pgrep -f "waypipe-connect ''${VM}$" 2>/dev/null \
       | grep -v "^$$\$" || true)
     if [[ -n "$OTHER" ]]; then
@@ -87,7 +87,7 @@ let
 
     echo "VM apps will appear as sway windows. Ctrl+C to disconnect."
 
-    # Workspace number for notifications — static for the lifetime of this script.
+    # Workspace number for notifications - static for the lifetime of this script.
     VM_WS=$(${pkgs.jq}/bin/jq -r \
       --arg v "$VM" \
       'to_entries[] | select(.value.vmName == $v) | .value.workspace' \
@@ -100,7 +100,7 @@ let
       ${pkgs.waypipe}/bin/waypipe --vsock --socket "$PORT" --compress none --threads 4 client &
       WAYPIPE_PID=$!
 
-      # 2. Poll until host vsock socket is actually open — no blind sleep.
+      # 2. Poll until host vsock socket is actually open - no blind sleep.
       _host_ready=0
       for _j in $(seq 1 50); do
         if ${pkgs.iproute2}/bin/ss -H -A vsock --listening 2>/dev/null \
@@ -141,7 +141,7 @@ let
       if [[ "$_tunnel_ok" -eq 1 ]]; then
         echo "Tunnel live: $VM (CID $CID, port $PORT)"
         ${pkgs.libnotify}/bin/notify-send -u normal "waypipe" \
-          "$VM connected — WS''${VM_WS:-?} ready" 2>/dev/null || true
+          "$VM connected - WS''${VM_WS:-?} ready" 2>/dev/null || true
       else
         echo "Tunnel did not confirm within 15s: $VM" >&2
       fi
@@ -189,7 +189,7 @@ let
 
     # Look up VM for this workspace from registry
     if [[ ! -f "${VM_REGISTRY}" ]]; then
-      log "No vm-registry — running locally"
+      log "No vm-registry - running locally"
       exec "$@"
     fi
 
@@ -207,7 +207,7 @@ let
     fi
 
     if [[ -z "$VM_INFO" ]]; then
-      # Check active-vms.json — if a task or alternate VM was marked active for
+      # Check active-vms.json - if a task or alternate VM was marked active for
       # this workspace (e.g. microvm-pentest-task1 started after microvm-pentest),
       # prefer it over the first registry entry.
       ACTIVE_VMS_FILE="$HOME/.cache/hydrix/active-vms.json"
@@ -236,20 +236,20 @@ let
     fi
 
     if [[ -z "$VM_INFO" ]]; then
-      log "No VM mapped to WS$WS — running locally"
+      log "No VM mapped to WS$WS - running locally"
       exec "$@"
     fi
 
     CID=$(echo "$VM_INFO" | ${pkgs.jq}/bin/jq -r '.cid')
     VM_NAME=$(echo "$VM_INFO" | ${pkgs.jq}/bin/jq -r '.name')
 
-    # Guard: if the VM is not running, fall back to host terminal + notify
+    # Guard: if the VM is not running, notify only - do not launch locally
     if ! systemctl is-active --quiet "microvm@''${VM_NAME}.service" 2>/dev/null; then
-      notify "$VM_NAME is not running — use 'microvm start $VM_NAME' to start it"
-      exec "$@"
+      notify "$VM_NAME is not running - use 'microvm start $VM_NAME' to start it"
+      exit 0
     fi
 
-    # Poll STATUS — waypipe-connect is expected to be running (started by microvm start).
+    # Poll STATUS - waypipe-connect is expected to be running (started by microvm start).
     # Do not auto-start it here; that is microvm start's responsibility.
     log "Waiting for waypipe to become ready in $VM_NAME..."
     READY=0
@@ -263,7 +263,7 @@ let
       sleep 0.5
     done
     if [[ "$READY" -eq 0 ]]; then
-      err "waypipe not ready in $VM_NAME — is waypipe-connect running? (microvm start $VM_NAME)"
+      err "waypipe not ready in $VM_NAME - is waypipe-connect running? (microvm start $VM_NAME)"
     fi
 
     log "WS$WS → $VM_NAME (CID $CID): $*"
@@ -354,7 +354,7 @@ let
 
     # Look up VM for this workspace from registry
     if [[ ! -f "${VM_REGISTRY}" ]]; then
-      log "No vm-registry — running locally"
+      log "No vm-registry - running locally"
       exec "$@"
     fi
 
@@ -378,7 +378,7 @@ let
     fi
 
     if [[ -z "$VM_INFO" ]]; then
-      log "No VM mapped to WS$WS — running locally"
+      log "No VM mapped to WS$WS - running locally"
       exec "$@"
     fi
 
@@ -387,11 +387,11 @@ let
 
     # Guard: if the VM is not running, fall back to host terminal + notify
     if ! systemctl is-active --quiet "microvm@''${VM_NAME}.service" 2>/dev/null; then
-      notify "$VM_NAME is not running — use 'microvm start $VM_NAME' to start it"
+      notify "$VM_NAME is not running - use 'microvm start $VM_NAME' to start it"
       exec "$@"
     fi
 
-    # Poll STATUS — waypipe-connect is expected to be running (started by microvm start).
+    # Poll STATUS - waypipe-connect is expected to be running (started by microvm start).
     # Do not auto-start it here; that is microvm start's responsibility.
     log "Waiting for waypipe to become ready in $VM_NAME..."
     READY=0
@@ -405,7 +405,7 @@ let
       sleep 0.5
     done
     if [[ "$READY" -eq 0 ]]; then
-      err "waypipe not ready in $VM_NAME — is waypipe-connect running? (microvm start $VM_NAME)"
+      err "waypipe not ready in $VM_NAME - is waypipe-connect running? (microvm start $VM_NAME)"
     fi
 
     log "WS$WS → $VM_NAME (CID $CID): $*"
@@ -638,7 +638,7 @@ EOF
     if ! pgrep -f "waypipe-connect ''${SELECTED}$" >/dev/null 2>&1; then
       setsid ${waypipeConnect}/bin/waypipe-connect "$SELECTED" \
         </dev/null >"/tmp/waypipe-connect-''${SELECTED}.log" 2>&1 &
-      notify "Switched to $SELECTED — connecting waypipe..."
+      notify "Switched to $SELECTED - connecting waypipe..."
     else
       notify "Switched to $SELECTED"
     fi
@@ -705,7 +705,7 @@ EOF
   # Auto-start waypipe-connect for all currently-running profile VMs.
   # Called at sway/Hyprland startup. Spawns one background poller per running
   # VM; each poller sends PING until it gets OK, then immediately starts
-  # waypipe-connect. No timeouts — VM readiness is the only gate.
+  # waypipe-connect. No timeouts - VM readiness is the only gate.
   waypipeConnectAll = pkgs.writeShellScriptBin "waypipe-connect-all" ''
     set -euo pipefail
 
@@ -716,7 +716,7 @@ EOF
     wait_and_connect() {
       local vm_name="$1" cid="$2"
 
-      # Poll until VM responds OK to PING — no timeout, VM readiness is the gate.
+      # Poll until VM responds OK to PING - no timeout, VM readiness is the gate.
       while true; do
         resp=$(printf 'PING\n' \
           | ${pkgs.socat}/bin/socat -T2 - VSOCK-CONNECT:"$cid":14509 2>/dev/null || true)
@@ -747,7 +747,7 @@ EOF
   # Gracefully exit i3.
   # Stops xpra inside all running VMs (via "stop" mode push) and kills any
   # host-side xpra attach processes, then exits i3.
-  # Leaves VMs with no display service running — the next WM pushes its own
+  # Leaves VMs with no display service running - the next WM pushes its own
   # mode (sway-session → waypipe, i3 startup → xpra) when it comes up.
   #
   exitI3 = pkgs.writeShellScriptBin "exit-i3" ''
@@ -760,7 +760,7 @@ EOF
   # Gracefully exit sway or Hyprland from any terminal.
   # Kills all host-side waypipe-connect sessions, unsets WAYLAND_DISPLAY from
   # the systemd user environment, then exits the compositor.
-  # VMs are left as-is — no mode push here. When i3 starts next it will push
+  # VMs are left as-is - no mode push here. When i3 starts next it will push
   # xpra mode; when sway starts it will push waypipe mode.
   #
   exitWayland = pkgs.writeShellScriptBin "exit-wayland" ''
@@ -768,7 +768,7 @@ EOF
     pkill -f "waypipe-connect" 2>/dev/null || true
     pkill -f "waypipe.*--vsock.*client" 2>/dev/null || true
 
-    # Signal VMs to stop their display services in the background — waypipe is
+    # Signal VMs to stop their display services in the background - waypipe is
     # already dead so VMs notice the disconnect regardless. No need to block exit.
     vm-push-display-mode stop >/dev/null 2>&1 &
 
@@ -798,7 +798,7 @@ in lib.mkIf (config.hydrix.sway.enable || config.hydrix.hyprland.enable) {
   #
   # Anonymous auth on the Unix socket: VM clients won't have the host PA cookie,
   # and without auth.anonymous PipeWire silently degrades them to an isolated
-  # null-sink session. Safe on a single-user machine — the cookie is only
+  # null-sink session. Safe on a single-user machine - the cookie is only
   # meaningful separation between different Unix users, not same-UID processes.
 
   # PipeWire: accept anonymous connections on the PA Unix socket
