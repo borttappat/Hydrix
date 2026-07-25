@@ -299,6 +299,8 @@ usage() {
     cat << EOF
 Usage: vpn-assign <command> [args]
 
+  on <network>                 Connect wg-<network> tunnel + assign
+  off <network>                Route <network> direct, bypassing VPN
   <network> <target>          Assign bridge to VPN/direct/blocked
   --persistent <net> <tgt>    Assign and save across reboots
   connect <vpn>               Bring up WireGuard tunnel
@@ -309,6 +311,13 @@ Usage: vpn-assign <command> [args]
 
 Known networks:  ${nets:-(load network-map to list)}
 Targets:         mullvad-<name>  direct  blocked
+
+Examples:
+  vpn-assign off browsing                             # temporarily bypass VPN
+  vpn-assign on browsing                               # reconnect through Mullvad
+  vpn-assign browsing blocked                          # kill switch — no traffic
+  vpn-assign --persistent browsing mullvad-browsing    # survive router restarts
+  vpn-assign status                                    # show current assignments
 EOF
 }
 
