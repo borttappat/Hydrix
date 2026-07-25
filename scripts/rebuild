@@ -22,6 +22,7 @@ CHECK_MICROVMS=false
 REBUILD_STALE=false
 VERBOSE=false
 IGNORE_ACTIVATION=false
+TEST_MODE=false
 SPEC_OVERRIDE=""
 DEV_OVERRIDE=""
 BUILD_TAG=""
@@ -47,6 +48,8 @@ Options:
   -r, --rebuild-stale   Rebuild stale base images
   -i, --ignore-activation  Continue even if activation fails (exit code 4)
   -v, --verbose         Show verbose output
+  --test                Activate without writing a boot entry (nixos-rebuild test
+                        equivalent) — stage untested changes before -> switch
   -t, --tag TAG         Tag this build for easier identification in the GRUB menu
                         (letters, numbers, ':', '_', '.', '-' only)
   --dev [path]          Override hydrix input with local path (for testing unpushed changes)
@@ -67,6 +70,7 @@ while [[ $# -gt 0 ]]; do
         -r|--rebuild-stale) REBUILD_STALE=true; shift ;;
         -i|--ignore-activation) IGNORE_ACTIVATION=true; shift ;;
         -v|--verbose) VERBOSE=true; shift ;;
+        --test|test) TEST_MODE=true; shift ;;
         -t|--tag)
             [[ -z "${2:-}" ]] && { echo "!! --tag requires a value" >&2; exit 1; }
             BUILD_TAG="$2"; shift 2 ;;
@@ -374,7 +378,9 @@ do_build() {
     # Always build the BASE profile (no -s) so specialisations are preserved
     # nh -s sets the system profile to the specialisation closure directly,
     # which loses all other specialisations from the profile
-    local nh_args=("os" "switch" "$FLAKE_DIR" "-H" "$target")
+    local verb="switch"
+    $TEST_MODE && verb="test"
+    local nh_args=("os" "$verb" "$FLAKE_DIR" "-H" "$target")
     local exit_code
     local extra_nix_args=("--impure")
 
@@ -385,7 +391,9 @@ do_build() {
 
     nh_args+=("--" "${extra_nix_args[@]}")
 
-    log "Building $target${spec:+ ($spec)}"
+    local test_suffix=""
+    $TEST_MODE && test_suffix=" [test]"
+    log "Building $target${spec:+ ($spec)}${test_suffix}"
 
     if $VERBOSE; then
         echo "+ nh ${nh_args[*]}"
@@ -420,7 +428,7 @@ do_build() {
         local spec_path="/nix/var/nix/profiles/system/specialisation/${spec}"
         if [[ -d "$spec_path" ]]; then
             log "Activating specialisation: $spec"
-            sudo "$spec_path/bin/switch-to-configuration" switch
+            sudo "$spec_path/bin/switch-to-configuration" "$verb"
             # Re-attach again after specialisation switch
             restore_network
         else
