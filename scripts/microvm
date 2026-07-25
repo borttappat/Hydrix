@@ -372,6 +372,21 @@ cmd_start() {
     # Unlock encrypted home volume if present
     local luks_path="/var/lib/microvms/${vm_name}/home.luks"
     local mapper_name="vm-${vm_name}-home"
+
+    # The built runner's qemu -drive args hardcode /dev/mapper/vm-<name>-home
+    # when encryption.enable is set at build time (microvm-profile-base.nix,
+    # autoCreate = false, the host must have already luksOpen'd it). Detect
+    # that expectation directly from the runner so a missing LUKS container
+    # (e.g. after `microvm purge`, which deletes *.luks) fails fast with a
+    # clear message instead of crash-looping to a display-service timeout.
+    if grep -q "/dev/mapper/${mapper_name}" \
+        "/var/lib/microvms/${vm_name}/current/bin/microvm-run" 2>/dev/null \
+        && [[ ! -f "$luks_path" ]]; then
+        log_error "${vm_name} expects an encrypted home volume (/dev/mapper/${mapper_name}) but no LUKS container exists at ${luks_path}"
+        log "This usually happens after 'microvm purge ${vm_name}'. Run: microvm encrypt-setup ${vm_name}"
+        return 1
+    fi
+
     if [[ -f "$luks_path" ]]; then
         if [[ -b "/dev/mapper/${mapper_name}" ]]; then
             log "Encrypted volume already unlocked"

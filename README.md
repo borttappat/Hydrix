@@ -34,9 +34,9 @@ Things being actively worked on or not yet verified. Checked off once resolved a
 - [ ] **Router VM in VM installations**: works on real laptop hardware; breaks when Hydrix is running inside a VM (for testing purposes)
 - [ ] **Desktop / USB WiFi**: designed for laptops with native WiFi cards; desktops without one are untested; USB WiFi card behaviour unknown
 - [ ] **AMD hardware**: currently Intel/ASUS-specific (VFIO, ASUS driver, ZenBook audio); needs AMD parity and hardware testing
-- [ ] **LUKS encryption for all profile VMs**: encryption works for pentest; should extend to every profile type
-- [ ] **Encrypted VM launch via wofi**: starting an encrypted VM from a terminal works; `mod+d` launcher on profile workspaces silently fails instead of prompting for password
-- [ ] **Builder build progress**: `microvm builder build X` shows no output; should display progress like `microvm build X` does in administrative mode
+- [ ] **LUKS encryption for all profile VMs**: encryption works for pentest; should extend to every profile type. Note: `microvm purge` deletes the LUKS container (`*.luks`) but leaves `encryption = true` in machine config, so a purged encrypted VM previously crash-looped to a "Timeout waiting for VM display service" with no clue why. `microvm start` now detects the built runner expects `/dev/mapper/vm-<name>-home` and the container is missing, and fails fast with a pointer to `microvm encrypt-setup <name>`.
+- [x] **Encrypted VM launch via wofi**: `mod+d` on a stopped encrypted VM now detects the LUKS volume and prompts for the passphrase via `wofi --password` (same masked-input pattern as `vault-pick.nix`), unlocking before `microvm start` runs. No terminal needed.
+- [x] **Builder build progress**: `microvm builder build X` now streams live status (`Building...` / `OK building ...` / `DONE`/`ERROR`) instead of going silent; errors are visible without socat'ing into the builder. Still coarse-grained: not the full per-derivation live stream `microvm build X` shows in administrative mode.
 - [ ] **Setup script** (`setup-hydrix.sh`): not fully end-to-end tested
 - [ ] **Installer post-reboot, gh auth**: persistence is implemented but untested; git config is not yet declarative (requires manual `git config` after reboot)
 - [x] **Clipboard isolation**: handled by the `hypr-clip-guard` Hyprland plugin — hooks all Wayland clipboard protocols to enforce per-VM isolation. See [DOCUMENTATION.md § Clipboard Isolation](#clipboard-isolation-hypr-clip-guard).
@@ -45,7 +45,7 @@ Things being actively worked on or not yet verified. Checked off once resolved a
 
 - [ ] **Socat terminal output**: improved but not verified clean; may need further work
 - [ ] **Phase out xpra**: waypipe is fully working and the primary stack; xpra still supported but should be deprecated
-- [ ] **Live-switch edge cases** (`microvm update`): generally works; worth investigating failure paths
+- [x] **Live-switch edge cases** (`microvm update`): fixed two silent-failure paths: the host-side nix-store DB registration step now surfaces errors instead of swallowing them, and `vm-switch` no longer mislabels hard failures (e.g. exit 100, incompatible init requiring reboot) as "OK, some units failed". Other edge cases may still surface; report if found.
 
 ---
 
