@@ -367,4 +367,4 @@ microvm restart microvm-pentest
 
 ---
 
-See [DOCUMENTATION.md](DOCUMENTATION.md) for full configuration reference, security model, secrets management, Mullvad VPN, task pentest VMs, vsock port reference, and troubleshooting.
+See [DOCUMENTATION.md](DOCUMENTATION.md) for full configuration reference, security model, secrets management, encrypted home volumes, Mullvad VPN, task pentest VMs, vsock port reference, and troubleshooting.
