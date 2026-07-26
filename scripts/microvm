@@ -926,6 +926,15 @@ cmd_console() {
         return 1
     fi
 
+    # Reattaching over the serial socket lands on the getty session that's
+    # been logged in (autologin) since boot - login's own MOTD print already
+    # fired once and won't fire again. Re-fetch it straight from the flake
+    # instead (users.motd is just a string in the VM's config) so it still
+    # shows on every attach; empty/missing for VMs with no motd set.
+    local motd
+    motd=$(nix eval --raw "$FLAKE_DIR#nixosConfigurations.${vm_name}.config.users.motd" 2>/dev/null || true)
+    [[ -n "$motd" ]] && printf '%s\n' "$motd"
+
     # screen can't attach to console.sock directly - it's a UNIX socket, not
     # a character device, so screen's serial-line detection never fires and
     # it tries (and fails) to exec the socket path as a command instead.
