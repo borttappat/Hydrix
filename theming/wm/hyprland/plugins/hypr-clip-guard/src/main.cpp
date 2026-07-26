@@ -24,6 +24,8 @@ static std::unordered_map<wl_client*, std::string>  s_clientGroup;
 static std::unordered_map<pid_t, std::string>       s_pidGroup;
 static std::string                                  s_selSourceGroup  = "host";
 static std::string                                  s_priSourceGroup  = "host";
+static std::string                                  s_selTargetGroup  = "host";
+static std::string                                  s_priTargetGroup  = "host";
 
 struct HookStats {
     std::atomic<uint64_t> allowed{0};
@@ -185,6 +187,31 @@ static std::string groupForClient(wl_client* cl) {
     return "host";
 }
 
+static std::string groupForRecipient(wl_client* cl) {
+    if (!cl)
+        return "unknown";
+    auto it = s_clientGroup.find(cl);
+    if (it != s_clientGroup.end())
+        return it->second;
+    pid_t pid = getPid(cl);
+    if (pid > 0) {
+        auto pit = s_pidGroup.find(pid);
+        if (pit != s_pidGroup.end()) {
+            s_clientGroup[cl] = pit->second;
+            return pit->second;
+        }
+        pid_t ppid = getPpid(pid);
+        if (ppid > 1) {
+            auto ppit = s_pidGroup.find(ppid);
+            if (ppit != s_pidGroup.end()) {
+                s_clientGroup[cl] = ppit->second;
+                return ppit->second;
+            }
+        }
+    }
+    return "unknown";
+}
+
 static std::string groupFromKeyboardFocus() {
     auto surf = g_pSeatManager->m_state.keyboardFocus.lock();
     if (surf)
@@ -227,6 +254,7 @@ static void seedSelSource(SP<IDataSource> sel) {
     if (sel != prev) {
         s_lastSelWP = sel;
         s_selSourceGroup = groupFromKeyboardFocus();
+        s_selTargetGroup = s_selSourceGroup;
     }
 }
 
@@ -235,13 +263,14 @@ static void seedPriSource(SP<IDataSource> sel) {
     if (sel != prev) {
         s_lastPriWP = sel;
         s_priSourceGroup = groupFromKeyboardFocus();
+        s_priTargetGroup = s_priSourceGroup;
     }
 }
 
-static bool shouldAllow(const std::string& srcGroup, const std::string& dstGroup) {
+static bool shouldAllow(const std::string& srcGroup, const std::string& dstGroup, const std::string& targetGroup) {
     if (srcGroup == dstGroup) return true;
     if (dstGroup == "host") return true;
-    if (srcGroup == "host") return dstGroup == groupFromKeyboardFocus();
+    if (srcGroup == "host") return dstGroup == targetGroup;
     return false;
 }
 
@@ -252,11 +281,11 @@ static void hkSendSelectionToDevice(void* thisptr, SP<IDataDevice> dev, SP<IData
     if (wlDev) {
         seedSelSource(sel);
         auto* cl = wlDev->client();
-        std::string dstGroup = groupForClient(cl);
+        std::string dstGroup = groupForRecipient(cl);
         std::string srcGroup = groupForSource(sel, s_selSourceGroup);
         s_selSourceGroup = srcGroup;
 
-        if (!shouldAllow(srcGroup, dstGroup)) {
+        if (!shouldAllow(srcGroup, dstGroup, s_selTargetGroup)) {
             s_statsData.blocked++;
             logEvent("data", srcGroup, dstGroup, getPid(cl), false);
             return;
@@ -275,11 +304,11 @@ static void hkSendPrimarySelectionToDevice(void* thisptr, SP<CPrimarySelectionDe
     if (dev) {
         seedPriSource(sel);
         auto* cl = dev->client();
-        std::string dstGroup = groupForClient(cl);
+        std::string dstGroup = groupForRecipient(cl);
         std::string srcGroup = groupForSource(sel, s_priSourceGroup);
         s_priSourceGroup = srcGroup;
 
-        if (!shouldAllow(srcGroup, dstGroup)) {
+        if (!shouldAllow(srcGroup, dstGroup, s_priTargetGroup)) {
             s_statsPri.blocked++;
             logEvent("pri", srcGroup, dstGroup, getPid(cl), false);
             return;
@@ -298,11 +327,12 @@ static void hkSendWlrSelectionToDevice(void* thisptr, SP<CWLRDataDevice> dev, SP
     if (dev) {
         if (primary) seedPriSource(sel); else seedSelSource(sel);
         auto* cl = dev->client();
-        std::string dstGroup = groupForClient(cl);
+        std::string dstGroup = groupForRecipient(cl);
+        std::string targetGroup = primary ? s_priTargetGroup : s_selTargetGroup;
         std::string srcGroup = groupForSource(sel, primary ? s_priSourceGroup : s_selSourceGroup);
         (primary ? s_priSourceGroup : s_selSourceGroup) = srcGroup;
 
-        if (!shouldAllow(srcGroup, dstGroup)) {
+        if (!shouldAllow(srcGroup, dstGroup, targetGroup)) {
             s_statsWlr.blocked++;
             logEvent("wlr", srcGroup, dstGroup, getPid(cl), false);
             return;
@@ -321,11 +351,12 @@ static void hkSendExtSelectionToDevice(void* thisptr, SP<CExtDataDevice> dev, SP
     if (dev) {
         if (primary) seedPriSource(sel); else seedSelSource(sel);
         auto* cl = dev->client();
-        std::string dstGroup = groupForClient(cl);
+        std::string dstGroup = groupForRecipient(cl);
+        std::string targetGroup = primary ? s_priTargetGroup : s_selTargetGroup;
         std::string srcGroup = groupForSource(sel, primary ? s_priSourceGroup : s_selSourceGroup);
         (primary ? s_priSourceGroup : s_selSourceGroup) = srcGroup;
 
-        if (!shouldAllow(srcGroup, dstGroup)) {
+        if (!shouldAllow(srcGroup, dstGroup, targetGroup)) {
             s_statsExt.blocked++;
             logEvent("ext", srcGroup, dstGroup, getPid(cl), false);
             return;
@@ -343,10 +374,10 @@ typedef void (*tSendInitial)(void*);
 static void hkExtSendInitialSelections(void* thisptr) {
     auto* self = reinterpret_cast<CExtDataDevice*>(thisptr);
     auto* cl = self->client();
-    std::string dstGroup = groupForClient(cl);
+    std::string dstGroup = groupForRecipient(cl);
 
-    if (dstGroup == "host" ||
-        (shouldAllow(s_selSourceGroup, dstGroup) && shouldAllow(s_priSourceGroup, dstGroup))) {
+    if (shouldAllow(s_selSourceGroup, dstGroup, s_selTargetGroup) &&
+        shouldAllow(s_priSourceGroup, dstGroup, s_priTargetGroup)) {
         logEvent("ext-init", s_selSourceGroup, dstGroup, getPid(cl), true);
         auto orig = (tSendInitial)s_hookExtInit->m_original;
         orig(thisptr);
@@ -360,10 +391,10 @@ static void hkExtSendInitialSelections(void* thisptr) {
 static void hkWlrSendInitialSelections(void* thisptr) {
     auto* self = reinterpret_cast<CWLRDataDevice*>(thisptr);
     auto* cl = self->client();
-    std::string dstGroup = groupForClient(cl);
+    std::string dstGroup = groupForRecipient(cl);
 
-    if (dstGroup == "host" ||
-        (shouldAllow(s_selSourceGroup, dstGroup) && shouldAllow(s_priSourceGroup, dstGroup))) {
+    if (shouldAllow(s_selSourceGroup, dstGroup, s_selTargetGroup) &&
+        shouldAllow(s_priSourceGroup, dstGroup, s_priTargetGroup)) {
         logEvent("wlr-init", s_selSourceGroup, dstGroup, getPid(cl), true);
         auto orig = (tSendInitial)s_hookWlrInit->m_original;
         orig(thisptr);
@@ -381,8 +412,8 @@ static std::string handleHyprctl(eHyprCtlOutputFormat fmt, std::string req) {
 
     if (fmt == eHyprCtlOutputFormat::FORMAT_NORMAL) {
         out = "clip-guard status\n";
-        out += "  selection source: " + s_selSourceGroup + "\n";
-        out += "  primary source:   " + s_priSourceGroup + "\n";
+        out += "  selection source: " + s_selSourceGroup + " (locked target: " + s_selTargetGroup + ")\n";
+        out += "  primary source:   " + s_priSourceGroup + " (locked target: " + s_priTargetGroup + ")\n";
         out += "  totals: " + std::to_string(totalBlocked) + " blocked, " + std::to_string(totalAllowed) + " allowed\n";
         out += "  per-hook:\n";
         out += "    data:  " + std::to_string(s_statsData.allowed.load()) + " allowed, " + std::to_string(s_statsData.blocked.load()) + " blocked\n";
