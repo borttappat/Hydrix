@@ -70,10 +70,12 @@ let
     ${pkgs.hyprland}/bin/hyprctl dispatch togglefloating active
     floating=$(${pkgs.hyprland}/bin/hyprctl activewindow -j | ${pkgs.jq}/bin/jq '.floating')
     if [ "$floating" = "true" ]; then
-      mon_w=$(${pkgs.hyprland}/bin/hyprctl monitors -j | ${pkgs.jq}/bin/jq '[.[] | select(.focused)] | .[0].width')
-      mon_h=$(${pkgs.hyprland}/bin/hyprctl monitors -j | ${pkgs.jq}/bin/jq '[.[] | select(.focused)] | .[0].height')
-      w=$(( mon_w * 80 / 100 ))
-      h=$(( mon_h * 80 / 100 ))
+      # monitors -j reports physical pixels; resizeactive/centerwindow operate in
+      # logical (post-scale) coordinates, so divide by scale before taking 80% -
+      # otherwise on a scaled monitor the target size is too big for the logical
+      # screen and the window ends up hanging off the edges.
+      read -r w h <<< "$(${pkgs.hyprland}/bin/hyprctl monitors -j | ${pkgs.jq}/bin/jq -r \
+        '[.[] | select(.focused)][0] | "\((.width/.scale*0.8)|floor) \((.height/.scale*0.8)|floor)"')"
       ${pkgs.hyprland}/bin/hyprctl dispatch resizeactive exact $w $h
       ${pkgs.hyprland}/bin/hyprctl dispatch centerwindow
     fi
@@ -321,7 +323,7 @@ EOF
     bind = $mod,       C,     layoutmsg, preselect d
     bind = $mod,       V,     layoutmsg, preselect r
     bind = $mod,       F,     fullscreen, 0
-    bind = $mod SHIFT, SPACE, togglefloating,
+    bind = $mod SHIFT, SPACE, exec, ${toggleFloat}
     bind = $mod,       SPACE, cyclenext,
     bind = $mod,       R,     submap, resize
 
