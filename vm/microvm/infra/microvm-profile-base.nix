@@ -237,6 +237,13 @@ in {
     # Incompatible with writableStoreOverlay (required for Home Manager activation)
     nix.settings.auto-optimise-store = lib.mkForce false;
 
+    # ===== Disable automatic GC for microVMs =====
+    # /nix/store here is the host's store mounted read-only via virtiofs, with a thin
+    # writable overlay on top. GC in the VM can't free anything in the read-only lower
+    # layer; it just walks the whole store over virtiofs and churns the overlay every
+    # week. Host manages GC for its own store.
+    nix.gc.automatic = lib.mkForce false;
+
     # ===== System switching =====
     # Keep system.switch.enable for potential future use
     microvm.optimize.enable = false;
