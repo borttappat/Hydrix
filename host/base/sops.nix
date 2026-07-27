@@ -26,10 +26,13 @@
 # Multi-machine / reinstall (with master key):
 #   New machine: hydrix-sops-setup --unlock   (enter passphrase, secrets decrypt immediately)
 #
-{ config, lib, pkgs, ... }:
-
-let
-  cfg      = config.hydrix.secrets;
+{
+  config,
+  lib,
+  pkgs,
+  ...
+}: let
+  cfg = config.hydrix.secrets;
   username = config.hydrix.username;
 
   # Path where age key will be stored (active key used by sops services)
@@ -41,7 +44,6 @@ let
 
   # SSH host key to derive age key from (fallback when no master key is present)
   sshHostKeyPath = "/etc/ssh/ssh_host_ed25519_key";
-
 in {
   config = lib.mkIf cfg.enable {
     # Ensure SSH host key exists before we try to derive age key
@@ -88,7 +90,7 @@ in {
           fi
         fi
       '';
-      deps = [ "etc" "users" ];
+      deps = ["etc" "users"];
     };
 
     # Auto-wire convenience shorthands into hydrix.secrets.files.
@@ -96,20 +98,29 @@ in {
     hydrix.secrets.files = lib.mkMerge [
       (lib.mkIf (cfg.githubSecretsFile != null) {
         github = lib.mkDefault {
-          file  = cfg.githubSecretsFile;
+          file = cfg.githubSecretsFile;
           vmDir = "ssh";
-          keys  = {
-            "id_ed25519"     = { outFile = "id_ed25519";     mode = "0600"; };
-            "id_ed25519_pub" = { outFile = "id_ed25519.pub"; mode = "0644"; };
+          keys = {
+            "id_ed25519" = {
+              outFile = "id_ed25519";
+              mode = "0600";
+            };
+            "id_ed25519_pub" = {
+              outFile = "id_ed25519.pub";
+              mode = "0644";
+            };
           };
         };
       })
       (lib.mkIf (cfg.wifiSecretsFile != null) {
         wifi = lib.mkDefault {
-          file  = cfg.wifiSecretsFile;
+          file = cfg.wifiSecretsFile;
           vmDir = "wifi";
-          keys  = {
-            "networks" = { outFile = "networks.json"; mode = "0600"; };
+          keys = {
+            "networks" = {
+              outFile = "networks.json";
+              mode = "0600";
+            };
           };
         };
       })
@@ -119,56 +130,62 @@ in {
     # Replaces the old hardcoded hydrix-github-secrets.service.
     # All services are non-fatal: exit 0 with a warning on decryption failure
     # so fresh-install / wrong-key machines can still boot and start VMs.
-    systemd.services = lib.mapAttrs' (name: fileCfg:
-      let
+    systemd.services = lib.mapAttrs' (
+      name: fileCfg: let
         wholeFile = fileCfg.keys == {};
         outFileName =
-          if fileCfg.outFile != "" then fileCfg.outFile
+          if fileCfg.outFile != ""
+          then fileCfg.outFile
           else builtins.baseNameOf (toString fileCfg.file);
       in
-      lib.nameValuePair "hydrix-sops-decrypt-${name}" {
-        description = "Decrypt sops ${name} secrets";
-        wantedBy    = [ "multi-user.target" ];
-        after       = [ "local-fs.target" ];
-        serviceConfig = {
-          Type = "oneshot";
-          RemainAfterExit = true;
-        };
-        script = ''
-          OUT="/run/secrets/${name}"
-          AGE_KEY="${ageKeyPath}"
+        lib.nameValuePair "hydrix-sops-decrypt-${name}" {
+          description = "Decrypt sops ${name} secrets";
+          wantedBy = ["multi-user.target"];
+          after = ["local-fs.target"];
+          serviceConfig = {
+            Type = "oneshot";
+            RemainAfterExit = true;
+          };
+          script = ''
+            OUT="/run/secrets/${name}"
+            AGE_KEY="${ageKeyPath}"
 
-          mkdir -p "$OUT"
-          chmod 700 "$OUT"
+            mkdir -p "$OUT"
+            chmod 700 "$OUT"
 
-          if [ ! -f "$AGE_KEY" ]; then
-            echo "No age key — ${name} secrets unavailable (run rebuild first)"
-            exit 0
-          fi
-
-          ${if wholeFile then ''
-            # Whole-file mode: decrypt entire sops file as-is
-            if SOPS_AGE_KEY_FILE="$AGE_KEY" \
-               ${pkgs.sops}/bin/sops --decrypt "${toString fileCfg.file}" \
-               > "$OUT/${outFileName}" 2>/dev/null; then
-              chmod 0600 "$OUT/${outFileName}"
-            else
-              echo "Warning: could not decrypt ${name} secrets"
+            if [ ! -f "$AGE_KEY" ]; then
+              echo "No age key — ${name} secrets unavailable (run rebuild first)"
+              exit 0
             fi
-          '' else ''
-            # Per-key mode: extract individual YAML keys
-            ${lib.concatStringsSep "" (lib.mapAttrsToList (keyName: keyCfg: ''
-              if SOPS_AGE_KEY_FILE="$AGE_KEY" \
-                 ${pkgs.sops}/bin/sops --decrypt --extract '["${keyName}"]' "${toString fileCfg.file}" \
-                 > "$OUT/${keyCfg.outFile}" 2>/dev/null; then
-                chmod ${keyCfg.mode} "$OUT/${keyCfg.outFile}"
-              else
-                echo "Warning: could not extract ${keyName} from ${name} secrets"
-              fi
-            '') fileCfg.keys)}
-          ''}
-        '';
-      }
+
+            ${
+              if wholeFile
+              then ''
+                # Whole-file mode: decrypt entire sops file as-is
+                if SOPS_AGE_KEY_FILE="$AGE_KEY" \
+                   ${pkgs.sops}/bin/sops --decrypt "${fileCfg.file}" \
+                   > "$OUT/${outFileName}" 2>/dev/null; then
+                  chmod 0600 "$OUT/${outFileName}"
+                else
+                  echo "Warning: could not decrypt ${name} secrets"
+                fi
+              ''
+              else ''
+                # Per-key mode: extract individual YAML keys
+                ${lib.concatStringsSep "" (lib.mapAttrsToList (keyName: keyCfg: ''
+                    if SOPS_AGE_KEY_FILE="$AGE_KEY" \
+                       ${pkgs.sops}/bin/sops --decrypt --extract '["${keyName}"]' "${fileCfg.file}" \
+                       > "$OUT/${keyCfg.outFile}" 2>/dev/null; then
+                      chmod ${keyCfg.mode} "$OUT/${keyCfg.outFile}"
+                    else
+                      echo "Warning: could not extract ${keyName} from ${name} secrets"
+                    fi
+                  '')
+                  fileCfg.keys)}
+              ''
+            }
+          '';
+        }
     ) (lib.filterAttrs (_: f: f.enable && f.file != null) cfg.files);
 
     # Helper script to get age public key
@@ -204,7 +221,7 @@ in {
     # libfido2 udev rules cover most known FIDO2 keys.
     # The Titan v2 (18d1:9470) is not yet in the upstream list so we add it explicitly.
     # TAG+="uaccess" grants access to the logged-in seat user without requiring a group.
-    services.udev.packages = [ pkgs.libfido2 ];
+    services.udev.packages = [pkgs.libfido2];
     services.udev.extraRules = ''
       KERNEL=="hidraw*", SUBSYSTEM=="hidraw", ATTRS{idVendor}=="18d1", ATTRS{idProduct}=="9470", TAG+="uaccess"
     '';
