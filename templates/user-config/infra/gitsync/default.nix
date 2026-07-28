@@ -1,7 +1,9 @@
-# Gitsync Infra VM — push/pull git repos from lockdown mode
+# Gitsync Infra VM - push/pull git repos from lockdown mode
 #
 # Repos are mounted R/W via virtiofs. Add/remove entries in the repos list
-# below and rebuild. First-time auth: microvm console microvm-gitsync → gh auth login
+# below and rebuild. Fully ephemeral - no persistent state, SSH keys re-derive
+# fresh from host secrets every boot. Push/pull is SSH-key auth only (no gh
+# CLI/OAuth involved).
 #
 # Host commands:
 #   microvm git repos            List mounted repos and current branch
@@ -9,14 +11,22 @@
 #   microvm git pull <repo>      Pull changes
 #   microvm git status <repo>    Show status + recent log
 #
-{ config, lib, pkgs, modulesPath, ... }:
-let
+{
+  config,
+  lib,
+  pkgs,
+  modulesPath,
+  ...
+}: let
   meta = import ./meta.nix;
 
   hostUsername = config.hydrix.username;
 
   repos = [
-    { name = "hydrix-config";   source = "/home/${hostUsername}/hydrix-config"; }
+    {
+      name = "hydrix-config";
+      source = "/home/${hostUsername}/hydrix-config";
+    }
     # Add any other repos you want accessible from lockdown mode, e.g.:
     # { name = "vault";           source = "/home/${hostUsername}/vault"; }
     # { name = "borttappat-site"; source = "/home/${hostUsername}/borttappat.github.io"; }
@@ -24,8 +34,10 @@ let
 
   repoNames = lib.concatMapStringsSep " " (r: r.name) repos;
 
-  safeDirectories = lib.concatMapStringsSep "\n"
-    (r: "    directory = /mnt/repos/${r.name}") repos;
+  safeDirectories =
+    lib.concatMapStringsSep "\n"
+    (r: "    directory = /mnt/repos/${r.name}")
+    repos;
 
   gitHandler = pkgs.writeShellScript "gitsync-vsock-handler" ''
     export PATH="${pkgs.coreutils}/bin:${pkgs.git}/bin:${pkgs.gh}/bin:${pkgs.openssh}/bin:${pkgs.glibc.bin}/bin:$PATH"
@@ -86,7 +98,7 @@ let
         echo "DONE"
         ;;
       SYNC)
-        # Commit all changes then push — used by vault-cli sync
+        # Commit all changes then push - used by vault-cli sync
         repo="$rest"
         repo_path="/mnt/repos/$repo"
         if [ ! -d "$repo_path/.git" ]; then echo "ERROR repo not found: $repo"; exit 0; fi
@@ -109,69 +121,71 @@ let
         ;;
     esac
   '';
-
 in {
   microvm.vsock.cid = meta.vsockCid;
 
-  microvm.interfaces = [{
-    type = "tap";
-    id   = meta.tapId;
-    mac  = meta.tapMac;
-  }];
+  microvm.interfaces = [
+    {
+      type = "tap";
+      id = meta.tapId;
+      mac = meta.tapMac;
+    }
+  ];
 
   microvm.mem = lib.mkForce 2560;
 
-  # Repo shares — nix-store share provided by infra-base
-  microvm.shares = map (r: {
-    tag        = "repo-${r.name}";
-    source     = r.source;
-    mountPoint = "/mnt/repos/${r.name}";
-    proto      = "virtiofs";
-  }) repos;
+  # Repo shares - nix-store share provided by infra-base
+  microvm.shares =
+    map (r: {
+      tag = "repo-${r.name}";
+      source = r.source;
+      mountPoint = "/mnt/repos/${r.name}";
+      proto = "virtiofs";
+    })
+    repos;
 
-  # nix-overlay (from infra-base) + persistent auth volume
+  # Everything under /var/lib/gitsync is ephemeral (tmpfs root) except
+  # gh-config: SSH keys re-derive fresh from /mnt/vm-secrets every boot
+  # (gitsync-setup.service below) so they don't need to persist, but the
+  # gh CLI's OAuth token (gh auth login) is genuine runtime state with no
+  # host-side source to re-derive from - kept persistent so interactive
+  # `gh` use doesn't need re-auth after every restart.
   microvm.volumes = lib.mkForce [
     {
-      image      = "/var/lib/microvms/microvm-gitsync/nix-overlay.qcow2";
-      mountPoint = "/nix/.rw-store";
-      size       = 2048;
-      autoCreate = true;
-    }
-    {
-      image      = "gitsync-data.qcow2";
-      mountPoint = "/var/lib/gitsync";
-      size       = 200;
+      image = "/var/lib/microvms/microvm-gitsync/gh-config.qcow2";
+      mountPoint = "/var/lib/gitsync/gh-config";
+      size = 64;
       autoCreate = true;
     }
   ];
 
   microvm.virtiofsd.threadPoolSize = 1;
 
-  boot.kernelModules = [ "vmw_vsock_virtio_transport" ];
+  boot.kernelModules = ["vmw_vsock_virtio_transport"];
 
   users.users.gitsync = {
     isNormalUser = true;
-    extraGroups  = [ "wheel" ];
-    password     = "gitsync";
-    home         = "/home/gitsync";
+    extraGroups = ["wheel"];
+    password = "gitsync";
+    home = "/home/gitsync";
   };
   services.getty.autologinUser = "gitsync";
   services.haveged.enable = true;
 
-  environment.systemPackages = with pkgs; [ git gh openssh socat vim ];
+  environment.systemPackages = with pkgs; [git gh openssh socat vim];
 
   environment.etc."gitconfig".text = ''
-    [safe]
-  ${safeDirectories}
-    [url "git@github.com:"]
-      insteadOf = https://github.com/
+      [safe]
+    ${safeDirectories}
+      [url "git@github.com:"]
+        insteadOf = https://github.com/
   '';
 
   systemd.services.gitsync-setup = {
     description = "Set up gitsync persistent directories";
-    wantedBy    = [ "multi-user.target" ];
-    after       = [ "local-fs.target" ];
-    before      = [ "gitsync-vsock.service" ];
+    wantedBy = ["multi-user.target"];
+    after = ["local-fs.target"];
+    before = ["gitsync-vsock.service"];
     serviceConfig.Type = "oneshot";
     serviceConfig.RemainAfterExit = true;
     script = ''
@@ -203,25 +217,25 @@ in {
 
   systemd.services.gitsync-vsock = {
     description = "Gitsync vsock server (port 14512)";
-    wantedBy    = [ "multi-user.target" ];
-    after       = [ "network.target" "gitsync-setup.service" ];
+    wantedBy = ["multi-user.target"];
+    after = ["network.target" "gitsync-setup.service"];
     serviceConfig = {
-      Type       = "simple";
-      Restart    = "always";
+      Type = "simple";
+      Restart = "always";
       RestartSec = 5;
-      ExecStart  = "${pkgs.socat}/bin/socat -t60 VSOCK-LISTEN:14512,reuseaddr,fork EXEC:${gitHandler},su=gitsync";
+      ExecStart = "${pkgs.socat}/bin/socat -t60 VSOCK-LISTEN:14512,reuseaddr,fork EXEC:${gitHandler},su=gitsync";
     };
   };
 
   systemd.services.gitsync-status = {
     description = "Gitsync status server (port 14513)";
-    wantedBy    = [ "multi-user.target" ];
-    after       = [ "network.target" ];
+    wantedBy = ["multi-user.target"];
+    after = ["network.target"];
     serviceConfig = {
-      Type       = "simple";
-      Restart    = "always";
+      Type = "simple";
+      Restart = "always";
       RestartSec = 5;
-      ExecStart  = let
+      ExecStart = let
         handler = pkgs.writeShellScript "gitsync-status-handler" ''
           read -r cmd
           if pgrep -x "git" > /dev/null; then echo "BUSY"; else echo "IDLE"; fi
@@ -232,19 +246,19 @@ in {
 
   users.motd = ''
 
-  +-------------------------------------------------+
-  |  HYDRIX GIT-SYNC VM                             |
-  +-------------------------------------------------+
-  |  Push/pull git repos from lockdown mode         |
-  |                                                 |
-  |  First time:  gh auth login                     |
-  |                                                 |
-  |  Commands from host (via microvm git):          |
-  |    microvm git repos          List repos        |
-  |    microvm git push <repo>    Push commits      |
-  |    microvm git pull <repo>    Pull changes      |
-  |    microvm git status <repo>  Show status       |
-  +-------------------------------------------------+
+    +-------------------------------------------------+
+    |  HYDRIX GIT-SYNC VM                             |
+    +-------------------------------------------------+
+    |  Push/pull git repos from lockdown mode         |
+    |                                                 |
+    |  First time:  gh auth login                     |
+    |                                                 |
+    |  Commands from host (via microvm git):          |
+    |    microvm git repos          List repos        |
+    |    microvm git push <repo>    Push commits      |
+    |    microvm git pull <repo>    Pull changes      |
+    |    microvm git status <repo>  Show status       |
+    +-------------------------------------------------+
 
   '';
 }

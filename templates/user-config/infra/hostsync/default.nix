@@ -1,4 +1,4 @@
-# Hostsync infra VM — secure host file inbox
+# Hostsync infra VM - secure host file inbox
 #
 # Receives encrypted file transfers from the files VM and decrypts them
 # into /mnt/host-inbox/, which is virtiofs-shared to ~/vm-inbox/ on the host.
@@ -13,83 +13,87 @@
 #   → file delivered from inbox into destination VM
 #
 # vsock 14506: host ↔ hostsync (ENCRYPT, SERVE, RECEIVE_PREPARE, DECRYPT, CLEANUP, PING)
-{ config, lib, pkgs, ... }:
-let
+{
+  config,
+  lib,
+  pkgs,
+  ...
+}: let
   meta = import ./meta.nix;
 
   hostUsername = config.hydrix.username;
 
   inbox = "/mnt/host-inbox";
 
-  # One-shot HTTP GET server — serves xfer.enc to the files VM.
+  # One-shot HTTP GET server - serves xfer.enc to the files VM.
   # Invoked by SERVE; exits after the first completed GET.
   serveScript = pkgs.writeShellScript "hostsync-serve" ''
-    ${pkgs.python3}/bin/python3 - "${inbox}/xfer.enc" << 'PYEOF'
-import sys, http.server, os
+        ${pkgs.python3}/bin/python3 - "${inbox}/xfer.enc" << 'PYEOF'
+    import sys, http.server, os
 
-xfer_file = sys.argv[1]
+    xfer_file = sys.argv[1]
 
-class Handler(http.server.BaseHTTPRequestHandler):
-    def do_GET(self):
-        if self.path != '/xfer.enc':
-            self.send_response(404); self.end_headers(); return
-        size = os.path.getsize(xfer_file)
-        self.send_response(200)
-        self.send_header('Content-Length', str(size))
-        self.send_header('Content-Type', 'application/octet-stream')
-        self.end_headers()
-        with open(xfer_file, 'rb') as f:
-            while True:
-                chunk = f.read(65536)
-                if not chunk: break
-                self.wfile.write(chunk)
-        raise SystemExit(0)
-    def log_message(self, *_): pass
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            if self.path != '/xfer.enc':
+                self.send_response(404); self.end_headers(); return
+            size = os.path.getsize(xfer_file)
+            self.send_response(200)
+            self.send_header('Content-Length', str(size))
+            self.send_header('Content-Type', 'application/octet-stream')
+            self.end_headers()
+            with open(xfer_file, 'rb') as f:
+                while True:
+                    chunk = f.read(65536)
+                    if not chunk: break
+                    self.wfile.write(chunk)
+            raise SystemExit(0)
+        def log_message(self, *_): pass
 
-http.server.HTTPServer(("", 8888), Handler).handle_request()
-PYEOF
+    http.server.HTTPServer(("", 8888), Handler).handle_request()
+    PYEOF
   '';
 
-  # One-shot HTTP PUT listener — saves received blob to the inbox.
+  # One-shot HTTP PUT listener - saves received blob to the inbox.
   # Invoked by RECEIVE_PREPARE; exits after the first completed PUT.
   receiveScript = pkgs.writeShellScript "hostsync-receive" ''
-    ${pkgs.python3}/bin/python3 - "${inbox}/xfer.enc" << 'PYEOF'
-import sys, http.server, os
+        ${pkgs.python3}/bin/python3 - "${inbox}/xfer.enc" << 'PYEOF'
+    import sys, http.server, os
 
-dest_file = sys.argv[1]
-os.makedirs(os.path.dirname(dest_file), exist_ok=True)
+    dest_file = sys.argv[1]
+    os.makedirs(os.path.dirname(dest_file), exist_ok=True)
 
-class Handler(http.server.BaseHTTPRequestHandler):
-    def do_PUT(self):
-        if self.path != '/xfer.enc':
-            self.send_response(404); self.end_headers(); return
-        length = int(self.headers.get('Content-Length', 0))
-        with open(dest_file, 'wb') as f:
-            rem = length
-            while rem > 0:
-                chunk = self.rfile.read(min(65536, rem))
-                if not chunk: break
-                f.write(chunk); rem -= len(chunk)
-        self.send_response(200); self.end_headers(); self.wfile.write(b'OK\n')
-        raise SystemExit(0)
-    def log_message(self, *_): pass
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_PUT(self):
+            if self.path != '/xfer.enc':
+                self.send_response(404); self.end_headers(); return
+            length = int(self.headers.get('Content-Length', 0))
+            with open(dest_file, 'wb') as f:
+                rem = length
+                while rem > 0:
+                    chunk = self.rfile.read(min(65536, rem))
+                    if not chunk: break
+                    f.write(chunk); rem -= len(chunk)
+            self.send_response(200); self.end_headers(); self.wfile.write(b'OK\n')
+            raise SystemExit(0)
+        def log_message(self, *_): pass
 
-http.server.HTTPServer(("", 8888), Handler).handle_request()
-PYEOF
+    http.server.HTTPServer(("", 8888), Handler).handle_request()
+    PYEOF
   '';
 
-  # vsock command handler — one connection per command (socat fork model).
+  # vsock command handler - one connection per command (socat fork model).
   # Protocol is compatible with the existing cmd_files_transfer flow:
-  #   ENCRYPT <pass> <path>  — encrypt inbox/<path> → inbox/xfer.enc, returns SHA256=<hash>
-  #   SERVE            — arms HTTP GET server serving xfer.enc, returns READY
-  #   SERVE_STOP       — kills HTTP GET server, returns OK
-  #   RECEIVE_PREPARE  — arms HTTP PUT listener, returns READY
-  #   RECEIVE_STOP     — kills listener, returns OK
+  #   ENCRYPT <pass> <path>  - encrypt inbox/<path> → inbox/xfer.enc, returns SHA256=<hash>
+  #   SERVE            - arms HTTP GET server serving xfer.enc, returns READY
+  #   SERVE_STOP       - kills HTTP GET server, returns OK
+  #   RECEIVE_PREPARE  - arms HTTP PUT listener, returns READY
+  #   RECEIVE_STOP     - kills listener, returns OK
   #   DECRYPT <pass> <archive-ignored> <dest-subdir>
-  #                    — decrypts inbox/xfer.enc into inbox/<dest-subdir>/, returns OK
-  #   CLEANUP          — removes xfer.enc + kills all helpers, returns OK
-  #   CHECKSUM <path>  — sha256 of inbox/<path>, returns SHA256=<hash>
-  #   PING             — returns PONG
+  #                    - decrypts inbox/xfer.enc into inbox/<dest-subdir>/, returns OK
+  #   CLEANUP          - removes xfer.enc + kills all helpers, returns OK
+  #   CHECKSUM <path>  - sha256 of inbox/<path>, returns SHA256=<hash>
+  #   PING             - returns PONG
   handlerScript = pkgs.writeShellScript "hostsync-handler" ''
     set -euo pipefail
     INBOX="${inbox}"
@@ -166,7 +170,7 @@ PYEOF
 
       DECRYPT)
         # DECRYPT <passphrase> <archive-path-ignored> [<dest-subdir>]
-        # archive-path is always xfer.enc in the inbox — field is ignored for
+        # archive-path is always xfer.enc in the inbox - field is ignored for
         # compatibility with the generic cmd_files_transfer protocol.
         PASSPHRASE=$(echo "$REST" | cut -d' ' -f1)
         EXTRACT_PARENT=$(echo "$REST" | cut -d' ' -f3-)
@@ -215,36 +219,33 @@ PYEOF
         ;;
     esac
   '';
-
 in {
   microvm.vsock.cid = meta.vsockCid;
 
-  microvm.interfaces = [{
-    type = "tap";
-    id   = meta.tapId;
-    mac  = meta.tapMac;
-  }];
+  microvm.interfaces = [
+    {
+      type = "tap";
+      id = meta.tapId;
+      mac = meta.tapMac;
+    }
+  ];
 
   microvm.mem = lib.mkForce 256;
 
-  # Host inbox share — virtiofsd on host maps ~/vm-inbox → /mnt/host-inbox in VM.
+  # Host inbox share - virtiofsd on host maps ~/vm-inbox → /mnt/host-inbox in VM.
   # Files decrypted here are immediately visible on the host.
-  microvm.shares = [{
-    tag        = "host-inbox";
-    source     = "/home/${hostUsername}/vm-inbox";
-    mountPoint = "${inbox}";
-    proto      = "virtiofs";
-  }];
+  microvm.shares = [
+    {
+      tag = "host-inbox";
+      source = "/home/${hostUsername}/vm-inbox";
+      mountPoint = "${inbox}";
+      proto = "virtiofs";
+    }
+  ];
 
-  # nix-overlay only — no persistent home volume needed (inbox is the virtiofs share)
-  microvm.volumes = lib.mkForce [{
-    image      = "/var/lib/microvms/microvm-hostsync/nix-overlay.qcow2";
-    mountPoint = "/nix/.rw-store";
-    size       = 2048;
-    autoCreate = true;
-  }];
-
-  boot.kernelModules = [ "vmw_vsock_virtio_transport" ];
+  # No persistent volumes - fully ephemeral (inbox data lives on the host via
+  # the virtiofs share above, not in VM-local storage).
+  boot.kernelModules = ["vmw_vsock_virtio_transport"];
 
   networking.useDHCP = lib.mkForce false;
 
@@ -252,7 +253,7 @@ in {
     enable = true;
     networks."10-hostsync" = {
       matchConfig.MACAddress = meta.tapMac;
-      address                = [ "${meta.subnet}.10/24" ];
+      address = ["${meta.subnet}.10/24"];
       linkConfig.RequiredForOnline = "no";
     };
   };
@@ -281,25 +282,30 @@ in {
 
   systemd.services.hostsync-agent = {
     description = "Hostsync vsock agent (port 14506)";
-    wantedBy    = [ "multi-user.target" ];
-    after       = [ "local-fs.target" ];
+    wantedBy = ["multi-user.target"];
+    after = ["local-fs.target"];
     serviceConfig = {
-      Type       = "simple";
-      Restart    = "always";
+      Type = "simple";
+      Restart = "always";
       RestartSec = "1s";
-      ExecStart  = "${pkgs.socat}/bin/socat VSOCK-LISTEN:14506,reuseaddr,fork EXEC:${handlerScript}";
+      ExecStart = "${pkgs.socat}/bin/socat VSOCK-LISTEN:14506,reuseaddr,fork EXEC:${handlerScript}";
     };
   };
 
   users.users.hostsync = {
     isNormalUser = true;
-    extraGroups  = [ "wheel" ];
-    password     = "hostsync";
-    home         = "/home/hostsync";
+    extraGroups = ["wheel"];
+    password = "hostsync";
+    home = "/home/hostsync";
   };
   services.getty.autologinUser = "hostsync";
 
   environment.systemPackages = with pkgs; [
-    socat openssl python3 coreutils gnutar gzip
+    socat
+    openssl
+    python3
+    coreutils
+    gnutar
+    gzip
   ];
 }

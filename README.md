@@ -39,7 +39,8 @@ Things being actively worked on or not yet verified. Checked off once resolved a
 - [x] **Builder build progress**: `microvm builder build X` now streams live status (`Building...` / `OK building ...` / `DONE`/`ERROR`) instead of going silent; errors are visible without socat'ing into the builder. Still coarse-grained: not the full per-derivation live stream `microvm build X` shows in administrative mode.
 - [ ] **Setup script** (`setup-hydrix.sh`): not fully end-to-end tested
 - [ ] **Installer post-reboot, gh auth**: persistence is implemented but untested; git config is not yet declarative (requires manual `git config` after reboot)
-- [x] **Clipboard isolation**: handled by the `hypr-clip-guard` Hyprland plugin — hooks all Wayland clipboard protocols to enforce per-VM isolation. See [DOCUMENTATION.md § Clipboard Isolation](#clipboard-isolation-hypr-clip-guard).
+- [ ] **Infra VM ephemerality**: router/router-stable/files/gitsync/hostsync/usb-sandbox/vault should wipe state on every restart, matching the lurking-profile pattern; router's `/var/lib` persistence currently requires a manual `microvm purge` after WiFi credential changes
+- [x] **Clipboard isolation**: handled by the `hypr-clip-guard` Hyprland plugin - hooks all Wayland clipboard protocols to enforce per-VM isolation. See [DOCUMENTATION.md § Clipboard Isolation](#clipboard-isolation-hypr-clip-guard).
 
 **Polish / lower priority**
 

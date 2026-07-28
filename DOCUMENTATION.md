@@ -448,6 +448,29 @@ sudo systemctl start nix-daemon
 
 ---
 
+### Infra VM Persistence Model
+
+Infra VMs (router, router-stable, builder, files, gitsync, hostsync, usb-sandbox, vault) are
+**ephemeral by default** - same pattern as the `lurking` profile VM. Nothing is special about
+how this works: no volume is declared for a given path, so it lives on microvm.nix's default
+tmpfs root and is wiped on every restart. Data that legitimately needs to survive is either an
+explicit, documented exception, or lives on the host (delivered via a virtiofs share) rather
+than inside the VM at all.
+
+| VM | Persistent state | Why |
+|---|---|---|
+| router / router-stable | None - `/var/lib` is fully ephemeral | NetworkManager connections, dnsmasq leases, and VPN pin state all reset to declared config on every restart. This also means `microvm purge` is no longer required after WiFi credential changes - a plain restart now gives the same clean state. |
+| builder | `/root/.cache/nix` (8GB, eval cache) | The only intentional exception. The builder doesn't keep its own nix store at all - it mounts the host's real `/nix/store` R/W via virtiofs and writes straight into it, so nothing built here is ever at risk of being lost. This one volume is pure performance (avoids 2+ min cold eval per builder start) with zero security/secrets sensitivity. |
+| files | `/storage` (opt-in, off by default) | `hydrix.files.persistence.enable` (default `false`). In-flight transfer payloads are ephemeral by design - FETCH/DELIVER/STORE are meant to be re-triggered on demand, not treated as durable storage. Set the option to `true` if you want transfers to survive a files-VM restart. |
+| gitsync | `/var/lib/gitsync/gh-config` only | SSH keys re-derive fresh from host secrets every boot (no need to persist). The `gh` CLI's OAuth token has no host-side source to re-derive from, so it gets a small dedicated persistent volume; everything else is ephemeral. |
+| hostsync, usb-sandbox, vault | None | Inbox data (hostsync) and the KeepassXC database (vault) already live on the host via virtiofs, not inside the VM - the VM itself holds nothing that needs to survive a restart. |
+
+The shared base (`vm/microvm/infra/microvm-infra-base.nix`) declares no volumes at all - each
+infra VM's own module is responsible for declaring only the specific, intentional exceptions
+listed above.
+
+---
+
 ### VM Types
 
 **MicroVM** (Recommended):
@@ -1048,11 +1071,11 @@ rebuild
 microvm purge microvm-router --force && mvm rebuild router
 ```
 
-After this the router VM receives credentials at boot via virtiofs — they are never baked into the Nix store and survive purges cleanly.
+After this the router VM receives credentials at boot via virtiofs - they are never baked into the Nix store and survive purges cleanly.
 
 #### Password storage
 
-Passwords are stored as 64-char WPA PSK hashes derived via `wpa_passphrase SSID PASSWORD`. NM accepts these directly and the plaintext password is never written to disk. However, in legacy mode the hashes are still readable by all VMs via the shared `/nix/store` — see [WiFi Credentials and the Nix Store](#wifi-credentials-and-the-nix-store). Migrating to sops mode eliminates this exposure.
+Passwords are stored as 64-char WPA PSK hashes derived via `wpa_passphrase SSID PASSWORD`. NM accepts these directly and the plaintext password is never written to disk. However, in legacy mode the hashes are still readable by all VMs via the shared `/nix/store` - see [WiFi Credentials and the Nix Store](#wifi-credentials-and-the-nix-store). Migrating to sops mode eliminates this exposure.
 
 ### Networking
 
@@ -2604,9 +2627,9 @@ The master password is stored in `/run/vault-session/token` inside the vault VM.
 
 **Boundary 4 \- Wayland clipboard isolation (hypr-clip-guard)**
 
-Credentials flow: vault VM → vsock → host → `wl-copy`. The `hypr-clip-guard` Hyprland plugin enforces clipboard isolation at the protocol level — it hooks all 6 Wayland clipboard delivery methods and blocks cross-VM transfers. Credentials written by `vault-pick` have source group "host" and are delivered only to the currently focused VM. The 30-second auto-clear (`wl-copy --clear`) limits the exposure window.
+Credentials flow: vault VM → vsock → host → `wl-copy`. The `hypr-clip-guard` Hyprland plugin enforces clipboard isolation at the protocol level - it hooks all 6 Wayland clipboard delivery methods and blocks cross-VM transfers. Credentials written by `vault-pick` have source group "host" and are delivered only to the currently focused VM. The 30-second auto-clear (`wl-copy --clear`) limits the exposure window.
 
-*Protects against:* Unfocused and background VM windows cannot read clipboard contents at all — the plugin blocks delivery before data reaches the Wayland client. Cross-VM clipboard leaks are impossible regardless of focus timing or selection events.
+*Protects against:* Unfocused and background VM windows cannot read clipboard contents at all - the plugin blocks delivery before data reaches the Wayland client. Cross-VM clipboard leaks are impossible regardless of focus timing or selection events.
 
 **Boundary 5 \- AES-256 at rest**
 
@@ -3877,9 +3900,9 @@ waypipe-connect-all             # connect waypipe for all running profile VMs
 
 ### Clipboard Isolation (hypr-clip-guard)
 
-waypipe forwards the Wayland clipboard protocol between VMs and the host compositor. Without isolation, copying text in one VM makes it available to every other VM — a compromised VM could silently harvest passwords or sensitive data from unrelated sessions.
+waypipe forwards the Wayland clipboard protocol between VMs and the host compositor. Without isolation, copying text in one VM makes it available to every other VM - a compromised VM could silently harvest passwords or sensitive data from unrelated sessions.
 
-The `hypr-clip-guard` Hyprland C++ plugin hooks all clipboard delivery methods inside the compositor to enforce per-VM isolation. It is loaded automatically via `hydrix-generated.conf` — no user configuration needed.
+The `hypr-clip-guard` Hyprland C++ plugin hooks all clipboard delivery methods inside the compositor to enforce per-VM isolation. It is loaded automatically via `hydrix-generated.conf` - no user configuration needed.
 
 #### Policy
 
@@ -3890,7 +3913,7 @@ The `hypr-clip-guard` Hyprland C++ plugin hooks all clipboard delivery methods i
 | Host → focused VM | **Allowed** (paste into active VM) |
 | VM-A → VM-B | **Blocked** (cross-VM isolation) |
 
-"Host" means any window without a `[vm-name]` title prefix. VM group identity comes from the waypipe `--title-prefix "[vm-name] "` convention — the plugin extracts the group from the window title, falling back to PID/PPID lineage for windowless clients (e.g. `wl-paste` through waypipe).
+"Host" means any window without a `[vm-name]` title prefix. VM group identity comes from the waypipe `--title-prefix "[vm-name] "` convention - the plugin extracts the group from the window title, falling back to PID/PPID lineage for windowless clients (e.g. `wl-paste` through waypipe).
 
 #### Architecture
 
@@ -3912,7 +3935,7 @@ VM app copies text
 
 #### Protocols Hooked (6 total)
 
-**`sendSelectionToDevice`** — called when clipboard data is delivered to a requesting client:
+**`sendSelectionToDevice`** - called when clipboard data is delivered to a requesting client:
 
 | Protocol | Used by |
 |----------|---------|
@@ -3921,7 +3944,7 @@ VM app copies text
 | `CDataDeviceWLRProtocol` | wl-paste, cliphist (wlr-data-control) |
 | `CExtDataDeviceProtocol` | Newer wl-paste (ext-data-control) |
 
-**`sendInitialSelections`** — called when a new data device is created, delivering the current clipboard immediately:
+**`sendInitialSelections`** - called when a new data device is created, delivering the current clipboard immediately:
 
 | Protocol | Purpose |
 |----------|---------|
@@ -3950,7 +3973,7 @@ Shows:
 
 #### Vault Interaction
 
-`vault-pick` writes credentials to the host clipboard via `wl-copy` on the host. The source group is "host", so the credential is delivered only to the currently focused VM — background VMs cannot read it. The 30-second auto-clear (`wl-copy --clear`) limits the exposure window further.
+`vault-pick` writes credentials to the host clipboard via `wl-copy` on the host. The source group is "host", so the credential is delivered only to the currently focused VM - background VMs cannot read it. The 30-second auto-clear (`wl-copy --clear`) limits the exposure window further.
 
 #### Key Files
 

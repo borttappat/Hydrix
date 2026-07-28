@@ -16,7 +16,7 @@
 #
 # Host-side wiring (microvm-host.nix):
 #   microvm@microvm-router-stable → Conflicts=microvm@microvm-router.service
-#   autostart = false  — manual-only "break glass" fallback
+#   autostart = false  - manual-only "break glass" fallback
 #   added to infrastructureVMs (available in lockdown mode)
 #
 # To launch: microvm start router-stable
@@ -31,7 +31,7 @@
   cfg = config.hydrix;
   routerCfg = cfg.router;
 
-  # QEMU without seccomp — same as main router (needed for VFIO)
+  # QEMU without seccomp - same as main router (needed for VFIO)
   qemuNoSeccomp = pkgs.qemu_kvm.overrideAttrs (old: {
     configureFlags = lib.filter (f: f != "--enable-seccomp") (old.configureFlags or []);
     buildInputs = lib.filter (p: p.pname or "" != "libseccomp") (old.buildInputs or []);
@@ -46,9 +46,18 @@
     legacyPassword = routerCfg.wifi.password;
     legacyNetwork =
       if legacySSID != "" && legacyPassword != ""
-      then [{ssid = legacySSID; password = legacyPassword; priority = 100;}]
+      then [
+        {
+          ssid = legacySSID;
+          password = legacyPassword;
+          priority = 100;
+        }
+      ]
       else [];
-  in if newFormat != [] then newFormat else legacyNetwork;
+  in
+    if newFormat != []
+    then newFormat
+    else legacyNetwork;
   hasWifiCredentials = wifiNetworks != [];
 
   wifiPciAddress = cfg.hardware.vfio.wifiPciAddress;
@@ -57,14 +66,20 @@
   extraNetworks = cfg.networking.extraNetworks;
   profileNetworks = cfg.networking.profileNetworks;
   # Deduplicated: custom profiles appear in both profileNetworks and extraNetworks.
-  allNetworks = lib.foldl' (acc: n:
-    if builtins.any (m: m.subnet == n.subnet) acc then acc else acc ++ [n]
+  allNetworks = lib.foldl' (
+    acc: n:
+      if builtins.any (m: m.subnet == n.subnet) acc
+      then acc
+      else acc ++ [n]
   ) [] (profileNetworks ++ extraNetworks);
 
-  # Files VM subnet — derived from allNetworks by routerTap name (set in infra/files/meta.nix).
+  # Files VM subnet - derived from allNetworks by routerTap name (set in infra/files/meta.nix).
   # Falls back to the canonical default if the files VM is not present.
   filesNetwork = lib.findFirst (n: n.routerTap or "" == "mv-router-file") null allNetworks;
-  filesSubnet  = if filesNetwork != null then filesNetwork.subnet else "192.168.108";
+  filesSubnet =
+    if filesNetwork != null
+    then filesNetwork.subnet
+    else "192.168.108";
 
   # Derive the stable TAP name for a network entry.
   # All framework routerTaps follow mv-router-<abbrev>; substitute the prefix.
@@ -73,29 +88,31 @@
     then "mv-rts-" + lib.removePrefix "mv-router-" n.routerTap
     else "mv-rts-${n.name}";
 
-  # Infrastructure LAN interfaces — from infra/*/meta.nix builtinVm entries.
+  # Infrastructure LAN interfaces - from infra/*/meta.nix builtinVm entries.
   # Stable router uses mv-rts-* prefix instead of mv-router-*.
   stableInfraLan = l: {
-    tap      = builtins.replaceStrings ["mv-router-"] ["mv-rts-"] l.tap;
-    subnet   = l.subnet;
+    tap = builtins.replaceStrings ["mv-router-"] ["mv-rts-"] l.tap;
+    subnet = l.subnet;
     routerIp = "${l.subnet}.253";
   };
   # frameworkLans: ALL infra LANs including management (used for dnsmasq, systemd-networkd,
-  # nftables — the host connects to the router via the management LAN).
+  # nftables - the host connects to the router via the management LAN).
   frameworkLans = map stableInfraLan cfg.router.microvm.infraLans;
 
   # frameworkQemuTaps: infra TAPs that need their own QEMU -netdev arg.
   # The management TAP (mv-rts-mgmt) is already declared in microvm.interfaces and must
-  # not be added again — QEMU would error "Device or resource busy".
+  # not be added again - QEMU would error "Device or resource busy".
   _declaredTaps = map (iface: iface.id) (lib.filter (iface: iface.type == "tap") config.microvm.interfaces);
   frameworkQemuTaps = lib.filter (l: !builtins.elem l.tap _declaredTaps) frameworkLans;
 
-  # All profile/extra network LAN interfaces — derived from meta.nix at build time.
-  profileLans = map (n: {
-    tap      = stableRouterTap n;
-    subnet   = n.subnet;
-    routerIp = "${n.subnet}.253";
-  }) allNetworks;
+  # All profile/extra network LAN interfaces - derived from meta.nix at build time.
+  profileLans =
+    map (n: {
+      tap = stableRouterTap n;
+      subnet = n.subnet;
+      routerIp = "${n.subnet}.253";
+    })
+    allNetworks;
 
   allLans = frameworkLans ++ profileLans;
 
@@ -107,7 +124,6 @@
 
   # Comma-separated list of VM subnets for nftables
   vmNetSet = lib.concatMapStringsSep ", " (l: "${l.subnet}.0/24") allLans;
-
 in {
   imports = [
     ../../options.nix
@@ -134,25 +150,31 @@ in {
       graphics.enable = false;
 
       interfaces = [
-        { type = "tap"; id = "mv-rts-mgmt"; mac = "02:00:00:03:00:01"; }
+        {
+          type = "tap";
+          id = "mv-rts-mgmt";
+          mac = "02:00:00:03:00:01";
+        }
       ];
 
       qemu.extraArgs =
         [
-          "-vga" "none"
-          "-display" "none"
+          "-vga"
+          "none"
+          "-display"
+          "none"
 
           "-chardev"
           "socket,id=console,path=/var/lib/microvms/${vmName}/console.sock,server=on,wait=off"
           "-serial"
           "chardev:console"
 
-          "-device" "pcie-root-port,id=pcie.1,slot=1,chassis=1"
+          "-device"
+          "pcie-root-port,id=pcie.1,slot=1,chassis=1"
           "-device"
           "vfio-pci,host=0000:${lib.removePrefix "0000:" wifiPciAddress},bus=pcie.1"
-
         ]
-        # Profile network TAPs — derived from profileNetworks (profiles/*/meta.nix).
+        # Profile network TAPs - derived from profileNetworks (profiles/*/meta.nix).
         # MACs: 02:00:00:03:XX:01, index+1 (avoids collision with mgmt=00).
         ++ lib.concatLists (lib.imap0 (i: pn: [
             "-netdev"
@@ -161,8 +183,8 @@ in {
             "virtio-net-pci,netdev=net-${pn.name},mac=02:00:00:03:${lib.fixedWidthString 2 "0" (builtins.toString (i + 1))}:01"
           ])
           profileNetworks)
-        # Builtin infra VM TAPs (builtinVm = true: builder, etc.) — mgmt excluded (see frameworkQemuTaps).
-        # MACs: 02:00:00:05:XX:01 — separate namespace from profiles (03) and extras (04).
+        # Builtin infra VM TAPs (builtinVm = true: builder, etc.) - mgmt excluded (see frameworkQemuTaps).
+        # MACs: 02:00:00:05:XX:01 - separate namespace from profiles (03) and extras (04).
         ++ lib.concatLists (lib.imap0 (i: l: [
             "-netdev"
             "tap,id=net-infra-${builtins.toString i},ifname=${l.tap},script=no,downscript=no"
@@ -195,14 +217,9 @@ in {
         }
       ];
 
-      volumes = [
-        {
-          image = "/var/lib/microvms/${vmName}/var-lib.qcow2";
-          mountPoint = "/var/lib";
-          size = 512;
-          autoCreate = true;
-        }
-      ];
+      # /var/lib is ephemeral - see microvm-router.nix for rationale. The
+      # fallback router should behave identically to the main router.
+      volumes = [];
 
       vsock.cid = lib.mkDefault 201;
     };
@@ -211,8 +228,14 @@ in {
 
     # ===== Kernel =====
     boot.initrd.availableKernelModules = [
-      "virtio_balloon" "virtio_blk" "virtio_pci" "virtio_ring"
-      "virtio_net" "virtio_scsi" "virtio_mmio" "squashfs"
+      "virtio_balloon"
+      "virtio_blk"
+      "virtio_pci"
+      "virtio_ring"
+      "virtio_net"
+      "virtio_scsi"
+      "virtio_mmio"
+      "squashfs"
     ];
 
     boot.kernelParams = [
@@ -224,8 +247,13 @@ in {
     boot.kernelPackages = lib.mkDefault pkgs.linuxPackages_latest;
 
     boot.kernelModules = [
-      "virtio_blk" "virtio_pci" "virtio_rng"
-      "iwlwifi" "iwlmvm" "cfg80211" "mac80211"
+      "virtio_blk"
+      "virtio_pci"
+      "virtio_rng"
+      "iwlwifi"
+      "iwlmvm"
+      "cfg80211"
+      "mac80211"
     ];
 
     hardware.enableAllFirmware = true;
@@ -237,29 +265,37 @@ in {
     # declarative networking below.
     # Interface renaming: MAC → stable TAP name inside the VM.
     # Matches the MAC assignments in qemu.extraArgs above.
-    systemd.network.links = {
-      "10-mv-rts-mgmt" = { matchConfig.MACAddress = "02:00:00:03:00:01"; linkConfig.Name = "mv-rts-mgmt"; };
-    } // lib.listToAttrs (lib.imap0 (i: pn: {
-      name  = "10-${stableRouterTap pn}";
-      value = {
-        matchConfig.MACAddress = "02:00:00:03:${lib.fixedWidthString 2 "0" (builtins.toString (i + 1))}:01";
-        linkConfig.Name = stableRouterTap pn;
-      };
-    }) profileNetworks)
-    // lib.listToAttrs (lib.imap0 (i: l: {
-      name  = "10-${l.tap}";
-      value = {
-        matchConfig.MACAddress = "02:00:00:05:${lib.fixedWidthString 2 "0" (builtins.toString i)}:01";
-        linkConfig.Name = l.tap;
-      };
-    }) frameworkQemuTaps)
-    // lib.listToAttrs (lib.imap0 (i: n: {
-      name  = "20-${stableRouterTap n}";
-      value = {
-        matchConfig.MACAddress = "02:00:00:04:${lib.fixedWidthString 2 "0" (builtins.toString i)}:01";
-        linkConfig.Name = stableRouterTap n;
-      };
-    }) extraNetworks);
+    systemd.network.links =
+      {
+        "10-mv-rts-mgmt" = {
+          matchConfig.MACAddress = "02:00:00:03:00:01";
+          linkConfig.Name = "mv-rts-mgmt";
+        };
+      }
+      // lib.listToAttrs (lib.imap0 (i: pn: {
+          name = "10-${stableRouterTap pn}";
+          value = {
+            matchConfig.MACAddress = "02:00:00:03:${lib.fixedWidthString 2 "0" (builtins.toString (i + 1))}:01";
+            linkConfig.Name = stableRouterTap pn;
+          };
+        })
+        profileNetworks)
+      // lib.listToAttrs (lib.imap0 (i: l: {
+          name = "10-${l.tap}";
+          value = {
+            matchConfig.MACAddress = "02:00:00:05:${lib.fixedWidthString 2 "0" (builtins.toString i)}:01";
+            linkConfig.Name = l.tap;
+          };
+        })
+        frameworkQemuTaps)
+      // lib.listToAttrs (lib.imap0 (i: n: {
+          name = "20-${stableRouterTap n}";
+          value = {
+            matchConfig.MACAddress = "02:00:00:04:${lib.fixedWidthString 2 "0" (builtins.toString i)}:01";
+            linkConfig.Name = stableRouterTap n;
+          };
+        })
+        extraNetworks);
 
     # ===== Networking =====
     networking = {
@@ -273,27 +309,34 @@ in {
         enable = true;
         wifi.powersave = false;
         settings.keyfile.path = "/var/lib/NetworkManager/system-connections";
-        unmanaged = [ "interface-name:mv-rts-*" ];
+        unmanaged = ["interface-name:mv-rts-*"];
         ensureProfiles = lib.mkIf hasWifiCredentials {
           profiles = builtins.listToAttrs (map (network: {
-            name = network.ssid;
-            value = {
-              connection = {
-                id = network.ssid;
-                type = "wifi";
-                autoconnect = "true";
-                autoconnect-priority = toString (network.priority or 50);
+              name = network.ssid;
+              value = {
+                connection = {
+                  id = network.ssid;
+                  type = "wifi";
+                  autoconnect = "true";
+                  autoconnect-priority = toString (network.priority or 50);
+                };
+                wifi = {
+                  mode = "infrastructure";
+                  ssid = network.ssid;
+                };
+                wifi-security = {
+                  key-mgmt = "wpa-psk";
+                  psk = network.password;
+                };
+                ipv4.method = "auto";
+                ipv6.method = "disabled";
               };
-              wifi = {mode = "infrastructure"; ssid = network.ssid;};
-              wifi-security = {key-mgmt = "wpa-psk"; psk = network.password;};
-              ipv4.method = "auto";
-              ipv6.method = "disabled";
-            };
-          }) wifiNetworks);
+            })
+            wifiNetworks);
         };
       };
 
-      # Not set here — see microvm-router.nix for why: NetworkManager's own
+      # Not set here - see microvm-router.nix for why: NetworkManager's own
       # module supplies wireless.enable = true + dbusControlled = true itself.
     };
 
@@ -303,32 +346,33 @@ in {
     systemd.network = {
       enable = true;
       networks = lib.listToAttrs (map (l: {
-        name = "10-${l.tap}";
-        value = {
-          matchConfig.Name = l.tap;
-          networkConfig = {
-            Address = "${l.routerIp}/24";
-            DHCP = "no";
-            LinkLocalAddressing = "no";
-            ConfigureWithoutCarrier = "yes";
+          name = "10-${l.tap}";
+          value = {
+            matchConfig.Name = l.tap;
+            networkConfig = {
+              Address = "${l.routerIp}/24";
+              DHCP = "no";
+              LinkLocalAddressing = "no";
+              ConfigureWithoutCarrier = "yes";
+            };
           };
-        };
-      }) allLans);
+        })
+        allLans);
     };
 
     boot.kernel.sysctl = {
-      "net.ipv4.ip_forward"                       = 1;
-      "net.ipv4.conf.all.forwarding"               = 1;
-      "net.ipv4.conf.default.rp_filter"            = 0;
-      "net.ipv4.conf.all.rp_filter"                = 0;
-      "net.ipv4.icmp_echo_ignore_broadcasts"       = 1;
+      "net.ipv4.ip_forward" = 1;
+      "net.ipv4.conf.all.forwarding" = 1;
+      "net.ipv4.conf.default.rp_filter" = 0;
+      "net.ipv4.conf.all.rp_filter" = 0;
+      "net.ipv4.icmp_echo_ignore_broadcasts" = 1;
       "net.ipv4.icmp_ignore_bogus_error_responses" = 1;
-      "net.ipv4.tcp_syncookies"                    = 1;
-      "net.ipv4.tcp_rfc1337"                       = 1;
-      "net.ipv4.conf.all.accept_source_route"      = 0;
-      "net.ipv4.conf.all.accept_redirects"         = 0;
-      "net.ipv4.conf.all.send_redirects"           = 0;
-      "net.ipv4.conf.all.log_martians"             = 1;
+      "net.ipv4.tcp_syncookies" = 1;
+      "net.ipv4.tcp_rfc1337" = 1;
+      "net.ipv4.conf.all.accept_source_route" = 0;
+      "net.ipv4.conf.all.accept_redirects" = 0;
+      "net.ipv4.conf.all.send_redirects" = 0;
+      "net.ipv4.conf.all.log_martians" = 1;
     };
 
     # ===== dnsmasq (fully declarative) =====
@@ -339,21 +383,25 @@ in {
       settings = {
         bind-interfaces = true;
         log-dhcp = true;
-        server = [ "1.1.1.1" "8.8.8.8" ];
+        server = ["1.1.1.1" "8.8.8.8"];
         interface = allLanTaps;
-        dhcp-range = map (l:
-          "${l.tap},${l.subnet}.10,${l.subnet}.200,24h"
-        ) allLans;
-        dhcp-option = lib.concatMap (l: [
-          "${l.tap},option:router,${l.routerIp}"
-          "${l.tap},option:dns-server,${l.routerIp}"
-        ]) allLans;
+        dhcp-range =
+          map (
+            l: "${l.tap},${l.subnet}.10,${l.subnet}.200,24h"
+          )
+          allLans;
+        dhcp-option =
+          lib.concatMap (l: [
+            "${l.tap},option:router,${l.routerIp}"
+            "${l.tap},option:dns-server,${l.routerIp}"
+          ])
+          allLans;
       };
     };
 
     # ===== Firewall (nftables, fully declarative) =====
     # LAN interface names are known at build time.
-    # WAN interface is NOT named — we identify it by negating all known LANs.
+    # WAN interface is NOT named - we identify it by negating all known LANs.
     # Any interface not in the LAN set is treated as WAN/VPN → masquerade.
     networking.nftables = {
       enable = true;
@@ -370,7 +418,7 @@ in {
             iif lo accept
             ct state established,related accept
             ct state invalid drop
-            # DHCP — source is 0.0.0.0, must allow before IP filtering
+            # DHCP - source is 0.0.0.0, must allow before IP filtering
             udp dport 67 accept
             # DNS from VMs
             ip saddr $VM_NETS udp dport 53 accept
@@ -387,7 +435,7 @@ in {
             type filter hook forward priority filter; policy drop;
             ct state established,related accept
             ct state invalid drop
-            # Files VM — allow HTTP file transfers between VMs
+            # Files VM - allow HTTP file transfers between VMs
             ip saddr ${filesSubnet}.0/24 tcp dport 8888 accept
             ip saddr ${filesSubnet}.0/24 ip daddr ${filesSubnet}.0/24 accept
             # Allow forwarding out to WAN/VPN (any non-LAN egress)
@@ -423,9 +471,19 @@ in {
     security.sudo.wheelNeedsPassword = false;
 
     environment.systemPackages = with pkgs; [
-      iproute2 iptables nftables tcpdump
-      nettools bind.dnsutils bridge-utils pciutils
-      htop vim iw wirelesstools networkmanager
+      iproute2
+      iptables
+      nftables
+      tcpdump
+      nettools
+      bind.dnsutils
+      bridge-utils
+      pciutils
+      htop
+      vim
+      iw
+      wirelesstools
+      networkmanager
     ];
 
     systemd.tmpfiles.rules = [
@@ -437,7 +495,7 @@ in {
     users.motd = ''
 
       ┌─────────────────────────────────────────────────────┐
-      │  Hydrix MicroVM Router — STABLE (Fallback)          │
+      │  Hydrix MicroVM Router - STABLE (Fallback)          │
       └─────────────────────────────────────────────────────┘
 
     '';

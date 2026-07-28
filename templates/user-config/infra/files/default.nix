@@ -1,4 +1,4 @@
-# Filesharing infra VM — encrypted inter-VM file transfer hub
+# Filesharing infra VM - encrypted inter-VM file transfer hub
 #
 # Base (headless, virtiofs store) provided by microvm-infra-base via mkInfraVm.
 # This module adds: vsock agent, multi-bridge networking, persistent storage.
@@ -7,22 +7,29 @@
 # excluded. User infra VMs that need transfer access are listed in infraParticipants.
 #
 # vsock 14505: host ↔ files VM (FETCH, DELIVER, STORE, STORE_RAW, LIST, PING)
-{ config, lib, pkgs, ... }:
-let
+{
+  config,
+  lib,
+  pkgs,
+  ...
+}: let
   meta = import ./meta.nix;
 
   vmName = config.networking.hostName;
 
-  # Privacy VMs — intentionally excluded from file transfer
-  privacyVMs = [ "lurking" ];
+  # Privacy VMs - intentionally excluded from file transfer
+  privacyVMs = ["lurking"];
 
   # Auto-discover profile VMs from profiles/ directory
   profilesDir = ../../profiles;
   profileNames = builtins.attrNames (builtins.readDir profilesDir);
-  validProfiles = builtins.filter (n:
-    !(builtins.elem n privacyVMs) &&
-    builtins.pathExists (profilesDir + "/${n}/meta.nix")
-  ) profileNames;
+  validProfiles =
+    builtins.filter (
+      n:
+        !(builtins.elem n privacyVMs)
+        && builtins.pathExists (profilesDir + "/${n}/meta.nix")
+    )
+    profileNames;
 
   # TAP abbreviation: first 4 chars of profile name
   abbrev = n: builtins.substring 0 4 n;
@@ -30,43 +37,47 @@ let
   # Per-bridge TAP/MAC/IP mappings for profile VMs
   # MAC: 02:00:00:02:<cidN>:01, cidN = zero-padded decimal of (vsockCid - 100)
   # Valid for profile CIDs 102-199
-  profileIfaceMap = builtins.listToAttrs (map (name:
-    let
-      pmeta = import (profilesDir + "/${name}/meta.nix");
-      cidN  = lib.fixedWidthString 2 "0" (toString (pmeta.vsockCid - 100));
-    in lib.nameValuePair name {
-      tap    = "mv-files-${abbrev name}";
-      mac    = "02:00:00:02:${cidN}:01";
-      subnet = pmeta.subnet;
-    }
-  ) validProfiles);
+  profileIfaceMap = builtins.listToAttrs (map (
+      name: let
+        pmeta = import (profilesDir + "/${name}/meta.nix");
+        cidN = lib.fixedWidthString 2 "0" (toString (pmeta.vsockCid - 100));
+      in
+        lib.nameValuePair name {
+          tap = "mv-files-${abbrev name}";
+          mac = "02:00:00:02:${cidN}:01";
+          subnet = pmeta.subnet;
+        }
+    )
+    validProfiles);
 
-  # Infra VMs that participate in file transfer (explicit — not auto-discovered)
+  # Infra VMs that participate in file transfer (explicit - not auto-discovered)
   # MAC 5th octet: hex(vsockCid - 100), prefixed 0 to stay in valid range
   usbSandboxMeta = import ../usb-sandbox/meta.nix;
-  hostsyncMeta   = import ../hostsync/meta.nix;
+  hostsyncMeta = import ../hostsync/meta.nix;
   infraIfaceMap = {
     # usb-sandbox: files VM gets a TAP on br-usb-sandbox so both VMs share that bridge
     "usb-sandbox" = {
-      tap    = "mv-files-usb";
-      mac    = "02:00:00:02:6d:02";  # Unique MAC on br-usb-sandbox (usb-sandbox itself uses :6d:01)
+      tap = "mv-files-usb";
+      mac = "02:00:00:02:6d:02"; # Unique MAC on br-usb-sandbox (usb-sandbox itself uses :6d:01)
       subnet = usbSandboxMeta.subnet;
     };
     # hostsync: files VM gets a TAP on br-hostsync to HTTP-deliver blobs to 192.168.214.10
     "hostsync" = {
-      tap    = "mv-files-hsy";
-      mac    = "02:00:00:02:d6:02";  # CID 214 = 0xd6; :02 = files VM side on this bridge
+      tap = "mv-files-hsy";
+      mac = "02:00:00:02:d6:02"; # CID 214 = 0xd6; :02 = files VM side on this bridge
       subnet = hostsyncMeta.subnet;
     };
   };
 
   ifaceMap = profileIfaceMap // infraIfaceMap;
 
-  extraInterfaces = lib.mapAttrsToList (_: i: {
-    type = "tap";
-    id   = i.tap;
-    mac  = i.mac;
-  }) ifaceMap;
+  extraInterfaces =
+    lib.mapAttrsToList (_: i: {
+      type = "tap";
+      id = i.tap;
+      mac = i.mac;
+    })
+    ifaceMap;
 
   filesAgentScript = pkgs.writeShellScript "microvm-files-agent" ''
     set -euo pipefail
@@ -192,125 +203,161 @@ let
         ;;
     esac
   '';
-
 in {
-  microvm.vsock.cid = meta.vsockCid;
-  microvm.interfaces = [{
-    type = "tap";
-    id   = meta.tapId;
-    mac  = meta.tapMac;
-  }] ++ extraInterfaces;
+  options.hydrix.files.persistence = {
+    enable = lib.mkOption {
+      type = lib.types.bool;
+      default = false;
+      description = ''
+        Persist /storage (in-flight inter-VM transfer payloads) across VM restarts.
+        Off by default: a restart mid-transfer means the source VM must re-send -
+        matches the "transfer hub" semantics (FETCH/DELIVER/STORE are designed to
+        be re-triggered on demand), and avoids leaving transferred file contents
+        sitting in VM-local storage indefinitely.
+      '';
+    };
+    size = lib.mkOption {
+      type = lib.types.int;
+      default = 51200;
+      description = "Size in MB for the persistent /storage volume, when enabled.";
+    };
+  };
 
-  microvm.mem = 512;
+  config = {
+    microvm.vsock.cid = meta.vsockCid;
+    microvm.interfaces =
+      [
+        {
+          type = "tap";
+          id = meta.tapId;
+          mac = meta.tapMac;
+        }
+      ]
+      ++ extraInterfaces;
 
-  microvm.volumes = lib.mkForce [
-    {
-      image      = "/var/lib/microvms/${vmName}/storage.qcow2";
-      mountPoint = "/storage";
-      size       = 51200;
-      autoCreate = true;
-    }
-    {
-      image      = "/var/lib/microvms/${vmName}/nix-overlay.qcow2";
-      mountPoint = "/nix/.rw-store";
-      size       = 4096;
-      autoCreate = true;
-    }
-  ];
+    microvm.mem = 512;
 
-  boot.kernelPackages = pkgs.linuxPackages_latest;
-  boot.kernelModules  = [ "vmw_vsock_virtio_transport" ];
+    microvm.volumes = lib.mkForce (
+      lib.optionals config.hydrix.files.persistence.enable [
+        {
+          image = "/var/lib/microvms/${vmName}/storage.qcow2";
+          mountPoint = "/storage";
+          size = config.hydrix.files.persistence.size;
+          autoCreate = true;
+        }
+      ]
+    );
 
-  networking.useDHCP = lib.mkForce false;
+    boot.kernelPackages = pkgs.linuxPackages_latest;
+    boot.kernelModules = ["vmw_vsock_virtio_transport"];
 
-  systemd.network = {
-    enable = true;
-    networks = {
-      "10-files-home" = {
-        matchConfig.MACAddress = meta.tapMac;
-        address = [ "${meta.subnet}.10/24" ];
-        gateway = [ "${meta.subnet}.253" ];
-        dns     = [ "${meta.subnet}.253" ];
-        linkConfig.RequiredForOnline = "no";
+    networking.useDHCP = lib.mkForce false;
+
+    systemd.network = {
+      enable = true;
+      networks =
+        {
+          "10-files-home" = {
+            matchConfig.MACAddress = meta.tapMac;
+            address = ["${meta.subnet}.10/24"];
+            gateway = ["${meta.subnet}.253"];
+            dns = ["${meta.subnet}.253"];
+            linkConfig.RequiredForOnline = "no";
+          };
+        }
+        // lib.mapAttrs' (name: i:
+          lib.nameValuePair "20-files-${name}" {
+            matchConfig.MACAddress = i.mac;
+            address = ["${i.subnet}.2/24"];
+            linkConfig.RequiredForOnline = "no";
+          })
+        ifaceMap;
+    };
+
+    boot.kernel.sysctl."net.ipv4.ip_forward" = 0;
+
+    networking.nftables = {
+      enable = true;
+      tables."files-vm" = {
+        family = "inet";
+        content = ''
+          chain input {
+            type filter hook input priority filter; policy drop;
+            iif lo accept
+            ct state established,related accept
+            ct state invalid drop
+            ip protocol icmp accept
+            tcp dport 8888 accept
+          }
+          chain forward {
+            type filter hook forward priority filter; policy drop;
+          }
+        '';
       };
-    } // lib.mapAttrs' (name: i: lib.nameValuePair "20-files-${name}" {
-      matchConfig.MACAddress       = i.mac;
-      address                      = [ "${i.subnet}.2/24" ];
-      linkConfig.RequiredForOnline = "no";
-    }) ifaceMap;
-  };
-
-  boot.kernel.sysctl."net.ipv4.ip_forward" = 0;
-
-  networking.nftables = {
-    enable = true;
-    tables."files-vm" = {
-      family = "inet";
-      content = ''
-        chain input {
-          type filter hook input priority filter; policy drop;
-          iif lo accept
-          ct state established,related accept
-          ct state invalid drop
-          ip protocol icmp accept
-          tcp dport 8888 accept
-        }
-        chain forward {
-          type filter hook forward priority filter; policy drop;
-        }
-      '';
     };
-  };
 
-  # Format /dev/vda as ext4 on first boot (or if unformatted after corruption).
-  # Must run before systemd-fsck, which would fail on an empty block device.
-  systemd.services.storage-init = {
-    description = "Initialize /storage filesystem if needed";
-    wantedBy    = [ "local-fs-pre.target" ];
-    before      = [ "systemd-fsck@dev-vda.service" "storage.mount" ];
-    after       = [ "dev-vda.device" ];
-    requires    = [ "dev-vda.device" ];
-    serviceConfig = {
-      Type            = "oneshot";
-      RemainAfterExit = true;
-      ExecStart       = pkgs.writeShellScript "storage-init" ''
-        if ! ${pkgs.e2fsprogs}/bin/e2fsck -n /dev/vda >/dev/null 2>&1; then
-          echo "Formatting /dev/vda as ext4..."
-          ${pkgs.e2fsprogs}/bin/mkfs.ext4 -F -L storage /dev/vda
-        fi
-      '';
+    # Format /dev/vda as ext4 on first boot (or if unformatted after corruption).
+    # Must run before systemd-fsck, which would fail on an empty block device.
+    # Only relevant when hydrix.files.persistence.enable is set - no volume,
+    # no /dev/vda, nothing to format.
+    systemd.services.storage-init = lib.mkIf config.hydrix.files.persistence.enable {
+      description = "Initialize /storage filesystem if needed";
+      wantedBy = ["local-fs-pre.target"];
+      before = ["systemd-fsck@dev-vda.service" "storage.mount"];
+      after = ["dev-vda.device"];
+      requires = ["dev-vda.device"];
+      serviceConfig = {
+        Type = "oneshot";
+        RemainAfterExit = true;
+        ExecStart = pkgs.writeShellScript "storage-init" ''
+          if ! ${pkgs.e2fsprogs}/bin/e2fsck -n /dev/vda >/dev/null 2>&1; then
+            echo "Formatting /dev/vda as ext4..."
+            ${pkgs.e2fsprogs}/bin/mkfs.ext4 -F -L storage /dev/vda
+          fi
+        '';
+      };
     };
-  };
 
-  systemd.tmpfiles.rules = [
-    "d /storage     0755 root root -"
-    "d /storage/tmp 0750 root root -"
-  ];
+    systemd.tmpfiles.rules = [
+      "d /storage     0755 root root -"
+      "d /storage/tmp 0750 root root -"
+    ];
 
-  systemd.services.microvm-files-agent = {
-    description = "Files VM vsock agent (port 14505)";
-    wantedBy    = [ "multi-user.target" ];
-    after       = [ "local-fs.target" "storage.mount" ];
-    serviceConfig = {
-      Type       = "simple";
-      Restart    = "always";
-      RestartSec = "1s";
-      ExecStart  = "${pkgs.socat}/bin/socat VSOCK-LISTEN:14505,reuseaddr,fork EXEC:${filesAgentScript}";
+    systemd.services.microvm-files-agent = {
+      description = "Files VM vsock agent (port 14505)";
+      wantedBy = ["multi-user.target"];
+      after =
+        ["local-fs.target"]
+        ++ lib.optionals config.hydrix.files.persistence.enable ["storage.mount"];
+      serviceConfig = {
+        Type = "simple";
+        Restart = "always";
+        RestartSec = "1s";
+        ExecStart = "${pkgs.socat}/bin/socat VSOCK-LISTEN:14505,reuseaddr,fork EXEC:${filesAgentScript}";
+      };
     };
+
+    environment.systemPackages = with pkgs; [
+      curl
+      openssl
+      socat
+      coreutils
+      gnutar
+      gzip
+      iproute2
+      htop
+      ncdu
+      e2fsprogs
+    ];
+
+    # Dedicated user for console autologin - matches builder/gitsync pattern.
+    # Root autologin on ttyS0 is blocked by login(1)'s securetty check.
+    users.users.files = {
+      isNormalUser = true;
+      extraGroups = ["wheel"];
+      password = "files";
+      home = "/home/files";
+    };
+    services.getty.autologinUser = "files";
   };
-
-  environment.systemPackages = with pkgs; [
-    curl openssl socat coreutils gnutar gzip iproute2 htop ncdu e2fsprogs
-  ];
-
-  # Dedicated user for console autologin — matches builder/gitsync pattern.
-  # Root autologin on ttyS0 is blocked by login(1)'s securetty check.
-  users.users.files = {
-    isNormalUser = true;
-    extraGroups  = [ "wheel" ];
-    password     = "files";
-    home         = "/home/files";
-  };
-  services.getty.autologinUser = "files";
-
 }

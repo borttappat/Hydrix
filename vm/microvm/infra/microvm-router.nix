@@ -73,13 +73,13 @@
 
   # Derived WAN mode booleans (resolved at eval time, embedded in generated scripts)
   usePciPassthrough = wanMode == "pci-passthrough" || (wanMode == "auto" && wifiPciAddress != "");
-  useEthernetWan    = wanMode == "macvtap"         || (wanMode == "auto" && wifiPciAddress == "");
+  useEthernetWan = wanMode == "macvtap" || (wanMode == "auto" && wifiPciAddress == "");
 
   # Mullvad VPN active when enabled and at least one bridge configured
   hasMullvad = vpnCfg.mullvad.enable && vpnCfg.mullvad.bridges != {};
   mullvadBridges = vpnCfg.mullvad.bridges; # attrset: bridge-name → conf-file path
 
-  # WireGuard config processing hook — user-defined via hydrix.router.vpn.mullvad.processConfig
+  # WireGuard config processing hook - user-defined via hydrix.router.vpn.mullvad.processConfig
   # Default: identity (pass through raw conf files unmodified)
   processConfig = vpnCfg.mullvad.processConfig;
 
@@ -94,27 +94,37 @@
   # profileNetworks (profileNetworks = ALL discovered profiles; extraNetworks =
   # non-framework profiles + infra VMs).  Filter out duplicates to avoid double
   # QEMU TAP entries (EBUSY) and duplicate dnsmasq/nftables config.
-  extraOnlyNetworks = lib.filter (n:
-    !(builtins.any (pn: pn.routerTap == n.routerTap) profileNetworks)
-  ) extraNetworks;
+  extraOnlyNetworks =
+    lib.filter (
+      n:
+        !(builtins.any (pn: pn.routerTap == n.routerTap) profileNetworks)
+    )
+    extraNetworks;
   # All networks the router serves: declared profiles + extra-only (infra VMs)
   allNetworks = profileNetworks ++ extraOnlyNetworks;
 
-  # LAN interface names — all statically known at build time via MAC→name links.
+  # LAN interface names - all statically known at build time via MAC→name links.
   # Used in nftables to identify WAN/VPN egress by negation so the firewall
   # never depends on runtime WAN detection (which can fail on fresh installs).
-  # Derived from infraLans + all profile/extra networks — no hardcoded names.
-  lanTaps = map (l: l.tap) cfg.router.microvm.infraLans
+  # Derived from infraLans + all profile/extra networks - no hardcoded names.
+  lanTaps =
+    map (l: l.tap) cfg.router.microvm.infraLans
     ++ map (n: n.routerTap) allNetworks;
 
   # nftables set literal: { "lo", "mv-router-mgmt", ... }
   lanTapSetNft = "{ " + lib.concatMapStringsSep ", " (t: "\"${t}\"") (["lo"] ++ lanTaps) + " }";
 
   # All LAN segments the router serves (networking config: dnsmasq, systemd-networkd,
-  # nftables). Includes the management TAP — the host connects to the router via mgmt.
+  # nftables). Includes the management TAP - the host connects to the router via mgmt.
   # infraLans comes from infra/*/meta.nix builtinVm entries.
   infraLans = cfg.router.microvm.infraLans;
-  allLans = infraLans ++ map (n: { tap = n.routerTap; subnet = n.subnet; }) allNetworks;
+  allLans =
+    infraLans
+    ++ map (n: {
+      tap = n.routerTap;
+      subnet = n.subnet;
+    })
+    allNetworks;
 
   # TAPs that need their own QEMU -netdev arg. The management TAP is declared
   # explicitly in extraArgs below, so exclude it to avoid duplicates.
@@ -122,7 +132,7 @@
 
   # Script run by QEMU *after* TUNSETIFF to bridge the TAP to its host bridge.
   # Using script= (not script=no) ensures QEMU holds the fd before bridge
-  # attachment — eliminating the EBUSY race where a pre-bridged TAP blocks
+  # attachment - eliminating the EBUSY race where a pre-bridged TAP blocks
   # TUNSETIFF (Linux rejects TUNSETIFF when an rx_handler is already registered).
   # TAPs are created on-demand by QEMU itself via TUNSETIFF; no pre-creation needed.
   tapBridgeScript = pkgs.writeShellScript "router-tap-bridge" ''
@@ -165,7 +175,7 @@ in {
       {
         assertion = wanMode != "pci-passthrough" || wifiPciAddress != "";
         message = ''
-          hydrix.hardware.vfio.wifiPciAddress is empty — the router VM needs a WiFi PCI
+          hydrix.hardware.vfio.wifiPciAddress is empty - the router VM needs a WiFi PCI
           address for VFIO passthrough when wan.mode = "pci-passthrough". Pass wifiPciAddress
           to mkMicrovmRouter in your flake:
 
@@ -192,7 +202,10 @@ in {
       hypervisor = "qemu";
       qemu.machine = "q35"; # Q35 chipset - better PCIe/VFIO support (matches libvirt router)
       # Only disable seccomp when VFIO passthrough is in use (seccomp blocks /dev/vfio access)
-      qemu.package = if usePciPassthrough then qemuNoSeccomp else pkgs.qemu_kvm;
+      qemu.package =
+        if usePciPassthrough
+        then qemuNoSeccomp
+        else pkgs.qemu_kvm;
 
       # Resources - router is lightweight (NAT/routing only, 1 vCPU sufficient)
       vcpu = 1;
@@ -229,23 +242,28 @@ in {
           "-serial"
           "chardev:console"
 
-          # Management TAP (br-mgmt) — created by QEMU, bridged by tapBridgeScript
-          "-netdev" "tap,id=net-mgmt,ifname=mv-router-mgmt,script=${tapBridgeScript},downscript=no"
-          "-device" "virtio-net-pci,netdev=net-mgmt,mac=02:00:00:01:00:01"
-
+          # Management TAP (br-mgmt) - created by QEMU, bridged by tapBridgeScript
+          "-netdev"
+          "tap,id=net-mgmt,ifname=mv-router-mgmt,script=${tapBridgeScript},downscript=no"
+          "-device"
+          "virtio-net-pci,netdev=net-mgmt,mac=02:00:00:01:00:01"
         ]
-        # VFIO passthrough — only when using WiFi PCI passthrough as WAN
+        # VFIO passthrough - only when using WiFi PCI passthrough as WAN
         ++ lib.optionals usePciPassthrough [
-          "-device" "pcie-root-port,id=pcie.1,slot=1,chassis=1"
+          "-device"
+          "pcie-root-port,id=pcie.1,slot=1,chassis=1"
           # Strip "0000:" prefix if user provided full format (handles both "00:14.3" and "0000:00:14.3")
-          "-device" "vfio-pci,host=0000:${lib.removePrefix "0000:" wifiPciAddress},bus=pcie.1"
+          "-device"
+          "vfio-pci,host=0000:${lib.removePrefix "0000:" wifiPciAddress},bus=pcie.1"
         ]
-        # Ethernet WAN TAP — only when using macvtap/ethernet as WAN
+        # Ethernet WAN TAP - only when using macvtap/ethernet as WAN
         ++ lib.optionals useEthernetWan [
-          "-netdev" "tap,id=net-wan,ifname=mv-router-wan,script=${tapBridgeScript},downscript=no"
-          "-device" "virtio-net-pci,netdev=net-wan,mac=02:00:00:01:09:01"
+          "-netdev"
+          "tap,id=net-wan,ifname=mv-router-wan,script=${tapBridgeScript},downscript=no"
+          "-device"
+          "virtio-net-pci,netdev=net-wan,mac=02:00:00:01:09:01"
         ]
-        # Profile network TAPs — derived from profileNetworks (profiles/*/meta.nix).
+        # Profile network TAPs - derived from profileNetworks (profiles/*/meta.nix).
         # MACs: 02:00:00:01:XX:01, index+1 (index 0 = 01 avoids collision with mgmt=00).
         # Order follows alphabetical profile directory discovery.
         ++ lib.concatLists (lib.imap0 (i: pn: [
@@ -255,8 +273,8 @@ in {
             "virtio-net-pci,netdev=net-${pn.name},mac=02:00:00:01:${lib.fixedWidthString 2 "0" (builtins.toString (i + 1))}:01"
           ])
           profileNetworks)
-        # Builtin infra VM TAPs (builtinVm = true: builder, etc.) — mgmt excluded (see infraQemuTaps).
-        # MACs: 02:00:00:03:XX:01 — separate namespace from profiles (01) and extras (02).
+        # Builtin infra VM TAPs (builtinVm = true: builder, etc.) - mgmt excluded (see infraQemuTaps).
+        # MACs: 02:00:00:03:XX:01 - separate namespace from profiles (01) and extras (02).
         ++ lib.concatLists (lib.imap0 (i: l: [
             "-netdev"
             "tap,id=net-infra-${builtins.toString i},ifname=${l.tap},script=${tapBridgeScript},downscript=no"
@@ -277,10 +295,10 @@ in {
       # Limit virtiofsd threads: default spawns nproc threads per share, wasteful when idle
       virtiofsd.threadPoolSize = 1;
       # Use auto cache mode (matches microvm-profile-base.nix): /nix/store files
-      # have stable mtimes so they stay cached indefinitely once faulted in —
+      # have stable mtimes so they stay cached indefinitely once faulted in -
       # without this, poller-forked binaries (iw, grep, wg, jq...) re-validate
       # with the host virtiofsd on every exec instead of hitting guest cache.
-      virtiofsd.extraArgs = [ "--cache" "auto" ];
+      virtiofsd.extraArgs = ["--cache" "auto"];
 
       # ===== Shared Filesystems =====
       shares = [
@@ -291,7 +309,8 @@ in {
           mountPoint = "/nix/.ro-store";
           proto = "virtiofs";
         }
-        # Router config directory (for persistent VPN state, etc.)
+        # VM config directory - used by vm-switch to receive .switch-reg nix DB dump.
+        # Created by `microvm build` at /var/lib/microvms/<name>/config on the host.
         {
           tag = "router-config";
           source = "/var/lib/microvms/${vmName}/config";
@@ -309,16 +328,13 @@ in {
         }
       ];
 
-      # ===== Persistent Volume for /var/lib =====
-      # Stores VPN assignments, dnsmasq leases, etc.
-      volumes = [
-        {
-          image = "/var/lib/microvms/${vmName}/var-lib.qcow2";
-          mountPoint = "/var/lib";
-          size = 512; # 512MB for router state
-          autoCreate = true;
-        }
-      ];
+      # ===== /var/lib is ephemeral =====
+      # No volume declared - /var/lib (NetworkManager connections, dnsmasq
+      # leases, VPN assignment state) lives on the tmpfs root and is wiped on
+      # every restart. Declared config (wifi.nix, hydrix.router.vpn.mullvad.*)
+      # is the only source of truth; no `microvm purge` needed to clear stale
+      # runtime state anymore.
+      volumes = [];
 
       # ===== Vsock =====
       # lib.mkDefault: user can override via infra/router/default.nix (or meta.nix CID)
@@ -371,34 +387,46 @@ in {
     # Interface renaming: MAC → stable TAP name inside the VM.
     # Matches the MAC assignments in qemu.extraArgs above so that
     # find_iface_by_name and all network services see consistent names.
-    systemd.network.links = {
-      "10-mv-router-mgmt" = { matchConfig.MACAddress = "02:00:00:01:00:01"; linkConfig.Name = "mv-router-mgmt"; };
-    } // lib.optionalAttrs useEthernetWan {
-      "10-mv-router-wan" = { matchConfig.MACAddress = "02:00:00:01:09:01"; linkConfig.Name = "mv-router-wan"; };
-    } // lib.listToAttrs (lib.imap0 (i: pn: {
-      name  = "10-${pn.routerTap}";
-      value = {
-        matchConfig.MACAddress = "02:00:00:01:${lib.fixedWidthString 2 "0" (builtins.toString (i + 1))}:01";
-        linkConfig.Name = pn.routerTap;
-      };
-    }) profileNetworks)
-    // lib.listToAttrs (lib.imap0 (i: l: {
-      name  = "10-${l.tap}";
-      value = {
-        matchConfig.MACAddress = "02:00:00:03:${lib.fixedWidthString 2 "0" (builtins.toString i)}:01";
-        linkConfig.Name = l.tap;
-      };
-    }) infraQemuTaps)
-    // lib.listToAttrs (lib.imap0 (i: n: {
-      name  = "20-${n.routerTap}";
-      value = {
-        matchConfig.MACAddress = "02:00:00:02:${lib.fixedWidthString 2 "0" (builtins.toString i)}:01";
-        linkConfig.Name = n.routerTap;
-      };
-    }) extraNetworks);
+    systemd.network.links =
+      {
+        "10-mv-router-mgmt" = {
+          matchConfig.MACAddress = "02:00:00:01:00:01";
+          linkConfig.Name = "mv-router-mgmt";
+        };
+      }
+      // lib.optionalAttrs useEthernetWan {
+        "10-mv-router-wan" = {
+          matchConfig.MACAddress = "02:00:00:01:09:01";
+          linkConfig.Name = "mv-router-wan";
+        };
+      }
+      // lib.listToAttrs (lib.imap0 (i: pn: {
+          name = "10-${pn.routerTap}";
+          value = {
+            matchConfig.MACAddress = "02:00:00:01:${lib.fixedWidthString 2 "0" (builtins.toString (i + 1))}:01";
+            linkConfig.Name = pn.routerTap;
+          };
+        })
+        profileNetworks)
+      // lib.listToAttrs (lib.imap0 (i: l: {
+          name = "10-${l.tap}";
+          value = {
+            matchConfig.MACAddress = "02:00:00:03:${lib.fixedWidthString 2 "0" (builtins.toString i)}:01";
+            linkConfig.Name = l.tap;
+          };
+        })
+        infraQemuTaps)
+      // lib.listToAttrs (lib.imap0 (i: n: {
+          name = "20-${n.routerTap}";
+          value = {
+            matchConfig.MACAddress = "02:00:00:02:${lib.fixedWidthString 2 "0" (builtins.toString i)}:01";
+            linkConfig.Name = n.routerTap;
+          };
+        })
+        extraNetworks);
 
     # ===== LAN Interface Configuration (systemd-networkd) =====
-    # Static IPs assigned at boot — no waiting for WiFi. Mirrors microvm-router-stable.
+    # Static IPs assigned at boot - no waiting for WiFi. Mirrors microvm-router-stable.
     # ConfigureWithoutCarrier ensures IPs come up even before TAP carrier is established,
     # so the host can reach 192.168.100.253 as soon as the VM boots.
     #
@@ -407,12 +435,18 @@ in {
     systemd.network = {
       enable = true;
       networks = lib.listToAttrs (lib.imap0 (i: l: {
-        name = "${lib.fixedWidthString 2 "0" (toString i)}-${l.tap}";
-        value = {
-          matchConfig.Name = l.tap;
-          networkConfig = { Address = "${l.subnet}.253/24"; DHCP = "no"; LinkLocalAddressing = "no"; ConfigureWithoutCarrier = "yes"; };
-        };
-      }) allLans);
+          name = "${lib.fixedWidthString 2 "0" (toString i)}-${l.tap}";
+          value = {
+            matchConfig.Name = l.tap;
+            networkConfig = {
+              Address = "${l.subnet}.253/24";
+              DHCP = "no";
+              LinkLocalAddressing = "no";
+              ConfigureWithoutCarrier = "yes";
+            };
+          };
+        })
+        allLans);
     };
 
     # ===== Networking Configuration =====
@@ -420,7 +454,7 @@ in {
       useDHCP = false;
       enableIPv6 = false;
 
-      # NetworkManager for WiFi management only — LAN TAPs are handled by systemd-networkd
+      # NetworkManager for WiFi management only - LAN TAPs are handled by systemd-networkd
       networkmanager = {
         enable = true;
         wifi.powersave = false; # Prevent missed broadcast ARP replies
@@ -474,7 +508,7 @@ in {
       # "unavailable". Let NM's module own this value.
       firewall.enable = false; # We use nftables directly
 
-      # LAN TAPs managed by systemd-networkd — tell NM to leave them alone
+      # LAN TAPs managed by systemd-networkd - tell NM to leave them alone
       networkmanager.unmanaged = map (l: l.tap) allLans;
     };
 
@@ -511,43 +545,51 @@ in {
     # Merged with Mullvad configs below using lib.mkMerge
     environment.etc = lib.mkMerge [
       {
-        # Routing tables — one per profile, using vsockCid as table ID (unique, stable)
-        "iproute2/rt_tables".text = ''
-          255     local
-          254     main
-          253     default
-          0       unspec
-          # Hydrix profile routing tables (ID = vsockCid)
-        '' + lib.concatMapStrings (n:
-          "  ${lib.last (lib.splitString "." n.subnet)}     ${n.name}\n"
-        ) allNetworks;
+        # Routing tables - one per profile, using vsockCid as table ID (unique, stable)
+        "iproute2/rt_tables".text =
+          ''
+            255     local
+            254     main
+            253     default
+            0       unspec
+            # Hydrix profile routing tables (ID = vsockCid)
+          ''
+          + lib.concatMapStrings (
+            n: "  ${lib.last (lib.splitString "." n.subnet)}     ${n.name}\n"
+          )
+          allNetworks;
 
         # Runtime network map for vpn-assign: name:tableId:subnet
         # Table ID = subnet last octet (e.g. 192.168.102 → 102), same as CID by convention
-        "hydrix-router/network-map".text =
-          lib.concatMapStrings (n:
-            "${n.name}:${lib.last (lib.splitString "." n.subnet)}:${n.subnet}.0/24\n"
-          ) allNetworks;
+        "hydrix-router/network-map".text = lib.concatMapStrings (
+          n: "${n.name}:${lib.last (lib.splitString "." n.subnet)}:${n.subnet}.0/24\n"
+        )
+        allNetworks;
 
-        # Static interface name map — generated at build time from known TAP names.
+        # Static interface name map - generated at build time from known TAP names.
         # Consumed by dnsmasq-config; no runtime detection needed since names are
         # fixed by systemd.network.links above. Variable names match what
         # dnsmasq-config expects: profile name → IFACE_<NAME>, infra → IFACE_<TAP>.
         "hydrix-router/interfaces".text =
           lib.concatMapStrings (l: let
             varName = lib.toUpper (builtins.replaceStrings ["-" "mv-router-"] ["_" ""] l.tap);
-          in "IFACE_${varName}=${l.tap}\n") infraLans
+          in "IFACE_${varName}=${l.tap}\n")
+          infraLans
           + lib.concatMapStrings (n: let
-              varName = lib.toUpper (builtins.replaceStrings ["-"] ["_"] n.name);
-            in "IFACE_${varName}=${n.routerTap}\n") allNetworks
-          ;
+            varName = lib.toUpper (builtins.replaceStrings ["-"] ["_"] n.name);
+          in "IFACE_${varName}=${n.routerTap}\n")
+          allNetworks;
       }
-      # Mullvad WireGuard conf files — processed via hydrix.router.vpn.mullvad.processConfig
+      # Mullvad WireGuard conf files - processed via hydrix.router.vpn.mullvad.processConfig
       (lib.mkIf hasMullvad (
         lib.mapAttrs' (bridge: f: {
           name = "wireguard/wg-${bridge}.conf";
-          value = { source = processConfig f; mode = "0600"; };
-        }) mullvadBridges
+          value = {
+            source = processConfig f;
+            mode = "0600";
+          };
+        })
+        mullvadBridges
       ))
     ];
 
@@ -583,7 +625,11 @@ in {
           echo ""
         }
 
-        USE_ETHERNET_WAN="${if useEthernetWan then "true" else "false"}"
+        USE_ETHERNET_WAN="${
+          if useEthernetWan
+          then "true"
+          else "false"
+        }"
 
         detect_wan() {
           if [[ "$USE_ETHERNET_WAN" == "true" ]]; then
@@ -663,8 +709,9 @@ in {
         echo "bind-interfaces" > /etc/dnsmasq.d/hydrix.conf
         ${lib.optionalString cfg.router.microvm.dnsmasq.enableDhcpLogging
           ''echo "log-dhcp" >> /etc/dnsmasq.d/hydrix.conf''}
-        ${lib.concatMapStrings (s: ''echo "server=${s}" >> /etc/dnsmasq.d/hydrix.conf
-        '') cfg.router.microvm.dnsmasq.servers}
+        ${lib.concatMapStrings (s: ''            echo "server=${s}" >> /etc/dnsmasq.d/hydrix.conf
+          '')
+          cfg.router.microvm.dnsmasq.servers}
 
         # Add each interface if it exists
         add_iface() {
@@ -683,13 +730,15 @@ in {
         }
 
         # Infrastructure LANs (from infra/*/meta.nix)
-        ${lib.concatStringsSep "\n        " (map (l:
-          "add_iface \"${l.tap}\" \"${l.subnet}\" \"${l.subnet}.253\""
-        ) infraLans)}
+        ${lib.concatStringsSep "\n        " (map (
+            l: "add_iface \"${l.tap}\" \"${l.subnet}\" \"${l.subnet}.253\""
+          )
+          infraLans)}
         # Profile + extra networks (from profiles/*/meta.nix + extraNetworks)
         ${lib.concatStringsSep "\n        " (map (n: let
           varName = lib.toUpper (builtins.replaceStrings ["-"] ["_"] n.name);
-        in "add_iface \"$IFACE_${varName}\" \"${n.subnet}\" \"${n.subnet}.253\"") allNetworks)}
+        in "add_iface \"$IFACE_${varName}\" \"${n.subnet}\" \"${n.subnet}.253\"")
+        allNetworks)}
 
         echo "Generated dnsmasq config:"
         cat /etc/dnsmasq.d/hydrix.conf
@@ -757,7 +806,7 @@ in {
             # Log and count dropped packets for debugging
             ip saddr $VM_NETWORKS counter log prefix "ROUTER-BLOCKED: " drop
 
-            # Allow non-LAN input (WAN, VPN interfaces — identified by negation)
+            # Allow non-LAN input (WAN, VPN interfaces - identified by negation)
             iifname != ${lanTapSetNft} accept
           }
 
@@ -769,20 +818,28 @@ in {
             ct state invalid drop
 
             # Shared subnets: allow inter-VM traffic (user-configurable)
-            ${let shared = cfg.router.microvm.firewall.sharedSubnets;
-              in lib.concatMapStrings (s: ''ip saddr ${s} accept
-            ip daddr ${s} accept
-            '') shared}
+            ${let
+          shared = cfg.router.microvm.firewall.sharedSubnets;
+        in
+          lib.concatMapStrings (s: ''            ip saddr ${s} accept
+                        ip daddr ${s} accept
+          '')
+          shared}
             # Isolated bridges: block inter-bridge traffic (auto-generated from topology)
             ${let
-                allSubnets   = map (l: "${l.subnet}.0/24") allLans;
-                shared       = cfg.router.microvm.firewall.sharedSubnets;
-                isolated     = lib.filter (s: !builtins.elem s shared) allSubnets;
-              in lib.concatMapStrings (src:
-                let others = lib.filter (d: d != src) isolated;
-                in if others == [] then ""
-                   else "ip saddr ${src} ip daddr { ${lib.concatStringsSep ", " others} } drop\n            "
-              ) isolated}
+          allSubnets = map (l: "${l.subnet}.0/24") allLans;
+          shared = cfg.router.microvm.firewall.sharedSubnets;
+          isolated = lib.filter (s: !builtins.elem s shared) allSubnets;
+        in
+          lib.concatMapStrings (
+            src: let
+              others = lib.filter (d: d != src) isolated;
+            in
+              if others == []
+              then ""
+              else "ip saddr ${src} ip daddr { ${lib.concatStringsSep ", " others} } drop\n            "
+          )
+          isolated}
             # User extra rules
             ${lib.concatStringsSep "\n            " cfg.router.microvm.firewall.extraRules}
 
@@ -807,16 +864,19 @@ in {
 
     # ===== Mullvad Boot-Assign Service =====
     # Connects configured tunnels and routes bridges at startup.
-    # Generated from vpn.mullvad.bridges — no hardcoded network names.
+    # Generated from vpn.mullvad.bridges - no hardcoded network names.
     systemd.services.vpn-boot-assign = lib.mkIf hasMullvad {
       description = "Apply Mullvad VPN bridge assignments";
-      after = [ "network-online.target" "router-firewall.service" ];
-      wants = [ "network-online.target" ];
-      wantedBy = [ "multi-user.target" ];
-      path = [ pkgs.wireguard-tools pkgs.iproute2 pkgs.gawk vpnAssign ];
-      serviceConfig = { Type = "oneshot"; RemainAfterExit = true; };
+      after = ["network-online.target" "router-firewall.service"];
+      wants = ["network-online.target"];
+      wantedBy = ["multi-user.target"];
+      path = [pkgs.wireguard-tools pkgs.iproute2 pkgs.gawk vpnAssign];
+      serviceConfig = {
+        Type = "oneshot";
+        RemainAfterExit = true;
+      };
       script =
-        # Connect each configured tunnel — fall back to direct if wg-quick fails
+        # Connect each configured tunnel - fall back to direct if wg-quick fails
         # so a failed tunnel never leaves a bridge with an empty routing table.
         # If the interface already exists (service restarted after partial run),
         # skip wg-quick and re-apply routing from whatever state the tunnel is in.
@@ -833,11 +893,13 @@ in {
           fi
         '') (lib.attrNames mullvadBridges)
         # All other known networks go direct
-        + lib.concatMapStrings (n:
-          lib.optionalString (!lib.hasAttr n.name mullvadBridges) ''
-            vpn-assign ${n.name} direct
-          ''
-        ) allNetworks;
+        + lib.concatMapStrings (
+          n:
+            lib.optionalString (!lib.hasAttr n.name mullvadBridges) ''
+              vpn-assign ${n.name} direct
+            ''
+        )
+        allNetworks;
     };
 
     # ===== WiFi Sync Service =====
@@ -864,14 +926,14 @@ in {
             json_esc() { printf '%s' "$1" | $SED 's/\\/\\\\/g; s/"/\\"/g'; }
 
             # Extract key=value from a keyfile using grep -m1 (no head, no SIGPIPE).
-            # Strips the key= prefix with shell expansion — no awk or cut needed.
+            # Strips the key= prefix with shell expansion - no awk or cut needed.
             kf_get() {
               local line
               line=$($GREP -m1 "^$1=" "$2" 2>/dev/null) || return 1
               printf '%s' "''${line#*=}"
             }
 
-            # Read active SSID from kernel via iw — no D-Bus.
+            # Read active SSID from kernel via iw - no D-Bus.
             get_current() {
               local line
               line=$(${pkgs.iw}/bin/iw dev 2>/dev/null | $GREP -m1 $'\tssid ') || true
@@ -880,7 +942,7 @@ in {
 
             # Flat list of all wifi connections from both NM dirs.
             # /run/ = declared (from wifi.nix build); /var/lib/ = runtime-added (pending).
-            # Dedup by SSID — /run/ takes precedence (listed first).
+            # Dedup by SSID - /run/ takes precedence (listed first).
             get_connections() {
               local first=true seen="" ssid psk
               printf '['
@@ -908,7 +970,7 @@ in {
             }
 
             # Matches the 10s cadence eww/waybar's wifi-sync widgets actually
-            # read at — sampling faster just burns CPU forking iw/grep for no one.
+            # read at - sampling faster just burns CPU forking iw/grep for no one.
             SAMPLE_INTERVAL=10
             while true; do
               sample > /tmp/wifi-sync-status.json.tmp \
@@ -987,20 +1049,20 @@ in {
     # non-sops deployments (credentials still in modules/wifi.nix) are unaffected.
     systemd.services.hydrix-wifi-from-sops = {
       description = "Configure WiFi networks from sops secrets";
-      wantedBy    = [ "network.target" ];
-      after       = [ "NetworkManager.service" ];
-      before      = [ "network.target" ];
+      wantedBy = ["network.target"];
+      after = ["NetworkManager.service"];
+      before = ["network.target"];
       serviceConfig = {
         Type = "oneshot";
         RemainAfterExit = true;
       };
       script = let
-        jq    = "${pkgs.jq}/bin/jq";
+        jq = "${pkgs.jq}/bin/jq";
         nmcli = "${pkgs.networkmanager}/bin/nmcli";
       in ''
         set -euo pipefail
         WIFI_FILE="/mnt/vm-secrets/wifi/networks.json"
-        [ -f "$WIFI_FILE" ] || { echo "No wifi secrets — skipping"; exit 0; }
+        [ -f "$WIFI_FILE" ] || { echo "No wifi secrets - skipping"; exit 0; }
         count=0
         while IFS= read -r net; do
           ssid=$(printf '%s' "$net" | ${jq} -r '.ssid')
@@ -1041,32 +1103,35 @@ in {
     security.sudo.wheelNeedsPassword = false;
 
     # ===== Packages =====
-    environment.systemPackages = (with pkgs; [
-      openvpn
-      iproute2
-      iptables
-      nftables
-      tcpdump
-      nettools
-      bind.dnsutils
-      bridge-utils
-      pciutils
-      usbutils
-      htop
-      vim
-      nano
-      tmux
-      dhcpcd
-      iw
-      wirelesstools
-      networkmanager
-      termshark
-      bandwhich
-    ] ++ lib.optionals hasMullvad [
-      wireguard-tools
-      vpnAssign
-      vpnStatus
-    ] ++ cfg.router.microvm.extraPackages);
+    environment.systemPackages = with pkgs;
+      [
+        openvpn
+        iproute2
+        iptables
+        nftables
+        tcpdump
+        nettools
+        bind.dnsutils
+        bridge-utils
+        pciutils
+        usbutils
+        htop
+        vim
+        nano
+        tmux
+        dhcpcd
+        iw
+        wirelesstools
+        networkmanager
+        termshark
+        bandwhich
+      ]
+      ++ lib.optionals hasMullvad [
+        wireguard-tools
+        vpnAssign
+        vpnStatus
+      ]
+      ++ cfg.router.microvm.extraPackages;
 
     # ===== Tmpfiles =====
     systemd.tmpfiles.rules = [

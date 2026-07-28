@@ -75,7 +75,7 @@ in {
       hypervisor = "qemu";
       qemu.machine = "pc"; # Standard PC for full PCI support
 
-      # High resources for builds — override in infra/builder/default.nix
+      # High resources for builds - override in infra/builder/default.nix
       vcpu = lib.mkDefault 8;
       mem = lib.mkDefault 16384; # 16GB for large builds
 
@@ -142,7 +142,13 @@ in {
           }
         ];
 
-      # Persistent eval cache - survives builder restarts, avoids 2+ min cold eval
+      # ===== EXCEPTION: intentional persistent volume =====
+      # Everything else about this VM is ephemeral (tmpfs root; host /nix/store
+      # and /nix/var/nix are mounted directly, not copied - nothing built here
+      # needs its own cache since it's already the host's actual store). This
+      # eval-cache volume is kept persistent on purpose: pure performance
+      # (avoids 2+ min cold eval per builder start), zero secrets/security
+      # sensitivity.
       volumes = [
         {
           image = "builder-cache.img";
