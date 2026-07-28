@@ -40,7 +40,6 @@ hardware-results.json
 Thumbs.db
 
 # Other files
-*.txt
 *.env
 
 # Markdown - ignore most but keep key docs
