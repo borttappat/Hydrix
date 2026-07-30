@@ -332,6 +332,12 @@
     };
   };
 
+  hydrix.plymouth = { 
+    enable = true;
+    showMessages = true;
+    fontSize = 27;
+  };
+
   # Required for sops age key derivation (SSH host key -> age key)
   services.openssh.enable = true;
 
