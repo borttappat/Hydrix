@@ -1,9 +1,11 @@
 # Gitsync Infra VM - push/pull git repos from lockdown mode
 #
 # Repos are mounted R/W via virtiofs. Add/remove entries in the repos list
-# below and rebuild. Fully ephemeral - no persistent state, SSH keys re-derive
-# fresh from host secrets every boot. Push/pull is SSH-key auth only (no gh
-# CLI/OAuth involved).
+# below and rebuild. Ephemeral by default - no persistent state, SSH keys
+# re-derive fresh from host secrets every boot, push/pull is SSH-key auth
+# only. Set hydrix.gitsync.gh.enable if you'd rather authenticate with the
+# gh CLI than manage an SSH deploy key - it adds gh plus a small persistent
+# volume for its OAuth token.
 #
 # Host commands:
 #   microvm git repos            List mounted repos and current branch
@@ -21,6 +23,8 @@
   meta = import ./meta.nix;
 
   hostUsername = config.hydrix.username;
+
+  ghEnabled = config.hydrix.gitsync.gh.enable;
 
   repos = [
     {
@@ -40,7 +44,7 @@
     repos;
 
   gitHandler = pkgs.writeShellScript "gitsync-vsock-handler" ''
-    export PATH="${pkgs.coreutils}/bin:${pkgs.git}/bin:${pkgs.gh}/bin:${pkgs.openssh}/bin:${pkgs.glibc.bin}/bin:$PATH"
+    export PATH="${pkgs.coreutils}/bin:${pkgs.git}/bin:${pkgs.openssh}/bin:${pkgs.glibc.bin}/bin:$PATH"
     export HOME="/home/gitsync"
 
     read -r cmd rest
@@ -121,144 +125,170 @@
         ;;
     esac
   '';
+
+  motdLines =
+    [
+      ""
+      "+-------------------------------------------------+"
+      "|  HYDRIX GIT-SYNC VM                             |"
+      "+-------------------------------------------------+"
+      "|  Push/pull git repos from lockdown mode         |"
+      "|                                                 |"
+    ]
+    ++ lib.optionals ghEnabled [
+      "|  First time:  gh auth login                     |"
+    ]
+    ++ [
+      "|  Commands from host (via microvm git):          |"
+      "|    microvm git repos          List repos        |"
+      "|    microvm git push <repo>    Push commits      |"
+      "|    microvm git pull <repo>    Pull changes      |"
+      "|    microvm git status <repo>  Show status       |"
+      "+-------------------------------------------------+"
+      ""
+    ];
 in {
-  microvm.vsock.cid = meta.vsockCid;
-
-  microvm.interfaces = [
-    {
-      type = "tap";
-      id = meta.tapId;
-      mac = meta.tapMac;
-    }
-  ];
-
-  microvm.mem = lib.mkForce 2560;
-
-  # Repo shares - nix-store share provided by infra-base
-  microvm.shares =
-    map (r: {
-      tag = "repo-${r.name}";
-      source = r.source;
-      mountPoint = "/mnt/repos/${r.name}";
-      proto = "virtiofs";
-    })
-    repos;
-
-  # Everything under /var/lib/gitsync is ephemeral (tmpfs root) except
-  # gh-config: SSH keys re-derive fresh from /mnt/vm-secrets every boot
-  # (gitsync-setup.service below) so they don't need to persist, but the
-  # gh CLI's OAuth token (gh auth login) is genuine runtime state with no
-  # host-side source to re-derive from - kept persistent so interactive
-  # `gh` use doesn't need re-auth after every restart.
-  microvm.volumes = lib.mkForce [
-    {
-      image = "/var/lib/microvms/microvm-gitsync/gh-config.qcow2";
-      mountPoint = "/var/lib/gitsync/gh-config";
-      size = 64;
-      autoCreate = true;
-    }
-  ];
-
-  microvm.virtiofsd.threadPoolSize = 1;
-
-  boot.kernelModules = ["vmw_vsock_virtio_transport"];
-
-  users.users.gitsync = {
-    isNormalUser = true;
-    extraGroups = ["wheel"];
-    password = "gitsync";
-    home = "/home/gitsync";
+  options.hydrix.gitsync.gh = {
+    enable = lib.mkOption {
+      type = lib.types.bool;
+      default = false;
+      description = ''
+        Install the gh CLI in the gitsync VM and give it a small persistent
+        /var/lib/gitsync/gh-config volume for its OAuth token, so `gh auth
+        login` survives restarts. Off by default: push/pull only needs SSH
+        keys, which already re-derive fresh from host secrets every boot.
+        Enable this if you'd rather authenticate with gh than manage an SSH
+        deploy key.
+      '';
+    };
   };
-  services.getty.autologinUser = "gitsync";
-  services.haveged.enable = true;
 
-  environment.systemPackages = with pkgs; [git gh openssh socat vim];
+  config = {
+    microvm.vsock.cid = meta.vsockCid;
 
-  environment.etc."gitconfig".text = ''
-      [safe]
-    ${safeDirectories}
-      [url "git@github.com:"]
-        insteadOf = https://github.com/
-  '';
+    microvm.interfaces = [
+      {
+        type = "tap";
+        id = meta.tapId;
+        mac = meta.tapMac;
+      }
+    ];
 
-  systemd.services.gitsync-setup = {
-    description = "Set up gitsync persistent directories";
-    wantedBy = ["multi-user.target"];
-    after = ["local-fs.target"];
-    before = ["gitsync-vsock.service"];
-    serviceConfig.Type = "oneshot";
-    serviceConfig.RemainAfterExit = true;
-    script = ''
-      mkdir -p /var/lib/gitsync/gh-config /var/lib/gitsync/ssh
-      mkdir -p /home/gitsync/.config
-      ln -sfn /var/lib/gitsync/gh-config /home/gitsync/.config/gh
-      chown -R gitsync:users /home/gitsync/.config
-      ln -sfn /var/lib/gitsync/ssh /home/gitsync/.ssh
+    microvm.mem = lib.mkForce 2560;
 
-      if [ -f "/mnt/vm-secrets/ssh/id_ed25519" ]; then
-        cp /mnt/vm-secrets/ssh/id_ed25519 /var/lib/gitsync/ssh/
-        chmod 600 /var/lib/gitsync/ssh/id_ed25519
-      fi
-      if [ -f "/mnt/vm-secrets/ssh/id_ed25519.pub" ]; then
-        cp /mnt/vm-secrets/ssh/id_ed25519.pub /var/lib/gitsync/ssh/
-        chmod 644 /var/lib/gitsync/ssh/id_ed25519.pub
-      fi
+    # Repo shares - nix-store share provided by infra-base
+    microvm.shares =
+      map (r: {
+        tag = "repo-${r.name}";
+        source = r.source;
+        mountPoint = "/mnt/repos/${r.name}";
+        proto = "virtiofs";
+      })
+      repos;
 
-      cat > /var/lib/gitsync/ssh/config << 'SSHEOF'
-      Host github.com
-        User git
-        IdentityFile ~/.ssh/id_ed25519
-        StrictHostKeyChecking accept-new
-      SSHEOF
-      chmod 600 /var/lib/gitsync/ssh/config
-      chown -R gitsync:users /var/lib/gitsync/gh-config /var/lib/gitsync/ssh
+    # Ephemeral by default - no volumes. SSH keys re-derive fresh from
+    # /mnt/vm-secrets every boot (gitsync-setup.service below); nothing here
+    # needs to survive a restart. When hydrix.gitsync.gh.enable is set,
+    # gh-config gets its own persistent volume since its OAuth token has no
+    # host-side source to re-derive from.
+    microvm.volumes = lib.mkForce (
+      lib.optionals ghEnabled [
+        {
+          image = "/var/lib/microvms/microvm-gitsync/gh-config.qcow2";
+          mountPoint = "/var/lib/gitsync/gh-config";
+          size = 64;
+          autoCreate = true;
+        }
+      ]
+    );
+
+    microvm.virtiofsd.threadPoolSize = 1;
+
+    boot.kernelModules = ["vmw_vsock_virtio_transport"];
+
+    users.users.gitsync = {
+      isNormalUser = true;
+      extraGroups = ["wheel"];
+      password = "gitsync";
+      home = "/home/gitsync";
+    };
+    services.getty.autologinUser = "gitsync";
+    services.haveged.enable = true;
+
+    environment.systemPackages = with pkgs; [git openssh socat vim] ++ lib.optionals ghEnabled [gh];
+
+    environment.etc."gitconfig".text = ''
+        [safe]
+      ${safeDirectories}
+        [url "git@github.com:"]
+          insteadOf = https://github.com/
     '';
-  };
 
-  systemd.services.gitsync-vsock = {
-    description = "Gitsync vsock server (port 14512)";
-    wantedBy = ["multi-user.target"];
-    after = ["network.target" "gitsync-setup.service"];
-    serviceConfig = {
-      Type = "simple";
-      Restart = "always";
-      RestartSec = 5;
-      ExecStart = "${pkgs.socat}/bin/socat -t60 VSOCK-LISTEN:14512,reuseaddr,fork EXEC:${gitHandler},su=gitsync";
+    systemd.services.gitsync-setup = {
+      description = "Set up gitsync SSH directory";
+      wantedBy = ["multi-user.target"];
+      after = ["local-fs.target"];
+      before = ["gitsync-vsock.service"];
+      serviceConfig.Type = "oneshot";
+      serviceConfig.RemainAfterExit = true;
+      script = ''
+        mkdir -p /var/lib/gitsync/ssh
+        ln -sfn /var/lib/gitsync/ssh /home/gitsync/.ssh
+
+        ${lib.optionalString ghEnabled ''
+          mkdir -p /var/lib/gitsync/gh-config /home/gitsync/.config
+          ln -sfn /var/lib/gitsync/gh-config /home/gitsync/.config/gh
+          chown -R gitsync:users /home/gitsync/.config /var/lib/gitsync/gh-config
+        ''}
+        if [ -f "/mnt/vm-secrets/ssh/id_ed25519" ]; then
+          cp /mnt/vm-secrets/ssh/id_ed25519 /var/lib/gitsync/ssh/
+          chmod 600 /var/lib/gitsync/ssh/id_ed25519
+        fi
+        if [ -f "/mnt/vm-secrets/ssh/id_ed25519.pub" ]; then
+          cp /mnt/vm-secrets/ssh/id_ed25519.pub /var/lib/gitsync/ssh/
+          chmod 644 /var/lib/gitsync/ssh/id_ed25519.pub
+        fi
+
+        cat > /var/lib/gitsync/ssh/config << 'SSHEOF'
+        Host github.com
+          User git
+          IdentityFile ~/.ssh/id_ed25519
+          StrictHostKeyChecking accept-new
+        SSHEOF
+        chmod 600 /var/lib/gitsync/ssh/config
+        chown -R gitsync:users /var/lib/gitsync/ssh
+      '';
     };
-  };
 
-  systemd.services.gitsync-status = {
-    description = "Gitsync status server (port 14513)";
-    wantedBy = ["multi-user.target"];
-    after = ["network.target"];
-    serviceConfig = {
-      Type = "simple";
-      Restart = "always";
-      RestartSec = 5;
-      ExecStart = let
-        handler = pkgs.writeShellScript "gitsync-status-handler" ''
-          read -r cmd
-          if pgrep -x "git" > /dev/null; then echo "BUSY"; else echo "IDLE"; fi
-        '';
-      in "${pkgs.socat}/bin/socat VSOCK-LISTEN:14513,reuseaddr,fork EXEC:${handler}";
+    systemd.services.gitsync-vsock = {
+      description = "Gitsync vsock server (port 14512)";
+      wantedBy = ["multi-user.target"];
+      after = ["network.target" "gitsync-setup.service"];
+      serviceConfig = {
+        Type = "simple";
+        Restart = "always";
+        RestartSec = 5;
+        ExecStart = "${pkgs.socat}/bin/socat -t60 VSOCK-LISTEN:14512,reuseaddr,fork EXEC:${gitHandler},su=gitsync";
+      };
     };
+
+    systemd.services.gitsync-status = {
+      description = "Gitsync status server (port 14513)";
+      wantedBy = ["multi-user.target"];
+      after = ["network.target"];
+      serviceConfig = {
+        Type = "simple";
+        Restart = "always";
+        RestartSec = 5;
+        ExecStart = let
+          handler = pkgs.writeShellScript "gitsync-status-handler" ''
+            read -r cmd
+            if pgrep -x "git" > /dev/null; then echo "BUSY"; else echo "IDLE"; fi
+          '';
+        in "${pkgs.socat}/bin/socat VSOCK-LISTEN:14513,reuseaddr,fork EXEC:${handler}";
+      };
+    };
+
+    users.motd = lib.concatStringsSep "\n" motdLines;
   };
-
-  users.motd = ''
-
-    +-------------------------------------------------+
-    |  HYDRIX GIT-SYNC VM                             |
-    +-------------------------------------------------+
-    |  Push/pull git repos from lockdown mode         |
-    |                                                 |
-    |  First time:  gh auth login                     |
-    |                                                 |
-    |  Commands from host (via microvm git):          |
-    |    microvm git repos          List repos        |
-    |    microvm git push <repo>    Push commits      |
-    |    microvm git pull <repo>    Pull changes      |
-    |    microvm git status <repo>  Show status       |
-    +-------------------------------------------------+
-
-  '';
 }
