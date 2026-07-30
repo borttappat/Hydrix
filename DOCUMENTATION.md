@@ -462,7 +462,7 @@ than inside the VM at all.
 | router / router-stable | None - `/var/lib` is fully ephemeral | NetworkManager connections, dnsmasq leases, and VPN pin state all reset to declared config on every restart. This also means `microvm purge` is no longer required after WiFi credential changes - a plain restart now gives the same clean state. |
 | builder | `/root/.cache/nix` (8GB, eval cache) | The only intentional exception. The builder doesn't keep its own nix store at all - it mounts the host's real `/nix/store` R/W via virtiofs and writes straight into it, so nothing built here is ever at risk of being lost. This one volume is pure performance (avoids 2+ min cold eval per builder start) with zero security/secrets sensitivity. |
 | files | `/storage` (opt-in, off by default) | `hydrix.files.persistence.enable` (default `false`). In-flight transfer payloads are ephemeral by design - FETCH/DELIVER/STORE are meant to be re-triggered on demand, not treated as durable storage. Set the option to `true` if you want transfers to survive a files-VM restart. |
-| gitsync | `/var/lib/gitsync/gh-config` only | SSH keys re-derive fresh from host secrets every boot (no need to persist). The `gh` CLI's OAuth token has no host-side source to re-derive from, so it gets a small dedicated persistent volume; everything else is ephemeral. |
+| gitsync | None by default | SSH keys re-derive fresh from host secrets every boot (no need to persist) - push/pull works with no persistent state at all. `hydrix.gitsync.gh.enable` (default `false`) opts into the `gh` CLI plus a small `/var/lib/gitsync/gh-config` volume for its OAuth token, for users who'd rather authenticate with gh than manage an SSH deploy key. |
 | hostsync, usb-sandbox, vault | None | Inbox data (hostsync) and the KeepassXC database (vault) already live on the host via virtiofs, not inside the VM - the VM itself holds nothing that needs to survive a restart. |
 
 The shared base (`vm/microvm/infra/microvm-infra-base.nix`) declares no volumes at all - each
@@ -985,7 +985,9 @@ The router VM maintains two NetworkManager connection directories:
 | Directory | Contents | Source |
 |---|---|---|
 | `/run/NetworkManager/system-connections/` | Declared networks, generated from `wifi.nix` at build time | NixOS build |
-| `/var/lib/NetworkManager/system-connections/` | Runtime-added networks, persists across restarts | `nmcli` at runtime |
+| `/var/lib/NetworkManager/system-connections/` | Runtime-added networks | `nmcli` at runtime |
+
+The router VM's `/var/lib` is ephemeral (tmpfs root, wiped on every restart - see [Infra VM Persistence Model](#infra-vm-persistence-model)), so runtime-added networks only last until the next restart unless they're also saved back to your credential store. `wifi-sync add`/`pull` handle this automatically.
 
 `wifi-sync` (POLL command over vsock) reads both directories and diffs the result against your credential store to identify networks that are on the router but not yet saved locally.
 
@@ -1023,7 +1025,7 @@ wifi-sync list
 wifi-sync remove "NetworkName"
 ```
 
-No rebuild is needed to apply credential changes. The router sees updates via its persistent NM state (for `add`) or on next boot via virtiofs (for connections loaded from `wifi.yaml`).
+No rebuild is needed to apply credential changes. `wifi-sync add` pushes the network to the router's live NM over vsock immediately, and also saves it to `secrets/wifi.yaml` so it's declared and gets delivered via virtiofs on every future boot - the router's `/var/lib` is ephemeral, so anything added at runtime but not saved to the credential store is gone on the next restart.
 
 #### Legacy mode workflow (wifi.nix)
 
@@ -1032,10 +1034,10 @@ In legacy mode, credentials live in `modules/wifi.nix` as WPA PSK hashes and are
 ```bash
 wifi-sync add "NetworkName" "password"   # saves hash to wifi.nix
 rebuild
-# Purge is required because NM runtime state in /var/lib/ takes precedence over
-# freshly built /run/ connections. Only a purge guarantees a clean NM state.
-microvm purge microvm-router --force && microvm build microvm-router && microvm start microvm-router
+microvm restart microvm-router
 ```
+
+The router's `/var/lib` is ephemeral, so a plain restart is enough - no `microvm purge` needed.
 
 To migrate from legacy to sops mode:
 
