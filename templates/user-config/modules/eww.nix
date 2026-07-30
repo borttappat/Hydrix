@@ -13,13 +13,27 @@
 #
 # Gated on hydrix.hyprland.enable — host-only, no VM usage.
 #
-{ config, lib, pkgs, ... }:
-let
+{
+  config,
+  lib,
+  pkgs,
+  ...
+}: let
   username = config.hydrix.username;
-  ui       = config.hydrix.graphical.ui;
-  gaps     = let v = ui.gaps or null; in if v != null then v else 10;
-  widgetX  = gaps;
-  fontSize = let v = config.hydrix.graphical.font.size or null; in if v != null then v else 10;
+  ui = config.hydrix.graphical.ui;
+  gaps = let
+    v = ui.gaps or null;
+  in
+    if v != null
+    then v
+    else 10;
+  widgetX = gaps;
+  fontFamily = config.hydrix.graphical.font.family or "Iosevka";
+  fontSize = let
+    base = config.hydrix.graphical.font.size or 10;
+    relation = config.hydrix.graphical.font.relations.eww or 1.0;
+  in
+    builtins.floor (base * relation);
 
   # Polling script: queries router vsock 14515 for wg dump JSON, then
   # cross-references currently-running VMs to filter down to active tunnels.
@@ -35,7 +49,7 @@ let
   # had been focused at least once.
   ewwWgStatus = pkgs.writeShellApplication {
     name = "eww-wg-status";
-    runtimeInputs = [ pkgs.socat pkgs.jq pkgs.coreutils pkgs.gnused ];
+    runtimeInputs = [pkgs.socat pkgs.jq pkgs.coreutils pkgs.gnused];
     text = ''
       router_json=$(echo "" | socat -T2 - VSOCK-CONNECT:200:14515 2>/dev/null || true)
       if [ -z "$router_json" ] || [ "$router_json" = "[]" ]; then
@@ -110,7 +124,7 @@ let
   # running-VM list instead of independently re-running `microvm status`.
   ewwMvmStatus = pkgs.writeShellApplication {
     name = "eww-mvm-status";
-    runtimeInputs = [ pkgs.jq pkgs.coreutils pkgs.gnused ];
+    runtimeInputs = [pkgs.jq pkgs.coreutils pkgs.gnused];
     text = ''
       microvm=/run/current-system/sw/bin/microvm
       cache="/tmp/hydrix-eww-vm-status.json"
@@ -148,7 +162,7 @@ let
   # Polling script: queries wifi-sync vsock 14506.
   ewwRouterStats = pkgs.writeShellApplication {
     name = "eww-router-stats";
-    runtimeInputs = [ pkgs.socat pkgs.jq ];
+    runtimeInputs = [pkgs.socat pkgs.jq];
     text = ''
       result=$(echo "POLL" | socat -T3 - VSOCK-CONNECT:200:14506 2>/dev/null || true)
       if [ -z "$result" ]; then
@@ -164,7 +178,7 @@ let
   # normalises direction to VM perspective (router rx/tx → VM up/down).
   ewwNetStats = pkgs.writeShellApplication {
     name = "eww-net-stats";
-    runtimeInputs = [ pkgs.socat pkgs.jq ];
+    runtimeInputs = [pkgs.socat pkgs.jq];
     text = ''
       raw=$(echo "" | socat -T4 - VSOCK-CONNECT:200:14517 2>/dev/null || true)
       [ -z "$raw" ] && { echo '{"wan":{"iface":"","down":"","up":""},"vms":[]}'; exit 0; }
@@ -184,7 +198,7 @@ let
   # completes before the window renders (avoids layout jitter on spawn).
   ewwLeftWatcher = pkgs.writeShellApplication {
     name = "eww-left-watch";
-    runtimeInputs = [ pkgs.eww pkgs.coreutils ];
+    runtimeInputs = [pkgs.eww pkgs.coreutils];
     text = ''
       sleep 3
       eww open left-overlay 2>/dev/null || true
@@ -396,7 +410,7 @@ let
     }
 
     * {
-      font-family: "Iosevka", monospace;
+      font-family: "${fontFamily}", monospace;
       font-size: ${toString fontSize}pt;
       color: $foreground;
       background-color: transparent;
@@ -532,50 +546,50 @@ let
 
   ewwYuckFile = pkgs.writeText "eww.yuck" ewwYuck;
   ewwScssFile = pkgs.writeText "eww.scss" ewwScss;
-in lib.mkIf config.hydrix.hyprland.enable {
+in
+  lib.mkIf config.hydrix.hyprland.enable {
+    home-manager.users.${username} = {lib, ...}: {
+      home.packages = [pkgs.eww ewwWgStatus ewwMvmStatus ewwRouterStats ewwNetStats ewwLeftWatcher];
 
-  home-manager.users.${username} = { lib, ... }: {
-    home.packages = [ pkgs.eww ewwWgStatus ewwMvmStatus ewwRouterStats ewwNetStats ewwLeftWatcher ];
+      home.activation.ewwConfig = lib.hm.dag.entryAfter ["writeBoundary"] ''
+        _dir="$HOME/.config/eww"
+        mkdir -p "$_dir"
+        [ -L "$_dir/eww.yuck" ] && rm "$_dir/eww.yuck" || true
+        [ -L "$_dir/eww.scss" ] && rm "$_dir/eww.scss" || true
+        cp ${ewwYuckFile} "$_dir/eww.yuck" && chmod 644 "$_dir/eww.yuck"
+        cp ${ewwScssFile} "$_dir/eww.scss" && chmod 644 "$_dir/eww.scss"
+      '';
 
-    home.activation.ewwConfig = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
-      _dir="$HOME/.config/eww"
-      mkdir -p "$_dir"
-      [ -L "$_dir/eww.yuck" ] && rm "$_dir/eww.yuck" || true
-      [ -L "$_dir/eww.scss" ] && rm "$_dir/eww.scss" || true
-      cp ${ewwYuckFile} "$_dir/eww.yuck" && chmod 644 "$_dir/eww.yuck"
-      cp ${ewwScssFile} "$_dir/eww.scss" && chmod 644 "$_dir/eww.scss"
-    '';
+      systemd.user.paths.eww-colors = {
+        Unit.Description = "Watch pywal SCSS for eww color reload";
+        Path.PathChanged = "%h/.cache/wal/colors.scss";
+        Install.WantedBy = ["hyprland-session.target"];
+      };
 
-    systemd.user.paths.eww-colors = {
-      Unit.Description = "Watch pywal SCSS for eww color reload";
-      Path.PathChanged = "%h/.cache/wal/colors.scss";
-      Install.WantedBy = [ "hyprland-session.target" ];
+      systemd.user.services.eww-colors = {
+        Unit = {
+          Description = "Reload eww on pywal color change";
+          After = ["hyprland-session.target"];
+        };
+        Service = {
+          Type = "oneshot";
+          ExecStart = "${pkgs.eww}/bin/eww reload";
+        };
+      };
+
+      systemd.user.services.eww-left-watch = {
+        Unit = {
+          Description = "eww left-overlay watcher";
+          After = ["hyprland-session.target"];
+          PartOf = ["hyprland-session.target"];
+        };
+        Service = {
+          Type = "simple";
+          ExecStart = "${ewwLeftWatcher}/bin/eww-left-watch";
+          Restart = "on-failure";
+          RestartSec = 5;
+        };
+        Install.WantedBy = ["hyprland-session.target"];
+      };
     };
-
-    systemd.user.services.eww-colors = {
-      Unit = {
-        Description = "Reload eww on pywal color change";
-        After       = [ "hyprland-session.target" ];
-      };
-      Service = {
-        Type      = "oneshot";
-        ExecStart = "${pkgs.eww}/bin/eww reload";
-      };
-    };
-
-    systemd.user.services.eww-left-watch = {
-      Unit = {
-        Description = "eww left-overlay watcher";
-        After       = [ "hyprland-session.target" ];
-        PartOf      = [ "hyprland-session.target" ];
-      };
-      Service = {
-        Type       = "simple";
-        ExecStart  = "${ewwLeftWatcher}/bin/eww-left-watch";
-        Restart    = "on-failure";
-        RestartSec = 5;
-      };
-      Install.WantedBy = [ "hyprland-session.target" ];
-    };
-  };
-}
+  }

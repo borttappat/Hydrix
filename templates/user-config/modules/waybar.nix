@@ -942,8 +942,8 @@ in {
       default = "monobar";
       description = ''
         Waybar layout profile.
-        dualbar — top + bottom bars, all modules always visible.
-        monobar  — single top bar; conditional modules hide below threshold.
+        dualbar - top + bottom bars, all modules always visible.
+        monobar - single top bar; conditional modules hide below threshold.
       '';
     };
   };
