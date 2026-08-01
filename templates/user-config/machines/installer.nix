@@ -215,14 +215,18 @@
         # vault requires setup before first use - see DOCUMENTATION.md §Vault VM.
         # Disabled by default - enable and set autostart = true after initializing ~/vault/.
         "microvm-vault"    = { enable = false; };
-        # Per-VM options (combine freely): enable, autostart, secrets, encryption
+        # Per-VM options (combine freely): enable, autostart, secrets, encryption, coupled
         #
         # secrets: provision named secrets into the VM (e.g. GitHub SSH key from secrets/github.yaml)
         # encryption: enable LUKS-encrypted home volume — run 'microvm encrypt-setup <name>' once after enabling
+        # coupled: profile/task VMs are excluded from the host build by default (built and
+        #   managed only via `microvm build/start/update <name>`, not `rebuild`) so host
+        #   rebuilds stay fast regardless of how many heavy desktop VMs are declared. Infra
+        #   VMs stay coupled (always built with the host) by default. Override either way here.
         #
         # "microvm-pentest"  = { encryption = true; secrets = [ "github" ]; };
         # "microvm-browsing" = { secrets = [ "github" ]; };
-        # "microvm-dev"      = { secrets = [ "github" ]; };
+        # "microvm-dev"      = { secrets = [ "github" ]; coupled = true; }; # e.g. keep always-fresh
         # "microvm-builder"  = { secrets = [ "github" ]; };
         # "microvm-gitsync"  = { secrets = [ "github" ]; };
       };

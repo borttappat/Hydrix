@@ -572,6 +572,19 @@ in {
         description = "Only include infrastructure VMs (router, builder) in microvm.vms. Used during install to skip building non-essential VM closures.";
       };
 
+      coupleProfiles = lib.mkOption {
+        type = lib.types.bool;
+        default = false;
+        description = ''
+          When true, profile and task VMs are coupled to the host build by
+          default (pre-decoupling behavior: every `rebuild` builds their full
+          toplevel and restarts them on config changes), same as infra VMs.
+          When false (default), profile/task VMs are decoupled: built and
+          managed only via `microvm build/start/update <name>`, keeping host
+          rebuilds fast. Per-VM `vms.<name>.coupled` always overrides this.
+        '';
+      };
+
       defaultBridge = lib.mkOption {
         type = lib.types.str;
         default = "br-browse";
@@ -582,6 +595,21 @@ in {
         type = lib.types.listOf lib.types.str;
         default = [];
         description = "All VM names managed by this flake. Populated automatically by the flake — do not set manually.";
+      };
+
+      vmClasses = lib.mkOption {
+        type = lib.types.attrsOf (lib.types.enum ["infra" "profile" "task"]);
+        default = {};
+        description = ''
+          Maps each known VM name to its category (infra / profile / task).
+          Populated automatically by the flake from profiles/*/meta.nix,
+          infra/*/meta.nix, and tasks/task*/meta.nix discovery, do not set
+          manually. Drives host-build coupling: profile/task VMs are excluded
+          from microvm.vms by default (built and managed only via the
+          `microvm` CLI); infra VMs, or any name absent from this map
+          (covers router/router-stable/builder, wired outside knownVms),
+          stay coupled to the host build.
+        '';
       };
 
       # Default VM names (can be overridden by user)
@@ -672,6 +700,19 @@ in {
               description = ''
                 Enable LUKS-encrypted home volume for this VM on this machine.
                 Run 'microvm encrypt-setup <name>' once after setting this, then rebuild.
+              '';
+            };
+            coupled = lib.mkOption {
+              type = lib.types.nullOr lib.types.bool;
+              default = null;
+              description = ''
+                Force this VM's coupling to the host build closure, overriding
+                the class default (infra = coupled, profile/task = decoupled).
+                true: build with `rebuild` (host toplevel depends on this VM's
+                nixosSystem toplevel, current framework behavior for all VMs).
+                false: exclude from microvm.vms even if classed as infra;
+                manage exclusively via `microvm build/start/update <name>`.
+                null (default): use the class default from vmClasses.
               '';
             };
           };

@@ -1141,6 +1141,30 @@ Advanced networking options (rarely needed):
 }
 ```
 
+#### Coupled vs Decoupled VMs
+
+Not every declared VM is built as part of the host's own `system.build.toplevel`. Infra
+VMs (router, router-stable, builder, files, gitsync, hostsync, usb-sandbox, vault) are
+**coupled**: they're placed in `config.microvm.vms`, so a host rebuild builds their full
+`nixosSystem` toplevel and restarts the running VM whenever its config changes. Profile
+VMs and task VMs are **decoupled** by default: excluded from `config.microvm.vms`, built
+and managed only via `microvm build/start/update/restart <name>`. This keeps host rebuild
+time independent of how many heavy desktop profile VMs are declared, since only the
+lightweight infra VMs are ever built as part of the host closure.
+
+Each VM's class (infra, profile, or task) is populated automatically by the consuming
+flake into `hydrix.microvmHost.vmClasses`, do not set this manually. Two ways to change
+the default:
+
+```nix
+# Per VM, in a machine config: overrides the class default either direction.
+hydrix.microvmHost.vms."microvm-dev".coupled = true;
+
+# Repo-wide, in the user flake: flips the default for ALL profile/task VMs at once.
+# A per-VM `coupled` override above still wins over this either way.
+hydrix.microvmHost.coupleProfiles = true;
+```
+
 ### Graphical Configuration
 
 ```nix

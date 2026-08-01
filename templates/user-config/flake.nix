@@ -170,6 +170,18 @@
                 map (m: "microvm-${m._profileName}") discoveredMetas
                 ++ map (m: "microvm-${m._infraName}") discoveredInfra
                 ++ map (m: "microvm-pentest-${m._taskName}") discoveredTasks;
+              # Tags each known VM with its category (infra/profile/task) so
+              # the host module can decouple profile/task VMs from the host
+              # build closure by default (see host/microvm/default.nix).
+              hydrix.microvmHost.vmClasses =
+                builtins.listToAttrs (map (m: { name = "microvm-${m._profileName}"; value = "profile"; }) discoveredMetas)
+                // builtins.listToAttrs (map (m: { name = "microvm-${m._infraName}"; value = "infra"; }) discoveredInfra)
+                // builtins.listToAttrs (map (m: { name = "microvm-pentest-${m._taskName}"; value = "task"; }) discoveredTasks);
+              # Uncomment to build/rebuild ALL profile and task VMs together with the
+              # host (pre-decoupling behavior: every `rebuild` also builds their full
+              # toplevel). Off by default: profile/task VMs are built and managed only
+              # via `microvm build/start/update <name>`, keeping host rebuilds fast.
+              # hydrix.microvmHost.coupleProfiles = true;
               # Per-machine router VM names — each machine gets its own router
               # nixosConfiguration with the correct wifiPciAddress baked in.
               hydrix.microvmHost.vmNames.router       = "microvm-router-${machineName}";

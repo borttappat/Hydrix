@@ -13,6 +13,19 @@
 #   4. Start microVM: microvm start microvm-browsing
 #   5. Or enable autostart: hydrix.microvmHost.vms."microvm-browsing".autostart = true;
 #
+# Coupled vs decoupled VMs:
+#   Only "coupled" VMs are placed in config.microvm.vms, which is what makes
+#   upstream microvm.nix build a VM's full nixosSystem toplevel as part of the
+#   host's own system.build.toplevel. Infra VMs (router, builder, etc.) are
+#   coupled by default so they're always built and reliably autostarted with
+#   the host. Profile and task VMs are decoupled by default: they're built
+#   and managed only via the `microvm` CLI (build/start/update/restart), never
+#   as a side effect of `rebuild`. This keeps host rebuild times independent of
+#   how many heavy desktop profile VMs are declared. Flip the default for all
+#   profile/task VMs at once with hydrix.microvmHost.coupleProfiles = true, or
+#   override a single VM with hydrix.microvmHost.vms.<name>.coupled = true/false
+#   (always wins over coupleProfiles). See vmClass/isCoupled below.
+#
 {
   config,
   lib,
@@ -47,6 +60,24 @@
     if cfg.infrastructureOnly
     then lib.filterAttrs (name: _: builtins.elem name infrastructureVMs) enabledVMs
     else enabledVMs;
+
+  # Coupled vs decoupled split (see header comment). Names absent from
+  # vmClasses (router/router-stable/builder, wired outside knownVms) default
+  # to "infra" so they stay coupled with no special-casing here.
+  vmClass = name: cfg.vmClasses.${name} or "infra";
+  isCoupled = name: vmCfg:
+    # allVms merges plain-attrset knownVms defaults with cfg.vms submodule
+    # instances via `//`; names not explicitly declared in cfg.vms fall
+    # through to the plain attrset and never gained a `coupled` key, hence
+    # the `or null` rather than assuming the field is always present.
+    if (vmCfg.coupled or null) != null
+    then vmCfg.coupled
+    else if builtins.elem (vmClass name) ["profile" "task"]
+    then cfg.coupleProfiles
+    else true;
+  coupledVMs = lib.filterAttrs isCoupled filteredVMs;
+  decoupledVMs = lib.filterAttrs (name: vmCfg: !(isCoupled name vmCfg)) filteredVMs;
+  decoupledAutostartVMs = lib.filterAttrs (_: v: v.autostart) decoupledVMs;
 
   # Filter VMs that have any secrets to provision
   vmsWithSecrets = lib.filterAttrs (_: v: v.enable && v.secrets != []) allVms;
@@ -421,6 +452,10 @@ in {
 
       # Declare microVMs from hydrix.microvmHost.vms
       # VM names must match nixosConfigurations in the Hydrix flake
+      # Only coupled VMs: this is what makes upstream microvm.nix build a VM's
+      # toplevel as part of the host's own system.build.toplevel. Decoupled
+      # VMs (profile/task, by default) are managed exclusively via the
+      # `microvm` CLI, see header comment.
       microvm.vms =
         lib.mapAttrs (name: vmCfg: {
           inherit (vmCfg) autostart;
@@ -429,7 +464,7 @@ in {
           # Allow updates via `microvm -u <name>` (uses user's hydrix-config)
           updateFlake = "path:${config.hydrix.paths.configDir}";
         })
-        filteredVMs;
+        coupledVMs;
 
       # ===== Systemd Services =====
       # Combines router TAP setup and secrets provisioning
@@ -706,6 +741,37 @@ in {
             '';
           };
         }
+
+        # Autostart replacement for decoupled VMs (profile/task by default).
+        # These are excluded from config.microvm.vms, so upstream's
+        # microvm.autostart -> systemd.targets.microvms.wants mechanism never
+        # sees them (it's built only from config.microvm.vms names). One
+        # concrete oneshot service per decoupled+autostart VM, gated on the
+        # runner already having been built at least once (via `microvm build
+        # <name>`, or hydrix-firstboot-vms above on a fresh install), skips
+        # cleanly via ConditionPathExists if not, rather than failing boot.
+        (lib.mapAttrs' (name: _:
+          lib.nameValuePair "hydrix-microvm-autostart-${name}" {
+            description = "Autostart decoupled microVM ${name}";
+            wantedBy = ["multi-user.target"];
+            after = ["network.target" "microvms.target"];
+            unitConfig.ConditionPathExists = "/var/lib/microvms/${name}/current";
+            path = [pkgs.systemd];
+            serviceConfig = {
+              Type = "oneshot";
+              RemainAfterExit = true;
+              # detect_flake_dir() in scripts/microvm falls back to
+              # $SUDO_USER/$USER, neither of which exist for a root systemd
+              # service with no login session, set it explicitly.
+              Environment = "HYDRIX_FLAKE_DIR=${config.hydrix.paths.configDir}";
+              ExecStart = "${pkgs.writeShellScript "hydrix-microvm-autostart-${name}" ''
+                set -e
+                systemctl is-active --quiet "microvm@${name}.service" && exit 0
+                exec ${pkgs.writeShellScriptBin "microvm" (builtins.readFile ../../scripts/microvm)}/bin/microvm start "${name}"
+              ''}";
+            };
+          })
+          decoupledAutostartVMs)
       ];
     })
   ];
