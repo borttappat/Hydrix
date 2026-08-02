@@ -447,7 +447,6 @@ Check with: virt-viewer $vm_name"
     COMMON_APPS=(
         "firefox"
         "alacritty"
-        "obsidian"
         "chromium"
         "nautilus"
         "code"

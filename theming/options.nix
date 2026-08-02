@@ -354,25 +354,6 @@ in {
       description = "Enable vi key bindings in fish shell.";
     };
 
-    obsidian.hostEnable = lib.mkOption {
-      type = lib.types.bool;
-      default = false;
-      description = ''
-        Install Obsidian on the host system. Default false to keep the
-        lockdown closure small. Set to true in administrative mode.
-      '';
-    };
-
-    obsidian.vaultPaths = lib.mkOption {
-      type = lib.types.listOf lib.types.str;
-      default = [];
-      description = ''
-        Paths to Obsidian vault directories (relative to home, e.g. "hack_the_world").
-        CSS snippets and appearance settings are deployed to each vault's .obsidian/ dir.
-      '';
-      example = ["hack_the_world" "notes"];
-    };
-
     standalone = lib.mkOption {
       type = lib.types.bool;
       default = false;

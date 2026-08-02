@@ -18,7 +18,6 @@
   hydrix.graphical.firefox.extensions = [
     "ublock-origin" "pywalfox" "vimium-ff" "detach-tab"
   ];
-  hydrix.graphical.obsidian.hostEnable = true;
 
   hydrix.services.tailscale.enable = true;
 

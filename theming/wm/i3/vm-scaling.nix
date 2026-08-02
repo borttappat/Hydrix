@@ -1,6 +1,6 @@
 # VM Scaling Module - Dynamic scaling from host's scaling.json (i3/X11 only)
 #
-# Provides wrapper scripts (alacritty-scaled, rofi-scaled, obsidian-scaled) that
+# Provides wrapper scripts (alacritty-scaled, rofi-scaled) that
 # read font sizes from scaling.json for consistent DPI across VMs using xpra.
 # Only activates in VMs — the host handles scaling natively.
 #
@@ -69,21 +69,6 @@ let
     exec ${pkgs.rofi}/bin/rofi "''${rofi_args[@]}"
   '';
 
-  # Obsidian wrapper - Electron app, needs --force-device-scale-factor
-  obsidianWrapper = pkgs.writeShellScriptBin "obsidian-scaled" ''
-    ${scalingJsonPaths}
-
-    obsidian_args=("$@")
-
-    if [ -n "$json_path" ]; then
-        scale_factor=$(${pkgs.jq}/bin/jq -r '.scale_factor // 1' "$json_path" 2>/dev/null)
-        # Electron apps use --force-device-scale-factor for scaling
-        obsidian_args+=(--force-device-scale-factor="$scale_factor")
-    fi
-
-    exec ${pkgs.obsidian}/bin/obsidian "''${obsidian_args[@]}"
-  '';
-
   # Generic GTK app wrapper - reads scale factor and sets GDK_DPI_SCALE
   gtkAppWrapper = name: binary: pkgs.writeShellScriptBin "${name}-scaled" ''
     ${scalingJsonPaths}
@@ -135,7 +120,6 @@ in {
     environment.systemPackages = [
       alacrittyWrapper
       rofiWrapper
-      obsidianWrapper
       scalingInfo
       pkgs.jq  # Required for scaling.json parsing
     ];
@@ -157,7 +141,6 @@ in {
     environment.shellAliases = {
       alacritty = "alacritty-scaled";
       rofi = "rofi-scaled";
-      obsidian = "obsidian-scaled";
     };
   };
 }

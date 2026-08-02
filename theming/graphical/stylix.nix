@@ -189,7 +189,6 @@ in {
         gtk.enable = lib.mkDefault true;
         gtksourceview.enable = lib.mkDefault true;
         mpv.enable = lib.mkDefault true;
-        obsidian.enable = lib.mkDefault true;
         qt.enable = lib.mkDefault true;
         starship.enable = lib.mkDefault true;
         tmux.enable = lib.mkDefault true;

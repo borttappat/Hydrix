@@ -31,7 +31,6 @@ in lib.mkIf config.hydrix.i3.enable {
       # === Applications ===
       "${mod}+m" = "exec alacritty-dpi --class floating -e hydrix-tui";
       "${mod}+Shift+m" = "exec --no-startup-id vm-launch";
-      # "${mod}+o" = "exec --no-startup-id ws-app obsidian";
       # "${mod}+z" = "exec --no-startup-id ws-app zathura";
 
       # === Volume ===

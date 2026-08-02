@@ -253,7 +253,6 @@ EOF
     bind = $mod, B, exec, hypr-ws-app firefox
 
     # Applications
-    bind = $mod,       O, exec, obsidian
     bind = $mod,       M, exec, alacritty -e hydrix-tui
     bind = $mod SHIFT, M, exec, vm-select
     bind = $mod,       Z, exec, zathura

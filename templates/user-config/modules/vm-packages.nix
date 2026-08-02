@@ -77,7 +77,6 @@
 
     # GUI apps (xpra forwarded)
     firefox
-    obsidian
     pywal
   ];
 }

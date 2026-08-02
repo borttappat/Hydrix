@@ -41,7 +41,7 @@ in {
     # Minimal CLI environment (always included)
     ./vm-minimal.nix
 
-    # GUI apps for xpra forwarding (alacritty, firefox, obsidian, pywal)
+    # GUI apps for xpra forwarding (alacritty, firefox, pywal)
     ../display/xpra-apps.nix
 
     # VM theming scripts (wal-sync, set-colorscheme-mode, refresh-colors)

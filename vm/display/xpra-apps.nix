@@ -1,6 +1,6 @@
 # Xpra Apps Module - GUI app theming integration for MicroVM xpra forwarding
 #
-# GUI apps (alacritty, firefox, obsidian) are configured in the user's
+# GUI apps (alacritty, firefox) are configured in the user's
 # hydrix-config/shared/vm-packages.nix.
 #
 # This module provides only the pywal colorscheme integration (plumbing).

@@ -103,7 +103,6 @@ in lib.mkIf config.hydrix.sway.enable {
       "${mod}+Shift+d" = null;
 
       # === Applications ===
-      "${mod}+o"       = "exec obsidian";
       "${mod}+z"       = "exec zathura";
       "${mod}+Shift+p" = "exec vault-pick";
 

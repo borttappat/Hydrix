@@ -75,9 +75,6 @@ in {
     asciinema
     cava
 
-    # Notes
-    obsidian
-
     # Qt/GTK theme support
     adwaita-icon-theme
     gtk-engine-murrine
