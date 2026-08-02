@@ -72,9 +72,5 @@ in {
     # PAM for hyprlock authentication
     security.pam.services.hyprlock.enable = lib.mkDefault true;
 
-    # Dynamic focus border colors: use wal palette per VM type.
-    # User can override in machines/<serial>.nix with a plain assignment.
-    hydrix.vmThemeSync.focusDaemon.mode = lib.mkDefault "dynamic";
-
   };
 }

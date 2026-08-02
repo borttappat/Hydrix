@@ -811,9 +811,6 @@
         "$HOME/.fehbg" >> "$LOG" 2>&1 || true
     fi
 
-    # Signal vm-focus-daemon to re-apply colors (SIGUSR1 forces refresh)
-    ${pkgs.procps}/bin/pkill -USR1 -f vm-focus-daemon 2>/dev/null || true
-
     echo "$(${date}): display-setup complete" >> "$LOG"
   '';
 

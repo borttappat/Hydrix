@@ -136,8 +136,6 @@
           # i3: reload via IPC
           echo "  Reloading i3..."
           ${i3msg} reload >/dev/null 2>&1 || true
-          # Signal vm-focus-daemon to re-apply border colors
-          ${pkgs.procps}/bin/pkill -USR1 -f vm-focus-daemon 2>/dev/null || true
         fi
 
         # === Polybar + display-setup (fixes gaps) ===
@@ -331,7 +329,7 @@
   '';
 
   # Wrapper to apply a scheme and reload components
-  # Creates ~/.cache/wal/.active to signal vm-focus-daemon to use wal colors
+  # Creates ~/.cache/wal/.active marker for dynamic wal color mode
   applySchemeScript = pkgs.writeShellScriptBin "apply-colorscheme" ''
     set -euo pipefail
     SCHEME_PATH="$1"
@@ -351,7 +349,7 @@
         ${pkgs.pywal}/bin/wal -q -i "$SCHEME_PATH" 2>&1 | grep -v "WARNING: The convert command is deprecated" || true
     fi
 
-    # Mark wal colors as active (vm-focus-daemon will respect this)
+    # Mark wal colors as active
     mkdir -p "$(dirname "$WAL_ACTIVE")"
     touch "$WAL_ACTIVE"
 
@@ -365,7 +363,7 @@
   '';
 
   # Script to restore the default nix-configured scheme
-  # Removes ~/.cache/wal/.active to return vm-focus-daemon to normal operation
+  # Removes ~/.cache/wal/.active marker
   restoreSchemeScript = pkgs.writeShellScriptBin "restore-colorscheme" ''
     set -euo pipefail
     WAL_ACTIVE="$HOME/.cache/wal/.active"
@@ -398,7 +396,7 @@
         exit 1
     fi
 
-    # Remove the active marker (vm-focus-daemon returns to normal)
+    # Remove the active marker
     rm -f "$WAL_ACTIVE"
 
     # Run nixwal to update nix-specific cache
@@ -428,7 +426,7 @@
   '';
 
   # Main theme applicator (wallpaper + colors + RGB lighting)
-  # Creates ~/.cache/wal/.active to signal vm-focus-daemon to use wal colors
+  # Creates ~/.cache/wal/.active marker for dynamic wal color mode
   walRgbScript = pkgs.writeShellScriptBin "walrgb" ''
     #!/usr/bin/env bash
     if [ -z "$1" ]; then
@@ -444,7 +442,7 @@
     # Generate colors (suppress ImageMagick v7 deprecation warnings)
     ${pkgs.pywal}/bin/wal -q -i "$FILE_PATH" 2>&1 | grep -v "WARNING: The convert command is deprecated" || true
 
-    # Mark wal colors as active (vm-focus-daemon will respect this)
+    # Mark wal colors as active
     mkdir -p "$(dirname "$WAL_ACTIVE")"
     touch "$WAL_ACTIVE"
 

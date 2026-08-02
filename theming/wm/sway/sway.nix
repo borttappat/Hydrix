@@ -259,12 +259,8 @@ in
             { command = "${swayApplyColors}/bin/sway-apply-colors"; }
             # Restore wallpaper from wal cache (feh doesn't work in Wayland)
             { command = "sh -c '[ -f ~/.cache/wal/wal ] && ${pkgs.swaybg}/bin/swaybg -i \"$(cat ~/.cache/wal/wal)\" -m fill &'"; }
-            # Export sway socket to systemd user env — required for services that use
-            # sway IPC (sway-focus-daemon) and for polybar's internal/i3 module.
-            # Must run before restarting sway-focus-daemon.
+            # Export sway socket to systemd user env; required for polybar's internal/i3 module.
             { command = "systemctl --user set-environment SWAYSOCK=$SWAYSOCK WAYLAND_DISPLAY=$WAYLAND_DISPLAY"; }
-            # Focus daemon: dynamic border colors per VM (reads [profile] title prefix)
-            { command = "systemctl --user restart sway-focus-daemon"; }
             # Services
             { command = "${pkgs.dunst}/bin/dunst"; }
             # Auto-connect waypipe for any profile VMs that are already running.
