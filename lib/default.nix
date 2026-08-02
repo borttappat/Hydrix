@@ -264,12 +264,9 @@ in rec {
   # mkMicrovmBuilder - Create the MicroVM builder for lockdown mode
   # =========================================================================
   # hostUsername: Username on the host machine (for mounting ~/hydrix-config)
-  # localHydrixPath: Optional path to local Hydrix clone (for developers)
-  #                  When set, builder mounts this path so flake can use path: inputs
   mkMicrovmBuilder = {
     system ? "x86_64-linux",
     hostUsername,  # Required: host user whose hydrix-config to mount
-    localHydrixPath ? null,  # Optional: path to local Hydrix clone for developers
     modules ? [],
     extraInputs ? {},
   }:
@@ -290,9 +287,7 @@ in rec {
       ../vm/microvm/infra/microvm-builder.nix
       {
         networking.hostName = "microvm-builder";
-        # Pass host username and optional local Hydrix path to builder module
         hydrix.builder.hostUsername = hostUsername;
-        hydrix.builder.localHydrixPath = localHydrixPath;
       }
     ] ++ modules;
   };

@@ -31,8 +31,6 @@
 }: let
   # Host username for mounting hydrix-config (passed from mkMicrovmBuilder)
   hostUsername = config.hydrix.builder.hostUsername;
-  # Optional local Hydrix path for developers
-  localHydrixPath = config.hydrix.builder.localHydrixPath;
   vmName = config.networking.hostName;
 in {
   imports = [
@@ -48,15 +46,6 @@ in {
     hostUsername = lib.mkOption {
       type = lib.types.str;
       description = "Username on the host machine (for mounting ~/hydrix-config)";
-    };
-    localHydrixPath = lib.mkOption {
-      type = lib.types.nullOr lib.types.str;
-      default = null;
-      description = ''
-        Optional path to local Hydrix clone for developers.
-        When set, builder mounts this path so flake can use path: inputs.
-        This enables local development: edit in ~/Hydrix, test via ~/hydrix-config.
-      '';
     };
   };
 
@@ -127,17 +116,6 @@ in {
             tag = "hydrix-config";
             source = "/home/${hostUsername}/hydrix-config";
             mountPoint = "/mnt/hydrix";
-            proto = "virtiofs";
-          }
-        ]
-        ++ lib.optionals (localHydrixPath != null) [
-          # Local Hydrix repo for developers - READ-ONLY for security
-          # Enables path: flake inputs to work inside builder VM
-          # Mount at same path so path references resolve correctly
-          {
-            tag = "local-hydrix";
-            source = localHydrixPath;
-            mountPoint = localHydrixPath;
             proto = "virtiofs";
           }
         ];
@@ -303,17 +281,11 @@ in {
       ''
         [safe]
           directory = /mnt/hydrix
-      ''
-      + lib.optionalString (localHydrixPath != null) ''
-        directory = ${localHydrixPath}
       '';
 
     # ===== Read-Only Mounts for Security =====
     # Builder can evaluate flakes but cannot modify source code
     fileSystems."/mnt/hydrix".options = lib.mkAfter ["ro"];
-    fileSystems.${localHydrixPath} = lib.mkIf (localHydrixPath != null) {
-      options = lib.mkAfter ["ro"];
-    };
 
     # ===== Vsock Build Server =====
     # Listens on port 14510 for build commands from host
