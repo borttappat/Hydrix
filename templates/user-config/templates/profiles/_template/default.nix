@@ -33,9 +33,6 @@ let meta = import ./meta.nix; in
   # Colorscheme for this VM (see colorschemes/ for options)
   hydrix.colorscheme = "__COLORSCHEME__";
 
-  # Per-VM focus border color (named: __FOCUS_COLOR__)
-  hydrix.vmThemeSync.focusBorder = "__FOCUS_COLOR__";
-
   # Firefox user-agent: blend in or null for the real UA.
   # Presets: "edge-windows" | "chrome-windows" | "chrome-mac" | "safari-mac" | "firefox-windows"
   # hydrix.graphical.firefox.userAgent = "edge-windows";
