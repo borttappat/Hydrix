@@ -327,7 +327,7 @@ in {
             focusBorder = lib.mkOption {
               type = lib.types.nullOr lib.types.str;
               default = null;
-              description = "Focus border color for this VM's windows in Hyprland. Named color (red, yellow, ...) or hex RRGGBBAA. Matches hydrix.vmThemeSync.focusBorder in the VM's own config.";
+              description = "Focus border color for this VM's windows in Hyprland. Named color (red, yellow, ...) or hex RRGGBBAA. Set in meta.nix, read by Hyprland window rules via vm-registry.json.";
             };
           };
         });
