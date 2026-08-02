@@ -561,8 +561,8 @@ in {
     ui = {
       gaps = lib.mkOption {
         type = lib.types.int;
-        default = 15;
-        description = "i3 inner gaps";
+        default = 10;
+        description = "Hyprland gap size (px): screen-to-bar, bar-to-window, window-to-window";
       };
 
       gapsStandaloneRelation = lib.mkOption {
