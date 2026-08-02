@@ -468,8 +468,6 @@ in {
     environment.systemPackages = [ hostRofi ];
 
     home-manager.users.${username} = { pkgs, ... }: {
-      stylix.targets.rofi.enable = false;
-
       programs.rofi = {
         enable = lib.mkDefault true;
         package = lib.mkDefault pkgs.rofi;

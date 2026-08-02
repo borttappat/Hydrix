@@ -5,30 +5,20 @@
     nixpkgs.url = "github:nixos/nixpkgs/nixos-26.05";
     nixpkgs-unstable.url = "github:nixos/nixpkgs/nixos-unstable";
 
-    home-manager = {
-      url = "github:nix-community/home-manager/release-26.05";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
-
     stylix = {
       url = "github:danth/stylix/release-26.05";
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
-    microvm = {
-      url = "github:astro/microvm.nix";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
+    home-manager.url = "github:nix-community/home-manager/release-26.05";
 
-    # Optional inputs (disko, sops-nix, nix-index-database, burpsuite-nix) are
-    # user-provided via extraInputs in mkHost/mkMicroVM calls. See templates/user-config/flake.nix.
+    microvm.url = "github:astro/microvm.nix";
   };
 
-  outputs = { self, nixpkgs, ... }@inputs:
+  outputs = { self, ... }@inputs:
   let
     system = "x86_64-linux";
 
-    # Import lib helpers
     lib = import ./lib { inherit inputs; };
 
   in {
@@ -90,21 +80,7 @@
     # =========================================================================
     # DEV SHELL
     # =========================================================================
-    devShells.${system}.default = let
-      pkgs = import nixpkgs { inherit system; };
-    in pkgs.mkShell {
-      buildInputs = with pkgs; [ qemu libvirt virt-manager git ];
-      shellHook = ''
-        echo "Hydrix Development Shell"
-        echo ""
-        echo "This is the Hydrix framework - not meant to be built directly."
-        echo ""
-        echo "To use Hydrix, create a local config:"
-        echo "  nix flake init -t github:borttappat/Hydrix"
-        echo ""
-        echo "Or run the installer:"
-        echo "  curl -sL https://raw.githubusercontent.com/borttappat/Hydrix/main/scripts/install-hydrix.sh | sudo bash"
-      '';
-    };
+    # Framework provides lib only; not meant to be built directly.
+    # Users build with their own nixpkgs version in their hydrix-config flake.
   };
 }

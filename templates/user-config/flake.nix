@@ -26,11 +26,23 @@
     # Hydrix framework
     # Fork support: change to git+https://github.com/<youruser>/Hydrix.git
     hydrix.url = "@HYDRIX_URL@";
+    # Override Hydrix's default nixpkgs pins with your chosen versions.
+    # Change nixpkgs.url to switch NixOS channel for all VMs and the host.
+    hydrix.inputs.nixpkgs.follows = "nixpkgs";
+    hydrix.inputs.nixpkgs-unstable.follows = "nixpkgs-unstable";
+    hydrix.inputs.stylix.follows = "stylix";
 
-    # Inherit nixpkgs from Hydrix for consistency
-    nixpkgs.follows = "hydrix/nixpkgs";
+    # Your NixOS channel: change to nixos-unstable, nixos-24.11, etc.
+    nixpkgs.url = "github:nixos/nixpkgs/nixos-26.05";
 
-    # Optional framework inputs — user-controlled versions
+    # Unstable packages channel (optional, for latest versions)
+    nixpkgs-unstable.url = "github:nixos/nixpkgs/nixos-unstable";
+
+    # Stylix theming (version tracks your nixpkgs channel above)
+    stylix.url = "github:danth/stylix/release-26.05";
+    stylix.inputs.nixpkgs.follows = "nixpkgs";
+
+    # Optional framework inputs (user-controlled versions)
     disko.url = "github:nix-community/disko";
     disko.inputs.nixpkgs.follows = "nixpkgs";
 
@@ -44,13 +56,14 @@
     burpsuite-nix.inputs.nixpkgs.follows = "nixpkgs";
   };
 
-  outputs = { self, hydrix, nixpkgs, ... }@inputs:
+  outputs = { self, hydrix, nixpkgs, nixpkgs-unstable, stylix, ... }@inputs:
   let
     # =========================================================================
     # HOST USERNAME (for builder VM)
     # =========================================================================
     # Set this to your username - used by builder VM to mount ~/hydrix-config
     hostUsername = "@USERNAME@";
+
 
     # =========================================================================
     # USER PROFILES
@@ -82,11 +95,11 @@
     # HOST CONFIG FOR VMS
     # =========================================================================
     # Settings inherited by all VMs at build time.
-    # (Runtime scaling — DPI, pixel sizes — comes from scaling.json automatically)
+    # (Runtime scaling, DPI and pixel sizes, comes from scaling.json automatically)
     #
     # IMPORTANT: Username must match hostUsername for 9p share paths to work.
     # Font family, colorscheme, etc. are also shared so VMs match the host.
-    # Host colorscheme — VMs inherit this via vmColors for consistent theming
+    # Host colorscheme: VMs inherit this via vmColors for consistent theming
     hostColorscheme = let
       configs = builtins.attrValues machineConfigs;
       schemes = map (c: c.config.hydrix.colorscheme) configs;
@@ -94,7 +107,7 @@
 
     hostConfig = { ... }: {
       imports = [
-        ./modules/common.nix      # Locale, timezone, scaling — shared with all VMs
+        ./modules/common.nix      # Locale, timezone, scaling; shared with all VMs
         ./modules/fonts.nix
         ./modules/vim.nix         # Deploy .vimrc from configs/vim/.vimrc
         ./modules/starship.nix    # Deploy starship.toml from configs/starship/
@@ -110,9 +123,9 @@
       hydrix.vmColors.enable = true;   # VMs inherit host colorscheme (reads wal cache at runtime)
       hydrix.vmColors.hostColorscheme = hostColorscheme;  # Build-time colorscheme fallback
       # hydrix.colorschemeInheritance = "dynamic";  # DEFAULT: "dynamic"
-      #   "full"    — VMs use all host wal colors
-      #   "dynamic" — VMs use host background + their own text colors
-      #   "none"    — VMs use their own colorscheme independently
+      #   "full":    VMs use all host wal colors
+      #   "dynamic": VMs use host background + their own text colors
+      #   "none":    VMs use their own colorscheme independently
     };
 
     # =========================================================================
@@ -157,7 +170,7 @@
             { hydrix.vmThemeSync.enable = true;
               # Registry's router/router-stable vmName defaults to the generic
               # infra dir name ("microvm-router"), but the real nixosConfigurations
-              # key is per-machine ("microvm-router-${machineName}") — override here
+              # key is per-machine ("microvm-router-${machineName}") -- override here
               # so get_cid's registry lookup hits instead of falling back to nix eval.
               hydrix.networking.vmRegistry      = vmRegistry // {
                 router        = vmRegistry.router        // { vmName = "microvm-router-${machineName}"; };
@@ -182,7 +195,7 @@
               # toplevel). Off by default: profile/task VMs are built and managed only
               # via `microvm build/start/update <name>`, keeping host rebuilds fast.
               # hydrix.microvmHost.coupleProfiles = true;
-              # Per-machine router VM names — each machine gets its own router
+              # Per-machine router VM names: each machine gets its own router
               # nixosConfiguration with the correct wifiPciAddress baked in.
               hydrix.microvmHost.vmNames.router       = "microvm-router-${machineName}";
               hydrix.microvmHost.vmNames.routerStable = "microvm-router-stable-${machineName}"; }
@@ -200,7 +213,6 @@
             ./modules/vim.nix          # Vim plugins (config is in configs/vim/)
             ./modules/helix.nix
             ./modules/firefox.nix      # Host Firefox toggle + user-agent
-            ./modules/obsidian.nix     # Host Obsidian toggle + vault paths
             ./modules/vault.nix        # Vault VM credential launcher (vault-cli + vault-pick)
           ];
         };
@@ -212,7 +224,7 @@
     # Reads meta.nix from every profiles/<name>/ directory.
     # Each meta.nix drives: vmRegistry, bridge setup, router subnets, polybar, i3.
     # To add a new VM type: create profiles/<name>/meta.nix + profiles/<name>/default.nix
-    # and rebuild — everything else auto-wires.
+    # and rebuild; everything else auto-wires.
     discoveredMetas = let
       profileNames = builtins.attrNames (builtins.readDir userProfiles);
       hasMeta = p: builtins.pathExists (userProfiles + "/${p}/meta.nix");
@@ -222,7 +234,7 @@
     # Built-in framework profiles (already have bridges/subnets in Hydrix)
     frameworkProfiles = [ "browsing" "pentest" "dev" "comms" "lurking" ];
 
-    # All profile networks — passed to router for declarative IP/DHCP config
+    # All profile networks: passed to router for declarative IP/DHCP config
     allProfileNetworks = map (m: { name = m._profileName; inherit (m) subnet routerTap; })
       discoveredMetas;
 
@@ -234,8 +246,8 @@
     # -------------------------------------------------------------------------
     # Task VM auto-discovery
     # Scans tasks/task*/ for directories containing meta.nix and builds:
-    #   discoveredTasks  — list of meta attrsets (one per task slot)
-    #   taskConfigs      — nixosConfigurations entries using mkMicroVM (pentest profile)
+    #   discoveredTasks: list of meta attrsets (one per task slot)
+    #   taskConfigs:      nixosConfigurations entries using mkMicroVM (pentest profile)
     # -------------------------------------------------------------------------
     discoveredTasks = let
       tasksDir  = ./tasks;
@@ -267,10 +279,10 @@
     # -------------------------------------------------------------------------
     # Infra VM auto-discovery
     # Scans infra/ for directories containing meta.nix and builds:
-    #   discoveredInfra   — list of meta attrsets (one per infra VM)
-    #   infraNetworks     — extraNetworks entries (only VMs with routerTap, i.e. NEW subnets)
-    #   infraTapBridges   — merged TAP→bridge map from all infra VM tapBridges fields
-    #   infraVMConfigs    — nixosConfigurations entries using mkInfraVm
+    #   discoveredInfra:  list of meta attrsets (one per infra VM)
+    #   infraNetworks:    extraNetworks entries (only VMs with routerTap, new subnets only)
+    #   infraTapBridges:  merged TAP->bridge map from all infra VM tapBridges fields
+    #   infraVMConfigs:   nixosConfigurations entries using mkInfraVm
     #
     # VMs with builtinVm = true (router, builder) are excluded from infraVMConfigs
     # because they use specialized builder functions declared explicitly below.
@@ -287,7 +299,7 @@
     infraNetworks = map (m: { name = m._infraName; inherit (m) subnet routerTap; })
       (builtins.filter (m: m ? routerTap && !(m.builtinVm or false)) discoveredInfra);
 
-    # Builtin infra VMs (builtinVm = true) with routerTap+subnet — TAPs are hardwired in
+    # Builtin infra VMs (builtinVm = true) with routerTap+subnet: TAPs are hardwired in
     # the framework, but subnets come from meta.nix. Passed to router as infraLans so it
     # can assign IPs on those interfaces (e.g. 192.168.100.253 on mv-router-mgmt).
     infraLans = map (m: { tap = m.routerTap; inherit (m) subnet; })
@@ -298,7 +310,7 @@
 
     extraNetworks = profileExtraNetworks ++ infraNetworks;
 
-    # Only non-builtin infra VMs — router/builder use specialized mk functions below
+    # Only non-builtin infra VMs: router/builder use specialized mk functions below
     infraVMConfigs = builtins.listToAttrs (map (m: {
       name  = "microvm-${m._infraName}";
       value = hydrix.lib.mkInfraVm {
@@ -348,7 +360,7 @@
         };
       }) discoveredTasks);
 
-    # Per-machine router configs — each reads wifiPciAddress from that machine's own config.
+    # Per-machine router configs: each reads wifiPciAddress from that machine's own config.
     # Avoids cross-machine pollution of a single shared wifiPciAddress, and ensures
     # multiple machines in the same flake each get their own router nixosConfiguration.
     routerModules = [
@@ -402,7 +414,7 @@
       };
     }) discoveredMetas);
 
-    # Per-machine profile overrides — extracted from machine configs AFTER machineConfigs
+    # Per-machine profile overrides: extracted from machine configs AFTER machineConfigs
     # is defined. Must NOT use autoVMConfigs to avoid a cycle:
     # autoVMConfigsWithOverrides -> machineConfigs -> vmRegistry -> autoVMConfigs.
     # autoVMConfigs stays pure; only the final nixosConfigurations output
@@ -453,7 +465,7 @@
 
     };
     # Infra VMs (files, gitsync, hostsync, usb-sandbox, etc.) are auto-discovered
-    # from infra/*/meta.nix — see infraVMConfigs above.
+    # from infra/*/meta.nix; see infraVMConfigs above.
 
     # =========================================================================
     # VM IMAGES (libvirt)
@@ -464,10 +476,10 @@
     #
     packages.x86_64-linux = {
       # VM images for libvirt deployment (build on-demand)
-      vm-browsing = (hydrix.lib.mkVM { profile = "browsing"; inherit userProfiles hostConfig userColorschemesDir; }).config.system.build.image;
-      vm-pentest = (hydrix.lib.mkVM { profile = "pentest"; inherit userProfiles hostConfig userColorschemesDir; }).config.system.build.image;
-      vm-dev = (hydrix.lib.mkVM { profile = "dev"; inherit userProfiles hostConfig userColorschemesDir; }).config.system.build.image;
-      vm-comms = (hydrix.lib.mkVM { profile = "comms"; inherit userProfiles hostConfig userColorschemesDir; }).config.system.build.image;
+      vm-browsing = (hydrix.lib.mkVM { profile = "browsing"; inherit userProfiles hostConfig userColorschemesDir;}).config.system.build.image;
+      vm-pentest = (hydrix.lib.mkVM { profile = "pentest"; inherit userProfiles hostConfig userColorschemesDir;}).config.system.build.image;
+      vm-dev = (hydrix.lib.mkVM { profile = "dev"; inherit userProfiles hostConfig userColorschemesDir;}).config.system.build.image;
+      vm-comms = (hydrix.lib.mkVM { profile = "comms"; inherit userProfiles hostConfig userColorschemesDir;}).config.system.build.image;
     };
   };
 }
