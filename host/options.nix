@@ -566,12 +566,6 @@ in {
         description = "Enable MicroVM host support.";
       };
 
-      infrastructureOnly = lib.mkOption {
-        type = lib.types.bool;
-        default = false;
-        description = "Only include infrastructure VMs (router, builder) in microvm.vms. Used during install to skip building non-essential VM closures.";
-      };
-
       coupleProfiles = lib.mkOption {
         type = lib.types.bool;
         default = false;

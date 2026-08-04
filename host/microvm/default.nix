@@ -42,9 +42,6 @@
   routerVmName = cfg.vmNames.router;
   stableRouterVmName = cfg.vmNames.routerStable;
 
-  # VMs built/declared during a fresh install (infrastructureOnly=true)
-  infrastructureVMs = [routerVmName stableRouterVmName "microvm-builder"];
-
   # Merge: knownVms auto-enabled with defaults; explicit cfg.vms entries override.
   allVms =
     (lib.genAttrs cfg.knownVms (_: {
@@ -54,12 +51,7 @@
     }))
     // cfg.vms;
 
-  # Enabled VMs, optionally filtered to infrastructure-only during first install
   enabledVMs = lib.filterAttrs (_: v: v.enable) allVms;
-  filteredVMs =
-    if cfg.infrastructureOnly
-    then lib.filterAttrs (name: _: builtins.elem name infrastructureVMs) enabledVMs
-    else enabledVMs;
 
   # Coupled vs decoupled split (see header comment). Names absent from
   # vmClasses (router/router-stable/builder, wired outside knownVms) default
@@ -75,8 +67,8 @@
     else if builtins.elem (vmClass name) ["profile" "task"]
     then cfg.coupleProfiles
     else true;
-  coupledVMs = lib.filterAttrs isCoupled filteredVMs;
-  decoupledVMs = lib.filterAttrs (name: vmCfg: !(isCoupled name vmCfg)) filteredVMs;
+  coupledVMs = lib.filterAttrs isCoupled enabledVMs;
+  decoupledVMs = lib.filterAttrs (name: vmCfg: !(isCoupled name vmCfg)) enabledVMs;
   decoupledAutostartVMs = lib.filterAttrs (_: v: v.autostart) decoupledVMs;
 
   # Filter VMs that have any secrets to provision
@@ -678,8 +670,11 @@ in {
           })
         enabledVMs)
 
-        # First-boot VM builder: builds unbuilt VMs and starts autostart VMs.
-        # Closures are typically cached from the installer so builds are instant.
+        # First-boot VM builder: builds coupled VMs (cheap - already part of the
+        # host toplevel, this just links /var/lib/microvms/<name>/current for the
+        # Hydrix CLI) and any decoupled VM explicitly opted into autostart. Decoupled
+        # VMs without autostart (e.g. microvm-pentest by default) are intentionally
+        # left unbuilt - they only get built via an explicit `microvm build <name>`.
         # Runs once per install, gated by /var/lib/hydrix/.firstboot-vms-done.
         {
           hydrix-firstboot-vms = {
@@ -733,7 +728,7 @@ in {
                     fi
                   ''}
                 '')
-                filteredVMs)}
+                (coupledVMs // decoupledAutostartVMs))}
 
               mkdir -p /var/lib/hydrix
               touch /var/lib/hydrix/.firstboot-vms-done

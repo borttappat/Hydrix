@@ -3220,14 +3220,6 @@ EOF
         exit 1
     fi
 
-    # Remove infrastructureOnly — first rebuild will build all enabled VMs
-    log "Removing infrastructureOnly from machine config..."
-    sed -i '/infrastructureOnly/d' "$config_dir/machines/${CONFIG[serial]}.nix"
-    (
-        cd "$config_dir"
-        git -c user.name="Hydrix Installer" -c user.email="installer@hydrix" add .
-        git -c user.name="Hydrix Installer" -c user.email="installer@hydrix" commit --amend --no-edit
-    )
 
     # If the original flake used a local path: for hydrix, clone Hydrix there
     # and restore the URL so the installed system works correctly on first boot
@@ -3560,12 +3552,6 @@ check_resume() {
     fi
 
     # Post-install steps (Hydrix clone, ownership, etc.)
-    log "Removing infrastructureOnly from machine config..."
-    sed -i '/infrastructureOnly/d' "$config_dir/machines/${CONFIG[serial]}.nix"
-    (cd "$config_dir" && \
-        git -c user.name="Hydrix Installer" -c user.email="installer@hydrix" add . && \
-        git -c user.name="Hydrix Installer" -c user.email="installer@hydrix" commit --amend --no-edit)
-
     if [[ -n "$HYDRIX_LOCAL_TARGET" ]]; then
         local mnt_hydrix="/mnt$HYDRIX_LOCAL_TARGET"
         if [[ ! -d "$mnt_hydrix" ]]; then
