@@ -237,7 +237,7 @@ Generated at NixOS activation from all profile `meta.nix` files. Every runtime t
 
 **Convention: `vsockCid` = subnet last octet = workspace number.** All three use the same number. Custom profiles start at CID 107+. Reserved: 200 (router), 201 (router-stable), 209 (usb-sandbox), 210 (builder), 211 (gitsync), 212 (files), 213 (vault), 214 (hostsync).
 
-Each entry drives: compositor border rules, workspace-desc label, `ws-app`/`ws-rofi` workspace -> VM routing, focus menu, `vm-sync` profile targeting, and file transfer IP resolution.
+Each entry drives: compositor border rules, workspace-desc label, `hypr-ws-app`/`vm-select` workspace -> VM routing, focus menu, `vm-sync` profile targeting, and file transfer IP resolution.
 
 ### VM Static IP Scheme
 
@@ -475,7 +475,7 @@ listed above.
 
 **MicroVM** (Recommended):
 - Uses QEMU with virtiofs for shared /nix/store
-- Display via waypipe (Wayland) or xpra (X11) over vsock
+- Display via waypipe over vsock
 
 **Libvirt** (Alternative):
 - Traditional qcow2 images
@@ -699,7 +699,6 @@ When you have a working `hydrix-config` on one machine and want to bring a secon
 │   ├── alacritty.nix            # Terminal cursor, keyboard overrides
 │   ├── dunst.nix                # Notification dimensions and urgency
 │   ├── ranger.nix               # File manager keybindings and rifle rules
-│   ├── rofi.nix                 # Launcher dimensions, key bindings
 │   ├── starship.nix             # Prompt configuration
 │   ├── vim.nix                  # Editor configuration
 │   ├── firefox.nix              # Host Firefox toggle and user-agent
@@ -1184,8 +1183,8 @@ hydrix.microvmHost.coupleProfiles = true;
       # Per-app font size multipliers (final size = base * scale_factor * relation)
       relations = {
         alacritty = 1.0;
-        polybar = 1.0;
-        rofi = 1.0;
+        waybar = 1.0;
+        wofi = 1.0;
         dunst = 1.0;
         firefox = 1.2;
         gtk = 1.0;
@@ -1195,20 +1194,16 @@ hydrix.microvmHost.coupleProfiles = true;
       standaloneRelations = {};       # e.g., { alacritty = 1.05; }
 
       overrides.alacritty = 12;       # Fixed size (bypass scaling)
-      familyOverrides.polybar = "Tamzen";
     };
 
     # UI dimensions
     ui = {
       gaps = 15;
       border = 2;
-      barHeight = 23;
+      barHeight = 23;                # Also used by dunst notification positioning
       barPadding = 2;
       cornerRadius = 2;
       shadowRadius = 18;
-      floatingBar = true;
-      bottomBar = true;              # Bottom bar with VM metrics
-      polybarStyle = "modular";      # unibar, modular, or pills
 
       # Workspace labels (attrset mapping number to label)
       workspaceLabels = {
@@ -1222,18 +1217,17 @@ hydrix.microvmHost.coupleProfiles = true;
         inactive = 1.0;
         overlay = 0.85;              # Unified opacity for terminals/overlays
         overlayOverrides = { alacritty = 0.95; };
-        rules = { "Polybar" = 95; }; # Per-window-class opacity rules
         exclude = [ "Alacritty" "feh" "Feh" "firefox" "Firefox" "mpv" "vlc" ];
       };
 
-      # Rofi/Dunst dimensions
-      rofiWidth = 800;
+      # Wofi/Dunst dimensions
+      rofiWidth = 800;                # Read by wofi.nix (name predates the wofi migration)
       rofiHeight = 400;
       dunstWidth = 300;
       dunstOffset = 300;
 
       # Compositor animations
-      compositor.animations = "modern"; # "none" or "modern" (bouncy picom v12)
+      compositor.animations = "modern"; # "none" or "modern"
     };
 
     # VM resource bar (inside VMs)
@@ -1247,7 +1241,6 @@ hydrix.microvmHost.coupleProfiles = true;
       auto = true;
       applyOnLogin = true;
       referenceDpi = 96;
-      internalResolution = "1920x1200";
       standaloneScaleFactor = 1.0;
     };
 
@@ -1300,17 +1293,17 @@ isMicrovm = !isHost && !graphical.standalone;
 
 | Tier | Condition | What it gets |
 |---|---|---|
-| **microvm** | VM with `standalone = false` | Theming only: pywal, wpgtk, feh, imagemagick, xrdb, pulseaudio, xclip/xsel |
-| **standalone** | VM with `standalone = true` | Adds: polybar, rofi, picom, xdotool, unclutter, xcape, scrot, flameshot, X11 tools |
-| **host** | `vmType = "host"` | Adds: i3lock, brightnessctl, libvibrant, xorg.xinit, xorg.xorgserver |
+| **microvm** | VM with `standalone = false` | Theming only: pywal, wpgtk, feh, imagemagick, pulseaudio |
+| **standalone** | VM with `standalone = true` | Same theming base, plus the Hyprland stack if `hydrix.hyprland.enable = true` is also set |
+| **host** | `vmType = "host"` | Adds: ddcutil (DDC/CI monitor control) |
 
-**Why:** MicroVMs forward apps to the host via waypipe or xpra, they have no local window manager and no physical display. Installing a compositor (picom), screenshot tools (flameshot, scrot), or hardware controls (brightnessctl, libvibrant) would be dead weight. Standalone libvirt VMs run a full desktop via virt-manager and need the WM stack, but still have no physical backlight or lockscreen. Only the host needs those.
+**Why:** MicroVMs forward apps to the host via waypipe, they have no local window manager and no physical display. Standalone libvirt VMs run a full desktop via virt-manager and need the WM stack (Hyprland), but still have no physical backlight or lockscreen. Only the host needs those.
 
 The `standalone` option on a VM config is the switch:
 
 ```nix
-hydrix.graphical.standalone = true;   # libvirt VM with own display -> full WM tier
-hydrix.graphical.standalone = false;  # microVM -> theming only, display forwarded via waypipe or xpra (default)
+hydrix.graphical.standalone = true;   # libvirt VM with own display -> full WM tier (with hyprland.enable = true)
+hydrix.graphical.standalone = false;  # microVM -> theming only, display forwarded via waypipe (default)
 ```
 
 ### Shared Modules
@@ -1324,15 +1317,12 @@ The `modules/` directory in your `hydrix-config` holds settings that apply to al
 | `wifi.nix` | WiFi credentials for the router VM | `wifi-sync` |
 | `fonts.nix` | Font packages and per-app size relations | User |
 | `graphical.nix` | Opacity, bluelight filter, bar layout, lockscreen | User |
-| `polybar.nix` | Bar style, workspace labels, module layout (i3 only) | User |
-| `waybar.nix` | Waybar config (Hyprland/Sway) | User |
+| `waybar.nix` | Waybar config (Hyprland) | User |
 | `hyprland.nix` | Hyprland keybindings and per-machine rules | User |
-| `i3.nix` | i3 keybindings | User |
 | `fish.nix` | Shell abbreviations and functions | User |
 | `alacritty.nix` | Terminal cursor shape, keyboard overrides | User |
 | `dunst.nix` | Notification dimensions and urgency settings | User |
 | `ranger.nix` | File manager keybindings and rifle rules | User |
-| `rofi.nix` | Launcher dimensions, key bindings, fuzzy matching | User |
 | `zathura.nix` | PDF viewer options | User |
 | `starship.nix` | Full prompt configuration (TOML inlined as Nix string) | User |
 | `vim.nix` | Editor configuration (vimrc inlined as Nix string) | User |
@@ -1371,31 +1361,21 @@ hydrix.graphical.obsidian.hostEnable = lib.mkDefault false;
 
 The framework auto-generates a CSS snippet from the active colorscheme and font settings, deploying it to each vault's `.obsidian/snippets/` directory and enabling it via `appearance.json`.
 
-#### polybar.nix
+#### waybar.nix
 
-```nix
-hydrix.graphical.ui.polybarStyle = lib.mkDefault "modular";  # or "unibar"
-hydrix.graphical.ui.floatingBar  = lib.mkDefault true;
-hydrix.graphical.ui.bottomBar    = lib.mkDefault true;
+Unlike the old polybar setup, waybar's module layout is not driven by string options -
+it's a fixed Nix-defined list per bar (`topBar`/`bottomBar`/`monoBar` in `modules/waybar.nix`).
+To add or remove modules, edit that file directly (see its header comment for the pattern);
+`hydrix.graphical.waybar.barType` (`"dualbar"` or `"monobar"`) is the only user-facing switch.
 
-# Override module layout (null = style default)
-# hydrix.graphical.ui.bar.top.right   = "pomo-dynamic git-dynamic battery-dynamic date-dynamic";
-# hydrix.graphical.ui.bar.bottom.right = "rproc-bottom vm-ram-bottom vm-cpu-bottom";
-```
+Module keys used in the layout include: `custom/workspace-desc`, `custom/focus`, `custom/pomo`,
+`custom/sync`, `custom/git`, `custom/mvms`, `custom/vms`, `custom/volume`, `custom/temp`,
+`custom/memory`, `custom/cpu`, `custom/disk`, `custom/uptime`, `custom/clock`,
+`custom/power-profile`, `custom/battery`, `custom/battery-time`, `custom/rproc`, `custom/cproc`,
+`custom/rproc-bottom`, `custom/cproc-bottom`, `custom/vm-cpu`, `custom/vm-ram`, `custom/vm-fs`,
+`custom/vm-sync-dev`, `custom/vm-sync-stg`, `custom/vm-tun`, `custom/vm-up`, `custom/wifi-sync`.
 
-Available modules for the modular style:
-```
-pomo-dynamic  sync-dynamic  git-dynamic  mvms-dynamic  vms-dynamic
-volume-dynamic  temp-dynamic  ram-dynamic  cpu-dynamic  fs-dynamic
-uptime-dynamic  date-dynamic  battery-dynamic  battery-time-dynamic
-focus-dynamic  xworkspaces  workspace-desc  spacer  power-profile-dynamic
-
-(bottom bar)
-rproc-bottom  cproc-bottom  vm-ram-bottom  vm-cpu-bottom
-vm-sync-dev-bottom  vm-sync-stg-bottom  vm-fs-bottom  vm-tun-bottom  vm-up-bottom
-```
-
-### Polybar VM Integration
+### Waybar VM Integration
 
 **workspace-desc** - Shows current workspace label (e.g., "BROWSING", "PENTEST") read from `/etc/hydrix/vm-registry.json` at runtime. Works automatically for any VM added to your config.
 
@@ -1408,9 +1388,9 @@ ws-name              # reset, reverts to registry label (e.g. "DEV")
 
 Overrides are written to `/tmp/ws-names/<number>` and cleared automatically on reboot. The status bar module checks this directory before falling back to the vm-registry, so workspace names are never changed.
 
-**focus-dynamic** - Shows which VM type is currently focused on each workspace. Uses the same vm-registry lookup.
+**focus** - Shows which VM type is currently focused on each workspace. Uses the same vm-registry lookup.
 
-**Bottom bar modules** (vm-ram-bottom, vm-cpu-bottom, etc.) - Query running VMs by polling vm-registry, then fetch metrics via vsock from each VM's CID (port 14501).
+**Bottom bar modules** (vm-ram, vm-cpu, rproc-bottom, cproc-bottom, etc.) - Query running VMs by polling vm-registry, then fetch metrics via vsock from each VM's CID (port 14501).
 
 Each profile VM runs a `vm-metrics` systemd service, a compiled C binary (`vm-metrics-server`) that collects CPU, RAM, disk, uptime, top processes, and tunnel traffic by reading `/proc` and `statvfs()` directly. It never calls external binaries during collection, which avoids virtiofsd round-trips: every process spawned in a VM resolves its `/proc/<pid>/exe` symlink through virtiofs into the host's `/nix/store`, causing host-side virtiofsd reads per spawn. The C binary loads once from virtiofs at service start, then runs entirely from guest RAM.
 
@@ -1425,8 +1405,6 @@ hydrix.vmMetrics = {
 ```
 
 The host queries the snapshot via vsock on demand,the VM only writes to `/run/vm-metrics-snapshot`; the host reads it when status bar modules poll.
-
-For detailed runtime data flow, see `POLYBAR-VM-INTEGRATION.md` in your config directory.
 
 ### Power Management
 
@@ -1466,15 +1444,12 @@ power-profile status       # Show both profiles
 
 The status bar PWR module shows the current mode (SAVE/AUTO/PERF) and left-clicking cycles through all three modes.
 
-### Polybar Styles
+### Waybar Layout
 
-| Style | Description |
+| `hydrix.graphical.waybar.barType` | Description |
 |-------|-------------|
-| `unibar` | Classic solid bar with `//` separators |
-| `modular` | Transparent background with module backgrounds (default) |
-| `pills` | Multiple small rounded floating bars |
-
-Note: on Hyprland, waybar is used instead of polybar.
+| `dualbar` | Top + bottom bars, all modules always visible |
+| `monobar` (default) | Single top bar; conditional modules hide below threshold |
 
 ### Secrets Management
 
@@ -1623,7 +1598,7 @@ Hydrix uses pywal-based colorschemes with real-time synchronization between the 
 ┌─────────────────────────────────────────────────────────────────────┐
 │  Layer 1: VM internal colorscheme                                   │
 │  hydrix.colorscheme = "punk"                                        │
-│  Drives pywal palette inside the VM: alacritty, rofi, dunst, GTK    │
+│  Drives pywal palette inside the VM: alacritty, wofi, dunst, GTK    │
 │  This is the VM's own base theme, independent of the host.          │
 ├─────────────────────────────────────────────────────────────────────┤
 │  Layer 2: Host wal cache inheritance (virtiofs)                     │
@@ -1648,7 +1623,7 @@ Each VM has its own declarative colorscheme that drives pywal inside the VM:
 hydrix.colorscheme = "hydrix";   # default colorscheme 
 ```
 
-This scheme is used for the VM's own terminals, rofi, dunst, GTK, and any other pywal-aware apps running inside the VM. It acts as the base palette, which colors are actually applied depends on Layer 2.
+This scheme is used for the VM's own terminals, wofi, dunst, GTK, and any other pywal-aware apps running inside the VM. It acts as the base palette, which colors are actually applied depends on Layer 2.
 
 **Available colorschemes** (located in `colorschemes/`):
 - `hydrix` - Default teal/cyan
@@ -1731,11 +1706,10 @@ All VM color operations are fully contained, writes never reach the host's `~/.c
 
 Without theme sync, VMs show default colors for ~500ms while pywal runs. This is prevented by:
 
-1. **wal-cache-link service**  copies host colors into VM's local `~/.cache/wal` before xpra starts, so colors exist from the first shell
+1. **wal-cache-link service**  copies host colors into VM's local `~/.cache/wal` before apps start, so colors exist from the first shell
 2. **Pre-generated `colors-runtime.toml`**  built at VM boot from the copied `colors.json` via jq; available before any terminal opens
 3. **Stylix fish target disabled**  prevents OSC escape sequences from overriding colors on every shell start (`stylix.targets.fish.enable = mkForce false`)
-4. **xpra-vsock ordering**  xpra only accepts connections after `wal-cache-link` completes
-5. **Conflicting services disabled**  `vm-colorscheme`, `wal-sync` timer, and `init-wal-cache` are disabled so they cannot overwrite the VM's local cache
+4. **Conflicting services disabled**  `vm-colorscheme`, `wal-sync` timer, and `init-wal-cache` are disabled so they cannot overwrite the VM's local cache
 
 #### Wal Cache Pre-population (Cold Start)
 
@@ -1761,9 +1735,7 @@ Without this, the virtiofs mount would be empty on first boot and VMs would have
 
 ### Layer 3 - Focus Border Color
 
-The focus border is the window border color shown **on the host** when a VM application window is focused. It works on all supported WMs. It is entirely independent from what colors the VM uses internally, you can have a VM running `nord` internally while its host-side border is bright orange.
-
-**Implementation note (Sway):** Sway has no IPC command to change `client.focused` at runtime - the only mechanism is writing `~/.config/sway/colors.conf` and calling `swaymsg reload`. To avoid a visible freeze during focus switches, the reload is scheduled asynchronously on a background thread with a 40ms debounce. The focus event handler returns immediately (no compositor pause), and the border color updates imperceptibly shortly after. Rapid workspace switches are coalesced into a single reload.
+The focus border is the window border color shown **on the host** when a VM application window is focused. It is entirely independent from what colors the VM uses internally, you can have a VM running `nord` internally while its host-side border is bright orange.
 
 #### Priority Chain
 
@@ -1879,12 +1851,9 @@ Fonts are configured via `hydrix.graphical.font` and flow through two separate p
     size = 10;                        # Base size at 96 DPI
     relations = {                     # Per-app size multipliers
       alacritty = 1.0;
-      polybar = 1.0;
-      rofi = 1.2;
+      waybar = 1.0;
+      wofi = 1.2;
       dunst = 0.9;
-    };
-    familyOverrides = {               # Per-app font family override
-      polybar = "Tamzen";             # Use different font for polybar
     };
   };
 }
@@ -1892,31 +1861,28 @@ Fonts are configured via `hydrix.graphical.font` and flow through two separate p
 
 ### Host Font Pipeline
 
-On the host, `alacritty-dpi` launches terminals with DPI-aware font settings:
-
-1. `dynamic-scaling` detects monitor DPI and writes `~/.config/hydrix/scaling.json`
-2. `scaling.json` contains calculated font sizes (fractional, e.g. 10.5) and the font family
-3. `alacritty-dpi` reads `scaling.json` at launch time and passes `-o font.size=X -o font.normal.family=Y`
-4. This overrides `alacritty.toml` (which has static build-time values from Stylix)
-
-The `scaling.json` font_name is patched by a system activation script on every `rebuild`, so it always reflects the current config even before a display event triggers `dynamic-scaling`.
+Hyprland handles DPI scaling natively per-monitor (fractional compositor scale), so
+Alacritty and other apps read their font size directly from the Nix-generated
+`alacritty.toml` (Stylix, build-time) with no runtime DPI wrapper needed. Firefox is
+the one app that still needs a runtime wrapper (`firefox-dpi`), because Firefox's own
+scaling doesn't follow the compositor scale automatically - it reads the scale via
+`hyprctl monitors` at launch time (see `theming/programs/firefox.nix`).
 
 ### VM Font Pipeline
 
 VMs use their own `alacritty.toml` directly - no wrapper overrides:
 
 1. Stylix generates `alacritty.toml` with font family and size from `hydrix.graphical.font`
-2. The VM's xpra session sets `WINIT_X11_SCALE_FACTOR=1` globally
-3. When launched via xpra (`microvm app` / `ws-app`), plain `alacritty` runs inside the VM
-4. Alacritty reads its own config with the correct font
+2. Apps are launched inside the VM via `hypr-ws-app` / waypipe
+3. Alacritty reads its own config with the correct font
 
 ### Updating Fonts
 
 | Action | Host | VMs |
 |--------|------|-----|
 | Change `font.family` | `rebuild` | `rebuild` + `microvm update <vm>` |
-| Change `font.size` | `rebuild` (scaling.json updates) | `rebuild` + `microvm update <vm>` |
-| DPI change (new monitor) | Automatic via `dynamic-scaling` | N/A (xpra handles display) |
+| Change `font.size` | `rebuild` | `rebuild` + `microvm update <vm>` |
+| DPI change (new monitor) | Automatic via Hyprland's per-monitor scale | N/A (waypipe forwards the rendered window) |
 
 Font packages must be included in the VM's closure. Add them to `vmPackages` in your font config:
 
@@ -1957,13 +1923,12 @@ New terminal windows pick up the updated font. Already-running terminals keep th
 ```bash
 # Lifecycle
 microvm build <name>       # Build/rebuild VM image
-microvm start <name>       # Start VM (polls PING→OK, then starts display tunnel (waypipe or xpra))
+microvm start <name>       # Start VM (polls PING→OK, then starts the waypipe tunnel)
 microvm stop <name>        # Stop VM
 microvm restart <name>     # Restart VM
 
-# Applications (just press Super+Return on the VM workspace in Hyprland/Sway)
-microvm app <name> <cmd>   # Launch app via xpra (i3/X11 only)
-microvm attach <name>      # Attach to xpra session (i3/X11 only)
+# Applications (just press Super+Return on the VM workspace)
+microvm app <name> <cmd>   # Launch app in VM via waypipe
 microvm console <name>     # Serial console (headless VMs)
 
 # Status
@@ -2767,11 +2732,10 @@ imports = [ ../modules/vault.nix ];
 hydrix.microvmHost.vms."microvm-vault" = { autostart = true; };
 ```
 
-**4. Add keybind** in your WM keybindings module (`modules/hyprland.nix`, `modules/sway.nix`, or `modules/i3.nix`):
+**4. Add keybind** in `modules/hyprland.nix`:
 
 ```
 bind = $mod, P, exec, vault-pick              # Hyprland
-"${mod}+p" = "exec vault-pick";               # Sway
 ```
 
 **5. Rebuild and initialize the database:**
@@ -2986,7 +2950,6 @@ All host-VM communication uses virtio-vsock. No SSH or network access to VMs. Ea
 
 | Port | Service | Direction | Purpose |
 |------|---------|-----------|---------|
-| 14500 | xpra-vsock | Host -> VM | GUI app forwarding and display (X11 mode) |
 | 14501 | vm-metrics | Host -> VM | Poll CPU, RAM, disk, uptime |
 | 14502 | vm-staging | Host -> VM | List/pull staged packages (vm-sync) |
 | 14503 | vm-colorscheme | Host -> VM | Push colorscheme updates (REFRESH) |
@@ -3259,7 +3222,7 @@ Zoxide for frecency-based `cd` (`z <partial-path>`). Initialized in fish config.
 
 ## Workspace Integration
 
-Workspaces are mapped to VMs via the `ws-app` script. Pressing `Super+Return` launches a terminal in the correct context, host or VM, based on the focused workspace.
+Workspaces are mapped to VMs via the `hypr-ws-app` script. Pressing `Super+Return` launches a terminal in the correct context, host or VM, based on the focused workspace.
 
 ### Workspace Mapping
 
@@ -3281,7 +3244,7 @@ Workspaces are mapped to VMs via the `ws-app` script. Pressing `Super+Return` la
 All workspace→VM routing reads from `/etc/hydrix/vm-registry.json` at runtime:
 
 ```
-ws-app (Super+Return)
+hypr-ws-app (Super+Return)
   -> get focused workspace number
   -> query vm-registry for profile at that workspace
   -> return "profile:select" or "host" or "router"
@@ -3297,13 +3260,13 @@ jq -r --argjson w "$ws" \
   /etc/hydrix/vm-registry.json
 ```
 
-**focus-dynamic module** (status bar) - Shows which VM type is focused on each workspace, using the same registry lookup.
+**focus module** (status bar) - Shows which VM type is focused on each workspace, using the same registry lookup.
 
 **focus menu** (launcher) - Press `Mod+F4` to enter focus mode. The menu is built by scanning vm-registry for all profile VMs.
 
 ### Active VM Tracking
 
-For workspace types that support multiple VMs (pentest, browsing, dev), `ws-app` remembers your last-used VM in `~/.cache/hydrix/active-vms.json`.
+For workspace types that support multiple VMs (pentest, browsing, dev), `hypr-ws-app` remembers your last-used VM in `~/.cache/hydrix/active-vms.json`.
 
 **Selection logic**:
 1. If active VM is set and still running → use it
@@ -3312,31 +3275,13 @@ For workspace types that support multiple VMs (pentest, browsing, dev), `ws-app`
    - Multiple -> show launcher selection menu, update active
    - None → fall back to host, clear active
 
-**Manual VM selection**: Use `ws-rofi` (or `Mod+d` on a VM workspace) to choose which VM is "active" for that type.
+**Manual VM selection**: Use `vm-select` (or `Mod+Shift+p` on a VM workspace) to choose which VM is "active" for that type.
 
 ### Launch Flow
 
-**X11 / i3 (xpra mode):**
 ```
 Super+Return
-  -> ws-app alacritty
-  -> detect focused workspace (i3-msg)
-  -> query /etc/hydrix/vm-registry.json for workspace→profile mapping
-  -> if profile found:
-       -> get active VM for type (or show menu)
-       -> xpra control vsock://<CID>:14500 start -- alacritty
-       -> auto-attach xpra if not attached
-  -> if no profile (WS1, WS7-9, or missing registry):
-       -> alacritty-dpi (DPI-aware host terminal)
-
-Super+Shift+Return
-  -> alacritty-dpi (always host, regardless of workspace)
-```
-
-**Wayland / Hyprland or Sway (waypipe mode):**
-```
-Super+Return
-  -> hypr-ws-app alacritty  (or sway-ws-app on Sway)
+  -> hypr-ws-app alacritty
   -> detect focused workspace
   -> query vm-registry for workspace->VM mapping
   -> if VM not running: notify "use microvm start <vm>", exec host terminal
@@ -3347,9 +3292,9 @@ Super+Return
   -> window appears on host desktop, compositor routes it to correct workspace
 ```
 
-### waypipe VM Forwarding (Wayland)
+### waypipe VM Forwarding
 
-waypipe is used when the host runs a Wayland compositor (Hyprland or Sway). VM apps appear as individual windows on the host desktop with no visible border between "VM app" and "host app".
+VM apps appear as individual windows on the host desktop with no visible border between "VM app" and "host app".
 
 **Architecture:**
 
@@ -3370,7 +3315,7 @@ The VM's waypipe server connects *out* to the host (VM→HOST vsock works becaus
 | `waypipe-connect` starts | Starts host-side `waypipe client` listener, sends `waypipe-reconnect` to VM via vsock:14509 |
 | VM receives `waypipe-reconnect` | Restarts `waypipe-vsock`; VM's waypipe server connects out to host vsock port |
 | Compositor starts (VMs already running) | `waypipe-connect-all` spawns one poller per running VM; each polls `PING->OK` then starts `waypipe-connect` immediately |
-| App launched | ws-app sends command to vsock:14508; VM runs app under `WAYLAND_DISPLAY=waypipe-0` |
+| App launched | `hypr-ws-app` sends command to vsock:14508; VM runs app under `WAYLAND_DISPLAY=waypipe-0` |
 | Connection drops | VM `waypipe-vsock` has `Restart=always`; host `waypipe-connect` has restart loop - both self-heal |
 | `exit-wayland` | Kills all `waypipe-connect` processes; pushes `stop` to VMs; unsets `WAYLAND_DISPLAY` |
 
@@ -3380,25 +3325,25 @@ The `display-mode` service on each VM accepts these commands:
 
 | Command | Effect |
 |---------|--------|
-| `xpra` | Stops waypipe services, starts xpra-vsock |
-| `waypipe` | Stops xpra-vsock, starts/restarts waypipe-vsock + waypipe-launch |
-| `STATUS` | Returns `"waypipe"`, `"xpra"`, or `"none"` |
+| `waypipe` | Starts/restarts waypipe-vsock + waypipe-launch |
+| `waypipe-reconnect` | Unconditional restart, used by `waypipe-connect` on startup/reconnect |
+| `STATUS` | Returns `"waypipe"` or `"none"` |
 | `stop` | Stops all display services (WM exiting) |
 | `PING` | Returns `"OK"` (VM readiness check) |
 
 **Known gotcha \- `set -e` and the restart loop:**
 
-`waypipe-connect` uses `set -euo pipefail`. The `waypipe client` command exits non-zero when the VM disconnects cleanly. Without `|| true` on the waypipe invocation, the bash wrapper exits silently and the restart loop never runs - leaving the host with no active tunnel while `pgrep` still finds nothing, causing the ws-app script to keep trying to start the tunnel from scratch. The fix: `waypipe client || true` in the while loop.
+`waypipe-connect` uses `set -euo pipefail`. The `waypipe client` command exits non-zero when the VM disconnects cleanly. Without `|| true` on the waypipe invocation, the bash wrapper exits silently and the restart loop never runs - leaving the host with no active tunnel while `pgrep` still finds nothing, causing `hypr-ws-app` to keep trying to start the tunnel from scratch. The fix: `waypipe client || true` in the while loop.
 
 **Known gotcha \- STATUS false positive:**
 
-`STATUS` checks both `[[ -S /run/user/1000/waypipe-0 ]]` AND `systemctl is-active --quiet waypipe-vsock`. Checking only the socket file is insufficient, it can persist after the service has stopped (crashed, or stopped by `stop` push). If STATUS incorrectly returns `"waypipe"`, the ws-app script proceeds to launch the app which then fails silently (app starts in VM but no window appears on host).
+`STATUS` checks both `[[ -S /run/user/1000/waypipe-0 ]]` AND `systemctl is-active --quiet waypipe-vsock`. Checking only the socket file is insufficient, it can persist after the service has stopped (crashed, or stopped by `stop` push). If STATUS incorrectly returns `"waypipe"`, `hypr-ws-app` proceeds to launch the app which then fails silently (app starts in VM but no window appears on host).
 
 ### waypipe - VM-Side Services
 
 Three systemd services run in each graphical profile VM:
 
-**`display-mode.service`** - runs as root, listens on vsock:14509. Handles mode switching and readiness signalling. Accepts: `PING` (returns `OK`), `STATUS` (returns `waypipe`/`xpra`/`none`), `waypipe` (stops xpra, starts waypipe-vsock + waypipe-launch), `xpra` (stops waypipe services, starts xpra-vsock), `waypipe-reconnect` (restarts waypipe-vsock if socket missing, leaves running apps alive otherwise), `stop` (stops all display services, leaves VM in neutral state ready for next WM's mode push), `JOURNAL_WAYPIPE` (returns waypipe-vsock journal for remote diagnostics).
+**`display-mode.service`** - runs as root, listens on vsock:14509. Handles mode switching and readiness signalling. Accepts: `PING` (returns `OK`), `STATUS` (returns `waypipe`/`none`), `waypipe` (starts/restarts waypipe-vsock + waypipe-launch), `waypipe-reconnect` (restarts waypipe-vsock if socket missing, leaves running apps alive otherwise), `stop` (stops all display services, leaves VM in neutral state ready for next start), `JOURNAL_WAYPIPE` (returns waypipe-vsock journal for remote diagnostics).
 
 Runs as root because starting/stopping system services requires it. STATUS returns `"waypipe"` only when both `/run/user/1000/waypipe-0` exists AND `waypipe-vsock` is active - checking the socket file alone is insufficient since it can persist after the service crashes.
 
@@ -3422,58 +3367,41 @@ Runs as root because starting/stopping system services requires it. STATUS retur
 4. After 1s (background), pushes `waypipe` mode to the VM via vsock:14509
 5. Restart loop: if waypipe exits (VM disconnect/restart), restarts it automatically - requires `waypipe client || true` so the `set -euo pipefail` wrapper does not exit on non-zero waypipe exit
 
-**`hypr-ws-app <command>`** / **`sway-ws-app <command>`** - workspace-aware app launcher:
-1. Detects focused workspace (via `hyprctl activeworkspace -j` or `swaymsg -t get_workspaces`)
+**`hypr-ws-app <command>`** - workspace-aware app launcher:
+1. Detects focused workspace via `hyprctl activeworkspace -j`
 2. Looks up which VM owns that workspace in `vm-registry.json`
 3. If `waypipe-connect` is not running for that VM, starts it and waits for the tunnel
 4. Polls vsock:14509 `STATUS` up to 20s until it returns `"waypipe"`
 5. Sends the command to vsock:14508 (`waypipe-launch`)
 
-**`vm-push-display-mode`** - detects the current compositor (`$WAYLAND_DISPLAY` set = Wayland, otherwise X11) and pushes the appropriate mode (`waypipe` or `xpra`) to all running profile VMs via vsock:14509. Called at compositor startup so VMs already running when the WM starts get the correct mode immediately.
+**`vm-push-display-mode`** - pushes `waypipe` mode to all running profile VMs via vsock:14509. Called at Hyprland startup so VMs already running when the compositor starts get pinged immediately.
 
 ### waypipe - Window Routing
 
 VM windows are routed to the correct workspace by the compositor via title-prefix matching. The title prefix is set by `waypipe --title-prefix "[browsing] "` in `waypipe-vsock.service`. Compositor config:
 
 ```nix
-# Hyprland - windowrulev2 in modules/hyprland.nix
+# windowrulev2 in modules/hyprland.nix
 windowrulev2 = [
   "workspace 3, title:^\[browsing\]"
   "workspace 2, title:^\[pentest\]"
   # etc - generated from vm-registry at build time
 ];
-
-# Sway - for_window in modules/sway.nix
-extraConfig = ''
-  for_window [title="^\[browsing\] "] move to workspace 3
-  for_window [title="^\[pentest\] "] move to workspace 2
-'';
 ```
 
 Rules are generated at build time from `vm-registry.json` so adding a new profile VM automatically adds the corresponding window routing rule after a rebuild.
 
 ### waypipe - Session Cleanup
 
-A persistent `WAYLAND_DISPLAY` in the systemd user environment after the compositor exits causes problems - picom refuses to start in i3 (`ConditionEnvironment=!WAYLAND_DISPLAY`). The session wrappers handle cleanup:
+A persistent `WAYLAND_DISPLAY` in the systemd user environment after the compositor exits causes problems for anything gated on `ConditionEnvironment=!WAYLAND_DISPLAY`. The session wrapper handles cleanup:
 
-**`sway-session`** / **`hyprland-session`** - wrapper scripts that start the compositor and on exit:
+**`hyprland-session`** - wrapper script that starts the compositor and on exit:
 1. Kill all `waypipe-connect` processes
 2. Push `stop` to all running VMs via vsock:14509 (VMs stop display services, return to neutral state)
 3. Unset `WAYLAND_DISPLAY` and `DISPLAY` from the systemd user environment
 4. Drop back to TTY
 
 **`exit-wayland`** - can be called from any terminal to perform the same cleanup without killing the compositor, then sends the compositor an exit signal.
-
-**`exit-i3`** - equivalent for i3: pushes `stop` to VMs, kills xpra processes, exits i3.
-
-Session transitions that work cleanly as a result:
-
-| Transition | Steps |
-|-----------|-------|
-| Sway/Hyprland -> TTY | Close session or call `exit-wayland` |
-| TTY -> i3 | Start normally - clean env, picom starts |
-| i3 -> TTY | Call `exit-i3` |
-| TTY -> Sway/Hyprland | Start session - `vm-push-display-mode` fires on startup |
 
 ### Adding a New Profile VM
 
@@ -3498,16 +3426,14 @@ microvm build microvm-myprofile && microvm start microvm-myprofile
 ```
 
 **What auto-adapts after rebuild** (no manual wiring needed):
-- `ws-app` routes workspace -> new VM (reads vm-registry at runtime)
-- status bar `workspace-desc` shows new label; `focus-dynamic` shows new VM type
+- `hypr-ws-app` routes workspace -> new VM (reads vm-registry at runtime)
+- status bar `workspace-desc` shows new label; `focus` shows new VM type
 - focus menu includes new VM
 - `hydrix-switch` and `router-status` include the new bridge
 
 **What you add manually:**
 - Dedicated keybindings (e.g., `Mod+Control+b` always opens browser on browsing VM)
 - App-specific shortcuts if you want them beyond workspace-routing
-
-For detailed runtime data flow, see `POLYBAR-VM-INTEGRATION.md` in your config directory.
 
 ---
 
@@ -3588,7 +3514,6 @@ hydrix.graphical.lockscreen = {
 
 | Key | Action |
 |-----|--------|
-| `Mod+Shift+i` | Edit i3 config |
 | `Mod+Shift+p` | Edit status bar config |
 | `Mod+Shift+n` | Edit nix machine config |
 
@@ -3725,16 +3650,6 @@ microvm list
 lsmod | grep vhost_vsock
 ```
 
-### No Display in VM
-
-```bash
-# Check xpra status (i3/X11 only)
-xpra info vsock://<CID>:14500
-
-# Re-attach manually (i3/X11 only)
-microvm attach <name>
-```
-
 ### Waypipe: App Launches But No Window Appears
 
 The app was accepted by `waypipe-launch` but no window appeared on the host. The waypipe tunnel is broken.
@@ -3766,7 +3681,7 @@ waypipe-connect <vm-name>   # foreground - Ctrl+C when done
 | STATUS returns `"waypipe"` but apps don't appear | Stale socket file, service actually dead | STATUS now checks `systemctl is-active waypipe-vsock` too |
 | STATUS returns `"none"` indefinitely | `display-mode` not receiving push, or VM not booted | Check `pgrep -af waypipe-connect`; restart `microvm start` |
 
-### Waypipe: ws-app Errors "waypipe not ready after 20s"
+### Waypipe: hypr-ws-app Errors "waypipe not ready after 20s"
 
 ```bash
 # Verify the VM has display-mode service (waypipe-vm.nix must be imported)
@@ -3855,70 +3770,59 @@ cat ~/.config/hydrix/scaling.json
 
 ---
 
-## Wayland Stack (Hyprland / Sway)
+## Wayland Stack (Hyprland)
 
-Hydrix supports Hyprland (primary) and Sway as Wayland compositors. VM apps are forwarded to the host desktop via **waypipe**, appearing as individual native windows. i3 is also available as an X11 option. All three default to disabled - enable exactly one.
+Hyprland is the only supported compositor. VM apps are forwarded to the host desktop via
+**waypipe**, appearing as individual native windows. The legacy Sway and i3 stacks (and
+xpra, the X11 forwarding mechanism i3 used) have been fully removed from the framework -
+there is no `hydrix.sway.enable` or `hydrix.i3.enable` option anymore.
 
 ### Enabling
 
 ```nix
-# machines/<serial>.nix - enable exactly one
-hydrix.hyprland.enable = true;  # Wayland, VM apps forwarded via waypipe (recommended)
-# hydrix.sway.enable = true;    # Wayland, VM apps forwarded via waypipe
-# hydrix.i3.enable = true;      # X11, VM apps forwarded via xpra
+# machines/<serial>.nix
+hydrix.hyprland.enable = true;  # Wayland, VM apps forwarded via waypipe
 ```
 
-### Programs per WM
+### Programs
 
-| Component | Hyprland | Sway | i3 |
-|-----------|----------|------|----|
-| Compositor/WM | Hyprland | Sway | i3 |
-| Status bar | waybar | waybar | polybar |
-| Launcher | wofi | wofi | rofi |
-| Lockscreen | hyprlock | swaylock | xss-lock |
-| VM forwarding | waypipe | waypipe | xpra |
+| Component | Program |
+|-----------|---------|
+| Compositor | Hyprland |
+| Status bar | waybar |
+| Launcher | wofi |
+| Lockscreen | hyprlock |
+| VM forwarding | waypipe |
 
 Start the session:
 ```bash
-hyprland-session   # Hyprland - cleans up waypipe + env on exit
-sway-session       # Sway - cleans up waypipe + env on exit
+hyprland-session   # cleans up waypipe + env on exit
 ```
 
 ### Module Overview
 
 | Module | Location | What it provides |
 |--------|----------|-----------------|
-| `wm/sway.nix` | `modules/wm/sway.nix` | NixOS Sway enablement, polkit, portals, packages |
-| `graphical/programs/sway.nix` | `modules/graphical/programs/sway.nix` | Home-manager Sway config: gaps, input, startup, colors |
-| `wm/waypipe-host.nix` | `modules/wm/waypipe-host.nix` | Host-side scripts: `waypipe-connect`, `waypipe-connect-all`, `sway-ws-app`, `hypr-ws-app`, `vm-push-display-mode`, `exit-wayland`, `exit-i3`; PipeWire vsock audio bridge (`pulse-vsock`) |
-| `vm/waypipe-vm.nix` | `modules/vm/waypipe-vm.nix` | VM-side systemd services: `display-mode` (vsock:14509), `waypipe-vsock`, `waypipe-launch` (vsock:14508), `pulse-vsock` (PulseAudio bridge to host) |
+| `wm/hyprland/waypipe.nix` | `theming/wm/hyprland/waypipe.nix` | Host-side scripts: `waypipe-connect`, `waypipe-connect-all`, `hypr-ws-app`, `vm-push-display-mode`, `exit-wayland`; PipeWire vsock audio bridge (`pulse-vsock`) |
+| `vm/display/waypipe-vm.nix` | `vm/display/waypipe-vm.nix` | VM-side systemd services: `display-mode` (vsock:14509), `waypipe-vsock`, `waypipe-launch` (vsock:14508), `pulse-vsock` (PulseAudio bridge to host) |
 
-**`waypipe-host.nix`** is auto-imported by `core.nix` and activates when `sway.enable` or `hyprland.enable` is true. No explicit import needed in your machine config.
+**`theming/wm/hyprland/waypipe.nix`** is auto-imported via `theming/wm/hyprland/default.nix` and activates when `hyprland.enable` is true.
 
-**`waypipe-vm.nix`** is auto-imported by `vm-base.nix` for all profile VMs. It coexists with xpra \- the `display-mode` handler (vsock:14509) switches between them at runtime based on what the host pushes.
+**`waypipe-vm.nix`** is auto-imported by `vm-base.nix`/`microvm-profile-base.nix` for all profile VMs.
 
 ### Display Mode Switching
 
-The host connects to each VM's `display-mode` service (vsock:14509) to switch display services:
-
-**Wayland (Hyprland/Sway):** `waypipe-connect` sends `waypipe-reconnect` directly to the VM, bypassing `vm-push-display-mode`. The VM unconditionally restarts `waypipe-vsock` and connects to the host listener.
-
-**X11 (i3):** `vm-push-display-mode` sends `xpra` to the VM, which starts `xpra-vsock`.
+The host connects to each VM's `display-mode` service (vsock:14509) to switch display services. `waypipe-connect` sends `waypipe-reconnect` directly to the VM, bypassing `vm-push-display-mode`. The VM unconditionally restarts `waypipe-vsock` and connects to the host listener.
 
 ```
-microvm start <vm>  [Wayland]
+microvm start <vm>
   → polls PING→OK on vsock:14509
   → starts waypipe-connect (sends waypipe-reconnect internally)
-
-microvm start <vm>  [X11]
-  → polls PING→OK on vsock:14509
-  → vm-push-display-mode sends "xpra" to vsock:14509
 ```
 
 Manual overrides:
 ```bash
-vm-push-display-mode            # auto-detect from env (xpra only)
-vm-push-display-mode xpra       # force xpra on all VMs
+vm-push-display-mode            # pushes waypipe mode
 vm-push-display-mode stop       # stop all display services in all VMs
 waypipe-connect <vm>            # manually start/restart waypipe for one VM
 waypipe-connect-all             # connect waypipe for all running profile VMs
@@ -4011,17 +3915,18 @@ Shows:
 
 ### Keybindings
 
-User keybindings live in `modules/hyprland.nix`, `modules/sway.nix`, or `modules/i3.nix` in your hydrix-config depending on which WM is enabled. Sway and i3 modules mirror each other - same workspace bindings, same VM routing pattern.
+User keybindings live in `modules/hyprland.nix` in your hydrix-config.
 
 ### Internal Display Scaling (Wayland)
 
-Unlike i3 (which uses xrandr), Sway and Hyprland use per-output scale. External monitors are unaffected.
+Hyprland uses per-output scale. External monitors are unaffected. (The option names below
+predate the migration off Sway and haven't been renamed, but they apply to Hyprland.)
 
 ```nix
 # machines/<serial>.nix
 hydrix.graphical.scaling.swayInternalScale  = 1.25;   # 25% larger UI (crisp, native res kept)
 hydrix.graphical.scaling.swayInternalMode   = "1280x800"; # OR: change actual hw resolution
-hydrix.graphical.scaling.swayInternalOutput = "eDP-1";    # default; run: swaymsg -t get_outputs
+hydrix.graphical.scaling.swayInternalOutput = "eDP-1";    # default; run: hyprctl monitors
 ```
 
 `swayInternalScale` and `swayInternalMode` are mutually exclusive - scale takes priority when both are set.
@@ -4071,18 +3976,13 @@ VM app
 | Event | Audio action |
 |-------|-------------|
 | `display-mode` receives `waypipe` or `waypipe-reconnect` | Starts `pulse-vsock` in VM |
-| `display-mode` receives `xpra` | Stops `pulse-vsock` (xpra handles audio internally) |
 | `display-mode` receives `stop` | Stops `pulse-vsock` alongside all display services |
 
 No configuration required \- audio works automatically for all profile VMs as soon as they are started in waypipe mode.
 
 ### Status Bar Notes
 
-**Hyprland:** waybar is used as the status bar, managed via a systemd user service and restarted automatically on monitor add/remove events.
-
-**Sway:** polybar runs under XWayland. The `xworkspaces` module uses `type = internal/i3` (polybar's Sway-compatible mode). The bar is launched by `display-setup --no-move` from the Sway startup command, with `I3SOCK=$SWAYSOCK` so the workspace module connects to Sway's IPC.
-
-**i3:** polybar runs natively under X11.
+waybar is used as the status bar, managed via a systemd user service and restarted automatically on monitor add/remove events.
 
 ---
 
@@ -4107,7 +4007,7 @@ No configuration required \- audio works automatically for all profile VMs as so
 | `~/.cache/wal/colors.json` | Active pywal colors |
 | `~/.cache/wal/.active` | Marker that wal colors are active |
 | `~/.cache/wal/.colorscheme-mode` | VM colorscheme inheritance mode |
-| `~/.cache/hydrix/active-vms.json` | Workspace-VM tracking (ws-app) |
+| `~/.cache/hydrix/active-vms.json` | Workspace-VM tracking (hypr-ws-app) |
 | `/var/lib/microvms/<name>/` | MicroVM persistent data |
 | `/var/lib/microvms/<name>/config/.switch-reg` | Nix DB registration for live switch |
 | `/var/lib/libvirt/base-images/` | Libvirt base images |

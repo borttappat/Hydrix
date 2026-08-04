@@ -45,7 +45,7 @@ Things being actively worked on or not yet verified. Checked off once resolved a
 **Polish / lower priority**
 
 - [ ] **Socat terminal output**: raw-mode attach/detach (`microvm console <name>`) verified working. Removed the `screen` fallback: it was broken since `console.sock` is a UNIX socket rather than a character device, so screen tried to exec the socket path as a command instead of connecting to it. Remaining known limitation: the console renders in a small, fixed geometry, inherent to qemu's serial-over-socket transport having no window-size negotiation with the guest, not fixable via socat or screen alone.
-- [ ] **Phase out xpra**: waypipe is fully working and the primary stack; xpra still supported but should be deprecated
+- [x] **Phase out xpra**: xpra, i3, and sway have been fully removed from the framework. Hyprland + waypipe is the only supported desktop stack.
 - [x] **Live-switch edge cases** (`microvm update`): fixed two silent-failure paths: the host-side nix-store DB registration step now surfaces errors instead of swallowing them, and `vm-switch` no longer mislabels hard failures (e.g. exit 100, incompatible init requiring reboot) as "OK, some units failed". Other edge cases may still surface; report if found.
 
 ---
@@ -75,7 +75,7 @@ Things being actively worked on or not yet verified. Checked off once resolved a
 Some more visual/graphical features:
 
 
-- **Hyprland (primary), Sway and i3 (available, disabled by default)** - VM apps forwarded as native windows via waypipe (Wayland) or xpra (X11) over vsock. All three WMs default to disabled - enable exactly one in your machine config.
+- **Hyprland** - the only supported compositor. VM apps forwarded as native windows via waypipe over vsock. Set `hydrix.hyprland.enable = true` in your machine config.
 - **VM metrics polling** - status bar pulls live CPU, RAM, disk, uptime from each running VM via vsock
 - **Pywal colorscheme system** - three independent color layers per VM: declarative base scheme, live host wal-cache sync via virtiofs, and per-VM focus border color on the host
 
@@ -222,20 +222,17 @@ microvm builder switch            # build + switch host config
 
 ## Display Stack
 
-All three WMs default to disabled. Enable exactly one in `machines/<serial>.nix`:
+Hyprland is the only supported compositor. Enable it in `machines/<serial>.nix`:
 
 ```nix
-# machines/<serial>.nix - enable exactly one
-hydrix.hyprland.enable = true;  # Wayland, VM apps forwarded via waypipe (recommended)
-# hydrix.sway.enable = true;    # Wayland, VM apps forwarded via waypipe
-# hydrix.i3.enable = true;      # X11, VM apps forwarded via xpra
+# machines/<serial>.nix
+hydrix.hyprland.enable = true;  # Wayland, VM apps forwarded via waypipe
 ```
 
-Hyprland is the primary supported stack. Sway and i3 are available but see less maintenance.
+On a VM workspace, pressing `Super+Return` launches the terminal in that VM as a native
+Hyprland window via waypipe.
 
-On a VM workspace, pressing `Super+Return` launches the terminal in that VM. Under Hyprland and Sway the window appears as a native compositor window via waypipe. Under i3 the same key uses xpra.
-
-### Hyprland (primary, actively maintained)
+### Hyprland
 
 | Component | Program |
 |-----------|---------|
@@ -253,38 +250,8 @@ hypr-ws-app firefox
 
 Keybindings live in `modules/hyprland.nix`.
 
-### Sway (available, less maintained)
-
-| Component | Program |
-|-----------|---------|
-| Compositor | Sway |
-| Status bar | waybar |
-| Launcher | wofi |
-| Lockscreen | swaylock |
-| VM forwarding | waypipe (vsock) |
-
-```bash
-sway-session                  # start Sway session from TTY
-sway-ws-app alacritty        # launch app in VM on current workspace
-```
-
-Keybindings live in `modules/sway.nix`.
-
-### i3 (available, X11)
-
-| Component | Program |
-|-----------|---------|
-| Window manager | i3 |
-| Status bar | polybar |
-| Launcher | rofi |
-| Lockscreen | xss-lock |
-| VM forwarding | xpra (vsock) |
-
-```bash
-ws-app alacritty              # launch app in VM on current workspace
-```
-
-Keybindings live in `modules/i3.nix`.
+Sway, i3, and xpra have been fully removed from the framework - there is no
+`hydrix.sway.enable` or `hydrix.i3.enable` option anymore.
 
 ---
 
