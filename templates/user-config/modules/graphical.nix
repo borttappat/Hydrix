@@ -4,9 +4,9 @@
 # Machine-specific overrides go in machines/<serial>.nix — plain assignment
 # there takes priority over the lib.mkDefault values here.
 #
-# Bar style and module layout → shared/waybar.nix
-# Font packages and mappings  → shared/fonts.nix
-# Font family/size/relations  → shared/fonts.nix (or machines/<serial>.nix)
+# Bar style and module layout -> modules/waybar.nix (active) / modules/polybar.nix (i3/sway fallback)
+# Font packages and mappings  -> modules/fonts.nix
+# Font family/size/relations  -> modules/fonts.nix (or machines/<serial>.nix)
 
 { lib, ... }:
 
@@ -18,11 +18,19 @@
     # ui.border       = lib.mkDefault 2;     # Window border width (px)
     # ui.cornerRadius = lib.mkDefault 2;     # Window corner radius (px); also base for pill radius
 
-    # ─── Waybar sizing (shared/waybar.nix) ────────────────────────────
-    # ui.barHeight          = lib.mkDefault 23;    # Bar content height (px); +10 added internally for pill margins
-    # ui.barGaps            = lib.mkDefault null;  # Bar-to-edge margin (null = ui.gaps)
-    # ui.pillRadius         = lib.mkDefault null;  # Explicit pill radius (null = cornerRadius * pillRadiusScale)
-    # ui.pillRadiusScale    = lib.mkDefault 1.0;   # Scale factor applied to cornerRadius for pill radius
+    # ─── Waybar sizing (active bar stack) ───────────────────────────────
+    # Bar content height and pill vertical padding are auto-derived from
+    # font.size and ui.gaps (see modules/waybar.nix). ui.barHeight has no effect here.
+    # ui.barGaps         = lib.mkDefault null;  # Bar-to-edge margin (null = gaps/2)
+    # ui.pillRadius      = lib.mkDefault null;  # Explicit pill radius (null = cornerRadius * pillRadiusScale)
+    # ui.pillRadiusScale = lib.mkDefault 2.0;   # Scale factor applied to cornerRadius for pill radius
+
+    # ─── Polybar sizing (i3/sway fallback only, hydrix.i3.enable) ───────
+    # ui.barHeight          = lib.mkDefault 23;    # Bar height (px)
+    # ui.barPadding         = lib.mkDefault 2;     # Internal bar padding
+    # ui.polybarFontOffset  = lib.mkDefault 3;     # Vertical text centering offset
+    # ui.barEdgeGapsFactor  = lib.mkDefault 1.0;   # Scale bar-to-edge spacing (0.0-1.0)
+    # ui.outerGapsMatchBar  = lib.mkDefault false; # i3 outer gaps match barGaps
 
     # ─── Opacity ───────────────────────────────────────────────────────
     # ui.opacity.overlay          = lib.mkDefault 0.85;

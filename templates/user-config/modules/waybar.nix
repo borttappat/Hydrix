@@ -24,16 +24,25 @@
 let
   username   = config.hydrix.username;
   fontFamily = config.hydrix.graphical.font.family or "Iosevka";
-  fontSize   = let base     = config.hydrix.graphical.font.size or 12;
-                   relation = config.hydrix.graphical.font.relations.waybar or 1.0;
-                   raw      = builtins.floor (base * relation);
-               in toString (if raw < 11 then 11 else raw);
+  fontSizeNum = let base     = config.hydrix.graphical.font.size or 12;
+                    relation = config.hydrix.graphical.font.relations.waybar or 1.0;
+                    raw      = builtins.floor (base * relation);
+                in if raw < 11 then 11 else raw;
+  fontSize   = toString fontSizeNum;
+  gaps        = config.hydrix.graphical.ui.gaps or 10;
+  # Pill internal padding scales with gaps (was hardcoded 3px — 0.3 solved to reproduce
+  # that exact value at the previous default gaps=10).
+  pillPaddingV = builtins.ceil (gaps * 0.3);
+  pillPaddingH = 10;
+  # Pill content height scales with font size (1.5 line-height factor solved to reproduce
+  # the previous hardcoded 23px at the previous default fontSize=11, pillPaddingV=3).
+  # Island modules float with pillVMargin on each side — bar height scales accordingly
+  barHeight   = builtins.ceil (fontSizeNum * 1.5) + 2 * pillPaddingV + 2 * pillVMargin;
   pillRadius  = let ui = config.hydrix.graphical.ui;
                 in toString (if ui.pillRadius != null
                              then ui.pillRadius
                              else builtins.floor (ui.cornerRadius * ui.pillRadiusScale));
   pillBorder  = toString (config.hydrix.graphical.ui.border or 2);
-  gaps        = config.hydrix.graphical.ui.gaps or 10;
   # pillVMargin = gaps is the key invariant that makes all gaps uniform:
   #   screen→pill-top  = margin-top(0) + pillVMargin     = gaps
   #   pill-bottom→win  = actual_surface - pill_bottom    = pillVMargin = gaps
@@ -42,12 +51,6 @@ let
   #   inner visual     = 2 * gaps_in ≈ gaps (exact for even gaps values)
   pillHMargin = 2;
   pillVMargin = gaps;
-  # Pill internal padding — vertical/horizontal found to look correct via live-editing
-  # ~/.config/waybar/style.css, then baked back in here as the single source of truth.
-  pillPaddingV = 3;
-  pillPaddingH = 10;
-  # Island modules float with pillVMargin on each side — bar height scales accordingly
-  barHeight   = (config.hydrix.graphical.ui.barHeight or 23) + 2 * pillVMargin;
   homeDir    = "/home/${username}";
 
   # Hydrix metrics timing
