@@ -36,6 +36,12 @@ let
   wofiWidth  = toString config.hydrix.graphical.ui.rofiWidth;
   wofiHeight = toString config.hydrix.graphical.ui.rofiHeight;
 
+  # wofi is a layer-shell surface, so Hyprland's decoration active_opacity
+  # (window-only) never reaches it; transparency has to be baked into its
+  # own GTK CSS instead, same as Alacritty manages its own opacity.
+  wofiOpacity = let o = config.hydrix.graphical.ui.opacity;
+    in toString (o.overlayOverrides.wofi or o.overlay);
+
   wofiLauncher = pkgs.writeShellScriptBin "wofi-launcher" ''
     set -euo pipefail
 
@@ -145,10 +151,11 @@ let
         local font_size='${wofiSize}'
         local font_name='${fontFamily}'
 
-        local bg fg accent
+        local bg fg accent bg_rgba
         bg=$(get_wal_color '.colors.color0' '#0e0f17')
         fg=$(get_wal_color '.colors.color7' '#e4d1ef')
         accent=$(get_wal_color '.colors.color4' '#f09ea2')
+        bg_rgba="rgba($((16#''${bg:1:2})), $((16#''${bg:3:2})), $((16#''${bg:5:2})), ${wofiOpacity})"
 
         cat <<EOF
 * {
@@ -160,7 +167,7 @@ let
 }
 
 #window {
-    background-color: ''${bg};
+    background-color: ''${bg_rgba};
     border-radius: ''${corner_radius}px;
     border: 0px solid transparent;
 }
@@ -463,10 +470,11 @@ EOF
         local font_size='${wofiSize}'
         local font_name='${fontFamily}'
 
-        local bg fg accent
+        local bg fg accent bg_rgba
         bg=$(get_wal_color '.colors.color0' '#0e0f17')
         fg=$(get_wal_color '.colors.color7' '#e4d1ef')
         accent=$(get_wal_color '.colors.color4' '#f09ea2')
+        bg_rgba="rgba($((16#''${bg:1:2})), $((16#''${bg:3:2})), $((16#''${bg:5:2})), ${wofiOpacity})"
 
         cat <<EOF
 * {
@@ -478,7 +486,7 @@ EOF
 }
 
 #window {
-    background-color: ''${bg};
+    background-color: ''${bg_rgba};
     border-radius: ''${corner_radius}px;
     border: 0px solid transparent;
 }
