@@ -2,8 +2,8 @@
 #
 # Provides:
 #   waypipe-connect   - connect to a VM's waypipe server (run once per VM)
-#   hypr-ws-app       - workspace-aware app launcher (replaces ws-app for Hyprland)
-#   vm-push-display-mode - detect WM and push xpra/waypipe mode to VMs
+#   hypr-ws-app       - workspace-aware app launcher
+#   vm-push-display-mode - push waypipe mode to VMs
 #
 # Usage:
 #   waypipe-connect microvm-browsing     # start forwarding (keep running)
@@ -85,7 +85,7 @@ let
     }
     trap cleanup INT TERM
 
-    echo "VM apps will appear as sway windows. Ctrl+C to disconnect."
+    echo "VM apps will appear as Hyprland windows. Ctrl+C to disconnect."
 
     # Workspace number for notifications - static for the lifetime of this script.
     VM_WS=$(${pkgs.jq}/bin/jq -r \
@@ -317,147 +317,6 @@ let
       | ${pkgs.socat}/bin/socat -T 10 - VSOCK-CONNECT:"$CID":14508
   '';
 
-  # ── sway-ws-app ────────────────────────────────────────────────────────────
-  # Workspace-aware app launcher for Sway (mirrors hypr-ws-app for Hyprland).
-  # Usage: sway-ws-app alacritty
-  #        sway-ws-app firefox https://foo.com
-  swayWsApp = pkgs.writeShellScriptBin "sway-ws-app" ''
-    set -euo pipefail
-
-    log()    { echo "[sway-ws-app] $*" >&2; }
-    notify() { ${pkgs.libnotify}/bin/notify-send -u normal "sway-ws-app" "$*"; }
-    err()    { ${pkgs.libnotify}/bin/notify-send -u critical "sway-ws-app" "$*"; exit 1; }
-
-    [[ $# -lt 1 ]] && err "Usage: sway-ws-app <command> [args...]"
-
-    # Current Sway workspace number
-    WS=$(${pkgs.sway}/bin/swaymsg -t get_workspaces \
-      | ${pkgs.jq}/bin/jq '.[] | select(.focused).num')
-
-    # WS1 = host, WS10 = router console
-    if [[ "$WS" -eq 1 ]]; then
-      log "WS1 (host) → running locally"
-      exec "$@"
-    fi
-
-    if [[ "$WS" -eq 10 ]]; then
-      log "WS10 (router) → opening console"
-      _router_vm=$(${pkgs.jq}/bin/jq -r '.routerVmName // "microvm-router"' /etc/hydrix/host-config.json 2>/dev/null || echo "microvm-router")
-      if systemctl is-active --quiet "microvm@$_router_vm.service" 2>/dev/null; then
-        exec alacritty -e sudo socat -,rawer \
-          unix-connect:/var/lib/microvms/$_router_vm/console.sock
-      else
-        notify "Router VM not running"
-        exec "$@"
-      fi
-    fi
-
-    # Look up VM for this workspace from registry
-    if [[ ! -f "${VM_REGISTRY}" ]]; then
-      log "No vm-registry - running locally"
-      exec "$@"
-    fi
-
-    # Focus mode: if set, route to the focused VM type regardless of workspace
-    VM_INFO=""
-    FOCUS_FILE="$HOME/.cache/hydrix/focus-mode"
-    if [[ -f "$FOCUS_FILE" ]]; then
-      FOCUS_TYPE=$(cat "$FOCUS_FILE")
-      VM_INFO=$(${pkgs.jq}/bin/jq -rc \
-        --arg t "$FOCUS_TYPE" \
-        'to_entries[] | select(.key == $t) | {cid: .value.cid, name: .value.vmName}' \
-        "${VM_REGISTRY}" 2>/dev/null | head -1)
-      [[ -n "$VM_INFO" ]] && log "Focus mode ($FOCUS_TYPE) overrides WS$WS"
-    fi
-
-    if [[ -z "$VM_INFO" ]]; then
-      VM_INFO=$(${pkgs.jq}/bin/jq -rc \
-        --argjson w "$WS" \
-        'to_entries[] | select(.value.workspace == $w) | {cid: .value.cid, name: .value.vmName}' \
-        "${VM_REGISTRY}" 2>/dev/null | head -1)
-    fi
-
-    if [[ -z "$VM_INFO" ]]; then
-      log "No VM mapped to WS$WS - running locally"
-      exec "$@"
-    fi
-
-    CID=$(echo "$VM_INFO" | ${pkgs.jq}/bin/jq -r '.cid')
-    VM_NAME=$(echo "$VM_INFO" | ${pkgs.jq}/bin/jq -r '.name')
-
-    # Guard: if the VM is not running, fall back to host terminal + notify
-    if ! systemctl is-active --quiet "microvm@''${VM_NAME}.service" 2>/dev/null; then
-      notify "$VM_NAME is not running - use 'microvm start $VM_NAME' to start it"
-      exec "$@"
-    fi
-
-    # Poll STATUS - waypipe-connect is expected to be running (started by microvm start).
-    # Do not auto-start it here; that is microvm start's responsibility.
-    log "Waiting for waypipe to become ready in $VM_NAME..."
-    READY=0
-    for i in $(seq 1 20); do
-      VM_STATUS=$(printf 'STATUS\n' \
-        | ${pkgs.socat}/bin/socat -T3 - VSOCK-CONNECT:"$CID":14509 2>/dev/null || true)
-      if [[ "$VM_STATUS" == "waypipe" ]]; then
-        READY=1
-        break
-      fi
-      sleep 0.5
-    done
-    if [[ "$READY" -eq 0 ]]; then
-      err "waypipe not ready in $VM_NAME - is waypipe-connect running? (microvm start $VM_NAME)"
-    fi
-
-    log "WS$WS → $VM_NAME (CID $CID): $*"
-
-    # Check if focus mode is routing to a different VM than this workspace's native VM.
-    # If so, the for_window rule will send the new window to the VM's home workspace;
-    # poll get_tree for the new window and move it back to the current workspace.
-    NATIVE_VM=$(${pkgs.jq}/bin/jq -rc \
-      --argjson w "$WS" \
-      'to_entries[] | select(.value.workspace == $w) | .value.vmName' \
-      "${VM_REGISTRY}" 2>/dev/null | head -1)
-
-    if [[ -n "''${FOCUS_TYPE:-}" ]] && [[ "$VM_NAME" != "$NATIVE_VM" ]]; then
-      TARGET_WS=$WS
-      TITLE_PREFIX="[''${FOCUS_TYPE}]"
-      log "Focus mode: will relocate $TITLE_PREFIX window to WS$TARGET_WS"
-      # Snapshot existing windows with this prefix so we only act on the new one
-      EXISTING_IDS=$(${pkgs.sway}/bin/swaymsg -t get_tree \
-        | ${pkgs.jq}/bin/jq -c --arg p "$TITLE_PREFIX" \
-          '[.. | objects | select(.name? and (.name | startswith($p))) | .id]' \
-          2>/dev/null || echo '[]')
-      (
-        for i in $(seq 1 40); do
-          sleep 0.25
-          con_id=$(${pkgs.sway}/bin/swaymsg -t get_tree \
-            | ${pkgs.jq}/bin/jq -r \
-              --arg p "$TITLE_PREFIX" \
-              --argjson ex "$EXISTING_IDS" \
-              '.. | objects | select(.name? and (.name | startswith($p)) and (.id as $id | $ex | index($id) | not)) | .id' \
-              2>/dev/null | head -1)
-          if [[ -n "$con_id" ]]; then
-            ${pkgs.sway}/bin/swaymsg "[con_id=$con_id] move to workspace $TARGET_WS"
-            ${pkgs.sway}/bin/swaymsg "[con_id=$con_id] focus"
-            break
-          fi
-        done
-      ) &
-    fi
-
-    # Send command to VM's waypipe-launch service (vsock:14508).
-    # For Firefox: inject HYDRIX_FF_SCALE from the focused Sway output.
-    LAUNCH_CMD="$*"
-    if [[ "''${1:-}" == "firefox" ]]; then
-      HOST_SCALE=$(${pkgs.sway}/bin/swaymsg -t get_outputs 2>/dev/null \
-        | ${pkgs.jq}/bin/jq -r '[.[] | select(.focused)][0].scale // .[0].scale // 1.0' \
-        2>/dev/null || echo "1.0")
-      LAUNCH_CMD="env HYDRIX_FF_SCALE=$HOST_SCALE $*"
-    fi
-    printf '%s\n' "$LAUNCH_CMD" \
-      | ${pkgs.socat}/bin/socat -T 10 - VSOCK-CONNECT:"$CID":14508
-  '';
-
   # ── vm-select ────────────────────────────────────────────────────────────
   # Wofi picker to switch the active VM on the current workspace.
   # Works on any workspace with multiple VMs (pentest+tasks, or any future
@@ -646,26 +505,22 @@ EOF
 
   # ── vm-push-display-mode ──────────────────────────────────────────────────
   # Pushes a display mode to all running profile VMs, or a specific VM.
-  # Mode is auto-detected from the environment unless given explicitly.
   #
   # Usage:
-  #   vm-push-display-mode              # auto-detect: xpra (X11) or waypipe (Wayland)
+  #   vm-push-display-mode              # push waypipe mode
   #   vm-push-display-mode stop         # stop all display services in VMs
-  #   vm-push-display-mode xpra         # force xpra mode
   #   vm-push-display-mode waypipe      # force waypipe mode
-  #   vm-push-display-mode browsing     # push auto-detected mode to one VM
+  #   vm-push-display-mode browsing     # push mode to one VM
   #
   vmPushDisplayMode = pkgs.writeShellScriptBin "vm-push-display-mode" ''
     set -euo pipefail
 
-    # If first arg is an explicit mode, use it; otherwise auto-detect.
-    if [[ "''${1:-}" =~ ^(stop|xpra|waypipe)$ ]]; then
+    # If first arg is an explicit mode, use it; otherwise default to waypipe.
+    if [[ "''${1:-}" =~ ^(stop|waypipe)$ ]]; then
       MODE="$1"
       shift
-    elif [[ -n "''${WAYLAND_DISPLAY:-}" ]]; then
-      MODE="waypipe"
     else
-      MODE="xpra"
+      MODE="waypipe"
     fi
 
     push_to_vm() {
@@ -703,7 +558,7 @@ EOF
 
   # ── waypipe-connect-all ───────────────────────────────────────────────────
   # Auto-start waypipe-connect for all currently-running profile VMs.
-  # Called at sway/Hyprland startup. Spawns one background poller per running
+  # Called at Hyprland startup. Spawns one background poller per running
   # VM; each poller sends PING until it gets OK, then immediately starts
   # waypipe-connect. No timeouts - VM readiness is the only gate.
   waypipeConnectAll = pkgs.writeShellScriptBin "waypipe-connect-all" ''
@@ -743,25 +598,10 @@ EOF
       "${VM_REGISTRY}" 2>/dev/null)
   '';
 
-  # ── exit-i3 ───────────────────────────────────────────────────────────────
-  # Gracefully exit i3.
-  # Stops xpra inside all running VMs (via "stop" mode push) and kills any
-  # host-side xpra attach processes, then exits i3.
-  # Leaves VMs with no display service running - the next WM pushes its own
-  # mode (sway-session → waypipe, i3 startup → xpra) when it comes up.
-  #
-  exitI3 = pkgs.writeShellScriptBin "exit-i3" ''
-    vm-push-display-mode stop >/dev/null 2>&1 &
-    pkill -f "xpra" 2>/dev/null || true
-    i3-msg exit
-  '';
-
   # ── exit-wayland ──────────────────────────────────────────────────────────
-  # Gracefully exit sway or Hyprland from any terminal.
+  # Gracefully exit Hyprland from any terminal.
   # Kills all host-side waypipe-connect sessions, unsets WAYLAND_DISPLAY from
   # the systemd user environment, then exits the compositor.
-  # VMs are left as-is - no mode push here. When i3 starts next it will push
-  # xpra mode; when sway starts it will push waypipe mode.
   #
   exitWayland = pkgs.writeShellScriptBin "exit-wayland" ''
     echo "Killing host waypipe sessions..."
@@ -772,22 +612,18 @@ EOF
     # already dead so VMs notice the disconnect regardless. No need to block exit.
     vm-push-display-mode stop >/dev/null 2>&1 &
 
-    # Remove WAYLAND_DISPLAY from the persistent systemd user environment so
-    # picom's ConditionEnvironment=!WAYLAND_DISPLAY is satisfied on next i3 start.
     systemctl --user unset-environment WAYLAND_DISPLAY DISPLAY 2>/dev/null || true
 
-    if pgrep -x sway >/dev/null 2>&1; then
-      swaymsg exit 2>/dev/null || true
-    elif hyprctl instances 2>/dev/null | grep -q .; then
+    if hyprctl instances 2>/dev/null | grep -q .; then
       hyprctl dispatch exit 2>/dev/null || true
     else
       echo "No Wayland session running" >&2
     fi
   '';
 
-in lib.mkIf (config.hydrix.sway.enable || config.hydrix.hyprland.enable) {
+in lib.mkIf config.hydrix.hyprland.enable {
   environment.systemPackages = [
-    waypipeConnect waypipeConnectAll hyprWsApp swayWsApp vmSelect vmPushDisplayMode exitI3 exitWayland
+    waypipeConnect waypipeConnectAll hyprWsApp vmSelect vmPushDisplayMode exitWayland
     pkgs.waypipe pkgs.socat pkgs.cliphist pkgs.wl-clipboard
   ];
 

@@ -15,8 +15,6 @@
 let
   username = config.hydrix.username;
   vmType = config.hydrix.vmType;
-  # Legacy X11/i3 DPI wrapper — only used when i3 is explicitly enabled
-  useFirefoxWrapped = config.hydrix.i3.enable or false;
 
   # Lock helpers for policies
   lock-false = {
@@ -51,42 +49,28 @@ let
   # Use override if set, otherwise scale base size by firefox relation
   fontSize = fontCfg.overrides.firefox or (builtins.floor (fontCfg.size * (fontCfg.relations.firefox or 1.5)));
   headerFontSize = fontCfg.overrides.firefoxHeader or (builtins.floor (fontCfg.size * 1.9));
-  scalingFactor = config.hydrix.graphical.scaling.computed.factor;
 
   # DPI-aware Firefox launcher - reads scale factor from scaling.json at runtime
   # Similar to alacritty-dpi, this ensures Firefox uses the host's dynamic DPI
   # Parameterized so it can wrap any Firefox derivation (needed for HM .override support)
   mkFirefoxDpi = firefoxPkg: pkgs.writeShellScriptBin "firefox-dpi" ''
-    SCALING_JSON="$HOME/.config/hydrix/scaling.json"
-    SCALING_JSON_VM="/mnt/hydrix-config/scaling.json"
     FF_PROFILE="$HOME/.mozilla/firefox/default"
     FF_USER_JS="$FF_PROFILE/user.js"
     FF_DPI_MARKER="$FF_PROFILE/.dpi-scale"
 
-    # Find scaling.json (host or VM mount)
-    json_path=""
-    if [ -f "$SCALING_JSON" ]; then
-        json_path="$SCALING_JSON"
-    elif [ -f "$SCALING_JSON_VM" ]; then
-        json_path="$SCALING_JSON_VM"
+    # Priority: HYDRIX_FF_SCALE env (set by host when launching in VM) >
+    #           HYPRLAND_INSTANCE_SIGNATURE (native Hyprland session)
+    scale_factor=""
+    if [ -n "''${HYDRIX_FF_SCALE:-}" ]; then
+        scale_factor="$HYDRIX_FF_SCALE"
+    elif [ -n "''${HYPRLAND_INSTANCE_SIGNATURE:-}" ]; then
+        # Running directly under Hyprland - read scale from compositor
+        scale_factor=$(${pkgs.hyprland}/bin/hyprctl monitors -j 2>/dev/null \
+            | ${pkgs.jq}/bin/jq -r '[.[] | select(.focused)][0].scale // .[0].scale // 1.0' \
+            2>/dev/null || echo "1.0")
     fi
 
-    if [ -n "$json_path" ] && [ -d "$FF_PROFILE" ]; then
-        # Priority: HYDRIX_FF_SCALE env (set by host when launching in VM) >
-        #           HYPRLAND_INSTANCE_SIGNATURE (native Hyprland session) >
-        #           scaling.json (X11/xrandr path)
-        if [ -n "''${HYDRIX_FF_SCALE:-}" ]; then
-            scale_factor="$HYDRIX_FF_SCALE"
-        elif [ -n "''${HYPRLAND_INSTANCE_SIGNATURE:-}" ]; then
-            # Running directly under Hyprland — read scale from compositor
-            scale_factor=$(${pkgs.hyprland}/bin/hyprctl monitors -j 2>/dev/null \
-                | ${pkgs.jq}/bin/jq -r '[.[] | select(.focused)][0].scale // .[0].scale // 1.0' \
-                2>/dev/null || echo "1.0")
-        else
-            # X11 or VM without HYDRIX_FF_SCALE — use scaling.json
-            scale_factor=$(${pkgs.jq}/bin/jq -r '.scale_factor // 1.0' "$json_path" 2>/dev/null)
-        fi
-
+    if [ -n "$scale_factor" ] && [ -d "$FF_PROFILE" ]; then
         # Check if scale factor changed (avoid unnecessary writes)
         current_scale=""
         [ -f "$FF_DPI_MARKER" ] && current_scale=$(cat "$FF_DPI_MARKER" 2>/dev/null)
@@ -354,8 +338,7 @@ in {
         enable = lib.mkDefault true;
         # Keep legacy path to avoid needing to move existing profiles
         configPath = ".mozilla/firefox";
-        # Plain Firefox on Wayland (Sway/Hyprland); DPI/pywalfox wrapper only on X11 (i3)
-        package = lib.mkDefault (if useFirefoxWrapped then firefoxWrapped else pkgs.firefox);
+        package = lib.mkDefault pkgs.firefox;
 
         profiles.default = {
           id = 0;

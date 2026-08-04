@@ -299,7 +299,7 @@ in {
       # Trust microVM TAP interfaces in firewall
       networking.firewall.trustedInterfaces = ["mv-+"];
 
-      # VM registry: written at activation, read by scripts/polybar at runtime
+      # VM registry: written at activation, read by scripts/waybar at runtime
       # Populated by flake.nix from discovered profile meta.nix files
       environment.etc."hydrix/vm-registry.json" = let
         combined =

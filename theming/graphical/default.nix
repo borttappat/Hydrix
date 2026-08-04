@@ -1,10 +1,10 @@
 # Graphical Environment Module
 #
 # Complete graphical environment for Hydrix:
-# - i3 window manager with gaps
+# - Hyprland window manager with gaps
 # - Stylix for automatic theming
 # - Dynamic DPI scaling and hardware normalization
-# - Polybar, Rofi, Dunst, Picom, Alacritty
+# - Waybar, Wofi, Dunst, Alacritty
 #
 # All configuration through hydrix.graphical.* options (see options.nix)
 #
@@ -13,9 +13,6 @@
 #   hydrix.graphical.font.family = "Iosevka";
 #   hydrix.graphical.font.size = 10;
 #   hydrix.graphical.ui.gaps = 8;
-#
-# To disable (e.g., for Wayland):
-#   hydrix.graphical.enable = false;
 
 { config, lib, pkgs, ... }:
 
@@ -29,20 +26,14 @@ in {
     # Options are in theming/options.nix
     ./packages.nix         # WM, X11, theming packages
     ./scaling.nix          # Compatibility layer for scaling.computed.*
-    ./dynamic-scaling.nix  # Hardware DPI detection + scaling
     ./stylix.nix           # Stylix theming
-    ./display-setup.nix    # Polybar runtime config
-    ./xsession.nix         # X session startup
     ./home.nix             # Home Manager programs
     ./scripts.nix          # Colorscheme management scripts
-    ../programs/blugon.nix       # Blue light filter (i3/X11 only, gated internally)
     ../fonts                     # Per-font profiles (sizes, overrides, UI adjustments)
     ../wm/focus-mode.nix   # Focus mode (lock keybindings to single VM type)
     # NixOS-level WM modules: system packages, portals, PAM, session scripts.
-    # Gated on hydrix.{i3,sway,hyprland}.enable inside each file.
+    # Gated on hydrix.hyprland.enable inside each file.
     ../wm/hyprland
-    ../wm/i3
-    ../wm/sway
   ];
 
   config = lib.mkMerge [
@@ -62,9 +53,6 @@ in {
 
       # Required when any home-manager module enables xdg.portal (e.g. Hyprland)
       environment.pathsToLink = [ "/share/applications" "/share/xdg-desktop-portal" ];
-
-      # PAM service for i3lock-color authentication (i3 only)
-      security.pam.services.i3lock = lib.mkIf config.hydrix.i3.enable { enable = true; };
 
       # Clean up old Home Manager backups before HM activation runs
       systemd.services.hm-backup-cleanup = {

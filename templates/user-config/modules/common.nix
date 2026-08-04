@@ -11,11 +11,8 @@
 {
   hydrix = {
     # ─── Window manager stack ───────────────────────────────────────────
-    # Hyprland is the default compositor. Enable i3 or sway per-machine if needed.
-    # Start hyprland: hyprland-launch    Start i3: startx    Start sway: sway-session
+    # Start hyprland: hyprland-launch
     hyprland.enable = lib.mkDefault true;
-    # sway.enable = lib.mkDefault false;  # Wayland/Sway — enable per machine
-    # i3.enable   = lib.mkDefault false;  # X11/i3 — enable per machine
   };
 
   # ─── Locale and timezone ─────────────────────────────────────────────

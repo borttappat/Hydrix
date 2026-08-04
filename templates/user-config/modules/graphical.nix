@@ -4,7 +4,7 @@
 # Machine-specific overrides go in machines/<serial>.nix — plain assignment
 # there takes priority over the lib.mkDefault values here.
 #
-# Bar style and module layout -> modules/waybar.nix (active) / modules/polybar.nix (i3/sway fallback)
+# Bar style and module layout -> modules/waybar.nix
 # Font packages and mappings  -> modules/fonts.nix
 # Font family/size/relations  -> modules/fonts.nix (or machines/<serial>.nix)
 
@@ -24,13 +24,6 @@
     # ui.barGaps         = lib.mkDefault null;  # Bar-to-edge margin (null = gaps/2)
     # ui.pillRadius      = lib.mkDefault null;  # Explicit pill radius (null = cornerRadius * pillRadiusScale)
     # ui.pillRadiusScale = lib.mkDefault 2.0;   # Scale factor applied to cornerRadius for pill radius
-
-    # ─── Polybar sizing (i3/sway fallback only, hydrix.i3.enable) ───────
-    # ui.barHeight          = lib.mkDefault 23;    # Bar height (px)
-    # ui.barPadding         = lib.mkDefault 2;     # Internal bar padding
-    # ui.polybarFontOffset  = lib.mkDefault 3;     # Vertical text centering offset
-    # ui.barEdgeGapsFactor  = lib.mkDefault 1.0;   # Scale bar-to-edge spacing (0.0-1.0)
-    # ui.outerGapsMatchBar  = lib.mkDefault false; # i3 outer gaps match barGaps
 
     # ─── Opacity ───────────────────────────────────────────────────────
     # ui.opacity.overlay          = lib.mkDefault 0.85;
@@ -56,7 +49,6 @@
     # ─── DPI scaling ───────────────────────────────────────────────────
     # scaling.auto                = lib.mkDefault true;
     # scaling.referenceDpi        = lib.mkDefault 96;
-    # scaling.internalResolution  = lib.mkDefault "1920x1200";  # null = auto-detect
     # scaling.standaloneScaleFactor = lib.mkDefault 1.0;        # scale in VM standalone mode
     # scaling.applyOnLogin        = lib.mkDefault true;
 

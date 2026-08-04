@@ -53,14 +53,7 @@ in {
         type = lib.types.int;
         readOnly = true;
         default = if ui.barGaps != null then ui.barGaps else ui.gaps;
-        description = "Polybar floating margins (falls back to gaps if not set)";
-      };
-
-      outerGaps = lib.mkOption {
-        type = lib.types.int;
-        readOnly = true;
-        default = if ui.outerGapsMatchBar then (if ui.barGaps != null then ui.barGaps else ui.gaps) else 0;
-        description = "i3 outer gaps (matches barGaps when outerGapsMatchBar is true, else 0)";
+        description = "Bar floating margins (falls back to gaps if not set)";
       };
 
       padding = lib.mkOption {

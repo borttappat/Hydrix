@@ -71,11 +71,7 @@
     # terminal = "alacritty";                 # DEFAULT: "alacritty"
     # editor   = "vim";                       # DEFAULT: "vim" (sets EDITOR/VISUAL)
 
-    # Window manager selection - all are off by default; enable exactly one here.
-    # i3.enable also gates the X11/xpra stack in all VMs (waypipe used otherwise).
     hyprland.enable = true;   # Wayland/Hyprland stack - start with: hyprland-launch
-    # sway.enable = true;     # Wayland/Sway stack     - start with: sway-session
-    # i3.enable = true;       # X11/i3 stack           - start with: startx
     # hyprland.hideBorderOnSingleWindow = true;  # DEFAULT: false - hide border when a workspace has one tiled window
 
     # ── VM focus border colors ────────────────────────────────────────────
@@ -277,7 +273,6 @@
       # ui.gaps        = 15;          # DEFAULT: 15 - window gaps (px)
       # ui.barHeight   = 23;          # DEFAULT: 23
       # ui.border      = 2;           # DEFAULT: 2  - window border width
-      # ui.floatingBar = true;        # DEFAULT: true - floating waybar
       # ui.cornerRadius = 2;          # DEFAULT: 2  - corner rounding radius
 
       # ─── Hyprland display scaling ──────────────────────────────────────
@@ -298,16 +293,6 @@
       #     };
       #     xkb_geometry { include "pc(pc105)" };
       #   };
-      # '';
-
-      # ─── X11/i3 settings ───────────────────────────────────────────────
-      # scaling.internalResolution = "1920x1200";  # i3/xrandr standalone display mode
-      # ui.polybarStyle = "modular";               # "unibar", "modular", "pills"
-      # keyboard.xmodmap = ''
-      #   clear lock
-      #   clear control
-      #   keycode 66 = Control_L
-      #   add control = Control_L Control_R
       # '';
 
       # ─── Sway display scaling ──────────────────────────────────────────

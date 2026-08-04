@@ -54,8 +54,6 @@
   isVM = vmType != null && vmType != "host";
   colorschemeInheritance = config.hydrix.colorschemeInheritance;
   jq = "${pkgs.jq}/bin/jq";
-  xrdb = "${pkgs.xrdb}/bin/xrdb";
-  i3msg = "${pkgs.i3}/bin/i3-msg";
 
   # Package colorschemes for runtime access
   # Merges framework colorschemes with user colorschemes (user takes priority)
@@ -82,7 +80,6 @@
         # Reads from ~/.cache/wal/colors.json
 
         WAL_COLORS="$HOME/.cache/wal/colors.json"
-        WAL_XRES="$HOME/.cache/wal/colors.Xresources"
 
         if [ ! -f "$WAL_COLORS" ]; then
             echo "Error: No wal colors found at $WAL_COLORS"
@@ -104,21 +101,6 @@
         BG=$(${jq} -r '.special.background' "$WAL_COLORS")
         FG=$(${jq} -r '.special.foreground' "$WAL_COLORS")
 
-        # === Polybar color cache (avoids xrdb-query per script invocation) ===
-        echo "  Writing polybar color cache..."
-        printf 'color0="%s"\ncolor1="%s"\ncolor2="%s"\ncolor3="%s"\ncolor4="%s"\ncolor5="%s"\ncolor6="%s"\ncolor7="%s"\ncolor8="%s"\nwal_bg="%s"\nwal_fg="%s"\n' \
-          "$COLOR0" "$COLOR1" "$COLOR2" "$COLOR3" "$COLOR4" \
-          "$COLOR5" "$COLOR6" "$COLOR7" "$COLOR8" "$BG" "$FG" \
-          > /tmp/hydrix-colors.sh
-
-        # === Xresources (rofi, i3, urxvt, etc) ===
-        echo "  Updating Xresources..."
-        if [ -f "$WAL_XRES" ]; then
-            ${xrdb} -merge "$WAL_XRES"
-        fi
-        # Override i3wm.color4 specifically for focused borders
-        ${xrdb} -merge <<< "i3wm.color4: $COLOR4"
-
         # === Window manager reload ===
         if [[ -n "''${HYPRLAND_INSTANCE_SIGNATURE:-}" ]]; then
           # Hyprland: write colors.conf, reload compositor, re-apply VM borders
@@ -126,29 +108,6 @@
           if command -v hypr-apply-colors >/dev/null 2>&1; then
             hypr-apply-colors
           fi
-        elif [[ -n "''${WAYLAND_DISPLAY:-}" ]]; then
-          # Sway: regenerate colors.conf include and reload
-          echo "  Applying sway colors..."
-          if command -v sway-apply-colors >/dev/null 2>&1; then
-            sway-apply-colors
-          fi
-        else
-          # i3: reload via IPC
-          echo "  Reloading i3..."
-          ${i3msg} reload >/dev/null 2>&1 || true
-        fi
-
-        # === Polybar + display-setup (fixes gaps) ===
-        # Skip display-setup in VMs - it would spawn polybar on host displays via xpra
-        # VMs just need polybar-msg to restart with new colors
-        if [ -e "/mnt/hydrix-config" ]; then
-            echo "  Restarting polybar (VM mode)..."
-            ${pkgs.polybar}/bin/polybar-msg cmd restart 2>/dev/null || true
-        elif command -v display-setup >/dev/null 2>&1; then
-            echo "  Running display-setup (polybar + gaps)..."
-            display-setup >/dev/null 2>&1 || true
-        else
-            ${pkgs.polybar}/bin/polybar-msg cmd restart 2>/dev/null || true
         fi
 
         # === Firefox (pywalfox) ===
@@ -485,7 +444,7 @@
     # Run nixwal to update nix-specific cache
     ${nixWalScript}/bin/nixwal
 
-    # Refresh all color-aware apps (polybar, i3, zathura, firefox, dunst, etc)
+    # Refresh all color-aware apps (waybar, zathura, firefox, dunst, etc)
     ${refreshColorsScript}/bin/refresh-colors
 
     # Pre-generate lockscreen background in background (instant lock on next use)
@@ -563,7 +522,7 @@
     # Run nixwal to update nix-specific cache
     ${nixWalScript}/bin/nixwal
 
-    # Refresh all color-aware apps (polybar, i3, zathura, firefox, dunst, etc)
+    # Refresh all color-aware apps (waybar, zathura, firefox, dunst, etc)
     ${refreshColorsScript}/bin/refresh-colors
 
     # Pre-generate lockscreen background in background (instant lock on next use)
@@ -749,13 +708,6 @@
             generate-dunstrc
         fi
     fi
-
-    # Update xpra X background to match wal colors (for VMs)
-    # This hides the resize_increments gap in alacritty windows
-    if [ -f "$WAL_CACHE/colors.json" ] && [ -S /tmp/.X11-unix/X100 ]; then
-        BG_COLOR=$(${jq} -r '.special.background // .colors.color0 // "#000000"' "$WAL_CACHE/colors.json" 2>/dev/null)
-        ${pkgs.xsetroot}/bin/xsetroot -display :100 -solid "$BG_COLOR" 2>/dev/null || true
-    fi
   '';
 
   # Firefox wrapper that runs pywalfox update after launch
@@ -932,12 +884,6 @@
     # Refresh all color-aware apps
     ${refreshColorsScript}/bin/refresh-colors
 
-    # Update xpra X background to match (hides resize_increments gaps in alacritty)
-    if [ -n "''${DISPLAY:-}" ] || [ -S /tmp/.X11-unix/X100 ]; then
-        BG_COLOR=$(${jq} -r '.special.background // .colors.color0 // "#000000"' "$WAL_COLORS" 2>/dev/null)
-        ${pkgs.xsetroot}/bin/xsetroot -display :100 -solid "$BG_COLOR" 2>/dev/null || true
-    fi
-
     # Save hash to avoid re-syncing unchanged colors
     echo "$HOST_HASH" > "$LAST_SYNC_HASH"
 
@@ -946,15 +892,14 @@
 
   # Pomodoro timer script
   # CLI: pomo start|stop|pause|reset|<none>
-  # State file: /tmp/pomodoro_state (STATE START_TIME ALERT)
-  # - STATE: WORK, BREAK, PAUSED_WORK, PAUSED_BREAK
+  # State file: /tmp/pomodoro_state (STATE START_TIME)
+  # - STATE: WORK, PAUSE, PAUSED_WORK, PAUSED_PAUSE
   # - START_TIME: Unix timestamp when current phase started (or remaining seconds when paused)
-  # - ALERT: 0 (normal) or 1 (timer expired, awaiting acknowledgment)
   pomoScript = pkgs.writeShellScriptBin "pomo" ''
     #!/usr/bin/env bash
     STATE_FILE="/tmp/pomodoro_state"
     WORK_DURATION=1500   # 25 minutes
-    BREAK_DURATION=300   # 5 minutes
+    PAUSE_DURATION=300   # 5 minutes
 
     get_state() {
       if [ -f "$STATE_FILE" ]; then
@@ -965,29 +910,28 @@
     }
 
     write_state() {
-      echo "$1 $2 $3" > "$STATE_FILE"
+      echo "$1 $2" > "$STATE_FILE"
     }
 
     start_timer() {
       local current=$(get_state)
       if [ -z "$current" ]; then
         # Fresh start - begin WORK phase
-        write_state "WORK" "$(date +%s)" "0"
+        write_state "WORK" "$(date +%s)"
         echo "Pomodoro started: WORK phase (25 min)"
       elif [[ "$current" == PAUSED_* ]]; then
         # Resume from pause
         local state=$(echo "$current" | awk '{print $1}')
         local remaining=$(echo "$current" | awk '{print $2}')
-        local alert=$(echo "$current" | awk '{print $3}')
         local original_state="''${state#PAUSED_}"
         # Calculate new start time based on remaining seconds
         local now=$(date +%s)
         if [ "$original_state" = "WORK" ]; then
           local new_start=$((now - (WORK_DURATION - remaining)))
         else
-          local new_start=$((now - (BREAK_DURATION - remaining)))
+          local new_start=$((now - (PAUSE_DURATION - remaining)))
         fi
-        write_state "$original_state" "$new_start" "$alert"
+        write_state "$original_state" "$new_start"
         echo "Pomodoro resumed: $original_state phase"
       else
         echo "Pomodoro is already running"
@@ -1003,7 +947,6 @@
 
       local state=$(echo "$current" | awk '{print $1}')
       local start_time=$(echo "$current" | awk '{print $2}')
-      local alert=$(echo "$current" | awk '{print $3}')
 
       if [[ "$state" == PAUSED_* ]]; then
         echo "Timer is already paused"
@@ -1016,14 +959,14 @@
       if [ "$state" = "WORK" ]; then
         duration=$WORK_DURATION
       else
-        duration=$BREAK_DURATION
+        duration=$PAUSE_DURATION
       fi
       local remaining=$((duration - elapsed))
       if [ "$remaining" -lt 0 ]; then
         remaining=0
       fi
 
-      write_state "PAUSED_$state" "$remaining" "$alert"
+      write_state "PAUSED_$state" "$remaining"
       echo "Pomodoro paused: $remaining seconds remaining"
     }
 
@@ -1037,11 +980,11 @@
     }
 
     reset_timer() {
-      write_state "WORK" "$(date +%s)" "0"
+      write_state "WORK" "$(date +%s)"
       echo "Pomodoro reset: WORK phase (25 min)"
     }
 
-    # Advance to next phase (called when timer expires and user acknowledges)
+    # Advance to the next phase (WORK -> PAUSE -> WORK ...), fresh timer
     advance_phase() {
       local current=$(get_state)
       if [ -z "$current" ]; then
@@ -1049,22 +992,20 @@
         return 1
       fi
 
-      local state=$(echo "$current" | awk '{print $1}')
-      local alert=$(echo "$current" | awk '{print $3}')
-
-      # Clear paused prefix if present
+      local state="''${current%% *}"
       state="''${state#PAUSED_}"
 
-      # Only advance if alerting (timer expired) or if explicitly requested
       if [ "$state" = "WORK" ]; then
-        write_state "BREAK" "$(date +%s)" "0"
-        echo "Starting BREAK phase (5 min)"
+        write_state "PAUSE" "$(date +%s)"
+        echo "Starting PAUSE phase (5 min)"
       else
-        write_state "WORK" "$(date +%s)" "0"
+        write_state "WORK" "$(date +%s)"
         echo "Starting WORK phase (25 min)"
       fi
     }
 
+    # No-arg entry point: resume if paused, advance if the running phase has
+    # expired, otherwise pause the running phase.
     toggle_pause() {
       local current=$(get_state)
       if [ -z "$current" ]; then
@@ -1073,17 +1014,20 @@
       fi
 
       local state=$(echo "$current" | awk '{print $1}')
-      local alert=$(echo "$current" | awk '{print $3}')
 
-      # If alerting, acknowledge and advance
-      if [ "$alert" = "1" ]; then
-        advance_phase
+      if [[ "$state" == PAUSED_* ]]; then
+        start_timer
         return
       fi
 
-      # Otherwise toggle pause
-      if [[ "$state" == PAUSED_* ]]; then
-        start_timer
+      local start_time=$(echo "$current" | awk '{print $2}')
+      local now=$(date +%s)
+      local duration
+      [ "$state" = "WORK" ] && duration=$WORK_DURATION || duration=$PAUSE_DURATION
+      local remaining=$((duration - (now - start_time)))
+
+      if [ "$remaining" -le 0 ]; then
+        advance_phase
       else
         pause_timer
       fi
@@ -1118,7 +1062,6 @@
     esac
   '';
 
-  # (lockScript/lockInstantScript/displayRecoverScript/monitorRescanScript moved to wm/i3/scripts.nix)
 
   # Path to the colorscheme JSON file (user dir first, then framework)
   colorschemeJsonPath = config.hydrix.resolveColorscheme colorscheme;
@@ -1192,7 +1135,6 @@ in {
         walSyncScript
         setColorschemeModeScript
         getColorschemeModeScript
-        pkgs.xsetroot # For updating xpra background when colors change
       ]
       ++ lib.optionals (!isVM) [
         pushColorsToVmsScript # Push colors to VMs via vsock (instant sync)
@@ -1252,7 +1194,6 @@ in {
         Install.WantedBy = [ "pywalfox-update.path" ];
       };
 
-      # (post-resume-display + post-resume-trigger moved to wm/i3/scripts.nix)
     };
   };
 }

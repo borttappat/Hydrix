@@ -115,7 +115,6 @@
         ./modules/alacritty.nix   # Cursor, keyboard overrides
         ./modules/dunst.nix       # Notification preferences
         ./modules/ranger.nix      # File manager mappings + rifle rules
-        ./modules/rofi.nix        # Launcher keybindings
         ./modules/zathura.nix     # PDF viewer settings
         ./modules/firefox.nix     # Shared Firefox defaults (extensions, UA, UI prefs)
       ];
@@ -161,8 +160,6 @@
             ./modules/fonts.nix        # Font packages and profiles
             ./modules/hyprland.nix     # Hyprland keybindings + config (user-customizable)
             ./modules/waybar.nix       # Waybar layout and modules (user-customizable)
-            ./modules/i3.nix           # i3 keybindings (user-customizable)
-            ./modules/sway.nix         # sway keybindings (user-customizable)
             ./modules/grub-theme.nix   # Hydrix-themed GRUB bootloader
             ./modules/plymouth.nix     # Hydrix boot animation
             ./modules/greetd.nix       # greetd login manager (tuigreet/regreet)
@@ -201,13 +198,11 @@
               hydrix.microvmHost.vmNames.routerStable = "microvm-router-stable-${machineName}"; }
             ./modules/common.nix       # Locale + shared settings (all machines)
             ./modules/graphical.nix    # UI preferences (opacity, bluelight, etc.)
-            ./modules/polybar.nix      # Polybar style, workspace labels, module layout
             ./modules/waybar.nix       # Waybar module
             ./modules/fish.nix         # Shell abbreviations + functions (user additions)
             ./modules/alacritty.nix    # Terminal cursor, keyboard overrides
             ./modules/dunst.nix        # Notification sound + size preferences
             ./modules/ranger.nix       # File manager mappings + rifle rules
-            ./modules/rofi.nix         # Launcher keybindings + extraConfig
             ./modules/zathura.nix      # PDF viewer settings
             ./modules/starship.nix     # Prompt env vars (config is in configs/starship/)
             ./modules/vim.nix          # Vim plugins (config is in configs/vim/)
@@ -222,7 +217,7 @@
     # PROFILE AUTO-DISCOVERY
     # =========================================================================
     # Reads meta.nix from every profiles/<name>/ directory.
-    # Each meta.nix drives: vmRegistry, bridge setup, router subnets, polybar, i3.
+    # Each meta.nix drives: vmRegistry, bridge setup, router subnets, waybar workspace labels.
     # To add a new VM type: create profiles/<name>/meta.nix + profiles/<name>/default.nix
     # and rebuild; everything else auto-wires.
     discoveredMetas = let
@@ -473,6 +468,7 @@
     # Libvirt VMs for multi-instance deployments and pentesting workflows.
     # MicroVMs are recommended for single-instance use cases.
     # Use libvirt when you need multiple named instances (e.g., pentest-target1, pentest-target2)
+    # Requires hydrix.libvirt.enable = true on the host to use the resulting images with virt-manager.
     #
     packages.x86_64-linux = {
       # VM images for libvirt deployment (build on-demand)

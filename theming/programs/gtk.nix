@@ -15,7 +15,6 @@
 
 let
   username = config.hydrix.username;
-  hasI3 = config.hydrix.i3.enable;
   jq = "${pkgs.jq}/bin/jq";
 
   generateGtkColorsScript = pkgs.writeShellScriptBin "generate-gtk-colors" ''
@@ -159,9 +158,7 @@ in {
         };
       };
 
-      # Pointer cursor — applies to all environments (X11, Wayland/Hyprland, Sway)
-      # Without this, Hyprland shows its default cursor on installs without i3.
-      # mkDefault so xsession.nix's definition wins when i3 is also enabled.
+      # Pointer cursor for Hyprland
       home.pointerCursor = lib.mkDefault {
         name = "Vanilla-DMZ";
         package = pkgs.vanilla-dmz;
@@ -189,10 +186,6 @@ in {
 
         # dconf for virt-manager settings
         dconf
-
-        # GTK settings tools (X11 only — Wayland users use nwg-look or similar)
-      ] ++ lib.optionals hasI3 [
-        lxappearance
       ];
 
       # virt-manager specific settings via dconf

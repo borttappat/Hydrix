@@ -13,7 +13,6 @@
 #                             Modes: lockdown (base), administrative, admin, fallback
 #                             No args = rebuild current mode
 #                             In lockdown: auto-uses builder VM (no host network)
-#   rebuild-libvirt-router    Rebuild libvirt router (if libvirt router enabled)
 #   new-profile [name]        Scaffold new VM profile from ~/hydrix-config/templates/
 #                             Auto-discovers next free CID/workspace (CID=subnet=WS)
 #                             Copies _template/, substitutes values, git-adds, rebuilds
@@ -24,7 +23,7 @@
 #     microvm list            List available microVMs
 #     microvm status          Show running microVMs
 #     microvm build <name>    Build/rebuild a microVM
-#     microvm start <name>    Start a microVM (waits for xpra)
+#     microvm start <name>    Start a microVM (waits for display readiness)
 #     microvm stop <name>     Stop a microVM
 #     microvm app <name> <cmd>  Launch app in microVM
 #     microvm console <name>  Attach to microVM console
@@ -47,8 +46,8 @@
 #
 # COLORSCHEME & THEMING
 # ---------------------
-#   walrgb <image>            Set wallpaper and generate pywal colors
-#   randomwal                 Random wallpaper from ~/Pictures/wallpapers
+#   walrgb <image>            Set wallpaper and generate pywal colors (theming/graphical/scripts.nix)
+#   randomwalrgb              Random wallpaper (theming/graphical/scripts.nix)
 #   save-colorscheme          Save current pywal scheme to colorschemes/
 #   refresh-colors            Reload all color-aware apps from wal cache
 #   restore-colorscheme       Revert to nix-configured colorscheme
@@ -68,9 +67,7 @@
 #
 # UTILITIES
 # ---------
-#   hydrix-lock               Lock screen with i3lock-color
 #   pyenvshell                Activate Python virtual environment
-#   vm-status                 Show system status (bridges, VMs, etc.)
 #   nixbuild                  Alias for rebuild (backwards compat)
 #
 # VM-ONLY COMMANDS (inside microVMs)
@@ -123,7 +120,6 @@ let
     # ===== BUILD & SYSTEM =====
     rebuild = "rebuild";
     new-profile = "new-profile";
-    # Note: rebuild-libvirt-router is provided by host/libvirt/router.nix
 
     # ===== MICROVM MANAGEMENT =====
     # Note: 'microvm' command is added in microvm-host.nix with path substitution
@@ -140,8 +136,6 @@ let
     vm-sync-tui = "vm-sync-tui.sh";
 
     # ===== COLORSCHEME & THEMING =====
-    walrgb = "walrgb.sh";
-    randomwal = "randomwalrgb.sh";
     save-colorscheme = "save-colorscheme.sh";
 
     # ===== VPN =====
@@ -156,8 +150,6 @@ let
     hydrix-sops-setup = "hydrix-sops-setup.sh";
 
     # ===== UTILITIES =====
-    # hydrix-lock: wired in theming/wm/i3/scripts.nix (gated on hydrix.i3.enable)
-    # i3launch:    wired in theming/wm/i3/scripts.nix (gated on hydrix.i3.enable)
     pyenvshell = "pyenvshell.sh";
     hardware-identify = "hardware-identify.sh";
   };

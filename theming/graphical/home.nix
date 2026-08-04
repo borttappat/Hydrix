@@ -19,9 +19,6 @@ let
   isVM = config.hydrix.vmType != null && config.hydrix.vmType != "host";
   modKey = if isVM then "Mod1" else "Mod4";
 
-  isHost = config.hydrix.vmType == null || config.hydrix.vmType == "host";
-  isMicrovm = !isHost && !config.hydrix.graphical.standalone;
-
 in {
   imports = [
     ../programs/alacritty.nix
@@ -34,8 +31,6 @@ in {
 
   config = lib.mkIf config.hydrix.graphical.enable {
     # Home Manager user configuration
-    # Note: xsession is configured in xsession.nix
-    # Note: i3 window manager is configured in i3.nix
     home-manager.users.${username} = { pkgs, ... }: {
       home.stateVersion = "26.05";
       stylix.enableReleaseChecks = false;
@@ -59,14 +54,6 @@ in {
 
         # Pywal for color experimentation
         pywal
-      ] ++ lib.optionals (!isMicrovm && config.hydrix.i3.enable) [
-        # X11/i3 utilities — not needed under Wayland
-        xclip
-        xsel
-        xdotool
-        unclutter
-        scrot
-        slop
       ];
     };
   };

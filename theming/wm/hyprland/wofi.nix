@@ -7,21 +7,18 @@
 #
 # VM apps are listed from the VM's nix store profile (sw/bin/), which is
 # accessible from the host without SSH. Selected app is launched inside the
-# VM via sway-ws-app / hypr-ws-app.
+# VM via hypr-ws-app.
 #
-# Mirrors host-rofi functionality for Wayland/sway.
-# Gated on hydrix.sway.enable or hydrix.hyprland.enable.
+# Mirrors host-rofi functionality for Wayland/Hyprland.
+# Gated on hydrix.hyprland.enable.
 
 { config, lib, pkgs, ... }:
 
 let
   username = config.hydrix.username;
   fontFamily = config.hydrix.graphical.font.family;
-  scalingJson = "$HOME/.config/hydrix/scaling.json";
 
-  # Compute font size from Nix options — same formula as waybar.nix.
-  # Used as the fallback when scaling.json is absent (Hyprland/Wayland: hydrix-scale
-  # is X11-only, so scaling.json is not regenerated under a Wayland session).
+  # Compute font size from Nix options - same formula as waybar.nix.
   wofiSize = let
     base     = config.hydrix.graphical.font.size;
     relation = config.hydrix.graphical.font.relations.wofi or
@@ -51,15 +48,9 @@ let
     # ── Workspace Detection ────────────────────────────────────────────────
 
     get_current_workspace() {
-        if [[ -n "''${HYPRLAND_INSTANCE_SIGNATURE:-}" ]]; then
-            ${pkgs.hyprland}/bin/hyprctl activeworkspace -j 2>/dev/null \
-                | ${pkgs.jq}/bin/jq -r '.id' \
-                || echo "1"
-        else
-            ${pkgs.sway}/bin/swaymsg -t get_workspaces 2>/dev/null \
-                | ${pkgs.jq}/bin/jq -r '.[] | select(.focused==true) | .num' \
-                || echo "1"
-        fi
+        ${pkgs.hyprland}/bin/hyprctl activeworkspace -j 2>/dev/null \
+            | ${pkgs.jq}/bin/jq -r '.id' \
+            || echo "1"
     }
 
     ws_to_vm_type() {
@@ -326,7 +317,7 @@ EOF
     # ── VM App Launcher ────────────────────────────────────────────────────
     # Lists executables from the VM's nix store profile (sw/bin/), accessible
     # from the host since /nix/store is shared. Shows them via wofi dmenu.
-    # On selection, launches the command in the VM via sway-ws-app / hypr-ws-app.
+    # On selection, launches the command in the VM via hypr-ws-app.
 
     show_vm_app_launcher() {
         local vm_type="$1"
@@ -372,8 +363,6 @@ EOF
             if [[ -n "$selected_app" ]]; then
                 if [[ -n "''${HYPRLAND_INSTANCE_SIGNATURE:-}" ]]; then
                     hypr-ws-app "$selected_app" &
-                elif [[ -n "''${SWAYSOCK:-}" ]]; then
-                    sway-ws-app "$selected_app" &
                 else
                     microvm app "''${selected}" "$selected_app" &
                 fi
@@ -620,8 +609,6 @@ EOF
 
             if [[ -n "''${HYPRLAND_INSTANCE_SIGNATURE:-}" ]]; then
                 hypr-ws-app "$selected_app" &
-            elif [[ -n "''${SWAYSOCK:-}" ]]; then
-                sway-ws-app "$selected_app" &
             fi
             disown 2>/dev/null || true
         else
@@ -634,7 +621,7 @@ EOF
   '';
 
 in {
-  config = lib.mkIf (config.hydrix.graphical.enable && (config.hydrix.sway.enable || config.hydrix.hyprland.enable)) {
+  config = lib.mkIf (config.hydrix.graphical.enable && config.hydrix.hyprland.enable) {
     environment.systemPackages = [ wofiLauncher vmLaunch ];
 
     home-manager.users.${username} = { pkgs, ... }: {

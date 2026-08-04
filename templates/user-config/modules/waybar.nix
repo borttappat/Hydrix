@@ -59,7 +59,7 @@ let
   configDir        = config.hydrix.paths.configDir or "${homeDir}/hydrix-config";
   barType          = config.hydrix.graphical.waybar.barType or "dualbar";
 
-  shouldActivate = ((config.hydrix.hyprland.enable or false) || (config.hydrix.sway.enable or false))
+  shouldActivate = (config.hydrix.hyprland.enable or false)
     && (config.hydrix.graphical.enable or false);
   isVM = (config.hydrix.vmType or null) != null && (config.hydrix.vmType or null) != "host";
 
@@ -97,7 +97,7 @@ let
   pomoScript = pkgs.writeShellScript "waybar-pomo" ''
     STATE_FILE="/tmp/pomodoro_state"
     [ -f "$STATE_FILE" ] || exit 0
-    read -r state start_time alert < "$STATE_FILE"
+    read -r state start_time < "$STATE_FILE"
     now=$(date +%s)
     if [[ "$state" == PAUSED_* ]]; then
       remaining="$start_time"
@@ -108,7 +108,8 @@ let
     [ "$state" = "WORK" ] && duration=1500 || duration=300
     remaining=$((duration - (now - start_time)))
     if [ "$remaining" -le 0 ]; then
-      echo "POMO ''${state}!"
+      next="WORK"; [ "$state" = "WORK" ] && next="PAUSE"
+      echo "POMO ''${next}!"
     else
       echo "POMO $state $(printf '%02d:%02d' $((remaining/60)) $((remaining%60)))"
     fi
@@ -146,7 +147,8 @@ let
   '';
 
   vmsScript = pkgs.writeShellScript "waybar-vms" ''
-    count=$(${pkgs.libvirt}/bin/virsh --connect qemu:///system list --state-running --name 2>/dev/null \
+    command -v virsh >/dev/null 2>&1 || exit 0
+    count=$(virsh --connect qemu:///system list --state-running --name 2>/dev/null \
       | ${pkgs.gnugrep}/bin/grep -c .) || count=0
     [ "$count" -eq 0 ] && exit 0
     echo "VMS $count"
@@ -255,14 +257,8 @@ let
     CURRENT_LINK="/tmp/hydrix-metrics-current"
 
     _get_workspace() {
-      # Runtime detection: Hyprland sets HYPRLAND_INSTANCE_SIGNATURE, Sway sets SWAYSOCK
-      if [ -n "$HYPRLAND_INSTANCE_SIGNATURE" ]; then
-        ${pkgs.hyprland}/bin/hyprctl activeworkspace -j 2>/dev/null \
-          | ${pkgs.jq}/bin/jq -r '.id // empty' | ${pkgs.coreutils}/bin/head -1
-      else
-        ${pkgs.sway}/bin/swaymsg -t get_workspaces 2>/dev/null \
-          | ${pkgs.jq}/bin/jq -r '.[] | select(.focused==true) | .num' | ${pkgs.coreutils}/bin/head -1
-      fi
+      ${pkgs.hyprland}/bin/hyprctl activeworkspace -j 2>/dev/null \
+        | ${pkgs.jq}/bin/jq -r '.id // empty' | ${pkgs.coreutils}/bin/head -1
     }
 
     while true; do
@@ -413,7 +409,7 @@ let
   '';
 
   uptimeScript = pkgs.writeShellScript "waybar-uptime" ''
-    up=$(awk '{s=int($1); h=int(s/3600); m=int((s%3600)/60); printf "%dh%02dm", h, m}' /proc/uptime)
+    up=$(awk '{s=int($1); h=int(s/3600); m=int((s%3600)/60); printf "%dH %02dM", h, m}' /proc/uptime)
     echo "UP $up"
   '';
 
@@ -478,7 +474,7 @@ let
   monoUptimeScript = pkgs.writeShellScript "waybar-mono-uptime" ''
     secs=$(${pkgs.gawk}/bin/awk '{printf "%d", $1}' /proc/uptime)
     [ "$secs" -lt 86400 ] && exit 0
-    printf 'UP %dh%02dm\n' "$((secs/3600))" "$(( (secs%3600)/60 ))"
+    printf 'UP %dH %02dM\n' "$((secs/3600))" "$(( (secs%3600)/60 ))"
   '';
 
   monoVmFsScript = pkgs.writeShellScript "waybar-mono-vm-fs" ''
@@ -559,7 +555,7 @@ let
     "custom/workspace-desc" = { exec = "${workspaceDescScript}"; interval = 1;  format = "{}"; tooltip = false; escape = false; };
     "hyprland/window"       = { format = "{}"; "max-length" = 60; "separate-outputs" = false; tooltip = false; };
     "custom/focus"          = { exec = "${focusScript}";         interval = 1;  format = "{}"; tooltip = false; escape = false; };
-    "custom/pomo"           = { exec = "${pomoScript}";          interval = 1;  format = "{}"; tooltip = false; escape = false; };
+    "custom/pomo"           = { exec = "${pomoScript}";          interval = 1;  format = "{}"; tooltip = false; escape = false; "on-click" = "pomo"; };
     "custom/sync"           = { exec = "${syncScript}";          interval = 30; format = "{}"; tooltip = false; escape = false; };
     "custom/git"            = { exec = "${gitScript}";           interval = 30; format = "{}"; tooltip = false; escape = false; "return-type" = "json"; };
     "custom/mvms"           = { exec = "${mvmsScript}";          interval = 5;  format = "{}"; tooltip = false; escape = false; };
@@ -689,7 +685,7 @@ let
 
     "custom/workspace-desc" = { exec = "${workspaceDescScript}"; interval = 1;  format = "{}"; tooltip = false; escape = false; };
     "custom/focus"          = { exec = "${focusScript}";         interval = 1;  format = "{}"; tooltip = false; escape = false; };
-    "custom/pomo"           = { exec = "${pomoScript}";          interval = 1;  format = "{}"; tooltip = false; escape = false; };
+    "custom/pomo"           = { exec = "${pomoScript}";          interval = 1;  format = "{}"; tooltip = false; escape = false; "on-click" = "pomo"; };
     "custom/sync"           = { exec = "${syncScript}";          interval = 30; format = "{}"; tooltip = false; escape = false; };
     "custom/git"            = { exec = "${monoGitScript}";       interval = 30; format = "{}"; tooltip = false; escape = false; "return-type" = "json"; };
     "custom/mvms"           = { exec = "${mvmsScript}";          interval = 5;  format = "{}"; tooltip = false; escape = false; };

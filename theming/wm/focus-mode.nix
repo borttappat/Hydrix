@@ -72,14 +72,6 @@ let
 
   stripMarker = "${pkgs.gnused}/bin/sed 's/^★ //; s/^  //'";
 
-  focus-rofi = pkgs.writeShellScriptBin "focus-rofi" ''
-    ${buildMenu}
-    selected=$(echo -e "$options" | ${pkgs.rofi}/bin/rofi -dmenu -i -p "Focus" -theme-str 'window { width: 200px; }')
-    [[ -z "$selected" ]] && exit 0
-    selected=$(echo "$selected" | ${stripMarker})
-    exec ${focus}/bin/focus "$selected"
-  '';
-
   focus-wofi = pkgs.writeShellScriptBin "focus-wofi" ''
     ${buildMenu}
     selected=$(echo -e "$options" | ${pkgs.wofi}/bin/wofi --dmenu --insensitive --prompt "Focus" --width 200)
@@ -88,15 +80,7 @@ let
     exec ${focus}/bin/focus "$selected"
   '';
 in {
-  config = lib.mkMerge [
-    (lib.mkIf config.hydrix.i3.enable {
-      environment.systemPackages = [ focus focus-rofi ];
-    })
-    (lib.mkIf config.hydrix.sway.enable {
-      environment.systemPackages = [ focus focus-wofi ];
-    })
-    (lib.mkIf config.hydrix.hyprland.enable {
-      environment.systemPackages = [ focus focus-wofi ];
-    })
-  ];
+  config = lib.mkIf config.hydrix.hyprland.enable {
+    environment.systemPackages = [ focus focus-wofi ];
+  };
 }

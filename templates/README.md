@@ -62,8 +62,7 @@ templates/user-config/               # Becomes ~/hydrix-config/
 │   ├── host-packages.nix            # Host-only packages beyond framework defaults
 │   ├── shell-packages.nix           # Shell packages present on host and all VMs
 │   ├── vm-packages.nix              # Packages present in all profile VMs
-│   ├── usb-blocking.nix             # USB new-device blocking in lockdown mode
-│   └── sddm.nix                     # SDDM display manager config
+│   └── usb-blocking.nix             # USB new-device blocking in lockdown mode
 ├── profiles/                        # Graphical VM overrides
 │   ├── browsing/
 │   │   ├── meta.nix                 # CID 103, br-browse, ws 3, label BROWSING

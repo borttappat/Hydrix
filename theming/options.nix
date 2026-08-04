@@ -359,9 +359,9 @@ in {
       default = false;
       description = ''
         Enable standalone graphical environment for libvirt VMs.
-        When true, the VM gets a full i3/polybar environment for use with
-        virt-manager or similar. When false (default), apps are forwarded
-        to the host via xpra (headless mode).
+        When true (also requires hydrix.hyprland.enable = true), the VM gets
+        its own Hyprland desktop for use with virt-manager. When false
+        (default), the graphical stack stays off (headless mode).
       '';
     };
 
@@ -592,7 +592,7 @@ in {
       barHeight = lib.mkOption {
         type = lib.types.int;
         default = 23;
-        description = "Polybar height";
+        description = "Bar height (base value, also used by dunst positioning)";
       };
 
       barHeightRelation = lib.mkOption {
@@ -616,43 +616,13 @@ in {
       barPadding = lib.mkOption {
         type = lib.types.int;
         default = 2;
-        description = "Polybar internal padding";
+        description = "Bar internal padding";
       };
 
       barGaps = lib.mkOption {
         type = lib.types.nullOr lib.types.int;
         default = null;
-        description = "Polybar floating margins (null = gaps/2)";
-      };
-
-      barEdgeGapsFactor = lib.mkOption {
-        type = lib.types.float;
-        default = 1.0;
-        description = "Factor for bar-to-screen-edge gaps (0.0-1.0)";
-      };
-
-      outerGapsMatchBar = lib.mkOption {
-        type = lib.types.bool;
-        default = false;
-        description = "i3 outer gaps match barGaps";
-      };
-
-      floatingBar = lib.mkOption {
-        type = lib.types.bool;
-        default = true;
-        description = "Enable floating polybar";
-      };
-
-      bottomBar = lib.mkOption {
-        type = lib.types.bool;
-        default = true;
-        description = "Enable bottom polybar with VM metrics";
-      };
-
-      polybarStyle = lib.mkOption {
-        type = lib.types.enum ["unibar" "modular" "pills"];
-        default = "modular";
-        description = "Polybar visual style";
+        description = "Bar floating margins (null = gaps/2)";
       };
 
       padding = lib.mkOption {
@@ -966,13 +936,6 @@ in {
         description = "Reference DPI for base values";
       };
 
-      internalResolution = lib.mkOption {
-        type = lib.types.nullOr lib.types.str;
-        default = null;
-        example = "1920x1200";
-        description = "Preferred internal display resolution (i3/xrandr)";
-      };
-
       swayInternalOutput = lib.mkOption {
         type = lib.types.str;
         default = "eDP-1";
@@ -985,7 +948,7 @@ in {
         example = 1.25;
         description = ''
           Scale factor for the internal display only (does not affect external monitors).
-          Wayland equivalent of internalResolution. Higher values → fewer logical pixels.
+          Higher values → fewer logical pixels.
           1.25 on 1920×1200 → 1536×960 logical. 1.5 → 1280×800 logical.
           Takes priority over swayInternalMode when both are set.
         '';
@@ -1128,19 +1091,6 @@ in {
   # WINDOW MANAGER OPTIONS
   # =========================================================================
 
-  options.hydrix.i3 = {
-    enable = lib.mkOption {
-      type = lib.types.bool;
-      default = false;
-      description = ''
-        Enable the i3/X11 window manager stack.
-        Activates: i3, polybar, rofi, picom, xsession, display-setup, focus-mode.
-        Set true in shared/graphical.nix to preserve the current X11 setup.
-        Set false (with hydrix.hyprland.enable = true) to switch to Wayland.
-      '';
-    };
-  };
-
   options.hydrix.hyprland = {
     enable = lib.mkOption {
       type = lib.types.bool;
@@ -1148,7 +1098,6 @@ in {
       description = ''
         Enable the Hyprland/Wayland window manager stack.
         Activates: Hyprland, Waybar, wofi, hypridle, hyprlock, hypr-focus-daemon.
-        Can be true alongside hydrix.i3.enable during transition testing.
       '';
     };
 
@@ -1205,18 +1154,6 @@ in {
         Hide the window border when a workspace has exactly one tiled window.
         Border returns automatically once a second window opens. Off by default
         to keep the border always visible; enable per-machine to taste.
-      '';
-    };
-  };
-
-  options.hydrix.sway = {
-    enable = lib.mkOption {
-      type = lib.types.bool;
-      default = false;
-      description = ''
-        Enable the Sway/Wayland window manager stack.
-        Compositor-agnostic: waypipe VM forwarding works identically with Sway and Hyprland.
-        Do not enable alongside hydrix.hyprland.enable — they compete for seat0.
       '';
     };
   };

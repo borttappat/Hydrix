@@ -26,7 +26,7 @@ let
   '';
 
 in {
-  imports = [ ./hyprland.nix ./wofi.nix ];
+  imports = [ ./hyprland.nix ./wofi.nix ./waypipe.nix ];
 
   config = lib.mkIf (cfg.enable && config.hydrix.hyprland.enable) {
     programs.hyprland = {
