@@ -6,4 +6,5 @@
   workspace  = 2;
   label      = "TASK 1";
   hasDisplay = true;
+  focusBorder = "orange";      # matches the pentest profile's border
 }
