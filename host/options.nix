@@ -17,12 +17,11 @@ in {
 
     router = {
       type = lib.mkOption {
-        type = lib.types.enum ["microvm" "libvirt" "none"];
+        type = lib.types.enum ["microvm" "none"];
         default = "microvm";
         description = ''
           Router VM implementation:
           - microvm: Declarative microVM with VFIO passthrough (default, recommended)
-          - libvirt: Traditional libvirt VM (image-based, fallback)
           - none: No router VM (host handles networking directly)
         '';
       };
@@ -96,7 +95,7 @@ in {
         };
       };
 
-      # WAN config for both microvm and libvirt router types
+      # WAN config for the microvm router
       wan = {
         mode = lib.mkOption {
           type = lib.types.enum ["auto" "pci-passthrough" "macvtap" "none"];
@@ -183,32 +182,6 @@ in {
             default = [];
             description = "Extra nftables rules appended to the forward chain.";
           };
-        };
-      };
-
-      libvirt = {
-        vmName = lib.mkOption {
-          type = lib.types.str;
-          default = "router";
-          description = "Name of the router VM in libvirt";
-        };
-
-        image = lib.mkOption {
-          type = lib.types.str;
-          default = "/var/lib/libvirt/images/router.qcow2";
-          description = "Path to the router VM qcow2 image";
-        };
-
-        memory = lib.mkOption {
-          type = lib.types.int;
-          default = 2048;
-          description = "Memory in MiB for the router VM";
-        };
-
-        vcpus = lib.mkOption {
-          type = lib.types.int;
-          default = 2;
-          description = "Number of vCPUs for the router VM";
         };
       };
 
@@ -388,10 +361,11 @@ in {
         type = lib.types.bool;
         default = false;
         description = ''
-          Enable libvirt/QEMU/virt-manager virtualization stack.
-          Automatically set to true when hydrix.router.type == "libvirt".
-          Leave false when using microvm-only setups to avoid pulling in
-          the full QEMU/virt-manager closure.
+          Enable libvirt/QEMU/virt-manager virtualization stack, for building and
+          running standalone VMs via virt-manager. Fully decoupled from
+          hydrix.router.type and microvm infrastructure - has no effect on
+          microVM builds. Leave false to avoid pulling in the full
+          QEMU/virt-manager closure.
         '';
       };
 

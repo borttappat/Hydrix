@@ -10,7 +10,7 @@
     ./vfio.nix
     ./networking.nix
     ./router.nix
-    ./libvirt       # libvirtd, QEMU, libvirt router host management
+    ./libvirt       # libvirtd, QEMU, virt-manager (standalone VMs)
     ./services.nix
     ./scripts.nix
     ./specialisations.nix

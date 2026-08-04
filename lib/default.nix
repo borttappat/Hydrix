@@ -88,9 +88,6 @@ in rec {
         # Host scripts (rebuild, microvm CLI, hydrix-tui, etc.)
         ../host/base/hydrix-scripts.nix
 
-        # Xpra host (VM app forwarding)
-        ../host/vm-integration/xpra-host.nix
-
         # MicroVM host management (virtiofsd, TAP interfaces)
         ../host/microvm
 
@@ -106,10 +103,7 @@ in rec {
         # MicroVM host support
         microvm.nixosModules.host
 
-        # waypipe VM forwarding (active when sway or hyprland enabled)
-        ../theming/wm/sway/waypipe.nix
-
-        # Graphical environment
+        # Graphical environment (waypipe VM forwarding lives in theming/wm/hyprland/waypipe.nix)
         ../theming
 
         # Set vmType to host
@@ -389,39 +383,6 @@ in rec {
     ++ nixpkgs'.lib.optionals (userProfiles != null && builtins.pathExists (userProfiles + "/${profile}")) [
       (userProfiles + "/${profile}")
     ];
-  };
-
-  # =========================================================================
-  # mkLibvirtRouter - Create the libvirt router VM (fallback)
-  # =========================================================================
-  # extraNetworks: same param as mkMicrovmRouter — accepts user-defined profile
-  # networks, but libvirt-router.nix does not yet process them dynamically.
-  # Pass them via modules = [ { hydrix.networking.extraNetworks = ...; } ] for now.
-  mkLibvirtRouter = {
-    system ? "x86_64-linux",
-    extraNetworks ? [],
-    modules ? [],
-    extraInputs ? {},
-  }:
-  let
-    allInputs = inputs // extraInputs;
-    nixpkgs' = inputs.nixpkgs;
-  in nixpkgs'.lib.nixosSystem {
-    inherit system;
-    modules = [
-      { nixpkgs.config.allowUnfree = true; }
-      { nixpkgs.overlays = [ overlay-unstable overlay-lkl-memory ]; }
-    ] ++ optionsModules ++
-      [ inputs.stylix.nixosModules.stylix ] ++
-      [
-      home-manager.nixosModules.home-manager
-      { home-manager.useGlobalPkgs = true; home-manager.useUserPackages = true; }
-      ../vm/libvirt/router.nix
-      "${nixpkgs'}/nixos/modules/virtualisation/disk-image.nix"
-      { image.efiSupport = false; }
-    ] ++ nixpkgs'.lib.optional (extraNetworks != []) {
-      hydrix.networking.extraNetworks = extraNetworks;
-    } ++ modules;
   };
 }
 

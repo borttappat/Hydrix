@@ -91,9 +91,6 @@ in {
       # DNS through router
       networking.nameservers = [ netCfg.routerIp ];
 
-      # Note: libvirtd is enabled in base config (modules/host/router.nix)
-      # for libvirt pentest VMs in all modes
-
       # Administrative firewall: SSH + Tailscale (Tailscale manages its own rules).
       # No VM bridge interfaces are trusted — VMs cannot reach the host over IP.
       networking.firewall.allowedTCPPorts = [ 22 ];

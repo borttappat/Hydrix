@@ -24,11 +24,11 @@ in {
         "video"
         "audio"
         "input"
-        "libvirtd"
         "docker"
         "kvm"
         "dialout"
-      ] ++ cfg.user.extraGroups;
+      ] ++ lib.optionals cfg.libvirt.enable [ "libvirtd" ]
+        ++ cfg.user.extraGroups;
       shell = shellPkg;
 
       # SSH authorized keys from options

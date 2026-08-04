@@ -27,7 +27,6 @@ detect_flake_dir() {
 
 readonly FLAKE_DIR="$(detect_flake_dir)"
 readonly BASE_IMAGE_DIR="/var/lib/libvirt/base-images"
-readonly XPRA_PORT=14500
 readonly PERSIST_BASE="$HOME/persist"
 readonly PROFILES_DIR="$FLAKE_DIR/profiles"
 readonly VM_REGISTRY="/etc/hydrix/vm-registry.json"
@@ -711,20 +710,6 @@ show_host_menu() {
 
 # ========== ROUTER ==========
 
-router_libvirt_state() {
-    if command -v virsh &>/dev/null; then
-        local state
-        state=$(sudo virsh --connect qemu:///system domstate router-vm 2>/dev/null | head -1)
-        case "$state" in
-            running) echo "running" ;;
-            "shut off"|"") echo "stopped" ;;
-            *) echo "$state" ;;
-        esac
-    else
-        echo "n/a"
-    fi
-}
-
 router_microvm_state() {
     for router_name in microvm-router; do
         if systemctl is-active --quiet "microvm@${router_name}.service" 2>/dev/null; then
@@ -740,29 +725,21 @@ router_microvm_state() {
 
 show_router_menu() {
     while true; do
-        local microvm_st libvirt_st
+        local microvm_st
         microvm_st=$(router_microvm_state)
-        libvirt_st=$(router_libvirt_state)
 
         clear
         show_session_log_bottom
 
         local header
-        header="Router"$'\n'"MicroVM: $microvm_st | Libvirt: $libvirt_st"
+        header="Router"$'\n'"MicroVM: $microvm_st"
 
         local actions=(
-            "--- MicroVM ---"
             "Start MicroVM router"
             "Stop MicroVM router"
             "Restart MicroVM router"
             "Build MicroVM router"
             "MicroVM Console"
-            "--- Libvirt ---"
-            "Start libvirt router"
-            "Stop libvirt router"
-            "Restart libvirt router"
-            "Rebuild libvirt router"
-            "Libvirt Console (SSH)"
             "---"
             "Back"
         )
@@ -773,12 +750,7 @@ show_router_menu() {
 
         case "$sel" in
             "Start MicroVM"*)
-                if [[ "$libvirt_st" == "running" ]]; then
-                    sudo virsh --connect qemu:///system destroy router-vm 2>/dev/null || true
-                    log_action info "Stopped libvirt router"
-                fi
                 # Router doesn't have xpra, use systemctl directly
-                # Try new name first, fall back to legacy
                 sudo systemctl start microvm@microvm-router.service
                 log_action ok "MicroVM router started"
                 ;;
@@ -793,7 +765,6 @@ show_router_menu() {
                 log_action ok "MicroVM router restarted"
                 ;;
             "Build MicroVM"*)
-                # Try new name first, fall back to legacy
                 microvm_build "microvm-router"
                 ;;
             "MicroVM Console")
@@ -802,37 +773,6 @@ show_router_menu() {
                 else
                     log "Ctrl+] to detach"
                     sudo socat -,rawer unix-connect:/var/lib/microvms/microvm-router/console.sock || true
-                fi
-                ;;
-            "Start libvirt"*)
-                if [[ "$microvm_st" == "running" ]]; then
-                    sudo systemctl stop microvm@microvm-router.service
-                    log_action info "Stopped MicroVM router"
-                fi
-                sudo virsh --connect qemu:///system start router-vm
-                log_action ok "Libvirt router started"
-                ;;
-            "Stop libvirt"*)
-                sudo virsh --connect qemu:///system destroy router-vm
-                log_action ok "Libvirt router stopped"
-                ;;
-            "Restart libvirt"*)
-                sudo virsh --connect qemu:///system destroy router-vm 2>/dev/null || true
-                sleep 1
-                sudo virsh --connect qemu:///system start router-vm
-                log_action ok "Libvirt router restarted"
-                ;;
-            "Rebuild libvirt"*)
-                run_in_terminal "Router" "rebuild-libvirt-router"
-                log_action ok "Router rebuild launched"
-                ;;
-            "Libvirt Console"*)
-                if [[ "$libvirt_st" != "running" ]]; then
-                    log_action err "Libvirt router not running"
-                else
-                    log "Connecting via SSH to 192.168.100.253..."
-                    ssh 192.168.100.253 || true
-                    press_enter  # Keep for SSH - user needs to see they're back
                 fi
                 ;;
             "---"*) continue ;;
