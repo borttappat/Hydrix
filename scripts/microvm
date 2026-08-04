@@ -11,7 +11,6 @@
 #   microvm app <name> <cmd>  Launch app in microVM
 #   microvm status [name]     Show status of microVM(s)
 #   microvm list              List all declared microVMs
-#   microvm attach <name>     Attach to xpra session
 #   microvm logs <name>       View microVM logs
 #
 # Examples:
@@ -62,7 +61,6 @@ load_port() {
     fi
 }
 
-readonly XPRA_PORT=$(load_port xpra 14500)
 readonly SWITCH_PORT=$(load_port switch 14504)
 readonly DISPLAY_MODE_PORT=$(load_port displayMode 14509)
 readonly WAYPIPE_LAUNCH_PORT=$(load_port waypipeLaunch 14508)
@@ -261,22 +259,6 @@ wait_for_builder() {
         sleep 1
         elapsed=$((elapsed + 1))
         if [[ $elapsed -ge $timeout ]]; then
-            return 1
-        fi
-    done
-    return 0
-}
-
-# Wait for xpra to be ready
-wait_for_xpra() {
-    local cid="$1"
-    local timeout="${2:-30}"
-    local elapsed=0
-
-    while ! timeout 3 xpra info "vsock://${cid}:${XPRA_PORT}" &>/dev/null; do
-        sleep 0.5
-        elapsed=$((elapsed + 1))
-        if [[ $elapsed -ge $((timeout * 2)) ]]; then
             return 1
         fi
     done
@@ -515,18 +497,10 @@ cmd_start() {
         fi
     fi
 
-    # Push display mode (xpra only, waypipe mode handled above)
+    # Fallback display-mode push (waypipe path above already handles the common case)
     if [[ "$_waypipe_started" -eq 0 ]] && command -v vm-push-display-mode >/dev/null 2>&1; then
         vm-push-display-mode "$profile" >/dev/null 2>&1 &
         disown
-    fi
-
-    # In xpra mode (X11), pre-attach session for instant first app launch
-    if [[ -z "${WAYLAND_DISPLAY:-}" ]] && command -v vm-app >/dev/null 2>&1; then
-        log "Pre-attaching xpra session..."
-        vm-app "$vm_name" --attach >/dev/null 2>&1 &
-        disown
-        log_success "Pre-attached"
     fi
 
     # Push current host colors to the new VM via vsock
@@ -535,7 +509,7 @@ cmd_start() {
         disown
     fi
 
-    # Desktop notification, waypipe mode includes workspace hint; xpra/other is generic
+    # Desktop notification, waypipe mode includes workspace hint
     if [[ "$_waypipe_started" -eq 1 ]]; then
         notify-send -u normal "MicroVM launched" \
             "${vm_name} ready, WS${vm_ws} apps available (Mod+Return)" 2>/dev/null || true
@@ -697,7 +671,7 @@ cmd_restart() {
     log "Starting service..."
     sudo systemctl start "microvm@${vm_name}.service"
 
-    # Headless VMs (router, builder) - no xpra
+    # Headless VMs (router, builder) - no display forwarding
     if is_headless "$vm_name"; then
         local total_time
         total_time=$(timer_end "$start")
@@ -756,18 +730,10 @@ cmd_restart() {
         fi
     fi
 
-    # Push display mode (xpra only, waypipe mode handled above)
+    # Fallback display-mode push (waypipe path above already handles the common case)
     if [[ "$_waypipe_started" -eq 0 ]] && command -v vm-push-display-mode >/dev/null 2>&1; then
         vm-push-display-mode "$profile" >/dev/null 2>&1 &
         disown
-    fi
-
-    # In xpra mode (X11), pre-attach session for instant first app launch
-    if [[ -z "${WAYLAND_DISPLAY:-}" ]] && command -v vm-app >/dev/null 2>&1; then
-        log "Pre-attaching xpra session..."
-        vm-app "$vm_name" --attach >/dev/null 2>&1 &
-        disown
-        log_success "Pre-attached"
     fi
 
     # Desktop notification
@@ -819,33 +785,13 @@ cmd_app() {
         fi
         printf '%s\n' "$app_cmd" | socat -T10 - VSOCK-CONNECT:"$cid":${WAYPIPE_LAUNCH_PORT}
     else
-        # X11/i3: lazily push xpra mode then use vm-app
-        local cid
-        cid=$(jq -r --arg v "$vm_name" \
-            'to_entries[] | select(.value.vmName == $v) | .value.cid' \
-            "$VM_REGISTRY" 2>/dev/null | head -1)
-        [[ -n "$cid" ]] && printf 'xpra\n' | socat -T5 - VSOCK-CONNECT:"$cid":${DISPLAY_MODE_PORT} 2>/dev/null || true
-        vm-app "$vm_name" "$app_cmd"
+        log_error "waypipe-connect not available, cannot launch app in $vm_name"
+        return 1
     fi
 
     local launch_time
     launch_time=$(timer_end "$start")
     log_time "App launched in ${BOLD}${launch_time}s${NC}"
-}
-
-# Attach to xpra session
-cmd_attach() {
-    local vm_name="$1"
-
-    if ! is_running "$vm_name"; then
-        log_error "${vm_name} is not running"
-        return 1
-    fi
-
-    log "Attaching to ${BOLD}${vm_name}${NC}..."
-    vm-app "$vm_name" --attach >/dev/null 2>&1 &
-    disown
-    log_success "Attached. Windows should appear on your desktop."
 }
 
 # Show status
@@ -1188,7 +1134,7 @@ cmd_purge() {
     sudo rm -f "$vm_dir"/*.qcow2 "$vm_dir"/*.luks
 
     # Delete socket files and other runtime state
-    sudo rm -f "$vm_dir"/console.sock "$vm_dir"/xpra-ready 2>/dev/null || true
+    sudo rm -f "$vm_dir"/console.sock 2>/dev/null || true
 
     log_success "Purged ${vm_name}"
     echo ""
@@ -2988,7 +2934,6 @@ ${BOLD}COMMANDS${NC}
 
   ${BOLD}Apps & Sessions:${NC}
     app <name> <cmd>        Launch app in microVM
-    attach <name>           Attach to xpra session
     console <name>          Attach to serial console (headless VMs)
 
   ${BOLD}Status:${NC}
@@ -3166,10 +3111,6 @@ main() {
         app)
             [[ $# -lt 2 ]] && { log_error "Usage: microvm app <name> <command>"; exit 1; }
             cmd_app "$@"
-            ;;
-        attach)
-            [[ $# -lt 1 ]] && { log_error "Usage: microvm attach <name>"; exit 1; }
-            cmd_attach "$1"
             ;;
         status)
             cmd_status "${1:-}"

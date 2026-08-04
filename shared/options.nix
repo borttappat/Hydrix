@@ -216,7 +216,6 @@ in {
       vsockPorts = lib.mkOption {
         type = lib.types.attrsOf lib.types.int;
         default = {
-          xpra          = 14500;
           metrics       = 14501;
           staging       = 14502;
           colorscheme   = 14503;
@@ -322,7 +321,7 @@ in {
             hasDisplay = lib.mkOption {
               type = lib.types.bool;
               default = true;
-              description = "Whether this VM runs a display-mode service (waypipe/xpra). False for headless infra VMs.";
+              description = "Whether this VM runs a display-mode service (waypipe). False for headless infra VMs.";
             };
             focusBorder = lib.mkOption {
               type = lib.types.nullOr lib.types.str;

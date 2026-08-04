@@ -6,7 +6,7 @@
 # - 9p shares for vm-config and vm-persist
 # - virtiofs for hydrix-config (scaling.json, read-only)
 # - TAP networking for bridge attachment
-# - Xpra for seamless app forwarding to host
+# - waypipe for seamless app forwarding to host
 # - Full graphical stack (Stylix theming, HM programs, fonts, colors)
 #
 # The graphical modules handle VM vs host differences internally via isVM checks
@@ -44,10 +44,7 @@ in {
     # Also provides VM color sync scripts (wal-sync, refresh-colors, set-colorscheme-mode)
     ../../../theming/graphical
 
-    # Xpra guest for seamless app forwarding (unified module for all VMs)
-    ../../display/xpra-shared.nix
-
-    # waypipe display mode handler (vsock:14509); coexists with xpra
+    # waypipe display mode handler (vsock:14509)
     ../../display/waypipe-vm.nix
 
     # vm-dev, vm-sync scripts (shared with libvirt VMs)
@@ -79,19 +76,18 @@ in {
     # MicroVMs get full graphical theming by default (opt-out with graphical.enable = false)
     hydrix.graphical.enable = lib.mkDefault true;
 
-    # ===== MicroVMs run headless - xpra provides its own Xvfb =====
+    # ===== MicroVMs run headless =====
     # Disable X server and display manager to avoid pulling in GDM/lightdm
     services.xserver.enable = lib.mkForce false;
     services.displayManager.autoLogin.enable = lib.mkForce false;
 
     # Software rendering (mesa/llvmpipe) for GPU-accelerated apps like alacritty
-    # xpra's Xvfb doesn't provide EGL/GL, so mesa must be available
     hardware.graphics.enable = true;
 
     # ===== Disable host-centric graphical services for microVMs =====
     # The graphical stack is imported for theming/fonts/alacritty config, but
-    # xsession, polybar, picom, splash, dunst, auto-resize are host/libvirt-VM
-    # specific and waste CPU in headless xpra-forwarded microVMs.
+    # xsession and dunst are host/libvirt-VM specific and waste CPU in headless
+    # waypipe-forwarded microVMs.
     home-manager.users.${config.hydrix.username} = {
       xsession.enable = lib.mkForce false;
       services.dunst.enable = lib.mkForce false;
@@ -223,7 +219,7 @@ in {
         mac = "02:00:00:00:00:${lib.substring 0 2 (builtins.hashString "md5" vmName)}";
       }];
 
-      # ===== Vsock for xpra =====
+      # ===== Vsock for waypipe/host communication =====
       vsock = {
         cid = config.hydrix.microvm.vsockCid;
       };
@@ -250,16 +246,16 @@ in {
     system.switch.enable = true;
 
     # ===== MicroVMs run headless =====
-    # GUI apps are forwarded to host via xpra (port 14500)
+    # GUI apps are forwarded to host via waypipe
     # No local graphical environment needed
 
-    # ===== VM Metrics Server for Host Polybar =====
+    # ===== VM Metrics Server for Host Waybar =====
     # Pre-collects metrics every vmCollectInterval seconds into a snapshot file.
     # The vsock handler (port 14501) serves the snapshot instantly for "all" queries.
     # Individual commands remain on-demand for hydrix-monitor compatibility.
     # Host reads snapshot via: echo "all" | socat - VSOCK-CONNECT:CID:14501
     systemd.services.vm-metrics = {
-      description = "VM metrics server for host polybar";
+      description = "VM metrics server for host waybar";
       wantedBy = [ "multi-user.target" ];
       after = [ "network.target" ];
 
@@ -443,7 +439,7 @@ in {
             # Signal running alacritty instances to reload
             ${pkgs.procps}/bin/pkill -USR1 alacritty 2>/dev/null || true
 
-            # Refresh colors for other apps (i3, polybar, dunst, etc.)
+            # Refresh colors for other apps (dunst, GTK, alacritty, etc.)
             # The virtiofs wal cache at /mnt/wal-cache has the host's live colors.
             # refresh-colors reads from ~/.cache/wal (symlinked to /mnt/wal-cache
             # by vmThemeSync) and reloads all color-aware apps.
@@ -482,7 +478,7 @@ in {
       "virtio_blk"
       "virtio_pci"
       "virtio_rng"
-      "vmw_vsock_virtio_transport"  # vsock for xpra
+      "vmw_vsock_virtio_transport"  # vsock for waypipe/host communication
     ];
 
     # Entropy settings

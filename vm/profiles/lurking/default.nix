@@ -1,7 +1,7 @@
 # Lurking Profile - Base configuration for darknet browsing VMs
 #
 # This is the HYDRIX BASE profile - infrastructure only.
-# MicroVMs use this directly (headless, xpra forwarding).
+# MicroVMs use this directly (headless, waypipe forwarding).
 #
 # EPHEMERAL by design - all data lost on restart for maximum privacy.
 #
@@ -16,7 +16,7 @@
   # VM identity
   hydrix.vmType = "lurking";
 
-  # Sound (for xpra audio forwarding)
+  # Sound (for waypipe audio forwarding)
   services.pipewire = {
     enable = lib.mkDefault true;
     alsa.enable = lib.mkDefault true;

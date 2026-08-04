@@ -42,8 +42,8 @@
 # │        (new terminals will pick up new colors on start)             │
 # │     2. Runs refresh-colors script for existing terminals:           │
 # │        - OSC escape sequences to running terminals                  │
-# │        - pywalfox, dunst, xsetroot updates                          │
-# │        Note: SIGUSR1 to alacritty is NOT used (crashes xpra)        │
+# │        - pywalfox, dunst updates                                    │
+# │        Note: SIGUSR1 to alacritty is NOT used (unreliable)          │
 # └─────────────────────────────────────────────────────────────────────┘
 #
 # ═══════════════════════════════════════════════════════════════════════
@@ -495,15 +495,7 @@ in {
         };
       };
 
-      # 8. Ensure colors are ready before xpra accepts connections
-      # Without this, alacritty may start before colors-runtime.toml exists,
-      # showing default/fallback colors briefly before the import loads.
-      systemd.services.xpra-vsock = {
-        after = [ "wal-cache-link.service" ];
-        wants = [ "wal-cache-link.service" ];
-      };
-
-      # 9. Override scripts installed by vm-theming.nix with VM-local-cache versions
+      # 8. Override scripts installed by vm-theming.nix with VM-local-cache versions
       environment.systemPackages = [
 
         # wal-sync: pull host colors into VM's local cache (manual trigger)
@@ -590,12 +582,6 @@ in {
           if command -v generate-dunstrc >/dev/null 2>&1; then
             generate-dunstrc 2>/dev/null || true
             ${pkgs.procps}/bin/pkill dunst 2>/dev/null || true
-          fi
-
-          # xpra root window background
-          BG=$(${jq} -r '.special.background // .colors.color0' "$WAL_COLORS" 2>/dev/null)
-          if [ -n "$BG" ] && command -v xsetroot >/dev/null 2>&1; then
-            xsetroot -solid "$BG" 2>/dev/null || true
           fi
         ''))
       ];

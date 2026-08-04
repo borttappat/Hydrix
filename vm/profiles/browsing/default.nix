@@ -1,7 +1,7 @@
 # Browsing Profile - Minimal base configuration for browsing VMs
 #
 # This is the HYDRIX BASE profile - minimal infrastructure only.
-# MicroVMs use this directly (headless, xpra forwarding).
+# MicroVMs use this directly (headless, waypipe forwarding).
 # Libvirt VMs can layer user profiles on top for graphical settings.
 #
 # User profiles (in ~/hydrix-config/profiles/browsing/) can add:
@@ -19,7 +19,7 @@
   # VM identity
   hydrix.vmType = "browsing";
 
-  # Sound (needed for xpra audio forwarding)
+  # Sound (needed for waypipe audio forwarding)
   services.pipewire = {
     enable = lib.mkDefault true;
     alsa.enable = lib.mkDefault true;

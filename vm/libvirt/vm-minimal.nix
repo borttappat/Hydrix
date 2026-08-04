@@ -1,4 +1,4 @@
-# VM Minimal Module - Essential shell and login configuration for headless/xpra VMs
+# VM Minimal Module - Essential shell and login configuration for headless VMs
 #
 # Packages and environment variables are configured in the user's
 # hydrix-config/shared/vm-packages.nix.

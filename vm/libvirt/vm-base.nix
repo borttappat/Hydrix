@@ -5,9 +5,11 @@
 # - Common imports (qemu-guest, shared-store, bake-config, etc.)
 # - Parameterized rebuild script
 #
-# By default, libvirt VMs run headless like microVMs - apps forwarded via xpra.
-# Enable hydrix.graphical.standalone = true for virt-manager use with full
-# i3/polybar environment.
+# By default, libvirt VMs run headless like microVMs - hydrix.graphical.enable
+# defaults to false (standalone = false). Set hydrix.graphical.standalone = true
+# together with hydrix.hyprland.enable = true for a VM with its own desktop,
+# viewable via virt-manager's SPICE/VNC console. No profile currently does this;
+# verify it works end-to-end before relying on it (see CLAUDE.md's Libvirt section).
 #
 # Profiles should import this module and only set profile-specific config:
 # - hydrix.vmType
@@ -41,9 +43,6 @@ in {
     # Minimal CLI environment (always included)
     ./vm-minimal.nix
 
-    # GUI apps for xpra forwarding (alacritty, firefox, pywal)
-    ../display/xpra-apps.nix
-
     # VM theming scripts (wal-sync, set-colorscheme-mode, refresh-colors)
     ../theming/vm-theming.nix
 
@@ -51,11 +50,10 @@ in {
     ../common/qemu-guest.nix
     ../common/shared-store.nix
     ./bake-config.nix
-    ../display/xpra-shared.nix  # Unified xpra module for all VMs
-    ../display/waypipe-vm.nix   # waypipe display mode handler (vsock:14509); coexists with xpra
+    ../display/waypipe-vm.nix   # waypipe display mode handler (vsock:14509)
     ../dev/vm-dev.nix       # vm-dev, vm-sync scripts for package development
 
-    # Core desktop environment (i3, X11)
+    # Core desktop environment
     # Only activates when hydrix.graphical.enable = true
     ../../shared/core
 
@@ -80,8 +78,9 @@ in {
 
   config = {
     # ===== Graphical environment =====
-    # When standalone = true, the VM has its own i3/polybar environment (for virt-manager)
-    # When standalone = false (default), apps are forwarded via xpra to host
+    # When standalone = true, the graphical stack activates for a Hyprland desktop
+    # (also requires hydrix.hyprland.enable = true), viewable via virt-manager.
+    # When standalone = false (default), the graphical stack stays off.
     # The graphical modules are always imported but only activate when enable = true
     hydrix.graphical.enable = lib.mkDefault cfg.graphical.standalone;
 
@@ -177,9 +176,6 @@ in {
 
     # ===== Enable virtiofs shared /nix/store =====
     hydrix.vm.sharedStore.enable = lib.mkDefault true;
-
-    # ===== Dynamic scaling for VMs =====
-    # Handled by theming/wm/i3/vm-scaling.nix (gated behind hydrix.i3.enable)
 
     # ===== Rebuild script =====
     # Parameterized based on hydrix.vm.rebuildTarget

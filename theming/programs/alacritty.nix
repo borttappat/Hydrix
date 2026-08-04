@@ -199,9 +199,9 @@ in {
           #
           # Opacity priority: overlayOverrides.alacritty > alacritty (legacy) > overlay
           #
-          # resize_increments: Disabled for VMs to prevent xpra edge artifacts.
+          # resize_increments: Disabled for VMs to prevent display-capture edge artifacts.
           # When enabled, alacritty snaps content to character cell boundaries,
-          # leaving small gaps at right/bottom edges that xpra captures as artifacts.
+          # leaving small gaps at right/bottom edges that VM display forwarding captures as artifacts.
           window = let
             opacityCfg = config.hydrix.graphical.ui.opacity;
             # Use overlayOverrides.alacritty if set, else legacy alacritty option, else overlay
@@ -209,7 +209,7 @@ in {
           in {
             opacity = lib.mkDefault effectiveOpacity;
             dynamic_padding   = lib.mkDefault true;
-            resize_increments = lib.mkDefault (!vmColorsEnabled);  # Disable for VMs to fix xpra artifacts
+            resize_increments = lib.mkDefault (!vmColorsEnabled);  # Disable for VMs to fix display-capture artifacts
             class = {
               general  = lib.mkDefault "Alacritty";
               instance = lib.mkDefault "Alacritty";

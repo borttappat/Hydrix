@@ -1,7 +1,7 @@
 # Comms Profile - User Customizations
 #
 # This is layered ON TOP of Hydrix's base comms profile.
-# Hydrix base provides: xpra forwarding, sound (required for calls), graphical stack
+# Hydrix base provides: waypipe forwarding, sound (required for calls), graphical stack
 # This profile adds: packages (Signal, Firefox)
 #
 { config, lib, pkgs, ... }:

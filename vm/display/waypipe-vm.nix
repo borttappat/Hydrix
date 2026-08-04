@@ -2,13 +2,13 @@
 #
 # Services (none auto-start — host pushes display mode at VM start via vsock:14509):
 #
-#   display-mode  (14509) — receives "xpra"/"waypipe"/"PING"/"STATUS" from host
+#   display-mode  (14509) — receives "waypipe"/"PING"/"STATUS" from host
 #   waypipe-vsock          — waypipe client connecting to host (vsock:14507)
 #   waypipe-launch(14508)  — receives app launch commands from host
 #
 # Flow:
-#   microvm start <vm>  → host detects WM → "xpra"|"waypipe" → vsock:14509
-#   VM display-mode     → starts xpra-vsock OR waypipe-vsock+waypipe-launch
+#   microvm start <vm>  → host pushes "waypipe" → vsock:14509
+#   VM display-mode     → starts waypipe-vsock+waypipe-launch
 #
 #   waypipe client (VM): connects to host server on vsock:14507
 #   waypipe server (HOST): listens on vsock:14507, forwards to Hyprland
@@ -35,17 +35,7 @@ let
       PING)
         echo "OK"
         ;;
-      xpra)
-        if systemctl list-unit-files xpra-vsock.service &>/dev/null; then
-          systemctl stop waypipe-vsock waypipe-launch ${lib.optionalString audioEnabled "pulse-vsock"} 2>/dev/null || true
-          systemctl start xpra-vsock
-          echo "xpra"
-        else
-          echo "xpra-unavailable"
-        fi
-        ;;
       waypipe)
-        systemctl stop xpra-vsock 2>/dev/null || true
         if systemctl is-active --quiet waypipe-vsock 2>/dev/null; then
           # Service running — check if socket actually exists (connection alive)
           if [[ ! -S "/run/user/1000/waypipe-0" ]]; then
@@ -64,7 +54,6 @@ let
         # Unconditional restart — used by waypipe-connect on startup/reconnect.
         # Unlike "waypipe", this always restarts regardless of socket state,
         # so a fresh host-side listener always gets a fresh VM connection.
-        systemctl stop xpra-vsock 2>/dev/null || true
         systemctl restart waypipe-vsock waypipe-launch 2>/dev/null || true
         ${lib.optionalString audioEnabled "systemctl start pulse-vsock 2>/dev/null || true"}
         echo "waypipe"
@@ -76,8 +65,6 @@ let
         if [[ -S "/run/user/1000/waypipe-0" ]] && \
            systemctl is-active --quiet waypipe-vsock 2>/dev/null; then
           echo "waypipe"
-        elif systemctl is-active --quiet xpra-vsock 2>/dev/null; then
-          echo "xpra"
         else
           echo "none"
         fi
@@ -95,7 +82,7 @@ let
         ;;
       stop)
         # Stop all display services — host WM is exiting; next WM will push its mode on start.
-        systemctl stop xpra-vsock waypipe-vsock waypipe-launch ${lib.optionalString audioEnabled "pulse-vsock"} 2>/dev/null || true
+        systemctl stop waypipe-vsock waypipe-launch ${lib.optionalString audioEnabled "pulse-vsock"} 2>/dev/null || true
         echo "stopped"
         ;;
       LAUNCH_LOG)
@@ -164,10 +151,6 @@ in {
     ELECTRON_OZONE_PLATFORM_HINT = "auto";
   };
 
-  # xpra auto-start suppression — only needed when i3.enable = true (xpra-shared.nix active)
-  systemd.services.xpra-vsock.wantedBy = lib.mkIf config.hydrix.i3.enable (lib.mkForce []);
-  systemd.services.xpra-audio-reconnect.wantedBy = lib.mkIf config.hydrix.i3.enable (lib.mkForce []);
-
   # ── display-mode (14509) ──────────────────────────────────────────────────
   # Runs as root so it can start/stop system services.
   # Responds to PING so microvm-start can detect VM readiness.
@@ -230,8 +213,7 @@ in {
   # ── pulse-vsock — on-demand, started by display-mode in waypipe mode ───────
   # Bridges host PipeWire audio to VMs via vsock:14505.
   # waypipe carries Wayland display only; this is the parallel audio channel.
-  # Started alongside waypipe-vsock, stopped when switching to xpra (which
-  # handles audio internally via xpra's own PulseAudio forwarding).
+  # Started alongside waypipe-vsock.
   #
   # Uses /run/user/1000/pulse/host-native (not the standard pulse/native) to
   # avoid conflict with the VM's own pipewire-pulse which owns that path.
@@ -240,7 +222,7 @@ in {
   # Flow: VM app → /run/user/1000/pulse/host-native → vsock:2:14505 → host PipeWire
   #
   # Disabled when hydrix.microvm.audio.enable = false (e.g. pentest, lurking).
-  # mkMerge: always suppress auto-start (covers xpra's pulse-vsock too); only
+  # mkMerge: always suppress auto-start by default; only
   # define the actual service when audio is enabled.
   systemd.services.pulse-vsock = lib.mkMerge [
     { wantedBy = lib.mkForce []; }

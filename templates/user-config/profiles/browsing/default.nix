@@ -1,7 +1,7 @@
 # Browsing Profile - User Customizations
 #
 # This is layered ON TOP of Hydrix's base browsing profile.
-# Hydrix base provides: xpra forwarding, sound, graphical stack
+# Hydrix base provides: waypipe forwarding, sound, graphical stack
 # This profile adds: packages, colorscheme, styling preferences
 #
 { config, lib, pkgs, ... }:

@@ -13,9 +13,9 @@
   # =========================================================================
   # MicroVM overrides - disable heavy/unnecessary services from Hydrix base
   # =========================================================================
-  # MicroVMs use xpra for display, not a local X session.
+  # MicroVMs use waypipe for display, not a local X session.
   # Disable xsession to prevent .xsession/.xinitrc generation.
-  # Disable dunst (notifications not useful via xpra).
+  # Disable dunst (notifications not useful via waypipe).
 
   # Hardware graphics: mesa/llvmpipe for alacritty GL rendering
   hardware.graphics.enable = true;
@@ -75,7 +75,7 @@
     # Nix tools
     nh
 
-    # GUI apps (xpra forwarded)
+    # GUI apps (waypipe forwarded)
     firefox
     pywal
   ];

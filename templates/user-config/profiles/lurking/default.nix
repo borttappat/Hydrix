@@ -1,7 +1,7 @@
 # Lurking Profile - User Customizations
 #
 # This is layered ON TOP of Hydrix's base lurking profile.
-# Hydrix base provides: xpra forwarding, sound, graphical stack
+# Hydrix base provides: waypipe forwarding, sound, graphical stack
 # This profile adds: Tor, anonymous browsing packages
 #
 # EPHEMERAL by design - all data lost on restart for maximum privacy.
