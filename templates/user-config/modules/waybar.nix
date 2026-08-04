@@ -30,7 +30,7 @@ let
                 in if raw < 11 then 11 else raw;
   fontSize   = toString fontSizeNum;
   gaps        = config.hydrix.graphical.ui.gaps or 10;
-  # Pill internal padding scales with gaps (was hardcoded 3px — 0.3 solved to reproduce
+  # Pill internal padding scales with gaps (was hardcoded 3px, 0.3 solved to reproduce
   # that exact value at the previous default gaps=10).
   pillPaddingV = builtins.ceil (gaps * 0.3);
   pillPaddingH = 10;
@@ -972,6 +972,11 @@ in {
       if [ ! -f "$_dir/colors.css" ]; then
         printf '%s' ${lib.escapeShellArg defaultColorsCSS} > "$_dir/colors.css"
       fi
+
+      # Restart so structural config/style changes actually apply. waybar only
+      # hot-reloads CSS on SIGUSR2, not config. try-restart is a no-op if waybar
+      # isn't running yet (first boot, headless rebuild).
+      ${pkgs.systemd}/bin/systemctl --user try-restart waybar.service 2>/dev/null || true
     '';
 
     # Seeds waybar config files before waybar starts — guards against the race where
