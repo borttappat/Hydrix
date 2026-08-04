@@ -71,7 +71,7 @@ readonly BUILDER_BUILD_PORT=$(load_port builderBuild 14510)
 readonly BUILDER_STATUS_PORT=$(load_port builderStatus 14511)
 readonly GITSYNC_NAME="microvm-gitsync"
 
-# Router VM names — read from host-config.json so per-machine names work.
+# Router VM names, read from host-config.json so per-machine names work.
 # Falls back to the default names for fresh installs / pre-activation.
 readonly ROUTER_NAME=$(jq -r '.routerVmName // "microvm-router"' /etc/hydrix/host-config.json 2>/dev/null || echo "microvm-router")
 readonly STABLE_ROUTER_NAME=$(jq -r '.stableRouterVmName // "microvm-router-stable"' /etc/hydrix/host-config.json 2>/dev/null || echo "microvm-router-stable")
@@ -137,7 +137,7 @@ detect_current_specialisation() {
 }
 
 # Registry file: generated at activation from infra/*/meta.nix and profiles/*/meta.nix
-# All VMs declared in hydrix-config appear here — no hardcoded CID tables needed.
+# All VMs declared in hydrix-config appear here, no hardcoded CID tables needed.
 VM_REGISTRY="/etc/hydrix/vm-registry.json"
 
 # Get vsock CID for a VM.
@@ -145,7 +145,7 @@ VM_REGISTRY="/etc/hydrix/vm-registry.json"
 get_cid() {
     local vm_name="$1"
 
-    # Registry lookup — covers all VMs declared in infra/*/meta.nix or profiles/*/meta.nix.
+    # Registry lookup, covers all VMs declared in infra/*/meta.nix or profiles/*/meta.nix.
     # The registry is a static file on disk, readable even when nix-daemon is stopped.
     if [[ -f "$VM_REGISTRY" ]]; then
         local cid
@@ -173,28 +173,26 @@ get_cid() {
     echo "$cid"
 }
 
-# Infra VM CIDs — resolved from registry (infra/*/meta.nix in hydrix-config).
+# Infra VM CIDs, resolved from registry (infra/*/meta.nix in hydrix-config).
 # Fallback to reserved defaults for pre-activation / fresh installs.
 BUILDER_CID=$(get_cid "$BUILDER_NAME" 2>/dev/null || true); BUILDER_CID="${BUILDER_CID:-210}"
 GITSYNC_CID=$(get_cid "$GITSYNC_NAME" 2>/dev/null || true); GITSYNC_CID="${GITSYNC_CID:-211}"
 
-# Get static IP for a VM (.10 on its bridge subnet)
-# Derived from vm-registry.json subnet field (e.g. "192.168.103" → "192.168.103.10")
-# pentest-task* slots share the pentest subnet.
+# Get static IP for a VM (subnet.<own CID>, matches hydrix.microvm.staticIp's
+# default derivation in microvm-profile-base.nix). Using the VM's own CID as the
+# last octet keeps VMs that share a subnet (pentest + its task slots) from
+# colliding on the same address.
+# Derived from vm-registry.json (e.g. subnet "192.168.102" + cid 116 → "192.168.102.116")
 get_vm_ip() {
     local vm_name="$1"
-    local profile="${vm_name#microvm-}"
-
-    # pentest task slots share the pentest subnet
-    if [[ "$vm_name" == microvm-pentest-task* ]]; then
-        profile="pentest"
-    fi
+    local key="${vm_name#microvm-}"
 
     if [[ -f "$VM_REGISTRY" ]]; then
-        local subnet
-        subnet=$(jq -r --arg p "$profile" '.[$p].subnet // empty' "$VM_REGISTRY" 2>/dev/null || echo "")
-        if [[ -n "$subnet" ]]; then
-            echo "${subnet}.10"
+        local subnet cid
+        subnet=$(jq -r --arg k "$key" '.[$k].subnet // empty' "$VM_REGISTRY" 2>/dev/null || echo "")
+        cid=$(jq -r --arg k "$key" '.[$k].cid // empty' "$VM_REGISTRY" 2>/dev/null || echo "")
+        if [[ -n "$subnet" && -n "$cid" ]]; then
+            echo "${subnet}.${cid}"
             return
         fi
     fi
@@ -210,7 +208,7 @@ is_running() {
 
 # Check if VM is headless (no display-mode service).
 # Reads hasDisplay from the registry. VMs not in the registry default to
-# graphical (false) — task VMs and pre-activation VMs are display VMs.
+# graphical (false), task VMs and pre-activation VMs are display VMs.
 is_headless() {
     local vm_name="$1"
     if [[ -f "$VM_REGISTRY" ]]; then
@@ -289,11 +287,35 @@ wait_for_xpra() {
 cmd_build() {
     local vm_name="$1"
 
+    # Auto-provision the LUKS-encrypted home volume before building, if this VM
+    # declares hydrix.microvm.encryption.enable and doesn't have one yet. Runs
+    # first, before the lockdown-mode reroute below, since it's a pure host-side
+    # operation unrelated to what's built inside the builder VM. This also means
+    # it's already a no-op by the time cmd_builder_build's own
+    # _HYDRIX_BUILDER_FLOW=1 host-registration call reaches this same function
+    # (the file will already exist from this first pass).
+    # The `|| echo "false"` fallback makes this a no-op for VM types that don't
+    # declare hydrix.microvm.encryption at all (router/builder/infra VMs built
+    # via mkMicrovmRouter/mkMicrovmBuilder/mkInfraVm don't import
+    # microvm-profile-options.nix).
+    local luks_path="/var/lib/microvms/${vm_name}/home.luks"
+    if [[ ! -f "$luks_path" ]]; then
+        local enc_enabled
+        enc_enabled=$(nix eval --json "${FLAKE_DIR}#nixosConfigurations.${vm_name}.config.hydrix.microvm.encryption.enable" 2>/dev/null || echo "false")
+        if [[ "$enc_enabled" == "true" ]]; then
+            log "Encryption enabled for ${vm_name}, no encrypted volume found, setting one up..."
+            if ! _HYDRIX_AUTO_ENCRYPT=1 cmd_encrypt_setup "$vm_name"; then
+                log_error "Encrypted volume setup failed"
+                return 1
+            fi
+        fi
+    fi
+
     # In lockdown mode, route through builder VM (skip if already inside builder flow)
     if [[ "${_HYDRIX_BUILDER_FLOW:-}" != "1" ]] && \
        [[ "$(detect_current_specialisation)" == "lockdown" ]] && \
        ! is_builder "$vm_name"; then
-        log "Lockdown mode — routing build through builder VM"
+        log "Lockdown mode, routing build through builder VM"
         cmd_builder_build "$vm_name"
         return
     fi
@@ -493,7 +515,7 @@ cmd_start() {
         fi
     fi
 
-    # Push display mode (xpra only — waypipe mode handled above)
+    # Push display mode (xpra only, waypipe mode handled above)
     if [[ "$_waypipe_started" -eq 0 ]] && command -v vm-push-display-mode >/dev/null 2>&1; then
         vm-push-display-mode "$profile" >/dev/null 2>&1 &
         disown
@@ -513,10 +535,10 @@ cmd_start() {
         disown
     fi
 
-    # Desktop notification — waypipe mode includes workspace hint; xpra/other is generic
+    # Desktop notification, waypipe mode includes workspace hint; xpra/other is generic
     if [[ "$_waypipe_started" -eq 1 ]]; then
         notify-send -u normal "MicroVM launched" \
-            "${vm_name} ready — WS${vm_ws} apps available (Mod+Return)" 2>/dev/null || true
+            "${vm_name} ready, WS${vm_ws} apps available (Mod+Return)" 2>/dev/null || true
     else
         notify-send "MicroVM launched" "${vm_name} is ready for interaction" 2>/dev/null || true
     fi
@@ -734,7 +756,7 @@ cmd_restart() {
         fi
     fi
 
-    # Push display mode (xpra only — waypipe mode handled above)
+    # Push display mode (xpra only, waypipe mode handled above)
     if [[ "$_waypipe_started" -eq 0 ]] && command -v vm-push-display-mode >/dev/null 2>&1; then
         vm-push-display-mode "$profile" >/dev/null 2>&1 &
         disown
@@ -751,7 +773,7 @@ cmd_restart() {
     # Desktop notification
     if [[ "$_waypipe_started" -eq 1 ]]; then
         notify-send -u normal "MicroVM restarted" \
-            "${vm_name} ready — WS${vm_ws} apps available (Mod+Return)" 2>/dev/null || true
+            "${vm_name} ready, WS${vm_ws} apps available (Mod+Return)" 2>/dev/null || true
     else
         notify-send "MicroVM Ready" "${vm_name} is ready for interaction" 2>/dev/null || true
     fi
@@ -792,7 +814,7 @@ cmd_app() {
             sleep 0.5
         done
         if [[ "$ready" -eq 0 ]]; then
-            log_error "waypipe not ready in $vm_name — is waypipe-connect running?"
+            log_error "waypipe not ready in $vm_name, is waypipe-connect running?"
             return 1
         fi
         printf '%s\n' "$app_cmd" | socat -T10 - VSOCK-CONNECT:"$cid":${WAYPIPE_LAUNCH_PORT}
@@ -865,13 +887,13 @@ cmd_status() {
         echo ""
 
         if [[ ! -f "$VM_REGISTRY" ]]; then
-            echo "VM registry not found — run 'rebuild' first"
+            echo "VM registry not found, run 'rebuild' first"
             return
         fi
 
         # vm-registry.json is already host-scoped (written by 'rebuild' for
         # this machine only), so no per-machine router filtering is needed
-        # here — unlike a flake eval, which would return every machine's
+        # here, unlike a flake eval, which would return every machine's
         # nixosConfigurations.
         local declared
         declared=$(jq -r '.[] | "\(.vmName) \(.cid)"' "$VM_REGISTRY" 2>/dev/null | sort -u)
@@ -899,7 +921,7 @@ cmd_status() {
 # List declared microVMs
 cmd_list() {
     if [[ ! -f "$VM_REGISTRY" ]]; then
-        echo "VM registry not found — run 'rebuild' first"
+        echo "VM registry not found, run 'rebuild' first"
         return
     fi
     jq -r '.[].vmName' "$VM_REGISTRY" 2>/dev/null | sort -u
@@ -1192,7 +1214,7 @@ cmd_encrypt_setup() {
 
     if [[ -f "$luks_path" ]]; then
         log_error "Encrypted volume already exists at ${luks_path}"
-        log_error "Run 'microvm start ${vm_name}' — it will prompt for the passphrase"
+        log_error "Run 'microvm start ${vm_name}', it will prompt for the passphrase"
         return 1
     fi
 
@@ -1201,41 +1223,77 @@ cmd_encrypt_setup() {
         return 1
     fi
 
-    # Warn if a plain qcow2 exists (it won't be migrated)
-    if [[ -f "${vm_dir}/home.qcow2" ]]; then
-        echo -e "${YELLOW}Warning: existing home.qcow2 found at ${vm_dir}/home.qcow2${NC}"
-        echo -e "${YELLOW}It will NOT be migrated — data inside will be inaccessible after this.${NC}"
-        echo ""
-        read -p "Continue? [y/N]: " confirm
-        [[ "$confirm" =~ ^[Yy]$ ]] || { log "Aborted"; return 1; }
+    # encrypt-setup only makes sense once the VM's config actually declares
+    # encryption.enable = true, otherwise the LUKS container gets built and
+    # the next 'microvm build' just ignores it (home volume stays plain qcow2).
+    local enc_enabled
+    enc_enabled=$(nix eval --json "${FLAKE_DIR}#nixosConfigurations.${vm_name}.config.hydrix.microvm.encryption.enable" 2>/dev/null || echo "false")
+    if [[ "$enc_enabled" != "true" ]]; then
+        log_error "${vm_name} does not have hydrix.microvm.encryption.enable = true in its config"
+        log_error "Set it first (in the VM's profile/task default.nix), then run this again"
+        return 1
     fi
 
-    # Determine size: prefer explicit arg, then try to read from running config, else default
+    # Non-blocking: encryption is opt-in per-VM, so reaching this point means
+    # it's already been decided (declared in config, or cmd_build auto-invoked
+    # us), no need to gate on an extra confirmation for an existing qcow2.
+    if [[ -f "${vm_dir}/home.qcow2" ]]; then
+        log_warn "Existing home.qcow2 found at ${vm_dir}/home.qcow2, it will NOT be migrated, data inside will be inaccessible after this"
+    fi
+
+    # Determine size: prefer explicit arg, else derive from the VM's own declared
+    # persistence.homeSize. Never guess a flat default here, that's exactly what
+    # let a comms LUKS container balloon to 100GB when its real declared size is
+    # 10GB (nobody passed a size, so it silently fell back to a 100GB constant).
     if [[ -z "$size_mb" ]]; then
-        # Try to infer from the declared homeSize (written to config dir at build time)
-        local config_size
-        config_size=$(cat "${vm_dir}/config/home-size-mb" 2>/dev/null || echo "")
-        size_mb="${config_size:-102400}"
-        log "Using home volume size: ${BOLD}${size_mb} MB${NC} (pass explicit size to override)"
+        size_mb=$(nix eval --json "${FLAKE_DIR}#nixosConfigurations.${vm_name}.config.hydrix.microvm.persistence.homeSize" 2>/dev/null || echo "")
+        if [[ -z "$size_mb" ]]; then
+            log_error "Could not determine ${vm_name}'s declared homeSize from the flake"
+            log_error "Pass it explicitly: microvm encrypt-setup ${vm_name} <size_mb>"
+            return 1
+        fi
+        log "Using ${vm_name}'s declared home volume size: ${BOLD}${size_mb} MB${NC}"
+    fi
+
+    # Capture the passphrase once, twice for confirmation, then feed the same
+    # confirmed bytes to both luksFormat and the immediately-following luksOpen
+    # via stdin (--key-file=-), so cryptsetup never prompts on its own and
+    # there's no repeated/third entry.
+    log "Setting up encryption passphrase..."
+    local pass1 pass2
+    read -s -p "Enter encryption passphrase: " pass1; echo >&2
+    read -s -p "Confirm encryption passphrase: " pass2; echo >&2
+    if [[ "$pass1" != "$pass2" ]]; then
+        log_error "Passphrases do not match"
+        return 1
+    fi
+    if [[ -z "$pass1" ]]; then
+        log_error "Passphrase cannot be empty"
+        return 1
     fi
 
     log "Creating ${size_mb} MB LUKS container at ${luks_path}..."
     sudo mkdir -p "$vm_dir"
-    sudo fallocate -l "${size_mb}M" "$luks_path"
+    if ! sudo fallocate -l "${size_mb}M" "$luks_path"; then
+        sudo rm -f "$luks_path"
+        log_error "Failed to allocate ${size_mb}MB at ${luks_path} (out of disk space?)"
+        return 1
+    fi
 
-    log "Formatting LUKS container (you will be prompted to set a passphrase)..."
-    if ! sudo cryptsetup luksFormat --type luks2 "$luks_path"; then
+    log "Formatting LUKS container..."
+    if ! printf '%s' "$pass1" | sudo cryptsetup luksFormat --type luks2 --batch-mode --key-file=- "$luks_path"; then
         sudo rm -f "$luks_path"
         log_error "LUKS format failed"
         return 1
     fi
 
     log "Opening container to initialise filesystem..."
-    if ! sudo cryptsetup luksOpen "$luks_path" "$mapper_name"; then
+    if ! printf '%s' "$pass1" | sudo cryptsetup luksOpen --key-file=- "$luks_path" "$mapper_name"; then
         sudo rm -f "$luks_path"
         log_error "Could not open freshly formatted container"
         return 1
     fi
+    unset pass1 pass2
 
     log "Creating ext4 filesystem..."
     sudo mkfs.ext4 -L "vm-${vm_name}" "/dev/mapper/${mapper_name}"
@@ -1244,11 +1302,12 @@ cmd_encrypt_setup() {
     sudo cryptsetup luksClose "$mapper_name"
 
     log_success "Encrypted volume ready at ${luks_path}"
-    echo ""
-    echo -e "  ${DIM}Next steps:${NC}"
-    echo -e "  1. Add ${BOLD}encryption = true${NC} to ${BOLD}microvmHost.vms.\"${vm_name}\"${NC} in your machine config"
-    echo -e "  2. Run ${BOLD}microvm build ${vm_name}${NC} to rebuild with the encrypted volume"
-    echo -e "  3. Run ${BOLD}microvm start ${vm_name}${NC} — it will prompt for your passphrase"
+    if [[ "${_HYDRIX_AUTO_ENCRYPT:-}" != "1" ]]; then
+        echo ""
+        echo -e "  ${DIM}Next steps:${NC}"
+        echo -e "  1. Run ${BOLD}microvm build ${vm_name}${NC} to rebuild with the encrypted volume"
+        echo -e "  2. Run ${BOLD}microvm start ${vm_name}${NC}, it will prompt for your passphrase"
+    fi
 }
 
 # Get system toplevel path from current symlink
@@ -1333,7 +1392,7 @@ cmd_switch() {
     reg_start=$(timer_start)
     local reg_output
     if ! reg_output=$(nix-store -qR "$path" | xargs nix-store --dump-db | sudo tee "$reg_file" 2>&1 >/dev/null); then
-        log_error "Failed to register store paths for VM — home-manager activation may fail during switch"
+        log_error "Failed to register store paths for VM, home-manager activation may fail during switch"
         [[ -n "$reg_output" ]] && echo -e "${DIM}${reg_output}${NC}"
         return 1
     fi
@@ -1460,7 +1519,7 @@ detect_host_config() {
     local flake_dir="$FLAKE_DIR"
     local serial=""
 
-    # 1) Serial number (primary — setup-hydrix names configs by serial)
+    # 1) Serial number (primary, setup-hydrix names configs by serial)
     for path in /sys/class/dmi/id/product_serial \
                 /sys/class/dmi/id/board_serial \
                 /sys/class/dmi/id/chassis_serial; do
@@ -1530,7 +1589,7 @@ detect_host_config() {
         echo "${configs[0]}"; return
     fi
 
-    # No match — fail loudly rather than silently using hostname
+    # No match, fail loudly rather than silently using hostname
     log_error "Could not detect machine config in $flake_dir/machines/"
     log_error "Tried: serial, board_name, product_name, single-config fallback"
     return 1
@@ -1644,8 +1703,15 @@ get_vm_name_from_target() {
             echo ""
             ;;
         *)
-            # Any unrecognized name: prepend microvm- if not already prefixed
-            if [[ "$target" == microvm-* ]]; then
+            # Try engagement-name lookup (tasks/.engagement-registry) before
+            # falling back to prepending microvm-. Lets "microvm start amazon"
+            # resolve straight to microvm-pentest-task2, using the registry as
+            # the single source of truth for engagement -> slot mapping.
+            local slot
+            slot=$(pentest_find_slot "$target" 2>/dev/null)
+            if [[ -n "$slot" ]]; then
+                echo "$slot"
+            elif [[ "$target" == microvm-* ]]; then
                 echo "$target"
             else
                 echo "microvm-$target"
@@ -1680,7 +1746,7 @@ cmd_builder_build() {
         flake_target=$(resolve_builder_target "$target")
         log "Building ${BOLD}${target}${NC}..."
 
-        # Stream build output live — tee to a log file for post-build error detection.
+        # Stream build output live, tee to a log file for post-build error detection.
         # $() command substitution would buffer everything until the build finishes;
         # tee lets the while-read loop display each line as it arrives from the VM.
         local build_log
@@ -1979,7 +2045,7 @@ cmd_builder() {
 # ===== Task Pentest VM Commands =====
 # Pre-declared task slots with a shared engagement registry.
 # Slots are permanent (registered with host config). Engagements are assigned
-# to slots via this registry — no rebuild needed per engagement.
+# to slots via this registry, no rebuild needed per engagement.
 
 readonly PENTEST_TASK_SLOTS=("microvm-pentest-task1" "microvm-pentest-task2" "microvm-pentest-task3")
 
@@ -2127,10 +2193,12 @@ cmd_pentest_create() {
     # Register first (before potentially long build)
     pentest_registry_set "$slot" "$engagement"
 
-    # Build the slot closure
+    # Build the slot closure (auto-provisions the LUKS volume if the slot
+    # declares hydrix.microvm.encryption.enable and doesn't have one yet,
+    # see cmd_build's universal encryption auto-setup)
     log "Building ${slot} closure..."
     if ! cmd_build "$slot"; then
-        log_warn "Build failed — rolling back registry"
+        log_warn "Build failed, rolling back registry"
         pentest_registry_set "$slot" ""
         return 1
     fi
@@ -2167,8 +2235,10 @@ cmd_pentest_close() {
         cmd_stop "$slot"
     fi
 
-    local vol="/var/lib/microvms/${slot}/home.qcow2"
-    [[ -f "$vol" ]] && log_warn "Volume preserved at ${vol} (snapshots intact)"
+    local vol_qcow2="/var/lib/microvms/${slot}/home.qcow2"
+    local vol_luks="/var/lib/microvms/${slot}/home.luks"
+    [[ -f "$vol_qcow2" ]] && log_warn "Volume preserved at ${vol_qcow2} (snapshots intact)"
+    [[ -f "$vol_luks" ]] && log_warn "Encrypted volume preserved at ${vol_luks}"
 
     pentest_registry_set "$slot" ""
     log_success "Engagement '${engagement}' closed. Slot ${slot} is now free."
@@ -2198,12 +2268,16 @@ cmd_pentest_purge() {
         cmd_stop "$slot"
     fi
 
-    local vol="/var/lib/microvms/${slot}/home.qcow2"
-    if [[ -f "$vol" ]]; then
-        local vol_size
-        vol_size=$(du -sh "$vol" 2>/dev/null | cut -f1)
+    local vol_qcow2="/var/lib/microvms/${slot}/home.qcow2"
+    local vol_luks="/var/lib/microvms/${slot}/home.luks"
+    if [[ -f "$vol_qcow2" || -f "$vol_luks" ]]; then
         echo -e "${YELLOW}This will delete all data for engagement ${BOLD}${engagement}${NC}${YELLOW} in ${slot}:${NC}"
-        echo -e "  Volume: ${vol} (${vol_size})"
+        if [[ -f "$vol_qcow2" ]]; then
+            echo -e "  Volume: ${vol_qcow2} ($(du -sh "$vol_qcow2" 2>/dev/null | cut -f1))"
+        fi
+        if [[ -f "$vol_luks" ]]; then
+            echo -e "  Encrypted volume: ${vol_luks} ($(du -sh "$vol_luks" 2>/dev/null | cut -f1))"
+        fi
         echo ""
     fi
 
@@ -2213,7 +2287,8 @@ cmd_pentest_purge() {
         [[ "$confirm" != "yes" ]] && { log "Aborted"; return 1; }
     fi
 
-    [[ -f "$vol" ]] && sudo rm -f "$vol"
+    [[ -f "$vol_qcow2" ]] && sudo rm -f "$vol_qcow2"
+    [[ -f "$vol_luks" ]] && sudo rm -f "$vol_luks"
     pentest_registry_set "$slot" ""
     log_success "Engagement '${engagement}' purged. Slot ${slot} is now free."
 }
@@ -2734,7 +2809,7 @@ cmd_files_transfer() {
     vsock_send "$dst_cid" "$VM_AGENT_PORT" "CLEANUP" >/dev/null 2>&1
     files_vm_send "CLEANUP_TMP xfer.enc" >/dev/null 2>&1
 
-    # Discard passphrase (already done — was only in local var)
+    # Discard passphrase (already done, was only in local var)
     passphrase=""
 
     # Stop files VM if we started it for this transfer
@@ -2861,7 +2936,7 @@ ${BOLD}COMMANDS${NC}
 
 ${BOLD}SECURITY${NC}
     - Passphrase generated fresh per operation (openssl rand -base64 32)
-    - Passphrase travels ONLY via vsock — never over bridge networks
+    - Passphrase travels ONLY via vsock, never over bridge networks
     - File content on bridges is always encrypted ciphertext
     - SHA256 verified at every hop before passphrase is released
     - Source files always remain at their original path

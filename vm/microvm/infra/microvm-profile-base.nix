@@ -19,7 +19,7 @@ let
   vmName = config.hydrix.vm.storeName;
   vmCollectInterval = config.hydrix.vmMetrics.vmCollectInterval;
 
-  # Compiled metrics server — zero shell/binary execs at runtime.
+  # Compiled metrics server, zero shell/binary execs at runtime.
   # Reads /proc directly; serves snapshot over vsock:14501.
   # Source lives alongside this file as vm-metrics.c.
   metricsServerBin = pkgs.runCommand "vm-metrics-server" {
@@ -63,7 +63,7 @@ in {
     ./vm-switch.nix
 
     # hydrix.microvm.* option declarations (also imported standalone by
-    # hydrix.lib.mkVM for libvirt/disk-image builds — see that file's header).
+    # hydrix.lib.mkVM for libvirt/disk-image builds, see that file's header).
     ./microvm-profile-options.nix
   ];
 
@@ -125,11 +125,11 @@ in {
       deflateOnOOM = true;  # Give memory back to guest if it's running low
 
       # ===== Virtiofs tuning =====
-      # Default spawns `nproc` threads per share — wasteful when idle
+      # Default spawns `nproc` threads per share, wasteful when idle
       virtiofsd.threadPoolSize = 2;
       # Use auto cache mode: kernel re-validates on mtime change, keeping
       # mutable shares (wal colors, hydrix-config) coherent with the host.
-      # /nix/store files have stable mtimes so they stay cached indefinitely —
+      # /nix/store files have stable mtimes so they stay cached indefinitely,
       # no regression vs "always" for immutable data.
       virtiofsd.extraArgs = [ "--cache" "auto" ];
 
@@ -170,7 +170,7 @@ in {
           readOnly = true;
         }
       ] ++ [
-        # Host secrets directory — always mounted; host pre-creates for all enabled VMs.
+        # Host secrets directory, always mounted; host pre-creates for all enabled VMs.
         # Empty when no secrets are provisioned (vms.<name>.secrets = [] in machine config).
         # VM-side provisioning service checks for file existence before copying.
         {
@@ -492,13 +492,14 @@ in {
     ];
 
     # ===== Networking =====
-    # Derive staticIp from vmSubnet if not explicitly set.
+    # Derive staticIp from vmSubnet + the VM's own CID if not explicitly set.
     # vmSubnet is always set from meta.nix via hydrix.networking.vmSubnet = meta.subnet.
-    # This means profile VMs get the correct .10 IP regardless of which subnet they're on,
-    # without needing any override in hydrix-config profiles.
+    # Using the CID (already globally unique) as the last octet, rather than a flat
+    # ".10", means VMs that intentionally share one subnet (pentest + its task slots)
+    # each get a distinct address instead of colliding on the same static IP.
     hydrix.microvm.staticIp = lib.mkDefault (
       let subnet = config.hydrix.networking.vmSubnet;
-      in if subnet != "" then "${subnet}.10" else null
+      in if subnet != "" then "${subnet}.${toString config.hydrix.microvm.vsockCid}" else null
     );
 
     networking.useDHCP = lib.mkDefault (config.hydrix.microvm.staticIp == null);
@@ -648,7 +649,7 @@ EOF
     };
 
     # ===== GitHub SSH key provisioning =====
-    # Always runs — checks for file existence before copying.
+    # Always runs, checks for file existence before copying.
     # Keys are only present when vms.<name>.secrets includes "github" in machine config.
     systemd.services.hydrix-secrets-provision = {
       description = "Provision GitHub SSH key from host secrets";
