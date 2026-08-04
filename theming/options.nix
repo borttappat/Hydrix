@@ -772,8 +772,8 @@ in {
 
       dunstOffset = lib.mkOption {
         type = lib.types.int;
-        default = 300;
-        description = "Dunst offset from screen edge";
+        default = 5;
+        description = "Dunst notification offset from screen edge, added to ui.gaps on both axes";
       };
 
       dunstEnablePopup = lib.mkOption {
