@@ -376,11 +376,39 @@ do_build() {
     local target="$1"
     local spec="${2:-}"
     # Always build the BASE profile (no -s) so specialisations are preserved
-    # nh -s sets the system profile to the specialisation closure directly,
-    # which loses all other specialisations from the profile
+    # correctly. nh -s DOES keep the sibling specialisations reachable inside
+    # the built closure, but it activates by pointing /run/current-system
+    # directly at the specialisation's own store path instead of going
+    # through <base>/specialisation/<name>/ - that breaks the invariant
+    # switch-to-configuration's unit-restart diffing relies on (confirmed:
+    # after `nh os switch -s administrative`, /etc/NIXOS_SPECIALISATION was
+    # missing and no systemd unit, including home-manager, was restarted
+    # despite the config having changed on disk).
     local verb="switch"
     $TEST_MODE && verb="test"
-    local nh_args=("os" "$verb" "$FLAKE_DIR" "-H" "$target")
+
+    # The base pass only needs to register the profile generation (+
+    # bootloader entry outside test mode); it must never live-activate,
+    # since that activation is immediately superseded by the specialisation's
+    # own activation below. boot/build instead of switch/test here means
+    # home-manager (and anything it manages, e.g. waybar) activates once per
+    # rebuild instead of twice.
+    local base_verb="$verb"
+    local out_link=""
+    if [[ -n "$spec" ]]; then
+        if $TEST_MODE; then
+            # test mode never touches the persistent profile, so the base
+            # closure's specialisation dir has to be found via an explicit
+            # result link instead of /nix/var/nix/profiles/system
+            base_verb="build"
+            out_link="$(mktemp -d)/result"
+        else
+            base_verb="boot"
+        fi
+    fi
+
+    local nh_args=("os" "$base_verb" "$FLAKE_DIR" "-H" "$target")
+    [[ -n "$out_link" ]] && nh_args+=("-o" "$out_link")
     local exit_code
     local extra_nix_args=("--impure")
 
@@ -402,44 +430,49 @@ do_build() {
     # Stream output in real-time while capturing for activation check
     local tmpfile
     tmpfile=$(mktemp)
-    trap "rm -f '$tmpfile'" RETURN
+    local cleanup="rm -f '$tmpfile'"
+    [[ -n "$out_link" ]] && cleanup="$cleanup; rm -rf '$(dirname "$out_link")'"
+    trap "$cleanup" RETURN
 
     nh "${nh_args[@]}" 2>&1 | tee "$tmpfile" && exit_code=0 || exit_code=${PIPESTATUS[0]}
 
-    local activation_failure=false
     if [[ $exit_code -ne 0 ]]; then
-        # Distinguish build failure from activation failure
-        # Activation failures still leave a valid system profile that we can switch to
-        if grep -q "Activation.*failed\|warning: the following units failed" "$tmpfile"; then
-            activation_failure=true
-            log "Activation had non-fatal failures (continuing with specialisation switch)"
-        else
-            err "Build failed (exit $exit_code)"
-            return $exit_code
-        fi
+        # base_verb is always boot/build (never activates), so a nonzero
+        # exit here is unambiguously a build/bootloader failure
+        err "Build failed (exit $exit_code)"
+        return $exit_code
     fi
 
-    # Re-attach TAPs to bridges (activation may have recreated bridges)
+    # Re-attach TAPs to bridges (bootloader install may have touched them)
     restore_network
 
     # If a specialisation was requested, activate it after the base profile is set
     # This preserves all specialisations in the system profile while activating the right one
     if [[ -n "$spec" ]]; then
-        local spec_path="/nix/var/nix/profiles/system/specialisation/${spec}"
+        local spec_path
+        if [[ -n "$out_link" ]]; then
+            spec_path="${out_link}/specialisation/${spec}"
+        else
+            spec_path="/nix/var/nix/profiles/system/specialisation/${spec}"
+        fi
         if [[ -d "$spec_path" ]]; then
             log "Activating specialisation: $spec"
-            sudo "$spec_path/bin/switch-to-configuration" "$verb"
+            # This is the only live activation of the rebuild, so its exit
+            # code is the real activation-failure signal.
+            if sudo "$spec_path/bin/switch-to-configuration" "$verb"; then
+                :
+            elif $IGNORE_ACTIVATION; then
+                log "Specialisation activation had failures (ignored, -i)"
+            else
+                err "Specialisation activation failed (use -i to suppress)"
+                return 1
+            fi
             # Re-attach again after specialisation switch
             restore_network
         else
             err "Specialisation '$spec' not found at $spec_path"
             return 1
         fi
-    fi
-
-    if $activation_failure && ! $IGNORE_ACTIVATION; then
-        err "Warning: activation had failures (use -i to suppress)"
-        return 1
     fi
 
     return 0
