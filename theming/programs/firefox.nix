@@ -47,7 +47,7 @@ let
   fontCfg = config.hydrix.graphical.font;
   fontName = fontCfg.family;
   # Use override if set, otherwise scale base size by firefox relation
-  fontSize = fontCfg.overrides.firefox or (builtins.floor (fontCfg.size * (fontCfg.relations.firefox or 1.5)));
+  fontSize = fontCfg.overrides.firefox or (builtins.floor (fontCfg.size * (fontCfg.relations.firefox or 1.2)));
   headerFontSize = fontCfg.overrides.firefoxHeader or (builtins.floor (fontCfg.size * 1.9));
 
   # DPI-aware Firefox launcher - reads scale factor from scaling.json at runtime

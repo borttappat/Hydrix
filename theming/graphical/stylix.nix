@@ -149,7 +149,7 @@ in {
         terminal = fontCfg.size;
         applications = fontCfg.size;
         desktop = fontCfg.size;
-        popups = builtins.floor (fontCfg.size * (fontCfg.relations.rofi or 1.2));
+        popups = builtins.floor (fontCfg.size * 1.2);
       };
     };
 

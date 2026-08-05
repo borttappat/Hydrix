@@ -31,12 +31,6 @@
     # ui.opacity.active           = lib.mkDefault 1.0;
     # ui.opacity.inactive         = lib.mkDefault 1.0;
     # ui.opacity.exclude          = lib.mkDefault [ "Alacritty" "feh" "Feh" "firefox" "Firefox" "mpv" "vlc" ];
-    # ui.opacity.rules            = lib.mkDefault { "Polybar" = 95; };
-
-    # ─── Compositor (picom) ────────────────────────────────────────────
-    # ui.compositor.animations = lib.mkDefault "modern";  # "none" or "modern"
-    # ui.shadowRadius          = lib.mkDefault 18;
-    # ui.shadowOffset          = lib.mkDefault 17;
 
     # ─── Keyboard remapping ────────────────────────────────────────────
     # keyboard.xmodmap = lib.mkDefault ''
@@ -51,10 +45,6 @@
     # scaling.referenceDpi        = lib.mkDefault 96;
     # scaling.standaloneScaleFactor = lib.mkDefault 1.0;        # scale in VM standalone mode
     # scaling.applyOnLogin        = lib.mkDefault true;
-
-    # ─── VM resource bar (inside VMs) ──────────────────────────────────
-    # vmBar.enable   = lib.mkDefault true;
-    # vmBar.position = lib.mkDefault "bottom";
 
     # ─── Blue light filter ─────────────────────────────────────────────
     # bluelight.enable       = lib.mkDefault true;

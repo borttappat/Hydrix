@@ -39,8 +39,7 @@
     #
     # relations = lib.mkDefault {
     #   alacritty = 1.0;
-    #   polybar   = 1.0;
-    #   rofi      = 1.0;
+    #   wofi      = 1.0;
     #   dunst     = 1.0;
     #   firefox   = 1.2;
     #   gtk       = 1.0;
@@ -55,7 +54,7 @@
     # Use a different font for specific apps while keeping the main family elsewhere.
     #
     # familyOverrides = lib.mkDefault {
-    #   polybar = "Tamzen";
+    #   wofi = "Tamzen";
     # };
 
     # ─── Fixed size overrides (bypass DPI scaling) ─────────────────────
@@ -64,11 +63,6 @@
     #
     # overrides = lib.mkDefault {
     #   alacritty = 10.5;
-    # };
-
-    # Per-app maximum size caps (clamp after DPI scaling)
-    # maxSizes = lib.mkDefault {
-    #   polybar = 13;
     # };
   };
 }

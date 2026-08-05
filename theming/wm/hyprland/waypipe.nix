@@ -25,8 +25,7 @@ let
   vmSelectFontFamily = config.hydrix.graphical.font.family;
   vmSelectWofiSize   = let
     base     = config.hydrix.graphical.font.size;
-    relation = config.hydrix.graphical.font.relations.wofi or
-               config.hydrix.graphical.font.relations.rofi or 1.0;
+    relation = config.hydrix.graphical.font.relations.wofi or 1.0;
     raw      = builtins.floor (base * relation);
   in toString (if raw < 11 then 11 else raw);
   vmSelectCornerRadius = let ui = config.hydrix.graphical.ui;

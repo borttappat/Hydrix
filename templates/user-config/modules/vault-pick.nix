@@ -15,8 +15,7 @@ let
   fontFamily = config.hydrix.graphical.font.family;
   wofiSize   = let
     base     = config.hydrix.graphical.font.size;
-    relation = config.hydrix.graphical.font.relations.wofi or
-               config.hydrix.graphical.font.relations.rofi or 1.0;
+    relation = config.hydrix.graphical.font.relations.wofi or 1.0;
     raw      = builtins.floor (base * relation);
   in toString (if raw < 11 then 11 else raw);
   wofiCornerRadius = let ui = config.hydrix.graphical.ui;

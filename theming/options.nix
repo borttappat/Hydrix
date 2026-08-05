@@ -1,6 +1,6 @@
 # Hydrix Theming Options
 #
-# Graphical environment, window managers (i3, Hyprland, Sway), fonts, scaling.
+# Graphical environment, Hyprland, fonts, scaling.
 # Imported for any system with a graphical environment.
 {
   config,
@@ -402,8 +402,6 @@ in {
         type = lib.types.attrsOf lib.types.float;
         default = {
           alacritty = 1.0;
-          polybar = 1.0;
-          rofi = 1.0;
           dunst = 1.0;
           firefox = 1.2;
           gtk = 1.0;
@@ -442,34 +440,10 @@ in {
         '';
       };
 
-      maxSizes = lib.mkOption {
-        type = lib.types.attrsOf lib.types.number;
-        default = {};
-        example = {
-          alacritty = 10.5;
-          polybar = 13;
-        };
-        description = ''
-          Per-app maximum font size caps. Calculated sizes are clamped
-          to these values after DPI scaling. Useful for bitmap fonts
-          that only render well up to specific sizes.
-        '';
-      };
-
       familyOverrides = lib.mkOption {
         type = lib.types.attrsOf lib.types.str;
         default = {};
         description = "Font family overrides per app";
-      };
-
-      polybarFontFlags = lib.mkOption {
-        type = lib.types.str;
-        default = "";
-        description = ''
-          Extra XFT font flags appended after the font name in polybar font declarations.
-          Used by font profiles to encode rendering requirements (e.g. Tamzen needs
-          ":fontformat=truetype:antialias=false"). Empty string for smooth fonts like Iosevka.
-        '';
       };
 
       packages = lib.mkOption {
@@ -523,7 +497,7 @@ in {
       layout = lib.mkOption {
         type = lib.types.str;
         default = "us";
-        description = "XKB keyboard layout for Wayland compositors (Hyprland, Sway). E.g. 'us', 'se', 'de'.";
+        description = "XKB keyboard layout for Hyprland. E.g. 'us', 'se', 'de'.";
         example = "se";
       };
 
@@ -595,24 +569,6 @@ in {
         description = "Bar height (base value, also used by dunst positioning)";
       };
 
-      barHeightRelation = lib.mkOption {
-        type = lib.types.float;
-        default = 1.0;
-        description = "Polybar height multiplier";
-      };
-
-      barHeightFamilyRelations = lib.mkOption {
-        type = lib.types.attrsOf lib.types.float;
-        default = {};
-        description = "Per-font bar height multipliers (profiles set defaults via mkDefault)";
-      };
-
-      polybarFontOffset = lib.mkOption {
-        type = lib.types.int;
-        default = 3;
-        description = "Polybar font vertical offset (adjusts text centering in bar)";
-      };
-
       barPadding = lib.mkOption {
         type = lib.types.int;
         default = 2;
@@ -639,8 +595,8 @@ in {
 
       cornerRadius = lib.mkOption {
         type = lib.types.int;
-        default = 2;
-        description = "Picom corner radius";
+        default = 1;
+        description = "Window corner radius";
       };
 
       workspaceLabels = lib.mkOption {
@@ -664,18 +620,6 @@ in {
         type = lib.types.attrsOf lib.types.str;
         default = {};
         description = "Per-workspace descriptions";
-      };
-
-      shadowRadius = lib.mkOption {
-        type = lib.types.int;
-        default = 18;
-        description = "Picom shadow radius";
-      };
-
-      shadowOffset = lib.mkOption {
-        type = lib.types.int;
-        default = 17;
-        description = "Picom shadow offset";
       };
 
       opacity = {
@@ -715,11 +659,6 @@ in {
           description = "Per-app overrides for overlay opacity";
         };
 
-        rules = lib.mkOption {
-          type = lib.types.attrsOf lib.types.int;
-          default = {"Polybar" = 95;};
-          description = "Custom opacity rules per window class";
-        };
       };
 
       rofiWidth = lib.mkOption {
@@ -749,7 +688,7 @@ in {
       dunstEnablePopup = lib.mkOption {
         type = lib.types.bool;
         default = false;
-        description = "Enable dunst notification popups (set false to use polybar module only)";
+        description = "Enable dunst notification popups";
       };
 
       dunstSound = lib.mkOption {
@@ -783,25 +722,6 @@ in {
           type = lib.types.int;
           default = 0;
           description = "Seconds before critical-urgency notifications expire. 0 = never.";
-        };
-      };
-
-      # Compositor settings
-      compositor = {
-        enable = lib.mkOption {
-          type = lib.types.bool;
-          default = true;
-          description = "Enable compositor (picom) for shadows, rounded corners, and animations.";
-        };
-
-        animations = lib.mkOption {
-          type = lib.types.enum ["none" "modern"];
-          default = "modern";
-          description = ''
-            Picom animation mode:
-            - none: Standard picom with fading only (xrender, no blur)
-            - modern: Picom v12 with bouncy animations (xrender, overshoot curves)
-          '';
         };
       };
 
@@ -936,35 +856,6 @@ in {
         description = "Reference DPI for base values";
       };
 
-      swayInternalOutput = lib.mkOption {
-        type = lib.types.str;
-        default = "eDP-1";
-        description = "Name of the internal display output in sway (from `swaymsg -t get_outputs`).";
-      };
-
-      swayInternalScale = lib.mkOption {
-        type = lib.types.nullOr lib.types.float;
-        default = null;
-        example = 1.25;
-        description = ''
-          Scale factor for the internal display only (does not affect external monitors).
-          Higher values → fewer logical pixels.
-          1.25 on 1920×1200 → 1536×960 logical. 1.5 → 1280×800 logical.
-          Takes priority over swayInternalMode when both are set.
-        '';
-      };
-
-      swayInternalMode = lib.mkOption {
-        type = lib.types.nullOr lib.types.str;
-        default = null;
-        example = "1280x800";
-        description = ''
-          Hardware resolution mode for the internal display only (does not affect external monitors).
-          Sets the actual pixel mode via `output <name> mode <WxH>`.
-          The display must support the requested mode.
-        '';
-      };
-
       hyprInternalOutput = lib.mkOption {
         type = lib.types.str;
         default = "eDP-1";
@@ -991,20 +882,6 @@ in {
       };
     };
 
-    # VM Bar (bottom bar with resource metrics inside VMs)
-    vmBar = {
-      enable = lib.mkOption {
-        type = lib.types.bool;
-        default = true;
-        description = "Enable bottom polybar inside VMs showing resource usage";
-      };
-
-      position = lib.mkOption {
-        type = lib.types.enum ["bottom"];
-        default = "bottom";
-        description = "Position of the VM resource bar";
-      };
-    };
 
     # Lockscreen
     lockscreen = {

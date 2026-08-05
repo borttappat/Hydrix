@@ -295,10 +295,6 @@
       #   };
       # '';
 
-      # ─── Sway display scaling ──────────────────────────────────────────
-      # scaling.swayInternalScale  = 1.25;
-      # scaling.swayInternalOutput = "eDP-1";   # DEFAULT: "eDP-1"
-
       # ─── Lockscreen ────────────────────────────────────────────────────
       # lockscreen.idleTimeout = 600;   # DEFAULT: 600 seconds
       # lockscreen.text      = "Locked";
