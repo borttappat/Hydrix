@@ -883,6 +883,15 @@ cmd_status() {
             fi
             printf "  %-30s %-18s %-6s\n" "$vm" "$status" "$cid"
         done <<< "$declared"
+
+        local orphans_raw orphan_count=0
+        if orphans_raw=$(_gc_find_orphans 2>/dev/null); then
+            orphan_count=$(echo "$orphans_raw" | grep -c . || true)
+        fi
+        if [[ "$orphan_count" -gt 0 ]]; then
+            echo ""
+            echo -e "  ${YELLOW}${orphan_count} orphaned VM director$([[ "$orphan_count" -eq 1 ]] && echo y || echo ies) with no matching flake VM${NC} - run ${BOLD}microvm gc${NC} to review"
+        fi
     fi
 }
 
@@ -1164,6 +1173,32 @@ cmd_purge() {
     echo -e "  ${DIM}The VM will start fresh with a new home volume.${NC}"
 }
 
+# Prints orphaned VM directory names (one per line): dirs under /var/lib/microvms/
+# with no matching nixosConfiguration in the current flake. Shared by cmd_gc
+# (interactive) and cmd_gc_check (cache-writing, for waybar/eww). Returns 1 if
+# the flake couldn't be evaluated at all (caller decides how to handle that).
+_gc_find_orphans() {
+    local declared
+    declared=$(nix eval --json "${FLAKE_DIR}#nixosConfigurations" --apply builtins.attrNames 2>/dev/null) || return 1
+
+    local dir name
+    for dir in /var/lib/microvms/*/; do
+        [[ -d "$dir" ]] || continue
+        name=$(basename "$dir")
+        echo "$declared" | jq -e --arg n "$name" 'index($n) != null' >/dev/null 2>&1 || echo "$name"
+    done
+}
+
+# Writes orphan count + names to a cache file for waybar/eww to read cheaply
+# (they poll far more often than a fresh `nix eval` is worth doing). Called
+# periodically by the hydrix-gc-check user timer; never deletes anything.
+cmd_gc_check() {
+    local cache="/tmp/hydrix-gc-status"
+    local orphans_json
+    orphans_json=$(_gc_find_orphans 2>/dev/null | jq -R . | jq -cs '{"count": length, "names": .}')
+    echo "$orphans_json" > "${cache}.tmp" && mv "${cache}.tmp" "$cache"
+}
+
 # List (and optionally remove) /var/lib/microvms/<name>/ directories with no
 # corresponding nixosConfiguration in the current flake - leftovers from renamed,
 # removed, or one-off test VMs. Dry-run by default; deletes only with confirmation.
@@ -1171,21 +1206,17 @@ cmd_gc() {
     local force="${1:-}"
 
     log "Checking declared VMs against ${FLAKE_DIR}#nixosConfigurations..."
-    local declared
-    declared=$(nix eval --json "${FLAKE_DIR}#nixosConfigurations" --apply builtins.attrNames 2>/dev/null) || {
+    local orphans_raw
+    if ! orphans_raw=$(_gc_find_orphans); then
         log_error "Could not evaluate nixosConfigurations from ${FLAKE_DIR}"
         return 1
-    }
+    fi
 
     local orphans=()
-    local dir name
-    for dir in /var/lib/microvms/*/; do
-        [[ -d "$dir" ]] || continue
-        name=$(basename "$dir")
-        if ! echo "$declared" | jq -e --arg n "$name" 'index($n) != null' >/dev/null 2>&1; then
-            orphans+=("$name")
-        fi
-    done
+    local name
+    while IFS= read -r name; do
+        [[ -n "$name" ]] && orphans+=("$name")
+    done <<< "$orphans_raw"
 
     if [[ ${#orphans[@]} -eq 0 ]]; then
         log_success "No orphaned VM directories found."
@@ -3243,6 +3274,11 @@ main() {
             ;;
         gc)
             cmd_gc "${1:-}"
+            ;;
+        gc-check)
+            # Internal: cache-writing mode for the hydrix-gc-check timer, not
+            # meant for interactive use (no output, never prompts).
+            cmd_gc_check
             ;;
         encrypt-setup)
             [[ $# -lt 1 ]] && { log_error "Usage: microvm encrypt-setup <name> [size_mb]"; exit 1; }

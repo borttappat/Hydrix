@@ -164,6 +164,22 @@
     '';
   };
 
+  # Polling script: reads the cache /tmp/hydrix-gc-status, refreshed every
+  # 30min by the hydrix-gc-check user timer (see host/microvm/default.nix) -
+  # never runs `nix eval` itself, matching the waybar gc-status module.
+  ewwGcStatus = pkgs.writeShellApplication {
+    name = "eww-gc-status";
+    runtimeInputs = [pkgs.jq pkgs.coreutils];
+    text = ''
+      cache="/tmp/hydrix-gc-status"
+      if [ -f "$cache" ]; then
+        cat "$cache"
+      else
+        echo '{"count":0,"names":[]}'
+      fi
+    '';
+  };
+
   # Polling script: queries wifi-sync vsock 14506.
   ewwRouterStats = pkgs.writeShellApplication {
     name = "eww-router-stats";
@@ -232,6 +248,11 @@
       :initial "{\"wan\":{\"iface\":\"\",\"down\":\"\",\"up\":\"\"},\"vms\":[]}"
       `eww-net-stats`)
 
+    (defpoll gc_status
+      :interval "10s"
+      :initial "{\"count\":0,\"names\":[]}"
+      `eww-gc-status`)
+
     (defwindow left-overlay
       :monitor 0
       :geometry (geometry
@@ -249,7 +270,7 @@
         :orientation "v"
         :space-evenly false
         :spacing 10
-        :visible {router_stats.current != "" || arraylength(vm_status.running) > 0}
+        :visible {router_stats.current != "" || arraylength(vm_status.running) > 0 || gc_status.count > 0}
         (vm-status-widget)
         (exit-nodes-widget)
         (router-widget)))
@@ -327,10 +348,15 @@
         :orientation "v"
         :space-evenly false
         :spacing 0
-        :visible {arraylength(vm_status.running) > 0}
+        :visible {arraylength(vm_status.running) > 0 || gc_status.count > 0}
         (label
           :class "vs-title"
           :text "VMS"
+          :halign "start")
+        (label
+          :class {gc_status.count > 0 ? "vs-pending unsaved" : "vs-pending"}
+          :visible {gc_status.count > 0}
+          :text {"+" + gc_status.count + " orphaned (microvm gc)"}
           :halign "start")
         (for vm in {vm_status.running}
           (vm-row-running :vm vm))
@@ -497,6 +523,10 @@
       margin-bottom: 4px;
     }
 
+    .vs-pending.unsaved {
+      color: $color1;
+    }
+
     .vm-row {
       margin-top: 3px;
     }
@@ -554,7 +584,7 @@
 in
   lib.mkIf config.hydrix.hyprland.enable {
     home-manager.users.${username} = {lib, ...}: {
-      home.packages = [pkgs.eww ewwWgStatus ewwMvmStatus ewwRouterStats ewwNetStats ewwLeftWatcher];
+      home.packages = [pkgs.eww ewwWgStatus ewwMvmStatus ewwRouterStats ewwNetStats ewwGcStatus ewwLeftWatcher];
 
       home.activation.ewwConfig = lib.hm.dag.entryAfter ["writeBoundary"] ''
         _dir="$HOME/.config/eww"

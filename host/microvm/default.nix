@@ -58,10 +58,10 @@
   # to "infra" so they stay coupled with no special-casing here.
   vmClass = name: cfg.vmClasses.${name} or "infra";
   isCoupled = name: vmCfg:
-    # allVms merges plain-attrset knownVms defaults with cfg.vms submodule
-    # instances via `//`; names not explicitly declared in cfg.vms fall
-    # through to the plain attrset and never gained a `coupled` key, hence
-    # the `or null` rather than assuming the field is always present.
+  # allVms merges plain-attrset knownVms defaults with cfg.vms submodule
+  # instances via `//`; names not explicitly declared in cfg.vms fall
+  # through to the plain attrset and never gained a `coupled` key, hence
+  # the `or null` rather than assuming the field is always present.
     if (vmCfg.coupled or null) != null
     then vmCfg.coupled
     else if builtins.elem (vmClass name) ["profile" "task"]
@@ -766,8 +766,34 @@ in {
               ''}";
             };
           })
-          decoupledAutostartVMs)
+        decoupledAutostartVMs)
       ];
+    })
+
+    # Periodically refreshes /tmp/hydrix-gc-status (orphaned VM directory count)
+    # for waybar/eww to read cheaply. `microvm gc` itself always checks live -
+    # this cache exists purely because a fresh `nix eval` on every 10-30s UI
+    # poll would be wasteful; orphans don't appear or disappear that often.
+    # User-level (not system) service: runs as the logged-in user so
+    # detect_flake_dir()'s $USER/$HOME fallback in scripts/microvm resolves
+    # naturally, and shares /tmp with the waybar/eww processes reading the cache.
+    (lib.mkIf cfg.enable {
+      systemd.user.services.hydrix-gc-check = {
+        description = "Refresh orphaned microVM directory cache";
+        serviceConfig = {
+          Type = "oneshot";
+          ExecStart = "${pkgs.writeShellScriptBin "microvm" (builtins.readFile ../../scripts/microvm)}/bin/microvm gc-check";
+        };
+      };
+
+      systemd.user.timers.hydrix-gc-check = {
+        description = "Periodic orphaned microVM directory check";
+        wantedBy = ["timers.target"];
+        timerConfig = {
+          OnStartupSec = "30s";
+          OnUnitActiveSec = "30min";
+        };
+      };
     })
   ];
 }

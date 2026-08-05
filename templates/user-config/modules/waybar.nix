@@ -371,6 +371,22 @@
     fi
   '';
 
+  # Reads the cache /tmp/hydrix-gc-status, refreshed every 30min by the
+  # hydrix-gc-check user timer (see host/microvm/default.nix) — never runs
+  # `nix eval` itself, that would be too expensive for a UI poll interval.
+  gcStatusScript = pkgs.writeShellScript "waybar-gc-status" ''
+    CACHE="/tmp/hydrix-gc-status"
+    [ -f "$CACHE" ] || exit 0
+    count=$(${pkgs.jq}/bin/jq -r '.count // 0' "$CACHE" 2>/dev/null) || exit 0
+    [ "$count" -eq 0 ] && exit 0
+    names=$(${pkgs.jq}/bin/jq -r '.names | join(", ")' "$CACHE" 2>/dev/null)
+    ${pkgs.jq}/bin/jq -cn \
+      --arg t "GC +$count" \
+      --arg tt "$count orphaned VM dir(s): $names — run: microvm gc" \
+      --arg c "unsaved" \
+      '{"text":$t,"tooltip":$tt,"class":$c}'
+  '';
+
   batteryTimeScript = pkgs.writeShellScript "waybar-battery-time" ''
     status=$(cat /sys/class/power_supply/BAT*/status 2>/dev/null | head -1)
     [ "$status" != "Discharging" ] && exit 0
@@ -716,6 +732,7 @@
       "custom/vm-fs"
       "custom/sep"
       "custom/wifi-sync"
+      "custom/gc-status"
       "custom/vm-tun"
       "custom/vm-up"
     ];
@@ -836,6 +853,14 @@
       escape = false;
       "return-type" = "json";
     };
+    "custom/gc-status" = {
+      exec = "${gcStatusScript}";
+      interval = 60;
+      format = "{}";
+      tooltip = true;
+      escape = false;
+      "return-type" = "json";
+    };
   };
 
   monoBar = {
@@ -885,6 +910,7 @@
       "custom/vm-tun"
       "custom/sep"
       "custom/wifi-sync"
+      "custom/gc-status"
       "custom/sep"
       "custom/clock"
     ];
@@ -1096,6 +1122,14 @@
       escape = false;
       "return-type" = "json";
     };
+    "custom/gc-status" = {
+      exec = "${gcStatusScript}";
+      interval = 60;
+      format = "{}";
+      tooltip = true;
+      escape = false;
+      "return-type" = "json";
+    };
   };
 
   configJson = builtins.toJSON (
@@ -1192,7 +1226,8 @@
     #custom-vm-sync-stg,
     #custom-vm-tun,
     #custom-vm-up,
-    #custom-wifi-sync {
+    #custom-wifi-sync,
+    #custom-gc-status {
       background: @background;
       color: @foreground;
       border: none;
@@ -1239,7 +1274,8 @@
     #custom-vm-sync-stg,
     #custom-vm-tun,
     #custom-vm-up,
-    #custom-wifi-sync { color: @color6; }
+    #custom-wifi-sync,
+    #custom-gc-status { color: @color6; }
 
     /* Hover: invert any pill */
     #custom-clock:hover,
@@ -1272,7 +1308,8 @@
     #custom-vm-sync-stg:hover,
     #custom-vm-tun:hover,
     #custom-vm-up:hover,
-    #custom-wifi-sync:hover {
+    #custom-wifi-sync:hover,
+    #custom-gc-status:hover {
       background: alpha(@foreground, 0.9);
       color: @background;
       transition: 0.3s;
