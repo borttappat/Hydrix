@@ -42,18 +42,14 @@ templates/user-config/               # Becomes ~/hydrix-config/
 │   ├── alacritty.nix                # Terminal cursor, keyboard overrides
 │   ├── dunst.nix                    # Notification dimensions, urgency colors
 │   ├── ranger.nix                   # File manager keybindings, rifle rules
-│   ├── rofi.nix                     # Launcher dimensions, key bindings
 │   ├── starship.nix                 # Prompt (TOML inlined as Nix string)
 │   ├── vim.nix                      # Editor (vimrc inlined as Nix string)
 │   ├── firefox.nix                  # Host Firefox toggle, user-agent spoofing
 │   ├── obsidian.nix                 # Host Obsidian toggle, vault CSS deployment
 │   ├── hyprland.nix                 # Hyprland keybindings and extra rules
 │   ├── waybar.nix                   # Waybar module layout and styling
-│   ├── polybar.nix                  # Polybar style, module layout (i3 only)
-│   ├── i3.nix                       # i3 keybindings
 │   ├── helix.nix                    # Helix editor config
 │   ├── eww.nix                      # eww widget daemon (exit-nodes, vm-status overlay)
-│   ├── sway.nix                     # Sway keybindings
 │   ├── tor-hardening.nix            # Tor anonymity module (import in lurking profile)
 │   ├── vault.nix                    # Vault VM host-side integration (import in machine)
 │   ├── vault-cli.nix                # vault-cli and vault-pick tools
@@ -139,9 +135,7 @@ templates/user-config/               # Becomes ~/hydrix-config/
   hydrix.hostname    = lib.mkDefault "hydrix";
   hydrix.colorscheme = lib.mkDefault "@COLORSCHEME@";
 
-  hydrix.hyprland.enable = lib.mkDefault true;   # enable exactly one WM
-  # hydrix.sway.enable   = lib.mkDefault false;
-  # hydrix.i3.enable     = lib.mkDefault false;
+  hydrix.hyprland.enable = lib.mkDefault true;
 
   hydrix.services.tailscale.enable = lib.mkDefault false;
 }

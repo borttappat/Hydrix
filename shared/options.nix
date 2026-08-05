@@ -316,7 +316,7 @@ in {
             label = lib.mkOption {
               type = lib.types.str;
               default = "";
-              description = "Short display label (e.g. OFFICE) used in polybar workspace-desc";
+              description = "Short display label (e.g. OFFICE) used in waybar workspace-desc";
             };
             hasDisplay = lib.mkOption {
               type = lib.types.bool;
@@ -334,7 +334,7 @@ in {
         description = ''
           Build-time VM registry, keyed by profile name. Written to
           /etc/hydrix/vm-registry.json at activation. All runtime
-          tooling (scripts, polybar) reads from there instead of
+          tooling (scripts, waybar) reads from there instead of
           hardcoded CID maps.
         '';
       };

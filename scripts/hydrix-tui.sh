@@ -750,17 +750,17 @@ show_router_menu() {
 
         case "$sel" in
             "Start MicroVM"*)
-                # Router doesn't have xpra, use systemctl directly
+                # Router is headless, no waypipe/display forwarding, use systemctl directly
                 sudo systemctl start microvm@microvm-router.service
                 log_action ok "MicroVM router started"
                 ;;
             "Stop MicroVM"*)
-                # Router doesn't have xpra, use systemctl directly
+                # Router is headless, no waypipe/display forwarding, use systemctl directly
                 sudo systemctl stop microvm@microvm-router.service 2>/dev/null || true
                 log_action ok "MicroVM router stopped"
                 ;;
             "Restart MicroVM"*)
-                # Router doesn't have xpra, use systemctl directly
+                # Router is headless, no waypipe/display forwarding, use systemctl directly
                 sudo systemctl restart microvm@microvm-router.service 2>/dev/null || true
                 log_action ok "MicroVM router restarted"
                 ;;

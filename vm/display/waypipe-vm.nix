@@ -145,7 +145,7 @@ in {
 
   # Force Electron apps (Signal, VS Code, etc.) to use native Wayland.
   # Without this, Electron defaults to Xwayland which bypasses waypipe's
-  # title-prefix injection, so Sway's for_window rules never match and
+  # title-prefix injection, so Hyprland's windowrule never matches and
   # windows land on the wrong workspace (or don't appear at all).
   environment.sessionVariables = {
     ELECTRON_OZONE_PLATFORM_HINT = "auto";

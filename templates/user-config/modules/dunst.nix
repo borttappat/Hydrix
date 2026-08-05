@@ -7,7 +7,7 @@
 { lib, ... }:
 
 {
-  # Enable popup display (required for Hyprland/Sway)
+  # Enable popup display
   hydrix.graphical.ui.dunstEnablePopup = lib.mkDefault true;
 
   # Notification popup width (pixels)

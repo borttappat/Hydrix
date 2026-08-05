@@ -84,7 +84,7 @@ in {
     staleThreshold = lib.mkOption {
       type = lib.types.int;
       default = 15;
-      description = "Seconds before a cached metric file is considered stale by polybar modules.";
+      description = "Seconds before a cached metric file is considered stale by waybar modules.";
       example = 10;
     };
   };

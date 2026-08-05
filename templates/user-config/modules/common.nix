@@ -25,7 +25,7 @@
   services.xserver.xkb.layout     = lib.mkDefault "@XKB_LAYOUT@";
   services.xserver.xkb.variant    = lib.mkDefault "@XKB_VARIANT@";
 
-  # Wire the same keyboard layout into Hyprland / Sway (Wayland compositors).
+  # Wire the same keyboard layout into Hyprland.
   # Overriding hydrix.graphical.keyboard.xkbFile in machines/<serial>.nix takes
   # precedence and is used for custom keymaps (e.g. the § → ~ remap).
   hydrix.graphical.keyboard.layout  = lib.mkDefault "@XKB_LAYOUT@";

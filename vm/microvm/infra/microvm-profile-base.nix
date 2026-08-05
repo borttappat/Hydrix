@@ -10,7 +10,7 @@
 # - Full graphical stack (Stylix theming, HM programs, fonts, colors)
 #
 # The graphical modules handle VM vs host differences internally via isVM checks
-# (picom disabled, mod key adjusted, xsession adapted for VMs).
+# (mod key adjusted, xsession adapted for VMs).
 # Graphical is enabled by default (opt-out with hydrix.graphical.enable = false).
 #
 { config, lib, pkgs, modulesPath, ... }:

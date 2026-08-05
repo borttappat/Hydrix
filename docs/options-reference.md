@@ -1084,7 +1084,7 @@ Mount host `/nix/store` as read-only virtiofs share. Enabled automatically for a
 
 Options in this section cover:
 - `hydrix.graphical.*` — display, scaling, UI, lockscreen, bluelight
-- `hydrix.i3.enable` / `hydrix.sway.enable` / `hydrix.hyprland.enable`
+- `hydrix.hyprland.enable`
 - `hydrix.graphical.font.*`
 - `hydrix.graphical.ui.*`
 - `hydrix.graphical.firefox.*`

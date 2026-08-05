@@ -517,7 +517,7 @@ cmd_start() {
         notify-send "MicroVM launched" "${vm_name} is ready for interaction" 2>/dev/null || true
     fi
 
-    # Register task pentest slots as the active pentest VM for polybar/rofi
+    # Register task pentest slots as the active pentest VM for waybar/vm-select
     if [[ "$vm_name" == microvm-pentest-task* ]]; then
         local active_vms_file="$HOME/.cache/hydrix/active-vms.json"
         mkdir -p "$(dirname "$active_vms_file")"
