@@ -1,14 +1,17 @@
 # Universal System Defaults
 # Applied to all Hydrix systems: host, microVMs, QEMU VMs.
 # All values use lib.mkDefault so any module can override with plain assignment.
-{ config, pkgs, lib, ... }:
-
 {
+  config,
+  pkgs,
+  lib,
+  ...
+}: {
   # Use latest Nix with git support
   nix.package = lib.mkDefault pkgs.nixVersions.git;
 
   nix.settings = {
-    experimental-features = [ "nix-command" "flakes" ];
+    experimental-features = ["nix-command" "flakes"];
     auto-optimise-store = lib.mkDefault true;
     download-buffer-size = lib.mkDefault 524288000;
     max-jobs = lib.mkDefault "auto";
@@ -48,7 +51,7 @@
   # Boot settings
   boot = {
     kernelPackages = lib.mkDefault pkgs.linuxPackages_latest;
-    kernelParams = lib.mkDefault [ "quiet" "loglevel=3" ];
+    kernelParams = lib.mkDefault ["quiet" "loglevel=3"];
     kernel.sysctl = {
       "kernel.sysrq" = lib.mkDefault 1;
       "vm.swappiness" = lib.mkDefault 10;
@@ -82,8 +85,18 @@
 
   # File descriptor limits — nix builds and nix-daemon open many files concurrently
   security.pam.loginLimits = [
-    { domain = "*"; type = "soft"; item = "nofile"; value = "524288"; }
-    { domain = "*"; type = "hard"; item = "nofile"; value = "524288"; }
+    {
+      domain = "*";
+      type = "soft";
+      item = "nofile";
+      value = "524288";
+    }
+    {
+      domain = "*";
+      type = "hard";
+      item = "nofile";
+      value = "524288";
+    }
   ];
   systemd.services.nix-daemon.serviceConfig.LimitNOFILE = lib.mkDefault 524288;
 
@@ -91,7 +104,4 @@
 
   # Firmware
   hardware.enableAllFirmware = lib.mkDefault true;
-
-  # State version default — override per machine in machines/<serial>.nix
-  system.stateVersion = lib.mkDefault "25.05";
 }

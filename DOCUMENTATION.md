@@ -228,16 +228,56 @@ Generated at NixOS activation from all profile `meta.nix` files. Every runtime t
 
 ```json
 {
-  "pentest":  { "vmName": "microvm-pentest",  "cid": 102, "bridge": "br-pentest",  "subnet": "192.168.102", "workspace": 2, "label": "PENTEST",  "focusBorder": "orange" },
-  "browsing": { "vmName": "microvm-browsing", "cid": 103, "bridge": "br-browse",   "subnet": "192.168.103", "workspace": 3, "label": "BROWSING", "focusBorder": "yellow" },
-  "comms":    { "vmName": "microvm-comms",    "cid": 104, "bridge": "br-comms",    "subnet": "192.168.104", "workspace": 4, "label": "COMMS",    "focusBorder": "green"  },
-  "office":   { "vmName": "microvm-office",   "cid": 107, "bridge": "br-office",   "subnet": "192.168.107", "workspace": 7, "label": "OFFICE",   "focusBorder": null     }
+  "pentest":  { "vmName": "microvm-pentest-mb-ux5406sa",  "cid": 102, "bridge": "br-pentest",  "subnet": "192.168.102", "workspace": 2, "label": "PENTEST",  "focusBorder": "orange" },
+  "browsing": { "vmName": "microvm-browsing-mb-ux5406sa", "cid": 103, "bridge": "br-browse",   "subnet": "192.168.103", "workspace": 3, "label": "BROWSING", "focusBorder": "yellow" },
+  "comms":    { "vmName": "microvm-comms-mb-ux5406sa",    "cid": 104, "bridge": "br-comms",    "subnet": "192.168.104", "workspace": 4, "label": "COMMS",    "focusBorder": "green"  },
+  "office":   { "vmName": "microvm-office-mb-ux5406sa",   "cid": 107, "bridge": "br-office",   "subnet": "192.168.107", "workspace": 7, "label": "OFFICE",   "focusBorder": null     }
 }
 ```
+
+The registry **key** (`"pentest"`, `"browsing"`, ...) is the stable, short profile name -
+always the same regardless of machine. The `vmName` field is that machine's real, current
+`nixosConfiguration` name (`microvm-<profile>-<serial>`, one per machine - see
+[§ VM Naming and Machine Identity](#vm-naming-and-machine-identity)); it's what every tool
+resolves at runtime, and it's the only field here that varies by machine.
 
 **Convention: `vsockCid` = subnet last octet = workspace number.** All three use the same number. Custom profiles start at CID 107+. Reserved: 200 (router), 201 (router-stable), 209 (usb-sandbox), 210 (builder), 211 (gitsync), 212 (files), 213 (vault), 214 (hostsync).
 
 Each entry drives: compositor border rules, workspace-desc label, `hypr-ws-app`/`vm-select` workspace -> VM routing, focus menu, `vm-sync` profile targeting, and file transfer IP resolution.
+
+### VM Naming and Machine Identity
+
+Every profile VM (browsing, pentest, dev, comms, lurking, and any custom profile) and every
+task VM (task1-3) is its own **per-machine** `nixosConfiguration` - `microvm-<profile>-<serial>`
+(e.g. `microvm-browsing-mb-ux5406sa`), the same pattern the router VM has always used
+(`microvm-router-<serial>`). A machine with two profiles and the router therefore has three
+independent nixosConfigurations under the hood, not one shared across every machine declared
+in your flake.
+
+**You never need to know or type `<serial>`.** The `microvm` CLI (and `microvm builder`)
+resolve short names - `browsing`, `pentest`, `task1`, ... - dynamically against
+`/etc/hydrix/vm-registry.json`'s `vmName` field for *this* machine, every time. `microvm start
+browsing` on one machine and the same command on a different machine each correctly resolve
+to that machine's own VM - the short form is not a shortcut for a fixed name, it's the actual
+stable interface. Typing the raw `nixosConfigurations` attribute directly (`.#nixosConfigurations
+.microvm-browsing...`) still works if you need it (e.g. scripting, `nix build`), but requires
+knowing the current machine's serial, which the short form exists specifically to avoid.
+
+**Why per-machine at all:** each profile VM's `system.stateVersion` (see
+[§ System State Version](#system-state-version)) and any machine-specific
+`hydrix.microvmHost.profileOverrides`/`vms.<name>.encryption` setting must apply to *that
+machine's* build only - a second machine with a different `stateVersion` or a different
+webcam passthrough VID/PID must not affect the first machine's VMs. Making each profile VM a
+real per-machine `nixosConfiguration` is what makes that isolation actual rather than
+accidental (with a single shared name across machines, one machine's overrides would leak
+into every other machine's build of the same profile).
+
+**Infra VMs are the exception, deliberately.** Router/router-stable are per-machine for a
+different, older reason (VFIO WiFi PCI address is inherently per-machine hardware). Builder,
+files, gitsync, hostsync, usb-sandbox, and vault stay a single name shared across every
+machine - they hold no persistent state (see
+[§ Infra VM Persistence Model](#infra-vm-persistence-model)), so there is nothing
+machine-specific to isolate.
 
 ### VM Static IP Scheme
 
@@ -255,11 +295,11 @@ The table below shows the Hydrix built-in profile **defaults**, your `meta.nix` 
 
 | VM | Default Bridge | Default Static IP |
 |----|---------------|------------------|
-| `microvm-pentest` | `br-pentest` | `<subnet>.10` |
-| `microvm-browsing` | `br-browse` | `<subnet>.10` |
-| `microvm-comms` | `br-comms` | `<subnet>.10` |
-| `microvm-dev` | `br-dev` | `<subnet>.10` |
-| `microvm-lurking` | `br-lurking` | `<subnet>.10` |
+| `pentest` | `br-pentest` | `<subnet>.10` |
+| `browsing` | `br-browse` | `<subnet>.10` |
+| `comms` | `br-comms` | `<subnet>.10` |
+| `dev` | `br-dev` | `<subnet>.10` |
+| `lurking` | `br-lurking` | `<subnet>.10` |
 
 Each VM configures this IP on its main TAP interface via systemd-networkd. The Files VM derives the destination IP for each VM from the vm-registry (`subnet + ".10"`) at transfer time.
 
@@ -393,15 +433,20 @@ microvm builder stop        # Stop builder (restarts host nix-daemon)
 
 | Target | Resolves To | Purpose |
 |--------|-------------|---------|
-| `browsing` | `microvm-browsing` | Browsing VM |
-| `pentest` | `microvm-pentest` | Pentest VM |
-| `dev` | `microvm-dev` | Dev VM |
-| `comms` | `microvm-comms` | Comms VM |
-| `lurking` | `microvm-lurking` | Lurking VM |
-| `router` | `microvm-router` | Router VM |
-| `builder` | `microvm-builder` | Builder VM itself |
+| `browsing` | `microvm-browsing-<serial>` (this machine, resolved from vm-registry.json) | Browsing VM |
+| `pentest` | `microvm-pentest-<serial>` | Pentest VM |
+| `dev` | `microvm-dev-<serial>` | Dev VM |
+| `comms` | `microvm-comms-<serial>` | Comms VM |
+| `lurking` | `microvm-lurking-<serial>` | Lurking VM |
+| `task1` / `task2` / `task3` | `microvm-pentest-task<N>-<serial>` | Task pentest slots |
+| `router` | `microvm-router-<serial>` | Router VM |
+| `builder` | `microvm-builder` | Builder VM itself (shared, not per-machine) |
 | `host` | Host system | Host NixOS configuration |
-| `.#path` | Raw flake path | e.g., `.#nixosConfigurations.microvm-dev` |
+| `.#path` | Raw flake path | e.g., `.#nixosConfigurations.microvm-dev-<serial>` |
+
+`<serial>` is your current machine's hardware serial - you never type it yourself, these
+targets resolve it automatically. See
+[§ VM Naming and Machine Identity](#vm-naming-and-machine-identity).
 
 **How it works:**
 
@@ -418,9 +463,9 @@ microvm builder stop        # Stop builder (restarts host nix-daemon)
 microvm builder shell
 
 # Inside builder shell:
-nix flake metadata           # Check flake inputs
-nix build .#microvm-browsing # Manual build
-exit                         # Return to host
+nix flake metadata                        # Check flake inputs
+nix build .#microvm-browsing-<serial>     # Manual build (use your machine's serial)
+exit                                       # Return to host
 ```
 
 **Builder status:**
@@ -576,23 +621,24 @@ curl -sL https://raw.githubusercontent.com/borttappat/Hydrix/main/scripts/instal
 
 The installer will:
 1. **Auto-detect hardware**: CPU (Intel/AMD), WiFi PCI address, ASUS features, hardware serial
-2. **Prompt for identity**: Username, colorscheme, disk, WiFi credentials - written to `modules/user.nix` and `modules/common.nix`
-3. **Detect locale**: Timezone, keyboard layout, and locale read from the running system - written into `modules/common.nix`
-4. **Partition disk**: GPT with EFI, optional LUKS encryption via disko
-5. **Generate config** in `~/hydrix-config/`:
+2. **Detect `system.stateVersion`**: read from the live ISO's own running NixOS release (`nixos-version`) - see [§ System State Version](#system-state-version)
+3. **Prompt for identity**: Username, colorscheme, disk, WiFi credentials - written to `modules/user.nix` and `modules/common.nix`
+4. **Detect locale**: Timezone, keyboard layout, and locale read from the running system - written into `modules/common.nix`
+5. **Partition disk**: GPT with EFI, optional LUKS encryption via disko
+6. **Generate config** in `~/hydrix-config/`:
    - `flake.nix` - Main flake importing Hydrix
-   - `machines/<serial>.nix` - Hardware config (platform, VFIO, disko, display scaling)
+   - `machines/<serial>.nix` - Hardware config (platform, VFIO, disko, display scaling, `system.stateVersion`)
    - `modules/user.nix` - Shared identity: username, colorscheme, WM choice, services
    - `modules/common.nix` - Shared locale, timezone, keyboard (applies to host and all VMs)
    - `specialisations/` - Boot mode configurations
    - `profiles/`, `infra/`, `tasks/` - VM configs copied from templates
-6. **Pre-build infrastructure VMs**: `microvm-router`, `microvm-router-stable`, `microvm-builder`
+7. **Pre-build infrastructure VMs**: `microvm-router-<serial>`, `microvm-router-stable-<serial>`, `microvm-builder`
 
-Profile VMs (`microvm-browsing`, `microvm-pentest`, `microvm-dev`, `microvm-comms`, `microvm-lurking`) are **not** built during install. Build them on demand after first boot:
+Profile VMs (browsing, pentest, dev, comms, lurking) are **not** built during install. Build them on demand after first boot:
 
 ```bash
-microvm build microvm-browsing
-microvm build microvm-pentest
+microvm build browsing
+microvm build pentest
 # etc.
 ```
 
@@ -600,11 +646,13 @@ On first boot:
 - **Router starts automatically** (controlled by `router.autostart = true`)
 - **Other VMs are declared but not started** - build them on demand
 
-To customize VMs per-machine, edit `machines/<serial>.nix`:
+To customize VMs per-machine, edit `machines/<serial>.nix`. Profile/task VMs are per-machine
+nixosConfigurations (see [§ VM Naming and Machine Identity](#vm-naming-and-machine-identity)),
+so their `vms` key here carries this machine's own serial:
 
 ```nix
 { config, ... }: {
-  hydrix.microvmHost.vms."microvm-pentest".enable = false;  # Disable if not needed
+  hydrix.microvmHost.vms."microvm-pentest-<serial>".enable = false;  # Disable if not needed
 }
 ```
 
@@ -633,7 +681,7 @@ hydrix.microvmHost.profileOverrides = {
 ./scripts/setup-hydrix.sh
 ```
 
-This auto-detects your current system configuration and generates a minimal Hydrix config preserving your existing disk layout. Same three installer modes apply - if `~/hydrix-config/` already exists, it detects the serial and selects add or use-existing automatically.
+This auto-detects your current system configuration and generates a minimal Hydrix config preserving your existing disk layout. Same three installer modes apply - if `~/hydrix-config/` already exists, it detects the serial and selects add or use-existing automatically. `system.stateVersion` is read from your existing `/etc/nixos/configuration.nix` (prompting for manual entry if that line isn't found), never re-detected from the currently running release - see [§ System State Version](#system-state-version).
 
 ### Adding a Machine to an Existing Config
 
@@ -777,34 +825,51 @@ Hydrix auto-detects your config with this priority:
 
   outputs = { hydrix, ... }:
   let
+    machineName = "ABC123XYZ";  # this machine's hardware serial
     userProfiles = ./profiles;  # Your profile customizations
-  in {
-    nixosConfigurations."ABC123XYZ" = hydrix.lib.mkHost {
-      modules = [ ./machines/ABC123XYZ.nix ];
+    machineConfig = hydrix.lib.mkHost {
+      modules = [ ./machines/${machineName}.nix ];
     };
+    # Every VM belonging to this machine inherits its system.stateVersion directly -
+    # see § System State Version. Never set stateVersion per-VM.
+    stateVersionModule = { system.stateVersion = machineConfig.config.system.stateVersion; };
+  in {
+    nixosConfigurations."${machineName}" = machineConfig;
 
-    # MicroVMs with user profiles overlaid on Hydrix base
+    # MicroVMs with user profiles overlaid on Hydrix base.
+    # Profile VMs are per-machine nixosConfigurations, named "microvm-<profile>-<machineName>"
+    # (the router follows the same pattern below) - see § VM Naming and Machine Identity.
     # hostname = the nixosConfiguration key; sets hydrix.vm.storeName (structural, do not change)
     # To customise the in-VM hostname, set hydrix.vm.hostname in profiles/<name>/default.nix
-    nixosConfigurations."microvm-browsing" = hydrix.lib.mkMicroVM {
+    nixosConfigurations."microvm-browsing-${machineName}" = hydrix.lib.mkMicroVM {
       profile = "browsing";
-      hostname = "microvm-browsing";
+      hostname = "microvm-browsing-${machineName}";
+      modules = [ stateVersionModule ];
       inherit userProfiles;  # Your customizations in ./profiles/browsing/
     };
 
-    nixosConfigurations."microvm-pentest" = hydrix.lib.mkMicroVM {
+    nixosConfigurations."microvm-pentest-${machineName}" = hydrix.lib.mkMicroVM {
       profile = "pentest";
-      hostname = "microvm-pentest";
+      hostname = "microvm-pentest-${machineName}";
+      modules = [ stateVersionModule ];
       inherit userProfiles;
     };
 
-    # Infrastructure VMs (not user-configurable)
-    nixosConfigurations."microvm-router"        = hydrix.lib.mkMicrovmRouter { inherit wifiPciAddress; };
-    nixosConfigurations."microvm-router-stable" = hydrix.lib.mkMicrovmRouterStable { inherit wifiPciAddress; };
-    nixosConfigurations."microvm-builder"       = hydrix.lib.mkMicrovmBuilder {};
+    # Infrastructure VMs. Router is per-machine too (VFIO WiFi PCI address is inherently
+    # per-machine hardware); the rest are shared across every machine in the flake since
+    # they hold no state that would need isolating (not user-configurable either way).
+    nixosConfigurations."microvm-router-${machineName}"        = hydrix.lib.mkMicrovmRouter { inherit wifiPciAddress; };
+    nixosConfigurations."microvm-router-stable-${machineName}" = hydrix.lib.mkMicrovmRouterStable { inherit wifiPciAddress; };
+    nixosConfigurations."microvm-builder"                      = hydrix.lib.mkMicrovmBuilder {};
   };
 }
 ```
+
+This single-machine example spells names out directly for clarity. The real generated
+`flake.nix` (see [§ Generated Configuration Structure](#generated-configuration-structure))
+auto-discovers every machine under `machines/*.nix` and loops profile/task VM generation over
+`machine × profile`, so adding a second machine to a real Hydrix config needs no changes to
+this wiring at all - just a new `machines/<serial>.nix` file.
 
 ### Library Functions
 
@@ -842,6 +907,42 @@ All configuration is done through `hydrix.*` options in your machine config file
   };
 }
 ```
+
+### System State Version
+
+Every machine config declares a plain, native `system.stateVersion` (not under `hydrix.*` -
+this is standard NixOS, not a Hydrix option):
+
+```nix
+# machines/<serial>.nix
+system.stateVersion = "25.05";
+```
+
+This is detected **once**, automatically, and is never meant to change afterward - per the
+[NixOS manual](https://nixos.org/manual/nixos/stable/options.html#opt-system.stateVersion),
+bumping it can silently change defaults for stateful services, so it should always reflect
+when this specific machine was originally installed, not whatever release it happens to be
+running today.
+
+- **`install-hydrix.sh`** (fresh install): reads the live ISO's own running NixOS release
+  (`nixos-version`), since there's no prior install to preserve a value from.
+- **`setup-hydrix.sh`** (migrating an existing install): reads the value already declared in
+  the machine's existing `/etc/nixos/configuration.nix`, carrying it forward as-is. If that
+  file has no `system.stateVersion` line, you're prompted to enter it manually.
+- Neither script ever derives it from the framework's own currently-pinned nixpkgs channel -
+  that would defeat the purpose (a machine installed years ago on an older release must keep
+  its original value even after `nix flake update` moves the whole fleet forward).
+
+**Every profile VM and task VM belonging to a machine inherits that machine's
+`system.stateVersion` automatically** - each VM's build gets it injected directly in
+`flake.nix` (`{ system.stateVersion = machineConfigs.<name>.config.system.stateVersion; }`),
+the same way each VM inherits its own per-machine identity (see
+[§ VM Naming and Machine Identity](#vm-naming-and-machine-identity)). You never set
+`system.stateVersion` per-VM, and a second machine with a different value only ever affects
+its own VMs. Infra VMs (router-stable, builder, files, gitsync, hostsync, usb-sandbox, vault)
+don't participate in this at all - they're ephemeral (see
+[§ Infra VM Persistence Model](#infra-vm-persistence-model)), so there's no stateful service
+config to protect from drifting.
 
 ### Locale and Timezone
 
@@ -915,13 +1016,13 @@ hydrix.webcamPassthrough = {
 };
 ```
 
-This sets a udev rule granting `kvm` group ownership of the device node and injects QEMU USB passthrough args into the target VM via `microvmHost.profileOverrides`.
+This sets a udev rule granting `kvm` group ownership of the device node and injects QEMU USB passthrough args into the target VM via `microvmHost.profileOverrides`. Since profile VMs are per-machine (see [§ VM Naming and Machine Identity](#vm-naming-and-machine-identity)), `profileOverrides` applies only to *this* machine's build of the target VM - a second machine's VID/PID never leaks into another machine's comms VM.
 
 **The passthrough is exclusive.** The webcam is unavailable on the host while the VM is running. To temporarily restore host access:
 
 ```bash
-microvm stop microvm-comms   # host reclaims webcam
-microvm start microvm-comms  # webcam returns to VM
+microvm stop comms   # host reclaims webcam
+microvm start comms  # webcam returns to VM
 ```
 
 After enabling, rebuild the host (applies udev rule), then rebuild the VM:
@@ -1033,7 +1134,7 @@ In legacy mode, credentials live in `modules/wifi.nix` as WPA PSK hashes and are
 ```bash
 wifi-sync add "NetworkName" "password"   # saves hash to wifi.nix
 rebuild
-microvm restart microvm-router
+microvm restart router
 ```
 
 The router's `/var/lib` is ephemeral, so a plain restart is enough - no `microvm purge` needed.
@@ -1069,7 +1170,7 @@ Then apply:
 
 ```bash
 rebuild
-microvm purge microvm-router --force && mvm rebuild router
+microvm purge router --force && mvm rebuild router
 ```
 
 After this the router VM receives credentials at boot via virtiofs - they are never baked into the Nix store and survive purges cleanly.
@@ -1116,29 +1217,29 @@ Advanced networking options (rarely needed):
   hydrix.microvmHost = {
     enable = true;
 
-    # Customizable VM names (defaults shown)
-    vmNames = {
-      browse = "microvm-browsing";
-      hack = "microvm-pentest";
-      dev = "microvm-dev";
-      comms = "microvm-comms";
-      lurk = "microvm-lurking";
-      build = "microvm-builder";
-      router = "microvm-router";
-    };
-
+    # Per-VM overrides: only declare autostart/secrets/encryption/coupled you actually
+    # want to change - every VM is enabled by default without an entry here at all.
+    # Profile/task VM keys carry this machine's own serial (see § VM Naming and Machine
+    # Identity); infra VM keys (builder, gitsync, files, ...) stay bare/shared.
     vms = {
-      microbrowse = { enable = true; autostart = false; };
-      microhack = { enable = true; };
-      microdev = { enable = true; secrets = [ "github" ]; };
-      microcomms = { enable = true; };
-      microlurk = { enable = true; };
+      "microvm-browsing-<serial>" = { autostart = false; };
+      "microvm-pentest-<serial>"  = { enable = true; };
+      "microvm-dev-<serial>"      = { enable = true; secrets = [ "github" ]; };
+      "microvm-comms-<serial>"    = { enable = true; };
+      "microvm-lurking-<serial>"  = { enable = true; };
     };
   };
 
   hydrix.builder.enable = true;      # Builder VM for lockdown mode builds
 }
 ```
+
+`hydrix.microvmHost.vmNames` also exists (`.router`/`.routerStable` only) but it's internal
+wiring the flake sets for you - it's how the router's per-machine name gets threaded into
+the host module, not a user customization surface. There's no equivalent for profile/task
+VM names: those are always `microvm-<profile>-<serial>` and are never user-renameable, since
+that fixed pattern is exactly what lets the short-form CLI (`microvm start browsing`) resolve
+them.
 
 #### Coupled vs Decoupled VMs
 
@@ -1157,7 +1258,7 @@ the default:
 
 ```nix
 # Per VM, in a machine config: overrides the class default either direction.
-hydrix.microvmHost.vms."microvm-dev".coupled = true;
+hydrix.microvmHost.vms."microvm-dev-<serial>".coupled = true;
 
 # Repo-wide, in the user flake: flips the default for ALL profile/task VMs at once.
 # A per-VM `coupled` override above still wins over this either way.
@@ -1490,10 +1591,11 @@ hydrix.secrets = {
   };
 };
 
-# Per-VM opt-in: only listed VMs receive each secret type
-hydrix.microvmHost.vms."microvm-browsing".secrets = [ "discord" ];
-hydrix.microvmHost.vms."microvm-router".secrets   = [ "wifi" ];
-hydrix.microvmHost.vms."microvm-dev".secrets      = [ "github" ];
+# Per-VM opt-in: only listed VMs receive each secret type. Profile/task VM keys carry
+# this machine's own serial (router already did); infra VMs (gitsync, etc.) stay bare.
+hydrix.microvmHost.vms."microvm-browsing-<serial>".secrets = [ "discord" ];
+hydrix.microvmHost.vms."microvm-router-<serial>".secrets   = [ "wifi" ];
+hydrix.microvmHost.vms."microvm-dev-<serial>".secrets      = [ "github" ];
 ```
 
 Each entry in `hydrix.secrets.files` auto-generates a `hydrix-sops-decrypt-<name>.service` on the host. Secrets are decrypted to `/run/secrets/<name>/` and provisioned to each VM's virtiofs share at `/run/hydrix-secrets/<vmname>/<vmDir>/`. Inside the VM they appear at `/mnt/vm-secrets/<vmDir>/`.
@@ -1541,7 +1643,7 @@ When the content of a secrets file changes (new network, updated password, etc.)
 
 ```bash
 sudo systemctl restart hydrix-sops-decrypt-wifi
-sudo systemctl restart hydrix-secrets-microvm-router
+sudo systemctl restart hydrix-secrets-microvm-router-<serial>
 # The router VM sees the change immediately via virtiofs.
 # If the VM has a consuming oneshot service, restart it too:
 # (inside router VM) systemctl restart hydrix-wifi-from-sops
@@ -1941,12 +2043,38 @@ microvm snapshot create <name> <snap>  # Create snapshot
 microvm snapshot list <name>           # List snapshots
 microvm snapshot revert <name> <snap>  # Revert to snapshot
 microvm purge <name>                   # Delete all data (fresh start)
+microvm gc                             # List/delete orphaned VM directories (see below)
 
 # Encrypted home volume
 microvm encrypt-setup <name>           # First-time setup (run once, VM must be stopped)
 microvm start <name>                   # Prompts for passphrase, then starts normally
 microvm stop <name>                    # Stops VM and locks volume automatically
 ```
+
+### Cleaning Up Orphaned VM Directories (`microvm gc`)
+
+`/var/lib/microvms/<name>/` directories are never deleted automatically - renaming a
+profile, removing one from `hydrix-config/profiles/`, or one-off test VMs all leave
+behind a directory with no corresponding `nixosConfiguration` anymore. `microvm gc`
+finds and (with confirmation) removes them:
+
+```bash
+microvm gc          # Dry-run: lists orphaned directories with size + last-modified date
+microvm gc --force  # Skip the confirmation prompt
+```
+
+**How it decides what's orphaned:** it evaluates `nix eval .#nixosConfigurations
+--apply builtins.attrNames` (cheap - just enumerates flake output keys, no build) and
+diffs that against `ls /var/lib/microvms/`. Any directory whose name isn't a currently
+declared VM is flagged. This means removing a profile's directory under
+`hydrix-config/profiles/<name>/` and rebuilding is enough - its old
+`/var/lib/microvms/microvm-<name>-<serial>/` state is automatically caught on the next
+`microvm gc` run, with no manual bookkeeping needed.
+
+Deliberately **on-demand only** - no timer, not part of `rebuild` - the same reasoning
+`microvm purge` already follows: VM data shouldn't disappear without a human explicitly
+asking. It will stop a matching VM first if one happens to still be running under an
+orphaned name before removing its directory.
 
 ### Encrypted Home Volumes
 
@@ -1963,19 +2091,19 @@ Persistent home volumes can be LUKS-encrypted so data is locked at rest whenever
 
 ```bash
 # 1. Stop the VM if running
-microvm stop microvm-pentest
+microvm stop pentest
 
 # 2. Create the LUKS container (prompts for passphrase, formats ext4 inside)
-microvm encrypt-setup microvm-pentest
+microvm encrypt-setup pentest
 
 # 3. Enable in your VM profile (hydrix-config/profiles/pentest/default.nix):
 #    hydrix.microvm.encryption.enable = true;
 
 # 4. Rebuild to point the VM at the encrypted volume
-microvm build microvm-pentest
+microvm build pentest
 
 # 5. Start - passphrase prompt appears before QEMU launches
-microvm start microvm-pentest
+microvm start pentest
 ```
 
 **Notes:**
@@ -2003,11 +2131,14 @@ Declared in `hydrix-config/profiles/<name>/meta.nix`, auto-discovered by the fla
 
 | Name | CID | WS | Bridge | Subnet | Persistence |
 |------|-----|----|--------|--------|-------------|
-| `microvm-pentest` | 102 | 2 | br-pentest | 192.168.102 | persistent, LUKS-encrypted |
-| `microvm-browsing` | 103 | 3 | br-browse | 192.168.103 | 10GB home |
-| `microvm-comms` | 104 | 4 | br-comms | 192.168.104 | Ephemeral |
-| `microvm-dev` | 105 | 5 | br-dev | 192.168.105 | 50GB + 20GB docker |
-| `microvm-lurking` | 106 | 6 | br-lurking | 192.168.106 | Ephemeral |
+| `pentest` | 102 | 2 | br-pentest | 192.168.102 | persistent, LUKS-encrypted |
+| `browsing` | 103 | 3 | br-browse | 192.168.103 | 10GB home |
+| `comms` | 104 | 4 | br-comms | 192.168.104 | persistent |
+| `dev` | 105 | 5 | br-dev | 192.168.105 | 50GB + 20GB docker |
+| `lurking` | 106 | 6 | br-lurking | 192.168.106 | Ephemeral |
+
+Each is actually its own per-machine `microvm-<name>-<serial>` nixosConfiguration - see
+[§ VM Naming and Machine Identity](#vm-naming-and-machine-identity).
 
 Custom profiles start at CID 107+. Use `new-profile <name>` to scaffold one.
 
@@ -2028,9 +2159,10 @@ The flake auto-discovers any profile directory that contains `meta.nix` - no man
 
 **Then complete the integration manually:**
 
-1. Declare the VM in `machines/<serial>.nix`:
+1. Declare the VM in `machines/<serial>.nix` (optional - only needed to change a default
+   like autostart/secrets/encryption; the VM builds and runs with no entry here at all):
 ```nix
-hydrix.microvmHost.vms."microvm-myprofile" = { enable = true; };
+hydrix.microvmHost.vms."microvm-myprofile-<serial>" = { autostart = false; };
 ```
 
 2. Customise `profiles/myprofile/default.nix` - set colorscheme, RAM/vCPUs, packages.
@@ -2038,7 +2170,9 @@ hydrix.microvmHost.vms."microvm-myprofile" = { enable = true; };
    Optionally set a custom hostname (what you see at the shell prompt inside the VM).
    The default is the profile name suffixed with `-vm` (e.g. `myprofile-vm`).
    This only affects the internal hostname - host scripts, window titles, and storage paths
-   always use the nixosConfiguration key (`microvm-myprofile`):
+   always use the nixosConfiguration key, which is per-machine
+   (`microvm-myprofile-<serial>`, see
+   [§ VM Naming and Machine Identity](#vm-naming-and-machine-identity)):
 
    ```nix
    hydrix.vm.hostname = "my-custom-name";
@@ -2053,8 +2187,8 @@ hydrix.router.vpn.mullvad.bridges.myprofile = ./mullvad-myprofile.conf;
 ```bash
 rebuild                       # host: creates br-myprofile, updates tapLookupScript + vm-registry
 mvm rebuild router files      # router picks up new subnet TAP; files VM picks up new bridge leg
-microvm build microvm-myprofile
-microvm start microvm-myprofile
+microvm build myprofile
+microvm start myprofile
 ```
 
 **What is auto-wired after `rebuild`** (no manual action needed):
@@ -2170,7 +2304,7 @@ The TUI's MicroVM menu includes task pentest slots. Task slots display their act
 For work that benefits from isolation per target or engagement, Hydrix supports **task slots**: a fixed pool of pre-declared pentest VMs that can be assigned to named engagements without a host rebuild.
 
 **How it works:**
-- Three task slots (`microvm-pentest-task1/2/3`, CIDs 115–117) are declared permanently in the host config via `hydrix-config/tasks/task*.nix`
+- Three task slots (`task1`/`task2`/`task3`, CIDs 115–117) are declared permanently in the host config via `hydrix-config/tasks/task*.nix`. Like every other profile/task VM, each is actually a per-machine `microvm-pentest-task<N>-<serial>` nixosConfiguration (see [§ VM Naming and Machine Identity](#vm-naming-and-machine-identity)) - use the short form below, it always resolves correctly regardless of machine.
 - Service units, TAP interfaces, and bridges are created once during the initial rebuild
 - `microvm pentest create <name>` assigns an engagement to a free slot and builds its closure - no rebuild needed
 
@@ -2187,22 +2321,22 @@ rebuild    # Registers the slot service units permanently
 ```bash
 # Start a new engagement
 microvm pentest create google           # Assign 'google' to a free slot
-microvm start microvm-pentest-task1     # Service unit already exists
-microvm snapshot create microvm-pentest-task1 google-clean  # Baseline
-microvm app microvm-pentest-task1 alacritty
+microvm start task1                     # Service unit already exists
+microvm snapshot create task1 google-clean  # Baseline
+microvm app task1 alacritty
 
 # Between sessions (revert to known-good state)
-microvm stop microvm-pentest-task1
-microvm snapshot revert microvm-pentest-task1 google-clean
-microvm start microvm-pentest-task1
+microvm stop task1
+microvm snapshot revert task1 google-clean
+microvm start task1
 
 # Close engagement (volume and snapshots preserved, slot freed)
 microvm pentest close google
 
 # Reopen from snapshot
 microvm pentest create google --slot 1
-microvm snapshot revert microvm-pentest-task1 google-clean
-microvm start microvm-pentest-task1
+microvm snapshot revert task1 google-clean
+microvm start task1
 
 # Purge all data for an engagement
 microvm pentest purge google
@@ -2213,11 +2347,11 @@ microvm pentest list
 
 **Task slot table:**
 
-| Slot | CID | TAP | Bridge |
-|------|-----|-----|--------|
-| `microvm-pentest-task1` | 115 | `mv-task-1` | `br-pentest` |
-| `microvm-pentest-task2` | 116 | `mv-task-2` | `br-pentest` |
-| `microvm-pentest-task3` | 117 | `mv-task-3` | `br-pentest` |
+| Slot | Real per-machine name | CID | TAP | Bridge |
+|------|-----------------------|-----|-----|--------|
+| `task1` | `microvm-pentest-task1-<serial>` | 115 | `mv-task-1` | `br-pentest` |
+| `task2` | `microvm-pentest-task2-<serial>` | 116 | `mv-task-2` | `br-pentest` |
+| `task3` | `microvm-pentest-task3-<serial>` | 117 | `mv-task-3` | `br-pentest` |
 
 **Adding more slots:** Create `tasks/task4.nix` with CID 118 and `tapId = "mv-task-4"`, then rebuild once. The `microvm pentest` command will discover it automatically.
 
@@ -2911,7 +3045,7 @@ Each VM bridge can route through a separate Mullvad WireGuard exit node. The rou
 
 4. **Rebuild the router:**
    ```bash
-   microvm build microvm-router && microvm restart microvm-router
+   microvm build router && microvm restart router
    ```
 
 ### How It Works
@@ -2938,7 +3072,7 @@ vpn-assign list-mullvad                     # List configured exit nodes
 
 1. Download a `.conf` file for the new VM: `vpn/mullvad-myvm.conf`
 2. Add `myvm = ./mullvad-myvm.conf;` to the `bridges` map in `vpn/mullvad.nix`
-3. Rebuild the router: `microvm build microvm-router && microvm restart microvm-router`
+3. Rebuild the router: `microvm build router && microvm restart router`
 
 ---
 
@@ -3081,13 +3215,14 @@ microvm builder stop                  # Stop builder (restarts host nix-daemon)
 
 | Target | Resolves To |
 |--------|-------------|
-| `browsing` | `microvm-browsing` |
-| `pentest` | `microvm-pentest` |
-| `dev` | `microvm-dev` |
-| `comms` | `microvm-comms` |
-| `lurking` | `microvm-lurking` |
-| `router` | `microvm-router` |
-| `builder` | `microvm-builder` |
+| `browsing` | `microvm-browsing-<serial>` (this machine) |
+| `pentest` | `microvm-pentest-<serial>` |
+| `dev` | `microvm-dev-<serial>` |
+| `comms` | `microvm-comms-<serial>` |
+| `lurking` | `microvm-lurking-<serial>` |
+| `task1` / `task2` / `task3` | `microvm-pentest-task<N>-<serial>` |
+| `router` | `microvm-router-<serial>` |
+| `builder` | `microvm-builder` (shared, not per-machine) |
 | `host` | Host NixOS config |
 
 **Operational flow:**
@@ -3111,9 +3246,9 @@ microvm builder build browsing
 microvm builder shell
 
 # Inside builder:
-nix flake metadata            # Check flake inputs
-nix build .#microvm-browsing  # Manual build
-exit                          # Return to host, builder stops
+nix flake metadata                        # Check flake inputs
+nix build .#microvm-browsing-<serial>     # Manual build (use your machine's serial)
+exit                                       # Return to host, builder stops
 ```
 
 **Status checking:**
@@ -3231,9 +3366,9 @@ Workspaces are mapped to VMs via the `hypr-ws-app` script. Pressing `Super+Retur
 | WS1 | Host | Always host terminal |
 | WS2 | Pentest VM | Active VM tracking |
 | WS3 | Browsing VM | Active VM tracking |
-| WS4 | Comms VM | Fixed (microvm-comms) |
+| WS4 | Comms VM | Fixed (comms) |
 | WS5 | Dev VM | Active VM tracking |
-| WS6 | Lurking VM | Fixed (microvm-lurking) |
+| WS6 | Lurking VM | Fixed (lurking) |
 | WS7-9 | Host | Always host terminal |
 | WS10 | Router | Serial console |
 
@@ -3350,7 +3485,7 @@ Runs as root because starting/stopping system services requires it. STATUS retur
 **`waypipe-vsock.service`** - runs as the user, started on-demand by display-mode. Connects outward to the host (CID 2) on the per-VM waypipe port (`14600 + CID - 100`). Key details:
 - `ExecStartPre`: creates `/run/user/1000/` and removes any stale `waypipe-0` socket from a previous session
 - `--display waypipe-0`: creates the Wayland proxy socket that apps inside the VM connect to via `WAYLAND_DISPLAY=waypipe-0`
-- `--title-prefix "[vmname] "`: derived at build time from the VM hostname (`lib.removePrefix "microvm-" hostname`), e.g. `[browsing] `. This prefix is how the host compositor routes VM windows to the correct workspace via `for_window` rules
+- `--title-prefix "[vmname] "`: derived at build time from `hydrix.vmType` (e.g. `[browsing] `), **not** from the VM's hostname/`storeName` - those now carry the per-machine serial suffix (`microvm-browsing-<serial>`, see [§ VM Naming and Machine Identity](#vm-naming-and-machine-identity)), which would break the title match below if used directly. `vmType` is set independently by each profile's own `default.nix`, so it stays a clean, machine-independent name (`browsing`, `pentest`, ...) regardless of the per-machine flake-attribute name. This prefix is how the host compositor routes VM windows to the correct workspace via `for_window` rules
 - `Restart=always`, `RestartSec=5s`: self-heals if the tunnel drops
 
 **`waypipe-launch.service`** - runs as the user, listens on vsock:14508. Receives one-line app launch commands from the host. On receipt:
@@ -3415,14 +3550,14 @@ The script scans existing profiles for the next free CID (starts at 107), prompt
 
 **After scaffolding, complete integration manually:**
 
-1. Declare in `machines/<serial>.nix`: `hydrix.microvmHost.vms."microvm-myprofile" = { enable = true; };`
+1. Declare in `machines/<serial>.nix` (optional, only for non-default settings): `hydrix.microvmHost.vms."microvm-myprofile-<serial>" = { autostart = false; };`
 2. Customise `profiles/myprofile/default.nix` ,colorscheme, RAM/vCPUs, packages
 3. Add VPN if needed: `hydrix.router.vpn.mullvad.bridges.myprofile = ./conf;`
 4. Rebuild in order (router and files VM have TAPs baked into their QEMU runner):
 ```bash
 rebuild                       # creates bridge, updates tapLookupScript + vm-registry
 mvm rebuild router files      # picks up new subnet TAP + new bridge leg
-microvm build microvm-myprofile && microvm start microvm-myprofile
+microvm build myprofile && microvm start myprofile
 ```
 
 **What auto-adapts after rebuild** (no manual wiring needed):
@@ -3705,7 +3840,7 @@ ss -lnx | grep vsock   # or: socat /dev/null VSOCK-LISTEN:<PORT>,reuseaddr & sle
 lspci -nnk | grep -A3 Wireless
 
 # Check router console
-microvm console microrouter
+microvm console router
 
 # Verify NetworkManager
 nmcli device status
@@ -3718,9 +3853,9 @@ Rebuilding and restarting the router VM is not enough when you add or remove a n
 Fix: purge the router VM so it starts with a clean NM state:
 
 ```bash
-microvm purge microvm-router --force
-microvm build microvm-router
-microvm start microvm-router
+microvm purge router --force
+microvm build router
+microvm start router
 ```
 
 After a purge, only the connections declared in `wifi.nix` (written to `/run/` at boot) exist, and NM connects normally.

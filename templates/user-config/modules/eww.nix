@@ -75,6 +75,7 @@
       }
 
       cache="/tmp/hydrix-eww-vm-status.json"
+      registry="/etc/hydrix/vm-registry.json"
       if [ -f "$cache" ]; then
         running_vms=$(jq -r '.running[].name' "$cache" 2>/dev/null | tr '\n' ' ' || true)
       else
@@ -82,7 +83,9 @@
         while read -r name status _; do
           case "$name" in microvm-*) ;; *) continue ;; esac
           [ "$status" = "running" ] || continue
-          running_vms="$running_vms ''${name#microvm-}"
+          short=$(jq -r --arg n "$name" 'to_entries[] | select(.value.vmName == $n) | .key' "$registry" 2>/dev/null | head -1)
+          [ -z "$short" ] && short="''${name#microvm-}"
+          running_vms="$running_vms $short"
         done < <(/run/current-system/sw/bin/microvm status 2>/dev/null \
           | sed -E 's/\x1b\[[0-9;]*[a-zA-Z]//g' \
           || true)
@@ -128,6 +131,7 @@
     text = ''
       microvm=/run/current-system/sw/bin/microvm
       cache="/tmp/hydrix-eww-vm-status.json"
+      registry="/etc/hydrix/vm-registry.json"
 
       running_json="[]"
       stopped_json="[]"
@@ -139,7 +143,8 @@
 
       while read -r name status cid; do
         case "$name" in microvm-*) ;; *) continue ;; esac
-        short="''${name#microvm-}"
+        short=$(jq -r --arg n "$name" 'to_entries[] | select(.value.vmName == $n) | .key' "$registry" 2>/dev/null | head -1)
+        [ -z "$short" ] && short="''${name#microvm-}"
         case "$status" in
           running)
             ip="192.168.$cid.2"

@@ -21,6 +21,9 @@
 { config, lib, pkgs, hydrix, ... }:
 
 {
+  # System state version — set once, never changed after install
+  system.stateVersion = "@STATE_VERSION@";
+
   imports = [
     ./@SERIAL@-hardware.nix
     ../specialisations/lockdown.nix
@@ -220,9 +223,11 @@
         #   rebuilds stay fast regardless of how many heavy desktop VMs are declared. Infra
         #   VMs stay coupled (always built with the host) by default. Override either way here.
         #
-        # "microvm-pentest"  = { encryption = true; secrets = [ "github" ]; };
-        # "microvm-browsing" = { secrets = [ "github" ]; };
-        # "microvm-dev"      = { secrets = [ "github" ]; coupled = true; }; # e.g. keep always-fresh
+        # Profile VMs (browsing/comms/pentest/dev/lurking) are per-machine nixosConfigurations
+        # (like the router above), so their keys here carry @SERIAL@ too:
+        # "microvm-pentest-@SERIAL@"  = { encryption = true; secrets = [ "github" ]; };
+        # "microvm-browsing-@SERIAL@" = { secrets = [ "github" ]; };
+        # "microvm-dev-@SERIAL@"      = { secrets = [ "github" ]; coupled = true; }; # e.g. keep always-fresh
         # "microvm-builder"  = { secrets = [ "github" ]; };
         # "microvm-gitsync"  = { secrets = [ "github" ]; };
       };

@@ -839,6 +839,22 @@ detect_asus() {
     fi
 }
 
+detect_state_version() {
+    log "Detecting NixOS state version..."
+
+    # Fresh install: no prior stateVersion exists yet, so use the release the
+    # live ISO is itself running, i.e. whatever Hydrix is currently pinned to.
+    # This value must never be bumped after install (see NixOS manual on
+    # system.stateVersion), so it's captured once here and never re-detected.
+    CONFIG[stateVersion]=$(nixos-version | grep -oE '^[0-9]+\.[0-9]+' || echo "")
+    if [[ -z "${CONFIG[stateVersion]}" ]]; then
+        CONFIG[stateVersion]="25.05"
+        warn "  Could not detect NixOS version, defaulting to ${CONFIG[stateVersion]}"
+    else
+        log "  Detected: ${CONFIG[stateVersion]}"
+    fi
+}
+
 detect_virtualization() {
     log "Detecting virtualization environment..."
 
@@ -2347,6 +2363,7 @@ generate_machine_nix() {
         -e "s|@WAN_DEVICE@|${CONFIG[wanDevice]}|g" \
         -e "s|@GRUB_GFXMODE@|${CONFIG[grubGfxmode]}|g" \
         -e "s|@EFI_BOOTLOADER_ID@|${CONFIG[efiBootloaderId]}|g" \
+        -e "s|@STATE_VERSION@|${CONFIG[stateVersion]}|g" \
         "$template_file" > "$config_dir/machines/${CONFIG[serial]}.nix"
 
     # Write GRUB extra entries as a separate Nix file to avoid quoting issues
@@ -3661,6 +3678,7 @@ access-tokens = github.com=$gh_token"
         detect_asus
         detect_wifi_hardware
     fi
+    detect_state_version
     detect_display_resolution
     if [[ "${CONFIG[vfioEnable]}" == "true" ]]; then
         detect_wifi_credentials

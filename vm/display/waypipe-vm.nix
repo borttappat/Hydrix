@@ -14,14 +14,21 @@
 #   waypipe server (HOST): listens on vsock:14507, forwards to Hyprland
 #   Apps inside VM use WAYLAND_DISPLAY=waypipe-0
 #
-{ config, pkgs, lib, ... }:
-
-let
+{
+  config,
+  pkgs,
+  lib,
+  ...
+}: let
   username = config.hydrix.username;
   audioEnabled = config.hydrix.microvm.audio.enable or false;
-  # Derive title prefix from storeName (not hostname): "microvm-lurking" → "lurking"
-  # Uses storeName so custom hostnames don't break Hyprland window-matching rules.
-  titlePrefix = lib.removePrefix "microvm-" config.hydrix.vm.storeName;
+  # Derive title prefix from vmType (e.g. "browsing"), not storeName/hostname:
+  # vmType is set directly by each profile's own default.nix, independent of the
+  # per-machine-suffixed flake-attribute name (storeName) or any custom hostname
+  # a task slot might set for engagement stealth naming, so it always matches the
+  # registry key Hyprland's windowrules are generated from (see hydrix.networking
+  # .vmRegistry / theming/wm/hyprland/hyprland.nix).
+  titlePrefix = config.hydrix.vmType;
   titlePrefixArg = "--title-prefix \"[${titlePrefix}] \"";
   # Per-VM waypipe port derived from vsock CID: CID 106 → port 14606
   # Avoids collision when multiple VMs are connected simultaneously.
@@ -94,10 +101,12 @@ let
     esac
   '';
 in {
-  boot.kernelModules = [ "vmw_vsock_virtio_transport" ];
+  boot.kernelModules = ["vmw_vsock_virtio_transport"];
 
   environment.systemPackages = [
-    pkgs.waypipe pkgs.socat pkgs.wl-clipboard
+    pkgs.waypipe
+    pkgs.socat
+    pkgs.wl-clipboard
     (pkgs.writeShellScriptBin "clip-test" ''
       echo "=== VM Clipboard Test Runner ==="
       echo "Watching clipboard events on ''${WAYLAND_DISPLAY:-waypipe-0}..."
@@ -129,8 +138,8 @@ in {
   # gtk backend handles FileChooser without needing a Wayland compositor.
   xdg.portal = {
     enable = true;
-    extraPortals = [ pkgs.xdg-desktop-portal-gtk ];
-    config.common.default = [ "gtk" ];
+    extraPortals = [pkgs.xdg-desktop-portal-gtk];
+    config.common.default = ["gtk"];
   };
 
   # D-Bus-activated services don't inherit the user session environment,
@@ -138,10 +147,8 @@ in {
   # GTK fails to initialize without a display → portal crashes → Firefox
   # waits out the full D-Bus timeout (~10s) before degrading.
   # Inject the known-fixed display name so the portal starts cleanly.
-  systemd.user.services.xdg-desktop-portal.serviceConfig.Environment =
-    [ "WAYLAND_DISPLAY=waypipe-0" "XDG_RUNTIME_DIR=/run/user/1000" ];
-  systemd.user.services.xdg-desktop-portal-gtk.serviceConfig.Environment =
-    [ "WAYLAND_DISPLAY=waypipe-0" "XDG_RUNTIME_DIR=/run/user/1000" ];
+  systemd.user.services.xdg-desktop-portal.serviceConfig.Environment = ["WAYLAND_DISPLAY=waypipe-0" "XDG_RUNTIME_DIR=/run/user/1000"];
+  systemd.user.services.xdg-desktop-portal-gtk.serviceConfig.Environment = ["WAYLAND_DISPLAY=waypipe-0" "XDG_RUNTIME_DIR=/run/user/1000"];
 
   # Force Electron apps (Signal, VS Code, etc.) to use native Wayland.
   # Without this, Electron defaults to Xwayland which bypasses waypipe's
@@ -156,8 +163,8 @@ in {
   # Responds to PING so microvm-start can detect VM readiness.
   systemd.services.display-mode = {
     description = "VM display mode selector (vsock:14509)";
-    wantedBy = [ "multi-user.target" ];
-    after = [ "network.target" ];
+    wantedBy = ["multi-user.target"];
+    after = ["network.target"];
     startLimitIntervalSec = 0;
 
     serviceConfig = {
@@ -179,7 +186,7 @@ in {
   # Apps inside VM use WAYLAND_DISPLAY=waypipe-0
   systemd.services.waypipe-vsock = {
     description = "waypipe Wayland compositor proxy (vsock:14507)";
-    after = [ "network.target" ];
+    after = ["network.target"];
     restartIfChanged = false;
     startLimitIntervalSec = 0;
 
@@ -225,44 +232,44 @@ in {
   # mkMerge: always suppress auto-start by default; only
   # define the actual service when audio is enabled.
   systemd.services.pulse-vsock = lib.mkMerge [
-    { wantedBy = lib.mkForce []; }
+    {wantedBy = lib.mkForce [];}
     (lib.mkIf audioEnabled {
-    description = "PulseAudio vsock bridge to host (port 14505)";
-    after = [ "network.target" ];
-    startLimitIntervalSec = 0;
+      description = "PulseAudio vsock bridge to host (port 14505)";
+      after = ["network.target"];
+      startLimitIntervalSec = 0;
 
-    serviceConfig = {
-      User = username;
-      Type = "simple";
-      Restart = "always";
-      RestartSec = "3s";
+      serviceConfig = {
+        User = username;
+        Type = "simple";
+        Restart = "always";
+        RestartSec = "3s";
 
-      ExecStartPre = [
-        "+${pkgs.coreutils}/bin/install -d -m 0700 -o ${username} /run/user/1000/pulse"
-        "+${pkgs.coreutils}/bin/rm -f /run/user/1000/pulse/host-native"
-      ];
-      ExecStart = pkgs.writeShellScript "pulse-vsock-start" ''
-        export XDG_RUNTIME_DIR="/run/user/1000"
-        # Wait for pipewire-pulse to create its native socket — this signals that
-        # the user session (and XDG_RUNTIME_DIR) is fully initialised. Starting
-        # before this point means systemd --user may wipe our socket on setup.
-        until [[ -S /run/user/1000/pulse/native ]]; do sleep 1; done
-        rm -f /run/user/1000/pulse/host-native
-        exec ${pkgs.socat}/bin/socat \
-          UNIX-LISTEN:/run/user/1000/pulse/host-native,fork,mode=0600,unlink-early \
-          VSOCK-CONNECT:2:14505
-      '';
-      ExecStopPost = "+${pkgs.coreutils}/bin/rm -f /run/user/1000/pulse/host-native";
-    };
-  })
+        ExecStartPre = [
+          "+${pkgs.coreutils}/bin/install -d -m 0700 -o ${username} /run/user/1000/pulse"
+          "+${pkgs.coreutils}/bin/rm -f /run/user/1000/pulse/host-native"
+        ];
+        ExecStart = pkgs.writeShellScript "pulse-vsock-start" ''
+          export XDG_RUNTIME_DIR="/run/user/1000"
+          # Wait for pipewire-pulse to create its native socket — this signals that
+          # the user session (and XDG_RUNTIME_DIR) is fully initialised. Starting
+          # before this point means systemd --user may wipe our socket on setup.
+          until [[ -S /run/user/1000/pulse/native ]]; do sleep 1; done
+          rm -f /run/user/1000/pulse/host-native
+          exec ${pkgs.socat}/bin/socat \
+            UNIX-LISTEN:/run/user/1000/pulse/host-native,fork,mode=0600,unlink-early \
+            VSOCK-CONNECT:2:14505
+        '';
+        ExecStopPost = "+${pkgs.coreutils}/bin/rm -f /run/user/1000/pulse/host-native";
+      };
+    })
   ];
 
   # ── waypipe-launch (14508) — on-demand, started by display-mode ──────────
   # Receives app launch commands from host, runs them with waypipe display.
   systemd.services.waypipe-launch = {
     description = "waypipe app launch receiver (vsock:14508)";
-    after = [ "waypipe-vsock.service" ];
-    wants = [ "waypipe-vsock.service" ];
+    after = ["waypipe-vsock.service"];
+    wants = ["waypipe-vsock.service"];
     startLimitIntervalSec = 0;
 
     serviceConfig = {
@@ -279,31 +286,31 @@ in {
         exec ${pkgs.socat}/bin/socat \
           VSOCK-LISTEN:14508,reuseaddr,fork \
           EXEC:'${pkgs.writeShellScript "launch-handler" ''
-            export XDG_RUNTIME_DIR="/run/user/1000"
-            export WAYLAND_DISPLAY=waypipe-0
-            read -r -a ARGS
-            if [[ ''${#ARGS[@]} -eq 0 ]]; then
-              echo "waypipe-launch: empty command" >&2
-              exit 1
-            fi
-            # Wait for waypipe socket to be ready (service active ≠ socket exists yet)
-            for _i in 1 2 3 4 5; do
-              [[ -S "$XDG_RUNTIME_DIR/$WAYLAND_DISPLAY" ]] && break
-              sleep 1
-            done
-            if [[ ! -S "$XDG_RUNTIME_DIR/$WAYLAND_DISPLAY" ]]; then
-              echo "waypipe-launch: socket $WAYLAND_DISPLAY not ready" >&2
-              exit 1
-            fi
-            # Detach from socat connection so closing it doesn't kill the app
-            export HOME="/home/${username}"
-            export USER="${username}"
-            export PATH="/etc/profiles/per-user/${username}/bin:/run/current-system/sw/bin:/nix/var/nix/profiles/default/bin"
-            export ELECTRON_OZONE_PLATFORM_HINT=auto
-            ${lib.optionalString audioEnabled ''export PULSE_SERVER="unix:/run/user/1000/pulse/host-native"''}
-            ${pkgs.util-linux}/bin/setsid "''${ARGS[@]}" </dev/null >>/tmp/waypipe-launch.log 2>&1 &
-            echo "launched: ''${ARGS[*]}"
-          ''}',nofork
+          export XDG_RUNTIME_DIR="/run/user/1000"
+          export WAYLAND_DISPLAY=waypipe-0
+          read -r -a ARGS
+          if [[ ''${#ARGS[@]} -eq 0 ]]; then
+            echo "waypipe-launch: empty command" >&2
+            exit 1
+          fi
+          # Wait for waypipe socket to be ready (service active ≠ socket exists yet)
+          for _i in 1 2 3 4 5; do
+            [[ -S "$XDG_RUNTIME_DIR/$WAYLAND_DISPLAY" ]] && break
+            sleep 1
+          done
+          if [[ ! -S "$XDG_RUNTIME_DIR/$WAYLAND_DISPLAY" ]]; then
+            echo "waypipe-launch: socket $WAYLAND_DISPLAY not ready" >&2
+            exit 1
+          fi
+          # Detach from socat connection so closing it doesn't kill the app
+          export HOME="/home/${username}"
+          export USER="${username}"
+          export PATH="/etc/profiles/per-user/${username}/bin:/run/current-system/sw/bin:/nix/var/nix/profiles/default/bin"
+          export ELECTRON_OZONE_PLATFORM_HINT=auto
+          ${lib.optionalString audioEnabled ''export PULSE_SERVER="unix:/run/user/1000/pulse/host-native"''}
+          ${pkgs.util-linux}/bin/setsid "''${ARGS[@]}" </dev/null >>/tmp/waypipe-launch.log 2>&1 &
+          echo "launched: ''${ARGS[*]}"
+        ''}',nofork
       '';
     };
   };

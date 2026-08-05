@@ -112,7 +112,7 @@ Specialisation files live in `hydrix-config/specialisations/`. Add extra package
 curl -sL https://raw.githubusercontent.com/borttappat/Hydrix/main/scripts/install-hydrix.sh | sudo bash
 ```
 
-The script partitions the disk via disko, auto-detects hardware (CPU, WiFi PCI address, ASUS features), prompts for username and colorscheme, generates `machines/<serial>.nix` + `modules/user.nix` + `modules/common.nix`, runs `nixos-install`, and pre-builds the router and builder VMs.
+The script partitions the disk via disko, auto-detects hardware (CPU, WiFi PCI address, ASUS features, and the live ISO's own NixOS release as this machine's `system.stateVersion`), prompts for username and colorscheme, generates `machines/<serial>.nix` + `modules/user.nix` + `modules/common.nix`, runs `nixos-install`, and pre-builds the router and builder VMs.
 
 **If you already have a `hydrix-config` on another machine**, provide the repo URL when prompted. The installer enters **add** mode: it clones your repo and generates only `machines/<serial>.nix` for the new hardware. User identity, locale, and VM configs are already in the repo - no re-prompting.
 
@@ -122,12 +122,12 @@ The script partitions the disk via disko, auto-detects hardware (CPU, WiFi PCI a
 curl -sL https://raw.githubusercontent.com/borttappat/Hydrix/main/scripts/setup-hydrix.sh | bash
 ```
 
-The script detects your current system (user, locale, WiFi), creates `~/hydrix-config/`, generates your machine config, and handles multi-machine setups. Same three modes apply: **fresh** (new config), **add** (new machine to existing repo), **use-existing** (serial already present).
+The script detects your current system (user, locale, WiFi), creates `~/hydrix-config/`, generates your machine config, and handles multi-machine setups. `system.stateVersion` is read from your existing `/etc/nixos/configuration.nix` (or prompted for manually if not found) rather than re-detected, since it must reflect this machine's original install, not its current release. Same three modes apply: **fresh** (new config), **add** (new machine to existing repo), **use-existing** (serial already present).
 
 
 # Start a profile VM (display tunnel starts automatically)
 ```bash
-microvm start microvm-browsing
+microvm start browsing
 ```
 
 # Build and start all profile VMs at once
@@ -153,11 +153,19 @@ Built-in profiles and their defaults:
 
 | VM | CID | WS | Bridge | Persistence |
 |----|-----|----|--------|-------------|
-| microvm-pentest | 102 | 2 | br-pentest | persistent, optionally LUKS-encrypted |
-| microvm-browsing | 103 | 3 | br-browse | 10GB home |
-| microvm-comms | 104 | 4 | br-comms | persistent |
-| microvm-dev | 105 | 5 | br-dev | 50GB + 20GB docker |
-| microvm-lurking | 106 | 6 | br-lurking | ephemeral |
+| pentest | 102 | 2 | br-pentest | persistent, optionally LUKS-encrypted |
+| browsing | 103 | 3 | br-browse | 10GB home |
+| comms | 104 | 4 | br-comms | persistent |
+| dev | 105 | 5 | br-dev | 50GB + 20GB docker |
+| lurking | 106 | 6 | br-lurking | ephemeral |
+
+Each profile is actually built as its own per-machine nixosConfiguration
+(`microvm-<profile>-<serial>`, the same pattern the router already uses), but you never
+need to know or type that: `microvm <cmd> <profile>` always resolves to the current
+machine's real VM name via `/etc/hydrix/vm-registry.json`. Infra VMs (router, builder,
+files, gitsync, hostsync, usb-sandbox, vault) are the exception - they stay a single
+shared name across every machine, since they hold no persistent state to differentiate.
+See [DOCUMENTATION.md § VM Naming and Machine Identity](DOCUMENTATION.md#vm-naming-and-machine-identity).
 
 Custom profiles start at CID 107+. Scaffold one with:
 
@@ -165,8 +173,8 @@ Custom profiles start at CID 107+. Scaffold one with:
 new-profile myvm   # auto-assigns next free CID and workspace
 rebuild            # creates bridge, updates tap wiring and vm-registry.json
 mvm rebuild router files   # pick up new bridge (router + files VM)
-microvm build microvm-myvm
-microvm start microvm-myvm
+microvm build myvm
+microvm start myvm
 ```
 
 ---
@@ -176,32 +184,32 @@ microvm start microvm-myvm
 
 Build a VM image (evaluates config, writes runner to nix store)
 ```bash
-microvm build microvm-browsing
+microvm build browsing
 ```
 
 Start a VM (polls readiness, then connects display tunnel)
 ```bash
-microvm start microvm-browsing
+microvm start browsing
 ```
 
 Stop a VM
 ```bash
-microvm stop microvm-browsing
+microvm stop browsing
 ```
 
 Restart (required for kernel, initrd, or runner changes)
 ```bash
-microvm restart microvm-browsing
+microvm restart browsing
 ```
 
 Live switch (applies config changes without restart - no kernel/runner changes)
 ```bash
-microvm update microvm-browsing
+microvm update browsing
 ```
 
 Check running vs built state
 ```bash
-microvm switch-status microvm-browsing
+microvm switch-status browsing
 ```
 
 Operate on multiple VMs at once
@@ -329,8 +337,8 @@ vm-sync push --name repo
 
 # On the host
 vm-sync pull repo --target pentest
-microvm build microvm-pentest
-microvm restart microvm-pentest
+microvm build pentest
+microvm restart pentest
 ```
 
 ---

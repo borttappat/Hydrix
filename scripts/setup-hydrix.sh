@@ -742,6 +742,18 @@ detect_current_config() {
         CONFIG[isAsus]="false"
     fi
 
+    # NixOS state version — read the value this machine was originally installed
+    # with (never bumped since, per the NixOS manual on system.stateVersion).
+    # Carried forward as-is; never re-derived from the currently running release.
+    CONFIG[stateVersion]=$(parse_nix_value "system.stateVersion" "/etc/nixos/configuration.nix")
+    if [[ -z "${CONFIG[stateVersion]}" ]]; then
+        read -rp "parameter system.stateVersion not found, enter value manually: " CONFIG[stateVersion]
+        while [[ -z "${CONFIG[stateVersion]}" ]]; do
+            read -rp "system.stateVersion cannot be empty, enter value manually: " CONFIG[stateVersion]
+        done
+    fi
+    log "  State version: ${CONFIG[stateVersion]}"
+
     # Root disk (for reference, not used by disko in setup)
     local root_dev
     root_dev=$(findmnt -n -o SOURCE / | sed 's/\[.*\]//' | sed 's/p[0-9]*$//' | sed 's/[0-9]*$//')
@@ -1142,6 +1154,7 @@ generate_machine_nix() {
         -e "s|@WAN_MODE@|${CONFIG[wanMode]}|g" \
         -e "s|@WAN_DEVICE_LINE@|${CONFIG[wanDeviceLine]}|g" \
         -e "s|@DISKO_DEVICE@|${CONFIG[diskoDevice]}|g" \
+        -e "s|@STATE_VERSION@|${CONFIG[stateVersion]}|g" \
         "$template_file" > "$CONFIG_DIR/machines/${CONFIG[serial]}.nix"
 
     log "  Created: $CONFIG_DIR/machines/${CONFIG[serial]}.nix"

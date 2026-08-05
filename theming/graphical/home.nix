@@ -8,17 +8,22 @@
 # - modules/shell/fish-home.nix
 # - modules/desktop/firefox.nix
 # - Most configs/*.template files
-
-{ config, lib, pkgs, ... }:
-
-let
+{
+  config,
+  lib,
+  pkgs,
+  ...
+}: let
   username = config.hydrix.username;
+  hostStateVersion = config.system.stateVersion;
 
   # Detect if we're in a VM (for keybinding differences)
   # "host" is not a VM, it's the physical machine
   isVM = config.hydrix.vmType != null && config.hydrix.vmType != "host";
-  modKey = if isVM then "Mod1" else "Mod4";
-
+  modKey =
+    if isVM
+    then "Mod1"
+    else "Mod4";
 in {
   imports = [
     ../programs/alacritty.nix
@@ -31,13 +36,16 @@ in {
 
   config = lib.mkIf config.hydrix.graphical.enable {
     # Home Manager user configuration
-    home-manager.users.${username} = { pkgs, ... }: {
-      home.stateVersion = "26.05";
+    home-manager.users.${username} = {pkgs, ...}: {
+      home.stateVersion = hostStateVersion;
       stylix.enableReleaseChecks = false;
 
       # Make variables available to program modules
       home.sessionVariables = {
-        HYDRIX_IS_VM = if isVM then "1" else "0";
+        HYDRIX_IS_VM =
+          if isVM
+          then "1"
+          else "0";
         HYDRIX_MOD_KEY = modKey;
       };
 

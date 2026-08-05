@@ -19,17 +19,24 @@
 #   Add script + module config to topBar in machines/<serial>.nix using lib.mkAfter,
 #   or simply edit this file directly and add them to modules-right.
 #
-{ config, lib, pkgs, ... }:
-
-let
-  username   = config.hydrix.username;
+{
+  config,
+  lib,
+  pkgs,
+  ...
+}: let
+  username = config.hydrix.username;
   fontFamily = config.hydrix.graphical.font.family or "Iosevka";
-  fontSizeNum = let base     = config.hydrix.graphical.font.size or 12;
-                    relation = config.hydrix.graphical.font.relations.waybar or 1.0;
-                    raw      = builtins.floor (base * relation);
-                in if raw < 11 then 11 else raw;
-  fontSize   = toString fontSizeNum;
-  gaps        = config.hydrix.graphical.ui.gaps or 10;
+  fontSizeNum = let
+    base = config.hydrix.graphical.font.size or 12;
+    relation = config.hydrix.graphical.font.relations.waybar or 1.0;
+    raw = builtins.floor (base * relation);
+  in
+    if raw < 11
+    then 11
+    else raw;
+  fontSize = toString fontSizeNum;
+  gaps = config.hydrix.graphical.ui.gaps or 10;
   # Pill internal padding scales with gaps (was hardcoded 3px, 0.3 solved to reproduce
   # that exact value at the previous default gaps=10).
   pillPaddingV = builtins.ceil (gaps * 0.3);
@@ -37,12 +44,16 @@ let
   # Pill content height scales with font size (1.5 line-height factor solved to reproduce
   # the previous hardcoded 23px at the previous default fontSize=11, pillPaddingV=3).
   # Island modules float with pillVMargin on each side — bar height scales accordingly
-  barHeight   = builtins.ceil (fontSizeNum * 1.5) + 2 * pillPaddingV + 2 * pillVMargin;
-  pillRadius  = let ui = config.hydrix.graphical.ui;
-                in toString (if ui.pillRadius != null
-                             then ui.pillRadius
-                             else builtins.floor (ui.cornerRadius * ui.pillRadiusScale));
-  pillBorder  = toString (config.hydrix.graphical.ui.border or 2);
+  barHeight = builtins.ceil (fontSizeNum * 1.5) + 2 * pillPaddingV + 2 * pillVMargin;
+  pillRadius = let
+    ui = config.hydrix.graphical.ui;
+  in
+    toString (
+      if ui.pillRadius != null
+      then ui.pillRadius
+      else builtins.floor (ui.cornerRadius * ui.pillRadiusScale)
+    );
+  pillBorder = toString (config.hydrix.graphical.ui.border or 2);
   # pillVMargin = gaps is the key invariant that makes all gaps uniform:
   #   screen→pill-top  = margin-top(0) + pillVMargin     = gaps
   #   pill-bottom→win  = actual_surface - pill_bottom    = pillVMargin = gaps
@@ -51,15 +62,16 @@ let
   #   inner visual     = 2 * gaps_in ≈ gaps (exact for even gaps values)
   pillHMargin = 2;
   pillVMargin = gaps;
-  homeDir    = "/home/${username}";
+  homeDir = "/home/${username}";
 
   # Hydrix metrics timing
   hostPollInterval = toString (config.hydrix.vmMetrics.hostPollInterval or 5);
-  staleThreshold   = toString (config.hydrix.vmMetrics.staleThreshold   or 15);
-  configDir        = config.hydrix.paths.configDir or "${homeDir}/hydrix-config";
-  barType          = config.hydrix.graphical.waybar.barType or "dualbar";
+  staleThreshold = toString (config.hydrix.vmMetrics.staleThreshold   or 15);
+  configDir = config.hydrix.paths.configDir or "${homeDir}/hydrix-config";
+  barType = config.hydrix.graphical.waybar.barType or "dualbar";
 
-  shouldActivate = (config.hydrix.hyprland.enable or false)
+  shouldActivate =
+    (config.hydrix.hyprland.enable or false)
     && (config.hydrix.graphical.enable or false);
   isVM = (config.hydrix.vmType or null) != null && (config.hydrix.vmType or null) != "host";
 
@@ -120,7 +132,8 @@ let
     [ -f "$VM_REGISTRY" ] || exit 0
     count=0
     while IFS= read -r profile; do
-      vm_name="microvm-$profile"
+      vm_name=$(jq -r --arg p "$profile" '.[$p].vmName // empty' "$VM_REGISTRY" 2>/dev/null)
+      [ -z "$vm_name" ] && continue
       systemctl is-active --quiet "microvm@$vm_name.service" 2>/dev/null || continue
       cid=$(jq -r --arg p "$profile" '.[$p].cid // empty' "$VM_REGISTRY" 2>/dev/null)
       [ -z "$cid" ] && continue
@@ -507,16 +520,16 @@ let
 
   topBar = {
     "reload_style_on_change" = true;
-    layer    = "top";
+    layer = "top";
     position = "top";
-    height   = barHeight;
-    spacing  = 0;
+    height = barHeight;
+    spacing = 0;
     "exclusive-zone" = barHeight + gaps - 2 * pillVMargin;
-    "margin-top"     = gaps - pillVMargin;
-    "margin-left"    = gaps - pillHMargin;
-    "margin-right"   = gaps - pillHMargin;
+    "margin-top" = gaps - pillVMargin;
+    "margin-left" = gaps - pillHMargin;
+    "margin-right" = gaps - pillHMargin;
 
-    "modules-left"   = [
+    "modules-left" = [
       "hyprland/workspaces"
       "custom/workspace-desc"
       "custom/sep"
@@ -524,7 +537,7 @@ let
       "custom/focus"
     ];
     "modules-center" = [];
-    "modules-right"  = [
+    "modules-right" = [
       "custom/pomo"
       "custom/sync"
       "custom/sep"
@@ -552,37 +565,138 @@ let
       "sort-by-number" = true;
     };
 
-    "custom/workspace-desc" = { exec = "${workspaceDescScript}"; interval = 1;  format = "{}"; tooltip = false; escape = false; };
-    "hyprland/window"       = { format = "{}"; "max-length" = 60; "separate-outputs" = false; tooltip = false; };
-    "custom/focus"          = { exec = "${focusScript}";         interval = 1;  format = "{}"; tooltip = false; escape = false; };
-    "custom/pomo"           = { exec = "${pomoScript}";          interval = 1;  format = "{}"; tooltip = false; escape = false; "on-click" = "pomo"; };
-    "custom/sync"           = { exec = "${syncScript}";          interval = 30; format = "{}"; tooltip = false; escape = false; };
-    "custom/git"            = { exec = "${gitScript}";           interval = 30; format = "{}"; tooltip = false; escape = false; "return-type" = "json"; };
-    "custom/mvms"           = { exec = "${mvmsScript}";          interval = 5;  format = "{}"; tooltip = false; escape = false; };
-    "custom/vms"            = { exec = "${vmsScript}";           interval = 10; format = "{}"; tooltip = false; escape = false; };
-    "custom/sep"            = { exec = "echo '|'"; interval = "once"; format = "{}"; tooltip = false; };
+    "custom/workspace-desc" = {
+      exec = "${workspaceDescScript}";
+      interval = 1;
+      format = "{}";
+      tooltip = false;
+      escape = false;
+    };
+    "hyprland/window" = {
+      format = "{}";
+      "max-length" = 60;
+      "separate-outputs" = false;
+      tooltip = false;
+    };
+    "custom/focus" = {
+      exec = "${focusScript}";
+      interval = 1;
+      format = "{}";
+      tooltip = false;
+      escape = false;
+    };
+    "custom/pomo" = {
+      exec = "${pomoScript}";
+      interval = 1;
+      format = "{}";
+      tooltip = false;
+      escape = false;
+      "on-click" = "pomo";
+    };
+    "custom/sync" = {
+      exec = "${syncScript}";
+      interval = 30;
+      format = "{}";
+      tooltip = false;
+      escape = false;
+    };
+    "custom/git" = {
+      exec = "${gitScript}";
+      interval = 30;
+      format = "{}";
+      tooltip = false;
+      escape = false;
+      "return-type" = "json";
+    };
+    "custom/mvms" = {
+      exec = "${mvmsScript}";
+      interval = 5;
+      format = "{}";
+      tooltip = false;
+      escape = false;
+    };
+    "custom/vms" = {
+      exec = "${vmsScript}";
+      interval = 10;
+      format = "{}";
+      tooltip = false;
+      escape = false;
+    };
+    "custom/sep" = {
+      exec = "echo '|'";
+      interval = "once";
+      format = "{}";
+      tooltip = false;
+    };
 
-    "custom/volume" = { exec = "${volumeScript}"; interval = 5; format = "{}"; tooltip = false; escape = false; "on-click" = "pavucontrol"; "on-scroll-up" = "${pkgs.pulseaudio}/bin/pactl set-sink-volume @DEFAULT_SINK@ +5%"; "on-scroll-down" = "${pkgs.pulseaudio}/bin/pactl set-sink-volume @DEFAULT_SINK@ -5%"; };
-    "custom/temp"   = { exec = "${tempScript}";    interval = 5;  format = "{}"; tooltip = false; escape = false; };
-    "custom/memory" = { exec = "${hostMemScript}"; interval = 5;  format = "{}"; tooltip = false; escape = false; "return-type" = "json"; };
-    "custom/cpu"    = { exec = "${hostCpuScript}"; interval = 5;  format = "{}"; tooltip = false; escape = false; "return-type" = "json"; };
-    "custom/disk"   = { exec = "${diskScript}";    interval = 30; format = "{}"; tooltip = false; escape = false; };
-    "custom/uptime" = { exec = "${uptimeScript}";  interval = 60; format = "{}"; tooltip = false; escape = false; };
-    "custom/clock"  = { exec = "${clockScript}";   interval = 60; format = "{}"; tooltip = false; escape = false; };
+    "custom/volume" = {
+      exec = "${volumeScript}";
+      interval = 5;
+      format = "{}";
+      tooltip = false;
+      escape = false;
+      "on-click" = "pavucontrol";
+      "on-scroll-up" = "${pkgs.pulseaudio}/bin/pactl set-sink-volume @DEFAULT_SINK@ +5%";
+      "on-scroll-down" = "${pkgs.pulseaudio}/bin/pactl set-sink-volume @DEFAULT_SINK@ -5%";
+    };
+    "custom/temp" = {
+      exec = "${tempScript}";
+      interval = 5;
+      format = "{}";
+      tooltip = false;
+      escape = false;
+    };
+    "custom/memory" = {
+      exec = "${hostMemScript}";
+      interval = 5;
+      format = "{}";
+      tooltip = false;
+      escape = false;
+      "return-type" = "json";
+    };
+    "custom/cpu" = {
+      exec = "${hostCpuScript}";
+      interval = 5;
+      format = "{}";
+      tooltip = false;
+      escape = false;
+      "return-type" = "json";
+    };
+    "custom/disk" = {
+      exec = "${diskScript}";
+      interval = 30;
+      format = "{}";
+      tooltip = false;
+      escape = false;
+    };
+    "custom/uptime" = {
+      exec = "${uptimeScript}";
+      interval = 60;
+      format = "{}";
+      tooltip = false;
+      escape = false;
+    };
+    "custom/clock" = {
+      exec = "${clockScript}";
+      interval = 60;
+      format = "{}";
+      tooltip = false;
+      escape = false;
+    };
   };
 
   bottomBar = {
     "reload_style_on_change" = true;
-    layer    = "top";
+    layer = "top";
     position = "bottom";
-    height   = barHeight;
-    spacing  = 0;
+    height = barHeight;
+    spacing = 0;
     "exclusive-zone" = barHeight + gaps - 2 * pillVMargin;
-    "margin-bottom"  = gaps - pillVMargin;
-    "margin-left"    = gaps - pillHMargin;
-    "margin-right"   = gaps - pillHMargin;
+    "margin-bottom" = gaps - pillVMargin;
+    "margin-left" = gaps - pillHMargin;
+    "margin-right" = gaps - pillHMargin;
 
-    "modules-left"   = [
+    "modules-left" = [
       "custom/power-profile"
       "custom/battery"
       "custom/battery-time"
@@ -591,7 +705,7 @@ let
       "custom/cproc"
     ];
     "modules-center" = [];
-    "modules-right"  = [
+    "modules-right" = [
       "custom/rproc-bottom"
       "custom/cproc-bottom"
       "custom/sep"
@@ -606,43 +720,142 @@ let
       "custom/vm-up"
     ];
 
-    "custom/battery" = { exec = "${batteryScript}"; interval = 30; format = "{}"; tooltip = false; escape = false; "return-type" = "json"; };
+    "custom/battery" = {
+      exec = "${batteryScript}";
+      interval = 30;
+      format = "{}";
+      tooltip = false;
+      escape = false;
+      "return-type" = "json";
+    };
 
-    "custom/power-profile" = { exec = "${powerProfileScript}"; interval = 10; format = "{}"; tooltip = false; escape = false; };
-    "custom/battery-time"  = { exec = "${batteryTimeScript}";  interval = 60; format = "{}"; tooltip = false; escape = false; };
-    "custom/sep"           = { exec = "echo '|'"; interval = "once"; format = "{}"; tooltip = false; };
-    "custom/rproc"         = { exec = "${rprocDynamicScript}"; interval = 3;  format = "{}"; tooltip = false; escape = false; };
-    "custom/cproc"         = { exec = "${cprocDynamicScript}"; interval = 3;  format = "{}"; tooltip = false; escape = false; };
-    "custom/rproc-bottom"  = { exec = "${rprocBottomScript}";  interval = lib.toInt hostPollInterval; format = "{}"; tooltip = false; escape = false; };
-    "custom/cproc-bottom"  = { exec = "${cprocBottomScript}";  interval = lib.toInt hostPollInterval; format = "{}"; tooltip = false; escape = false; };
-    "custom/vm-cpu"        = { exec = "${vmCpuScript}";        interval = lib.toInt hostPollInterval; format = "{}"; tooltip = false; escape = false; "return-type" = "json"; };
-    "custom/vm-ram"        = { exec = "${vmRamScript}";        interval = lib.toInt hostPollInterval; format = "{}"; tooltip = false; escape = false; "return-type" = "json"; };
-    "custom/vm-fs"         = { exec = "${vmFsScript}";         interval = lib.toInt hostPollInterval; format = "{}"; tooltip = false; escape = false; };
-    "custom/vm-sync-dev"   = { exec = "${vmSyncDevScript}";    interval = lib.toInt hostPollInterval; format = "{}"; tooltip = false; escape = false; };
-    "custom/vm-sync-stg"   = { exec = "${vmSyncStgScript}";    interval = lib.toInt hostPollInterval; format = "{}"; tooltip = false; escape = false; };
-    "custom/vm-tun"        = { exec = "${vmTunScript}";        interval = lib.toInt hostPollInterval; format = "{}"; tooltip = false; escape = false; };
-    "custom/vm-up"         = { exec = "${vmUpScript}";         interval = 30; format = "{}"; tooltip = false; escape = false; };
-    "custom/wifi-sync"     = { exec = "${wifiSyncScript}";     interval = 10; format = "{}"; tooltip = false; escape = false; "return-type" = "json"; };
+    "custom/power-profile" = {
+      exec = "${powerProfileScript}";
+      interval = 10;
+      format = "{}";
+      tooltip = false;
+      escape = false;
+    };
+    "custom/battery-time" = {
+      exec = "${batteryTimeScript}";
+      interval = 60;
+      format = "{}";
+      tooltip = false;
+      escape = false;
+    };
+    "custom/sep" = {
+      exec = "echo '|'";
+      interval = "once";
+      format = "{}";
+      tooltip = false;
+    };
+    "custom/rproc" = {
+      exec = "${rprocDynamicScript}";
+      interval = 3;
+      format = "{}";
+      tooltip = false;
+      escape = false;
+    };
+    "custom/cproc" = {
+      exec = "${cprocDynamicScript}";
+      interval = 3;
+      format = "{}";
+      tooltip = false;
+      escape = false;
+    };
+    "custom/rproc-bottom" = {
+      exec = "${rprocBottomScript}";
+      interval = lib.toInt hostPollInterval;
+      format = "{}";
+      tooltip = false;
+      escape = false;
+    };
+    "custom/cproc-bottom" = {
+      exec = "${cprocBottomScript}";
+      interval = lib.toInt hostPollInterval;
+      format = "{}";
+      tooltip = false;
+      escape = false;
+    };
+    "custom/vm-cpu" = {
+      exec = "${vmCpuScript}";
+      interval = lib.toInt hostPollInterval;
+      format = "{}";
+      tooltip = false;
+      escape = false;
+      "return-type" = "json";
+    };
+    "custom/vm-ram" = {
+      exec = "${vmRamScript}";
+      interval = lib.toInt hostPollInterval;
+      format = "{}";
+      tooltip = false;
+      escape = false;
+      "return-type" = "json";
+    };
+    "custom/vm-fs" = {
+      exec = "${vmFsScript}";
+      interval = lib.toInt hostPollInterval;
+      format = "{}";
+      tooltip = false;
+      escape = false;
+    };
+    "custom/vm-sync-dev" = {
+      exec = "${vmSyncDevScript}";
+      interval = lib.toInt hostPollInterval;
+      format = "{}";
+      tooltip = false;
+      escape = false;
+    };
+    "custom/vm-sync-stg" = {
+      exec = "${vmSyncStgScript}";
+      interval = lib.toInt hostPollInterval;
+      format = "{}";
+      tooltip = false;
+      escape = false;
+    };
+    "custom/vm-tun" = {
+      exec = "${vmTunScript}";
+      interval = lib.toInt hostPollInterval;
+      format = "{}";
+      tooltip = false;
+      escape = false;
+    };
+    "custom/vm-up" = {
+      exec = "${vmUpScript}";
+      interval = 30;
+      format = "{}";
+      tooltip = false;
+      escape = false;
+    };
+    "custom/wifi-sync" = {
+      exec = "${wifiSyncScript}";
+      interval = 10;
+      format = "{}";
+      tooltip = false;
+      escape = false;
+      "return-type" = "json";
+    };
   };
 
   monoBar = {
     "reload_style_on_change" = true;
-    layer    = "top";
+    layer = "top";
     position = "top";
-    height   = barHeight;
-    spacing  = 0;
+    height = barHeight;
+    spacing = 0;
     "exclusive-zone" = barHeight + gaps - 2 * pillVMargin;
-    "margin-top"     = gaps - pillVMargin;
-    "margin-left"    = gaps - pillHMargin;
-    "margin-right"   = gaps - pillHMargin;
+    "margin-top" = gaps - pillVMargin;
+    "margin-left" = gaps - pillHMargin;
+    "margin-right" = gaps - pillHMargin;
 
-    "modules-left"   = [
+    "modules-left" = [
       "hyprland/workspaces"
       "custom/workspace-desc"
       "custom/focus"
     ];
     "modules-center" = [];
-    "modules-right"  = [
+    "modules-right" = [
       "custom/pomo"
       "custom/sync"
       "custom/sep"
@@ -683,38 +896,212 @@ let
       "sort-by-number" = true;
     };
 
-    "custom/workspace-desc" = { exec = "${workspaceDescScript}"; interval = 1;  format = "{}"; tooltip = false; escape = false; };
-    "custom/focus"          = { exec = "${focusScript}";         interval = 1;  format = "{}"; tooltip = false; escape = false; };
-    "custom/pomo"           = { exec = "${pomoScript}";          interval = 1;  format = "{}"; tooltip = false; escape = false; "on-click" = "pomo"; };
-    "custom/sync"           = { exec = "${syncScript}";          interval = 30; format = "{}"; tooltip = false; escape = false; };
-    "custom/git"            = { exec = "${monoGitScript}";       interval = 30; format = "{}"; tooltip = false; escape = false; "return-type" = "json"; };
-    "custom/mvms"           = { exec = "${mvmsScript}";          interval = 5;  format = "{}"; tooltip = false; escape = false; };
-    "custom/vms"            = { exec = "${vmsScript}";           interval = 10; format = "{}"; tooltip = false; escape = false; };
-    "custom/sep"            = { exec = "echo '|'"; interval = "once"; format = "{}"; tooltip = false; };
-    "custom/volume"    = { exec = "${volumeScript}";    interval = 5;  format = "{}"; tooltip = false; escape = false; "on-click" = "pavucontrol"; "on-scroll-up" = "${pkgs.pulseaudio}/bin/pactl set-sink-volume @DEFAULT_SINK@ +5%"; "on-scroll-down" = "${pkgs.pulseaudio}/bin/pactl set-sink-volume @DEFAULT_SINK@ -5%"; };
-    "custom/bluetooth" = { exec = "${bluetoothScript}"; interval = 10; format = "{}"; tooltip = false; escape = false; "return-type" = "json"; };
-    "custom/temp"      = { exec = "${monoTempScript}";  interval = 5;  format = "{}"; tooltip = false; escape = false; };
-    "custom/memory"    = { exec = "${hostMemScript}";   interval = 5;  format = "{}"; tooltip = false; escape = false; "return-type" = "json"; };
-    "custom/cpu"       = { exec = "${hostCpuScript}";   interval = 5;  format = "{}"; tooltip = false; escape = false; "return-type" = "json"; };
-    "custom/disk"      = { exec = "${diskScript}";      interval = 30; format = "{}"; tooltip = false; escape = false; };
-    "custom/uptime"    = { exec = "${monoUptimeScript}";interval = 60; format = "{}"; tooltip = false; escape = false; };
-    "custom/clock"     = { exec = "${clockScript}";     interval = 60; format = "{}"; tooltip = false; escape = false; };
-    "custom/power-profile" = { exec = "${powerProfileScript}"; interval = 10; format = "{}"; tooltip = false; escape = false; };
-    "custom/battery"       = { exec = "${monoBatteryScript}";  interval = 30; format = "{}"; tooltip = false; escape = false; "return-type" = "json"; };
-    "custom/battery-time"  = { exec = "${batteryTimeScript}";  interval = 60; format = "{}"; tooltip = false; escape = false; };
-    "custom/vm-cpu"      = { exec = "${vmCpuScript}";     interval = lib.toInt hostPollInterval; format = "{}"; tooltip = false; escape = false; "return-type" = "json"; };
-    "custom/vm-ram"      = { exec = "${vmRamScript}";     interval = lib.toInt hostPollInterval; format = "{}"; tooltip = false; escape = false; "return-type" = "json"; };
-    "custom/vm-fs"       = { exec = "${monoVmFsScript}";  interval = lib.toInt hostPollInterval; format = "{}"; tooltip = false; escape = false; };
-    "custom/vm-sync-dev" = { exec = "${vmSyncDevScript}"; interval = lib.toInt hostPollInterval; format = "{}"; tooltip = false; escape = false; };
-    "custom/vm-sync-stg" = { exec = "${vmSyncStgScript}"; interval = lib.toInt hostPollInterval; format = "{}"; tooltip = false; escape = false; };
-    "custom/vm-tun"      = { exec = "${vmTunScript}";     interval = lib.toInt hostPollInterval; format = "{}"; tooltip = false; escape = false; };
-    "custom/vm-up"       = { exec = "${vmUpScript}";      interval = 30;                        format = "{}"; tooltip = false; escape = false; };
-    "custom/wifi-sync"   = { exec = "${wifiSyncScript}";  interval = 10;                        format = "{}"; tooltip = true; escape = false; "return-type" = "json"; };
+    "custom/workspace-desc" = {
+      exec = "${workspaceDescScript}";
+      interval = 1;
+      format = "{}";
+      tooltip = false;
+      escape = false;
+    };
+    "custom/focus" = {
+      exec = "${focusScript}";
+      interval = 1;
+      format = "{}";
+      tooltip = false;
+      escape = false;
+    };
+    "custom/pomo" = {
+      exec = "${pomoScript}";
+      interval = 1;
+      format = "{}";
+      tooltip = false;
+      escape = false;
+      "on-click" = "pomo";
+    };
+    "custom/sync" = {
+      exec = "${syncScript}";
+      interval = 30;
+      format = "{}";
+      tooltip = false;
+      escape = false;
+    };
+    "custom/git" = {
+      exec = "${monoGitScript}";
+      interval = 30;
+      format = "{}";
+      tooltip = false;
+      escape = false;
+      "return-type" = "json";
+    };
+    "custom/mvms" = {
+      exec = "${mvmsScript}";
+      interval = 5;
+      format = "{}";
+      tooltip = false;
+      escape = false;
+    };
+    "custom/vms" = {
+      exec = "${vmsScript}";
+      interval = 10;
+      format = "{}";
+      tooltip = false;
+      escape = false;
+    };
+    "custom/sep" = {
+      exec = "echo '|'";
+      interval = "once";
+      format = "{}";
+      tooltip = false;
+    };
+    "custom/volume" = {
+      exec = "${volumeScript}";
+      interval = 5;
+      format = "{}";
+      tooltip = false;
+      escape = false;
+      "on-click" = "pavucontrol";
+      "on-scroll-up" = "${pkgs.pulseaudio}/bin/pactl set-sink-volume @DEFAULT_SINK@ +5%";
+      "on-scroll-down" = "${pkgs.pulseaudio}/bin/pactl set-sink-volume @DEFAULT_SINK@ -5%";
+    };
+    "custom/bluetooth" = {
+      exec = "${bluetoothScript}";
+      interval = 10;
+      format = "{}";
+      tooltip = false;
+      escape = false;
+      "return-type" = "json";
+    };
+    "custom/temp" = {
+      exec = "${monoTempScript}";
+      interval = 5;
+      format = "{}";
+      tooltip = false;
+      escape = false;
+    };
+    "custom/memory" = {
+      exec = "${hostMemScript}";
+      interval = 5;
+      format = "{}";
+      tooltip = false;
+      escape = false;
+      "return-type" = "json";
+    };
+    "custom/cpu" = {
+      exec = "${hostCpuScript}";
+      interval = 5;
+      format = "{}";
+      tooltip = false;
+      escape = false;
+      "return-type" = "json";
+    };
+    "custom/disk" = {
+      exec = "${diskScript}";
+      interval = 30;
+      format = "{}";
+      tooltip = false;
+      escape = false;
+    };
+    "custom/uptime" = {
+      exec = "${monoUptimeScript}";
+      interval = 60;
+      format = "{}";
+      tooltip = false;
+      escape = false;
+    };
+    "custom/clock" = {
+      exec = "${clockScript}";
+      interval = 60;
+      format = "{}";
+      tooltip = false;
+      escape = false;
+    };
+    "custom/power-profile" = {
+      exec = "${powerProfileScript}";
+      interval = 10;
+      format = "{}";
+      tooltip = false;
+      escape = false;
+    };
+    "custom/battery" = {
+      exec = "${monoBatteryScript}";
+      interval = 30;
+      format = "{}";
+      tooltip = false;
+      escape = false;
+      "return-type" = "json";
+    };
+    "custom/battery-time" = {
+      exec = "${batteryTimeScript}";
+      interval = 60;
+      format = "{}";
+      tooltip = false;
+      escape = false;
+    };
+    "custom/vm-cpu" = {
+      exec = "${vmCpuScript}";
+      interval = lib.toInt hostPollInterval;
+      format = "{}";
+      tooltip = false;
+      escape = false;
+      "return-type" = "json";
+    };
+    "custom/vm-ram" = {
+      exec = "${vmRamScript}";
+      interval = lib.toInt hostPollInterval;
+      format = "{}";
+      tooltip = false;
+      escape = false;
+      "return-type" = "json";
+    };
+    "custom/vm-fs" = {
+      exec = "${monoVmFsScript}";
+      interval = lib.toInt hostPollInterval;
+      format = "{}";
+      tooltip = false;
+      escape = false;
+    };
+    "custom/vm-sync-dev" = {
+      exec = "${vmSyncDevScript}";
+      interval = lib.toInt hostPollInterval;
+      format = "{}";
+      tooltip = false;
+      escape = false;
+    };
+    "custom/vm-sync-stg" = {
+      exec = "${vmSyncStgScript}";
+      interval = lib.toInt hostPollInterval;
+      format = "{}";
+      tooltip = false;
+      escape = false;
+    };
+    "custom/vm-tun" = {
+      exec = "${vmTunScript}";
+      interval = lib.toInt hostPollInterval;
+      format = "{}";
+      tooltip = false;
+      escape = false;
+    };
+    "custom/vm-up" = {
+      exec = "${vmUpScript}";
+      interval = 30;
+      format = "{}";
+      tooltip = false;
+      escape = false;
+    };
+    "custom/wifi-sync" = {
+      exec = "${wifiSyncScript}";
+      interval = 10;
+      format = "{}";
+      tooltip = true;
+      escape = false;
+      "return-type" = "json";
+    };
   };
 
   configJson = builtins.toJSON (
-    if barType == "monobar" then [ monoBar ]
-    else [ topBar bottomBar ]
+    if barType == "monobar"
+    then [monoBar]
+    else [topBar bottomBar]
   );
 
   defaultColorsCSS = ''
@@ -933,11 +1320,10 @@ let
     [ -f "$_dir/style.css" ]  || printf '%s' ${lib.escapeShellArg styleCSS} > "$_dir/style.css"
     [ -f "$_dir/colors.css" ] || printf '%s' ${lib.escapeShellArg defaultColorsCSS} > "$_dir/colors.css"
   '';
-
 in {
   options.hydrix.graphical.waybar = {
     barType = lib.mkOption {
-      type    = lib.types.enum [ "dualbar" "monobar" ];
+      type = lib.types.enum ["dualbar" "monobar"];
       default = "monobar";
       description = ''
         Waybar layout profile.
@@ -948,81 +1334,81 @@ in {
   };
 
   config = lib.mkIf shouldActivate {
-  home-manager.users.${username} = { lib, ... }: {
-    # All three waybar files are written as mutable regular files — not nix store symlinks.
-    # This allows live editing (waybar reloads CSS on SIGUSR2, config on restart).
-    # Delete a file to have the next rebuild regenerate it from Nix.
-    home.activation.waybarFiles = lib.hm.dag.entryAfter ["writeBoundary"] ''
-      _dir="$HOME/.config/waybar"
-      mkdir -p "$_dir"
+    home-manager.users.${username} = {lib, ...}: {
+      # All three waybar files are written as mutable regular files — not nix store symlinks.
+      # This allows live editing (waybar reloads CSS on SIGUSR2, config on restart).
+      # Delete a file to have the next rebuild regenerate it from Nix.
+      home.activation.waybarFiles = lib.hm.dag.entryAfter ["writeBoundary"] ''
+        _dir="$HOME/.config/waybar"
+        mkdir -p "$_dir"
 
-      # config — remove any stale nix store symlink, always write (structural changes must apply)
-      [ -L "$_dir/config" ] && rm -f "$_dir/config"
-      printf '%s' ${lib.escapeShellArg configJson} > "$_dir/config"
+        # config — remove any stale nix store symlink, always write (structural changes must apply)
+        [ -L "$_dir/config" ] && rm -f "$_dir/config"
+        printf '%s' ${lib.escapeShellArg configJson} > "$_dir/config"
 
-      # style.css — always regenerate (structural changes must apply)
-      [ -L "$_dir/style.css" ] && rm -f "$_dir/style.css"
-      printf '%s' ${lib.escapeShellArg styleCSS} > "$_dir/style.css"
+        # style.css — always regenerate (structural changes must apply)
+        [ -L "$_dir/style.css" ] && rm -f "$_dir/style.css"
+        printf '%s' ${lib.escapeShellArg styleCSS} > "$_dir/style.css"
 
-      # colors.css — only write default if absent (hypr-apply-colors owns this file)
-      if [ ! -f "$_dir/colors.css" ]; then
-        printf '%s' ${lib.escapeShellArg defaultColorsCSS} > "$_dir/colors.css"
-      fi
+        # colors.css — only write default if absent (hypr-apply-colors owns this file)
+        if [ ! -f "$_dir/colors.css" ]; then
+          printf '%s' ${lib.escapeShellArg defaultColorsCSS} > "$_dir/colors.css"
+        fi
 
-      # Restart so structural config/style changes actually apply. waybar only
-      # hot-reloads CSS on SIGUSR2, not config. try-restart is a no-op if waybar
-      # isn't running yet (first boot, headless rebuild).
-      ${pkgs.systemd}/bin/systemctl --user try-restart waybar.service 2>/dev/null || true
-    '';
+        # Restart so structural config/style changes actually apply. waybar only
+        # hot-reloads CSS on SIGUSR2, not config. try-restart is a no-op if waybar
+        # isn't running yet (first boot, headless rebuild).
+        ${pkgs.systemd}/bin/systemctl --user try-restart waybar.service 2>/dev/null || true
+      '';
 
-    # Seeds waybar config files before waybar starts — guards against the race where
-    # home-manager activation (system service) hasn't written configs yet on first boot.
-    systemd.user.services.waybar-init = {
-      Unit = {
-        Description = "Seed waybar config files for first session";
-        Before = [ "waybar.service" ];
+      # Seeds waybar config files before waybar starts — guards against the race where
+      # home-manager activation (system service) hasn't written configs yet on first boot.
+      systemd.user.services.waybar-init = {
+        Unit = {
+          Description = "Seed waybar config files for first session";
+          Before = ["waybar.service"];
+        };
+        Service = {
+          Type = "oneshot";
+          RemainAfterExit = true;
+          ExecStart = "${waybarInitScript}";
+        };
+        Install.WantedBy = ["waybar.service"];
       };
-      Service = {
-        Type            = "oneshot";
-        RemainAfterExit = true;
-        ExecStart       = "${waybarInitScript}";
+
+      # Waybar — managed by systemd so lifecycle is serialised (no pkill races).
+      # Started by hyprland-session.target; restarted by waybar-monitor-watch on monitor events.
+      systemd.user.services.waybar = lib.mkIf shouldActivate {
+        Unit = {
+          Description = "Waybar status bar";
+          After = ["hyprland-session.target" "waybar-init.service"];
+          PartOf = ["hyprland-session.target"];
+        };
+        Service = {
+          Type = "simple";
+          ExecStart = "${pkgs.waybar}/bin/waybar";
+          Restart = "on-failure";
+          RestartSec = 1;
+        };
+        Install.WantedBy = ["hyprland-session.target"];
       };
-      Install.WantedBy = [ "waybar.service" ];
+
+      # VM metrics poller: polls current workspace VM and writes /tmp/hydrix-metrics-current
+      # so that all VM bottom-bar modules (vm-cpu, vm-ram, rproc-bottom, etc.) have data.
+      systemd.user.services.hydrix-vm-poller = lib.mkIf (!isVM) {
+        Unit = {
+          Description = "Hydrix VM metrics poller";
+          After = ["graphical-session.target"];
+          PartOf = ["graphical-session.target"];
+        };
+        Service = {
+          Type = "simple";
+          ExecStart = "${vmPollerScript}";
+          Restart = "on-failure";
+          RestartSec = 5;
+        };
+        Install.WantedBy = ["graphical-session.target"];
+      };
     };
-
-    # Waybar — managed by systemd so lifecycle is serialised (no pkill races).
-    # Started by hyprland-session.target; restarted by waybar-monitor-watch on monitor events.
-    systemd.user.services.waybar = lib.mkIf shouldActivate {
-      Unit = {
-        Description = "Waybar status bar";
-        After       = [ "hyprland-session.target" "waybar-init.service" ];
-        PartOf      = [ "hyprland-session.target" ];
-      };
-      Service = {
-        Type       = "simple";
-        ExecStart  = "${pkgs.waybar}/bin/waybar";
-        Restart    = "on-failure";
-        RestartSec = 1;
-      };
-      Install.WantedBy = [ "hyprland-session.target" ];
-    };
-
-    # VM metrics poller: polls current workspace VM and writes /tmp/hydrix-metrics-current
-    # so that all VM bottom-bar modules (vm-cpu, vm-ram, rproc-bottom, etc.) have data.
-    systemd.user.services.hydrix-vm-poller = lib.mkIf (!isVM) {
-      Unit = {
-        Description = "Hydrix VM metrics poller";
-        After = [ "graphical-session.target" ];
-        PartOf = [ "graphical-session.target" ];
-      };
-      Service = {
-        Type = "simple";
-        ExecStart = "${vmPollerScript}";
-        Restart = "on-failure";
-        RestartSec = 5;
-      };
-      Install.WantedBy = [ "graphical-session.target" ];
-    };
-  };
   }; # config
 }
