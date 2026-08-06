@@ -1,16 +1,11 @@
 # WiFi Configuration - Shared across all machines
 #
-# Run 'wifi-sync pull' to populate from router, or add networks manually.
-# Run 'wifi-sync add SSID PASSWORD' to push to router and save in one step.
-# Passwords may be plaintext or WPA PSK hashes (64-char hex) — both are accepted.
-#
-# IMPORTANT: All VMs share the host's Nix store and can read this file,
-# including the PSK hashes. Use sops-nix to encrypt credentials at rest.
+# Run 'wifi-sync add SSID PASSWORD' (admin mode) to add via router.
+# Run 'wifi-sync' (fallback mode) to capture the current host connection.
+# Run 'wifi-sync pull' to merge all router NM connections into this list.
 
 { config, lib, pkgs, ... }:
 
 {
-  hydrix.router.wifi.networks = lib.mkDefault [
-    # { ssid = "MyNetwork"; password = "plaintext-or-64char-psk-hash"; priority = 100; }
-  ];
+  hydrix.router.wifi.networks = [ ];
 }

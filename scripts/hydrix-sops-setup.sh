@@ -438,13 +438,51 @@ if [[ -f "$SOPS_YAML" ]]; then
   exit 0
 fi
 
+# Offer a password-protected, portable master key up front so it's included
+# as a second recipient from the start -- lets new machines (or a reinstall)
+# decrypt secrets immediately on clone, no 'sops updatekeys' round-trip needed.
+MASTER_KEY_ENC="$SECRETS_DIR/master-age-key.age"
+MASTER_PUBKEY=""
+if [[ ! -f "$MASTER_KEY_ENC" ]]; then
+  echo ""
+  echo -e "${CYAN}A master key lets new machines (or a reinstall) decrypt secrets"
+  echo -e "immediately on clone, no 'sops updatekeys' round-trip required.${NC}"
+  read -p "Generate a password-protected master key now? [Y/n]: " gen_master
+  if [[ "${gen_master:-y}" =~ ^[Yy] ]]; then
+    TMPMASTER=$(mktemp)
+    trap 'rm -f "$TMPMASTER"' EXIT
+    rm -f "$TMPMASTER"
+    age-keygen -o "$TMPMASTER" 2>/dev/null
+    MASTER_PUBKEY=$(age-keygen -y "$TMPMASTER" 2>/dev/null)
+    echo ""
+    echo "Set a passphrase to protect the master key."
+    echo ""
+    if age --passphrase -o "$MASTER_KEY_ENC" "$TMPMASTER"; then
+      # This machine just generated the key and already holds the plaintext --
+      # activate it directly instead of requiring a separate --unlock.
+      sudo mkdir -p /var/lib/sops-nix
+      sudo chmod 700 /var/lib/sops-nix
+      sudo cp "$TMPMASTER" /var/lib/sops-nix/master-age-key.txt
+      sudo chmod 600 /var/lib/sops-nix/master-age-key.txt
+      echo -e "${GREEN}Master key generated: $MASTER_KEY_ENC${NC}"
+    else
+      echo -e "${YELLOW}Master key encryption failed -- continuing with the SSH-derived key only${NC}"
+      MASTER_PUBKEY=""
+      rm -f "$MASTER_KEY_ENC"
+    fi
+    rm -f "$TMPMASTER"
+    trap - EXIT
+  fi
+fi
+
 # Create a new .sops.yaml covering all YAML files in secrets/
-cat > "$SOPS_YAML" << EOF
-creation_rules:
-  - path_regex: .*\\.yaml\$
-    age:
-      - $HOST_PUBKEY
-EOF
+{
+  echo "creation_rules:"
+  echo "  - path_regex: .*\\.yaml\$"
+  echo "    age:"
+  echo "      - $HOST_PUBKEY"
+  [[ -n "$MASTER_PUBKEY" ]] && echo "      - $MASTER_PUBKEY"
+} > "$SOPS_YAML"
 
 echo -e "${GREEN}Created $SOPS_YAML${NC}"
 echo ""
@@ -453,7 +491,11 @@ echo -e "  ${BOLD}hydrix-sops-setup --enroll-fido2${NC}"
 echo ""
 echo "Next steps:"
 echo -e "  Create a secret:  ${BOLD}sops $SECRETS_DIR/mysecret.yaml${NC}"
-echo -e "  Commit the config:  ${BOLD}git add -f $SOPS_YAML && git commit${NC}"
+if [[ -n "$MASTER_PUBKEY" ]]; then
+  echo -e "  Commit the config:  ${BOLD}git add -f $SOPS_YAML $MASTER_KEY_ENC && git commit${NC}"
+else
+  echo -e "  Commit the config:  ${BOLD}git add -f $SOPS_YAML && git commit${NC}"
+fi
 echo ""
 
 # Check for existing encrypted files that may need re-keying

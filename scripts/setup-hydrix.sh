@@ -981,27 +981,10 @@ substitute_modules_locale() {
     log "  Locale: tz=${CONFIG[timezone]} lang=${CONFIG[locale]} kb=${CONFIG[xkbLayout]}"
 }
 
-substitute_modules_wifi() {
-    local wifi="$CONFIG_DIR/modules/wifi.nix"
-
-    # Skip if placeholders are already gone (existing repo has real credentials)
-    if ! grep -q "@WIFI_SSID@" "$wifi" 2>/dev/null; then
-        log "  modules/wifi.nix already configured, skipping WiFi substitution"
-        return
-    fi
-
-    if [[ -z "${CONFIG[wifiSsid]}" ]]; then
-        log "  No WiFi SSID collected, skipping wifi.nix substitution"
-        return
-    fi
-
-    log "  Substituting WiFi credentials in modules/wifi.nix..."
-    sed -i \
-        -e "s|@WIFI_SSID@|${CONFIG[wifiSsid]}|g" \
-        -e "s|@WIFI_PASSWORD@|${CONFIG[wifiPassword]}|g" \
-        "$wifi"
-    log "  WiFi: ssid=${CONFIG[wifiSsid]}"
-}
+# wifi.nix ships from the template as a static empty sops stub (no
+# @WIFI_SSID@ placeholder to substitute). Credentials collected by
+# prompt_wifi() are encrypted straight to secrets/wifi.yaml in the sops
+# step of main() instead, never written to modules/wifi.nix in plaintext.
 
 copy_template_custom() {
     log "Creating custom modules from template..."
@@ -1172,7 +1155,6 @@ generate_full_config() {
     copy_template_infra
     copy_template_modules
     substitute_modules_locale
-    substitute_modules_wifi
     copy_template_custom
     copy_template_templates
     copy_template_configs
@@ -1212,7 +1194,6 @@ generate_machine_only() {
     # Update modules files if they still have placeholder values
     # (handles edge case: user cloned a fresh repo with unsubstituted templates)
     substitute_modules_locale
-    substitute_modules_wifi
 
     # Commit the new machine
     (
@@ -1258,9 +1239,9 @@ prompt_wifi() {
         return
     fi
 
-    # Skip if modules/wifi.nix already has real credentials (not placeholder)
-    if [[ -f "$CONFIG_DIR/modules/wifi.nix" ]] && ! grep -q "@WIFI_SSID@" "$CONFIG_DIR/modules/wifi.nix" 2>/dev/null; then
-        log "WiFi already configured in modules/wifi.nix, skipping"
+    # Skip if this repo already has WiFi credentials encrypted via sops
+    if [[ -f "$CONFIG_DIR/secrets/wifi.yaml" ]]; then
+        log "WiFi already configured in secrets/wifi.yaml, skipping"
         return
     fi
 
@@ -1689,20 +1670,75 @@ main() {
                 echo "Until then, VMs start without secrets (graceful degradation)."
             fi
         else
-            # Fresh repo: initialize sops
+            # Fresh repo: initialize sops (offers a password-protected master key itself)
             hydrix-sops-setup
             echo ""
 
-            # Offer to migrate wifi credentials to sops immediately
-            if command -v setup-wifi-secrets &>/dev/null \
-               && [[ -f "$CONFIG_DIR/modules/wifi.nix" ]] \
-               && grep -qv "@WIFI_SSID@\|networks = \[\]" "$CONFIG_DIR/modules/wifi.nix" 2>/dev/null; then
-                echo "WiFi credentials are currently in modules/wifi.nix (readable by all VMs)."
-                read -p "Encrypt them to secrets/wifi.yaml now? [Y/n]: " do_wifi
-                if [[ ! "$do_wifi" =~ ^[Nn]$ ]]; then
-                    setup-wifi-secrets
-                    echo ""
-                    echo "Next: set wifiSecretsFile in machines/${CONFIG[serial]}.nix and rebuild."
+            local machine_nix="$CONFIG_DIR/machines/${CONFIG[serial]}.nix"
+
+            # Encrypt WiFi credentials collected earlier by prompt_wifi() straight
+            # to secrets/wifi.yaml -- modules/wifi.nix stays the sops stub, never
+            # holds plaintext.
+            if [[ -f "$SOPS_YAML" ]] && [[ ! -f "$CONFIG_DIR/secrets/wifi.yaml" ]] \
+               && [[ -n "${CONFIG[wifiSsid]:-}" ]] && [[ -n "${CONFIG[wifiPassword]:-}" ]]; then
+                local ssid_esc psk_esc
+                ssid_esc=$(printf '%s' "${CONFIG[wifiSsid]}"     | sed 's/\\/\\\\/g; s/"/\\"/g')
+                psk_esc=$(printf  '%s' "${CONFIG[wifiPassword]}" | sed 's/\\/\\\\/g; s/"/\\"/g')
+                printf 'networks: "[{\\"ssid\\": \\"%s\\", \\"psk\\": \\"%s\\", \\"priority\\": 50}]"\n' \
+                    "$ssid_esc" "$psk_esc" > "$CONFIG_DIR/secrets/wifi.yaml"
+                if sops --encrypt --in-place "$CONFIG_DIR/secrets/wifi.yaml" 2>/dev/null; then
+                    sed -i 's/      enable = false;/      enable = true;/' "$machine_nix"
+                    sed -i \
+                        's|# wifiSecretsFile   = ../secrets/wifi.yaml;|wifiSecretsFile = ../secrets/wifi.yaml;|' \
+                        "$machine_nix"
+                    sed -i \
+                        "s|\"microvm-router-${CONFIG[serial]}\" = { autostart = true; };|\"microvm-router-${CONFIG[serial]}\" = { autostart = true; secrets = [ \"wifi\" ]; };|" \
+                        "$machine_nix"
+                    echo "WiFi credentials encrypted to secrets/wifi.yaml."
+                else
+                    rm -f "$CONFIG_DIR/secrets/wifi.yaml"
+                    warn "sops encryption failed, add WiFi credentials later with: wifi-sync add SSID PASSWORD"
+                fi
+            fi
+
+            # Offer a dedicated SSH deploy key so microvm-gitsync can push/pull
+            # this repo with no host internet (lockdown mode). Registering the
+            # public key with GitHub stays a manual step, by design.
+            if [[ -f "$SOPS_YAML" ]] && [[ ! -f "$CONFIG_DIR/secrets/github.yaml" ]]; then
+                echo ""
+                echo "A dedicated SSH deploy key lets microvm-gitsync push/pull this repo"
+                echo "offline. You add the printed public key to GitHub yourself afterward;"
+                echo "nothing is registered automatically."
+                read -p "Generate an SSH deploy key for gitsync now? [Y/n]: " do_deploy
+                if [[ "${do_deploy:-y}" =~ ^[Yy] ]]; then
+                    local deploy_tmp
+                    deploy_tmp=$(mktemp)
+                    rm -f "$deploy_tmp"
+                    if ssh-keygen -t ed25519 -f "$deploy_tmp" -N "" -C "hydrix-gitsync-${CONFIG[serial]}" -q; then
+                        {
+                            echo "id_ed25519: |"
+                            sed 's/^/    /' "$deploy_tmp"
+                            printf 'id_ed25519_pub: "%s"\n' "$(cat "$deploy_tmp.pub")"
+                        } > "$CONFIG_DIR/secrets/github.yaml"
+                        if sops --encrypt --in-place "$CONFIG_DIR/secrets/github.yaml" 2>/dev/null; then
+                            sed -i 's/      enable = false;/      enable = true;/' "$machine_nix"
+                            sed -i \
+                                's|# githubSecretsFile = ../secrets/github.yaml;|githubSecretsFile = ../secrets/github.yaml;|' \
+                                "$machine_nix"
+                            sed -i \
+                                's|# "microvm-gitsync"  = { secrets = \[ "github" \]; };|"microvm-gitsync" = { secrets = [ "github" ]; };|' \
+                                "$machine_nix"
+                            echo ""
+                            echo "Deploy key generated. Add this public key to GitHub (github.com/settings/keys):"
+                            echo "  $(cat "$deploy_tmp.pub")"
+                        else
+                            rm -f "$CONFIG_DIR/secrets/github.yaml"
+                            warn "sops encryption failed, deploy key not saved."
+                        fi
+                    else
+                        warn "Could not generate SSH deploy key"
+                    fi
+                    shred -u "$deploy_tmp" "$deploy_tmp.pub" 2>/dev/null || rm -f "$deploy_tmp" "$deploy_tmp.pub"
                 fi
             fi
 
@@ -1711,7 +1747,7 @@ main() {
             echo "  hydrix-sops-setup --gen-key"
             echo ""
             echo "Commit the sops config:"
-            echo "  cd $CONFIG_DIR && git add -f secrets/.sops.yaml && git commit -m 'feat(secrets): init sops'"
+            echo "  cd $CONFIG_DIR && git add -f secrets/ machines/${CONFIG[serial]}.nix && git commit -m 'feat(secrets): init sops'"
         fi
     else
         warn "hydrix-sops-setup not found. Run 'hydrix-sops-setup' after reboot to initialize sops."
