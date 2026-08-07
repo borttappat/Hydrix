@@ -76,7 +76,7 @@ let
           ''}
           ${lib.optionalString (platform == "amd") ''
             # AMD: no max_perf_pct equivalent; EPP controls performance ceiling
-            # Disable boost (AMD: 1=on, 0=off — inverted vs Intel)
+            # Disable boost (AMD: 1=on, 0=off, inverted vs Intel)
             echo 0 | sudo tee /sys/devices/system/cpu/cpufreq/boost > /dev/null 2>&1 || true
           ''}
           # Set ASUS platform profile to Quiet for minimal fan noise
@@ -84,8 +84,8 @@ let
             sudo asusctl profile -P Quiet >/dev/null 2>&1 || true
           fi
           echo "powersave" > "$STATE_FILE"
-          ${lib.optionalString (platform == "intel") ''echo "Mode: powersave — CPU 60%, turbo off, fans quiet"''}
-          ${lib.optionalString (platform == "amd") ''echo "Mode: powersave — turbo off, EPP power, fans quiet"''}
+          ${lib.optionalString (platform == "intel") ''echo "Mode: powersave - CPU 60%, turbo off, fans quiet"''}
+          ${lib.optionalString (platform == "amd") ''echo "Mode: powersave - turbo off, EPP power, fans quiet"''}
           ;;
         balanced|auto)
           echo "Restoring balanced mode..."
@@ -107,7 +107,7 @@ let
             sudo asusctl profile -P Balanced >/dev/null 2>&1 || true
           fi
           echo "auto" > "$STATE_FILE"
-          echo "Mode: balanced — HWP balance_power, turbo on, fans balanced"
+          echo "Mode: balanced - HWP balance_power, turbo on, fans balanced"
           ;;
         performance|high)
           echo "Setting performance mode..."
@@ -131,7 +131,7 @@ let
             sudo asusctl profile -P Performance >/dev/null 2>&1 || true
           fi
           echo "performance" > "$STATE_FILE"
-          echo "Mode: performance — 100% CPU, turbo on, fans high"
+          echo "Mode: performance - 100% CPU, turbo on, fans high"
           ;;
         cooldown|cool)
           echo "Setting cooldown mode..."
@@ -154,7 +154,7 @@ let
             sudo asusctl profile -P Performance >/dev/null 2>&1 || true
           fi
           echo "cooldown" > "$STATE_FILE"
-          echo "Mode: cooldown — CPU throttled, fans max (active cooling)"
+          echo "Mode: cooldown - CPU throttled, fans max (active cooling)"
           ;;
         *)
           echo "Unknown mode: $mode"
@@ -175,7 +175,7 @@ let
       esac
     }
 
-    # asusctl prints verbose zbus/tracing output to stdout — filter it out
+    # asusctl prints verbose zbus/tracing output to stdout, filter it out
     asusctl_quiet() { asusctl "$@" 2>/dev/null | grep -v "^\[INFO\|^Starting version\|^$" ; }
 
     get_fan_profile() {
