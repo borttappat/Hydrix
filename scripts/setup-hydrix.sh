@@ -981,6 +981,27 @@ substitute_modules_locale() {
     log "  Locale: tz=${CONFIG[timezone]} lang=${CONFIG[locale]} kb=${CONFIG[xkbLayout]}"
 }
 
+substitute_modules_user() {
+    local user_nix="$CONFIG_DIR/modules/user.nix"
+
+    # Skip if placeholders are already gone (existing repo has real values)
+    if ! grep -q "@USERNAME@" "$user_nix" 2>/dev/null; then
+        log "  modules/user.nix already configured, skipping identity substitution"
+        return
+    fi
+
+    log "  Substituting identity placeholders in modules/user.nix..."
+    sed -i \
+        -e "s|@USERNAME@|${CONFIG[username]}|g" \
+        -e "s|@COLORSCHEME@|${CONFIG[colorscheme]}|g" \
+        "$user_nix"
+    log "  Identity: user=${CONFIG[username]} colorscheme=${CONFIG[colorscheme]}"
+}
+
+# Git identity for ~/hydrix-config is auto-derived at eval time (machine name
+# + hydrix.username, scoped to that repo's local .git/config via
+# modules/user.nix); no prompt, no placeholder substitution needed here.
+
 # wifi.nix ships from the template as a static empty sops stub (no
 # @WIFI_SSID@ placeholder to substitute). Credentials collected by
 # prompt_wifi() are encrypted straight to secrets/wifi.yaml in the sops
@@ -1119,8 +1140,6 @@ generate_machine_nix() {
     sed \
         -e "s|@SERIAL@|${CONFIG[serial]}|g" \
         -e "s|@GEN_DATE@|${gen_date}|g" \
-        -e "s|@USERNAME@|${CONFIG[username]}|g" \
-        -e "s|@COLORSCHEME@|${CONFIG[colorscheme]}|g" \
         -e "s|@HARDWARE_IMPORT@|${hardware_import}|g" \
         -e "s|@TIMEZONE@|${CONFIG[timezone]}|g" \
         -e "s|@LANGUAGE@|${CONFIG[language]}|g" \
@@ -1155,6 +1174,7 @@ generate_full_config() {
     copy_template_infra
     copy_template_modules
     substitute_modules_locale
+    substitute_modules_user
     copy_template_custom
     copy_template_templates
     copy_template_configs
@@ -1194,6 +1214,7 @@ generate_machine_only() {
     # Update modules files if they still have placeholder values
     # (handles edge case: user cloned a fresh repo with unsubstituted templates)
     substitute_modules_locale
+    substitute_modules_user
 
     # Commit the new machine
     (
@@ -1657,6 +1678,19 @@ main() {
             # Existing repo: this is an additional machine
             if [[ -n "$PUBKEY" ]] && grep -qF "$PUBKEY" "$SOPS_YAML" 2>/dev/null; then
                 success "This machine's age key is already in secrets/.sops.yaml"
+            elif [[ -f "$CONFIG_DIR/secrets/master-age-key.age" ]]; then
+                # A password-protected master key is already a recipient in
+                # .sops.yaml; unlocking it here decrypts secrets immediately,
+                # no sops updatekeys round-trip from an already-enrolled
+                # machine needed.
+                echo "Found secrets/master-age-key.age in the repo."
+                echo "Unlocking it decrypts secrets on this machine right away."
+                read -p "Unlock master key now? [Y/n]: " do_unlock
+                if [[ "${do_unlock:-y}" =~ ^[Yy] ]]; then
+                    hydrix-sops-setup --unlock
+                else
+                    echo "Skipped. Run 'hydrix-sops-setup --unlock' later to decrypt secrets."
+                fi
             else
                 echo "This machine's age key must be added to secrets/.sops.yaml."
                 echo ""

@@ -53,7 +53,7 @@
   #   imports = [ ../specialisations/leisure.nix ];
   # };
   
-  users.users.@USERNAME@.hashedPassword = "@PASSWORD_HASH@";
+  users.users.${config.hydrix.username}.hashedPassword = "@PASSWORD_HASH@";
 
   # =========================================================================
   # HYDRIX CONFIGURATION
@@ -62,9 +62,7 @@
     # ─────────────────────────────────────────────────────────────────────
     # IDENTITY
     # ─────────────────────────────────────────────────────────────────────
-    username = "@USERNAME@";
-    hostname = "hydrix";         # Visual hostname (config file identified by serial)
-    colorscheme = "@COLORSCHEME@";
+    # username, hostname, colorscheme live in modules/user.nix (shared)
     graphical.wallpaper = "${hydrix}/theming/wallpapers/Hydrix.png";
 
     # ─────────────────────────────────────────────────────────────────────

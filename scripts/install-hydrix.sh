@@ -220,8 +220,6 @@ declare -A CONFIG=(
     [hydrixUrl]="github:borttappat/Hydrix"
     [hydrixLocalPath]=""
     [cpuThrottle]="normal"
-    [gitName]=""
-    [gitEmail]=""
 )
 
 # ========== UTILITY FUNCTIONS ==========
@@ -1645,14 +1643,9 @@ gather_user_info() {
         fi
     done
 
-    # Git identity (used to pre-populate ~/.gitconfig on the new system)
-    echo ""
-    log "=== Git Identity ==="
-    log "  Pre-populates ~/.gitconfig so commits work out of the box after first boot."
-    read -p "Git user name [${CONFIG[username]}]: " git_name
-    CONFIG[gitName]="${git_name:-${CONFIG[username]}}"
-    read -p "Git email [leave blank to skip]: " git_email
-    CONFIG[gitEmail]="${git_email:-}"
+    # Git identity for ~/hydrix-config is auto-derived at eval time (machine
+    # name + hydrix.username, scoped to that repo's local .git/config via
+    # modules/user.nix); no prompt needed.
 }
 
 gather_locale() {
@@ -2011,6 +2004,14 @@ copy_template_modules() {
         -e "s|@XKB_VARIANT@|${CONFIG[xkbVariant]}|g" \
         "$config_dir/modules/common.nix"
 
+    # Populate user.nix with identity. Git identity (user.name/user.email in
+    # ~/hydrix-config's local .git/config only) is auto-derived at eval time
+    # from machineName + hydrix.username, no placeholder or prompt needed.
+    sed -i \
+        -e "s|@USERNAME@|${CONFIG[username]}|g" \
+        -e "s|@COLORSCHEME@|${CONFIG[colorscheme]}|g" \
+        "$config_dir/modules/user.nix"
+
     # wifi.nix ships from the template as an empty sops stub (see
     # templates/user-config/modules/wifi.nix) — credentials collected by
     # gather_wifi() are encrypted straight to secrets/wifi.yaml by
@@ -2330,9 +2331,7 @@ generate_machine_nix() {
     sed \
         -e "s|@SERIAL@|${CONFIG[serial]}|g" \
         -e "s|@DATE@|${gen_date}|g" \
-        -e "s|@USERNAME@|${CONFIG[username]}|g" \
         -e "s|@PASSWORD_HASH@|${password_hash}|g" \
-        -e "s|@COLORSCHEME@|${CONFIG[colorscheme]}|g" \
         -e "s|@DEVICE@|${CONFIG[device]}|g" \
         -e "s|@SWAP_SIZE@|${CONFIG[swapSize]}|g" \
         -e "s|@LAYOUT@|${CONFIG[layout]}|g" \
@@ -3377,21 +3376,6 @@ EOF
         cp -r "$gh_config_src" "/mnt/home/${CONFIG[username]}/.config/gh"
         chown -R "$uid:$gid" "/mnt/home/${CONFIG[username]}/.config/gh"
         chmod 700 "/mnt/home/${CONFIG[username]}/.config/gh"
-    fi
-
-    # Write ~/.gitconfig with the user's git identity
-    if [[ -n "${CONFIG[gitName]:-}" ]]; then
-        local gitconfig_path="/mnt/home/${CONFIG[username]}/.gitconfig"
-        log "Writing ~/.gitconfig for ${CONFIG[gitName]}..."
-        {
-            echo "[user]"
-            echo "	name = ${CONFIG[gitName]}"
-            if [[ -n "${CONFIG[gitEmail]:-}" ]]; then
-                echo "	email = ${CONFIG[gitEmail]}"
-            fi
-        } > "$gitconfig_path"
-        chown "$uid:$gid" "$gitconfig_path"
-        chmod 644 "$gitconfig_path"
     fi
 
     # Remove installer swapfile if we created one

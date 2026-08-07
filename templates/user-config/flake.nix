@@ -116,6 +116,7 @@
     hostConfig = {...}: {
       imports = [
         ./modules/common.nix # Locale, timezone, scaling; shared with all VMs
+        ./modules/user.nix # Username, colorscheme; shared with all VMs
         ./modules/fonts.nix
         ./modules/vim.nix # Deploy .vimrc from configs/vim/.vimrc
         ./modules/starship.nix # Deploy starship.toml from configs/starship/
@@ -163,7 +164,7 @@
       in {
         name = machineName;
         value = hydrix.lib.mkHost {
-          specialArgs = {inherit self hydrix;};
+          specialArgs = {inherit self hydrix machineName;};
           extraInputs = {inherit (inputs) disko sops-nix nix-index-database burpsuite-nix;};
           inherit userColorschemesDir;
           modules = [
@@ -240,6 +241,7 @@
               hydrix.microvmHost.vmNames.routerStable = "microvm-router-stable-${machineName}";
             }
             ./modules/common.nix # Locale + shared settings (all machines)
+            ./modules/user.nix # Username, colorscheme; shared across machines
             ./modules/graphical.nix # UI preferences (opacity, bluelight, etc.)
             ./modules/waybar.nix # Waybar module
             ./modules/fish.nix # Shell abbreviations + functions (user additions)
