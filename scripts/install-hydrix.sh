@@ -2261,16 +2261,46 @@ validate_generated_config() {
         echo ""
     done
 
-    # Lightweight disko check — evaluates only the disk layout (fast, low memory)
-    # to catch misconfigured hydrix.disko.* before touching the disk.
+    # Disk layout check. For fresh/add installs, generate_machine_nix already wrote
+    # CONFIG[device]/[layout]/[nixosPartition]/[efiPartition] straight into
+    # machines/<serial>.nix, so those values ARE the disko config -- check them
+    # directly in bash instead of evaluating the full host nixosSystem (home-manager
+    # + stylix + full theming + microvm host, see hydrix.lib.mkHost) just to read
+    # config.disko.devices.disk back out. That eval needs ~24-32GB of address space
+    # (see the swapfile note near install_nixos) and runs here in Phase 1, before
+    # any swap has been provisioned -- on constrained live-ISO memory it can OOM
+    # before ever reaching partitioning. It also never actually verified the device
+    # path exists; Nix has no way to stat /dev/nvme0n1, it only confirms the
+    # expression isn't empty, which is guaranteed by construction here anyway.
+    #
+    # use-existing mode reuses a cloned machines/<serial>.nix verbatim (CONFIG does
+    # not reflect its actual disko settings), so it still needs the real eval.
     log "  Checking disk layout..."
-    local disko_check
-    disko_check=$(nix eval "$TEMP_CONFIG#nixosConfigurations.${CONFIG[serial]}.config.disko.devices.disk" \
-                  --no-write-lock-file 2>&1) || true
-    if [[ "$disko_check" == "{ }" ]] || [[ -z "$disko_check" ]]; then
-        warn "  Disko devices appear empty — fileSystems will not be generated"
-        warn "  Check hydrix.disko.* settings in your machine config"
+    if [[ "$MODE" == "use-existing" ]]; then
+        local disko_check
+        disko_check=$(nix eval "$TEMP_CONFIG#nixosConfigurations.${CONFIG[serial]}.config.disko.devices.disk" \
+                      --no-write-lock-file 2>&1) || true
+        if [[ "$disko_check" == "{ }" ]] || [[ -z "$disko_check" ]]; then
+            warn "  Disko devices appear empty, fileSystems will not be generated"
+            warn "  Check hydrix.disko.* settings in your machine config"
+        else
+            success "  Disk layout: OK"
+        fi
     else
+        case "${CONFIG[layout]}" in
+            full-disk-plain|full-disk-luks)
+                [[ -b "${CONFIG[device]}" ]] || error "Disk device not found: ${CONFIG[device]}"
+                ;;
+            dual-boot-luks|dual-boot-plain)
+                [[ -n "${CONFIG[nixosPartition]}" ]] || error "No NixOS partition set for dual-boot layout"
+                [[ -b "${CONFIG[nixosPartition]}" ]] || error "NixOS partition not found: ${CONFIG[nixosPartition]}"
+                [[ -n "${CONFIG[efiPartition]}" ]] || error "No EFI partition set for dual-boot layout"
+                [[ -b "${CONFIG[efiPartition]}" ]] || error "EFI partition not found: ${CONFIG[efiPartition]}"
+                ;;
+            *)
+                error "Unknown disko layout: ${CONFIG[layout]}"
+                ;;
+        esac
         success "  Disk layout: OK"
     fi
 
