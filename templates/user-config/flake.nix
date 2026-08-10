@@ -209,7 +209,7 @@
               hydrix.networking.infraTapBridges = infraTapBridges;
               hydrix.microvmHost.knownVms =
                 map (m: "microvm-${m._profileName}-${machineName}") discoveredMetas
-                ++ map (m: "microvm-${m._infraName}") discoveredInfra
+                ++ map (m: "microvm-${m._infraName}") (builtins.filter (m: !(m.builtinVm or false)) discoveredInfra)
                 ++ map (m: "microvm-pentest-${m._taskName}-${machineName}") discoveredTasks;
               # Tags each known VM with its category (infra/profile/task) so
               # the host module can decouple profile/task VMs from the host
@@ -224,7 +224,7 @@
                     name = "microvm-${m._infraName}";
                     value = "infra";
                   })
-                  discoveredInfra)
+                  (builtins.filter (m: !(m.builtinVm or false)) discoveredInfra))
                 // builtins.listToAttrs (map (m: {
                     name = "microvm-pentest-${m._taskName}-${machineName}";
                     value = "task";
