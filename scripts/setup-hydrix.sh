@@ -1821,9 +1821,17 @@ main() {
 # Brace block forces bash to buffer the entire script before executing,
 # which is required when piped via curl | bash
 {
-    mkdir -p /var/log/hydrix 2>/dev/null || true
-    HYDRIX_LOG="/var/log/hydrix/hydrix-setup-$(date +%Y%m%d-%H%M%S).log"
+    # This script runs as a plain user (sudo only for specific privileged steps),
+    # and /var/log is root-owned on every NixOS system -- log to /tmp like
+    # install-hydrix.sh does, then best-effort copy it into /var/log/hydrix
+    # afterward via sudo so it persists in the same place either way.
+    HYDRIX_LOG="/tmp/hydrix-setup-$(date +%Y%m%d-%H%M%S).log"
     echo "Logging to: $HYDRIX_LOG"
     exec > >(tee -a "$HYDRIX_LOG") 2>&1
     main "$@"
+    if sudo -n true 2>/dev/null; then
+        sudo mkdir -p /var/log/hydrix
+        sudo cp "$HYDRIX_LOG" /var/log/hydrix/
+        echo "Setup log saved to /var/log/hydrix/$(basename "$HYDRIX_LOG")"
+    fi
 }
