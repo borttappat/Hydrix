@@ -151,16 +151,22 @@ find_hydrix_templates() {
     fi
 
     # 5. Fetch from GitHub — covers curl|bash on a fresh machine with no local clone
+    #
+    # Callers capture this function's return value via tmpl_root=$(find_hydrix_templates),
+    # so nothing in this branch may write to stdout except the final `echo "$found"` below
+    # -- log/success are plain echo (stdout) elsewhere in this script, and git clone's own
+    # output would land on stdout too without redirecting it, so all three are explicitly
+    # sent to stderr here instead.
     if [[ -z "$found" ]]; then
-        log "Templates not found locally — fetching from GitHub..."
+        log "Templates not found locally — fetching from GitHub..." >&2
         local clone_dir
         clone_dir=$(mktemp -d)
         local branch="${HYDRIX_BRANCH:-main}"
         if git clone --depth=1 --branch "$branch" \
-            https://github.com/borttappat/Hydrix.git "$clone_dir/Hydrix" 2>&1; then
+            https://github.com/borttappat/Hydrix.git "$clone_dir/Hydrix" >&2; then
             found="$clone_dir/Hydrix/templates/user-config"
             HYDRIX_TEMPLATES_TMPDIR="$clone_dir"
-            success "Templates fetched from GitHub (branch: $branch)"
+            success "Templates fetched from GitHub (branch: $branch)" >&2
         else
             rm -rf "$clone_dir"
             return 1
