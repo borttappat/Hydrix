@@ -11,7 +11,7 @@
   bridge     = "br-builder";
   tapId     = "mv-gitsync";
   tapMac    = "02:00:00:02:11:01";  # CID 211 - 100 = 111 = 0x6f... fixed MAC
-  subnet    = "192.168.107";
+  subnet    = "192.168.210";  # br-builder subnet, matches builder's meta.nix
   label     = "GITSYNC";
 
   tapBridges = {

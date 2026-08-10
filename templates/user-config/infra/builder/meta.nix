@@ -6,4 +6,8 @@
   label      = "BUILDER";
   hasDisplay = false;
   builtinVm  = true;
+
+  # Builder network, shared with gitsync VM
+  routerTap  = "mv-router-bldr";
+  subnet     = "192.168.210";
 }
