@@ -37,10 +37,12 @@ in {
   ];
 
   config = lib.mkMerge [
-    # Host defaults
+    # Host defaults. graphical.enable is NOT force-defaulted true here (it's a plain
+    # `mkEnableOption`, false by default) so a plumbing-only host stays desktop-free
+    # with zero opt-out needed -- setup-hydrix/install-hydrix's generated machine
+    # configs explicitly set hydrix.graphical.enable = true alongside hyprland.enable.
     (lib.mkIf isHost {
       hydrix.graphical = {
-        enable = lib.mkDefault true;
         scaling.auto = lib.mkDefault true;
       };
     })
