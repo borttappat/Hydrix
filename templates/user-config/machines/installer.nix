@@ -111,6 +111,9 @@
       type = "@ROUTER_TYPE@";
       wan.mode = "@WAN_MODE@";
       wan.device = if "@WAN_DEVICE@" != "" then "@WAN_DEVICE@" else null;
+      # persistence.enable = true;  # DEFAULT: false - keep nmcli-added WiFi
+      #   connections across router restarts (declarative ones from
+      #   modules/wifi.nix survive either way)
     };
 
       # ─── Mullvad VPN (optional) ────────────────────────────────────────
@@ -262,7 +265,7 @@
     # Shared UI preferences live in modules/graphical.nix (imported for all machines).
     # All options listed there — override here with plain assignment (no mkForce needed).
     graphical = {
-      enable = true;
+      enable = true; # DEFAULT: false — required now (no longer auto-enabled for hosts)
 
       # polarity = "dark";  # DEFAULT: "dark"
 

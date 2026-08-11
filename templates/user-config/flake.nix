@@ -462,14 +462,21 @@
       ./infra/router-stable/default.nix
     ];
 
-    perMachineRouterConfigs = builtins.listToAttrs (map (machineName: {
+    perMachineRouterConfigs = builtins.listToAttrs (map (machineName: let
+      mc = builtins.getAttr machineName machineConfigs;
+    in {
       name = "microvm-router-${machineName}";
       value = hydrix.lib.mkMicrovmRouter {
         hostname = "microvm-router-${machineName}";
-        wifiPciAddress = (builtins.getAttr machineName machineConfigs).config.hydrix.hardware.vfio.wifiPciAddress;
+        wifiPciAddress = mc.config.hydrix.hardware.vfio.wifiPciAddress;
         inherit extraNetworks;
         profileNetworks = allProfileNetworks;
-        modules = routerModules;
+        # The router VM is a separate nixosSystem build, not a child of the host
+        # config -- only values explicitly threaded through here reach it.
+        # hydrix.router.persistence set on the host machine config (e.g.
+        # machines/<serial>.nix) is re-read from that machine's own evaluated
+        # config and re-applied here, same pattern as wifiPciAddress above.
+        modules = routerModules ++ [{hydrix.router.persistence = mc.config.hydrix.router.persistence;}];
       };
     }) (builtins.attrNames machineConfigs));
 

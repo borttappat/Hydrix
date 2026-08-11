@@ -27,5 +27,9 @@
     # Archive tools
     unzip
     p7zip
+
+    # Route specific commands through the Tor SOCKS proxy (services.tor.client,
+    # enabled by default for this profile — see vm/profiles/comms/services.nix)
+    torsocks
   ];
 }
