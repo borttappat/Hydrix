@@ -2699,9 +2699,9 @@ cmd_files_transfer() {
     dst_vm=$(echo "$dst_spec" | cut -d'/' -f1)
     dst_path=$(echo "$dst_spec" | cut -d'/' -f2-)
 
-    # Resolve short names
-    [[ "$src_vm" != microvm-* ]] && src_vm="microvm-${src_vm}"
-    [[ "$dst_vm" != microvm-* ]] && dst_vm="microvm-${dst_vm}"
+    # Resolve short names (e.g. "browsing" -> "microvm-browsing-<serial>")
+    src_vm="$(get_vm_name_from_target "$src_vm")"
+    dst_vm="$(get_vm_name_from_target "$dst_vm")"
 
     local src_cid dst_cid
     src_cid=$(get_vm_cid "$src_vm") || exit 1
@@ -2872,7 +2872,7 @@ cmd_files_store() {
 
     src_vm=$(echo "$src_spec" | cut -d'/' -f1)
     src_path=$(echo "$src_spec" | cut -d'/' -f2-)
-    [[ "$src_vm" != microvm-* ]] && src_vm="microvm-${src_vm}"
+    src_vm="$(get_vm_name_from_target "$src_vm")"
 
     local src_cid
     src_cid=$(get_vm_cid "$src_vm") || exit 1
