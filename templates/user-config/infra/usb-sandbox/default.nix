@@ -71,8 +71,10 @@ in {
     enable = true;
     networks."10-usb-sandbox" = {
       matchConfig.MACAddress = meta.tapMac;
-      address = [ "${meta.subnet}.10/24" ];
-      # No gateway — isolated bridge, files VM only, no internet
+      # Own CID as last octet, matching get_vm_ip's subnet.cid derivation in
+      # scripts/microvm (same convention every profile VM uses).
+      address = [ "${meta.subnet}.${toString meta.vsockCid}/24" ];
+      # No gateway - isolated bridge, files VM only, no internet
       linkConfig.RequiredForOnline = "no";
     };
   };

@@ -61,7 +61,7 @@
       mac = "02:00:00:02:6d:02"; # Unique MAC on br-usb-sandbox (usb-sandbox itself uses :6d:01)
       subnet = usbSandboxMeta.subnet;
     };
-    # hostsync: files VM gets a TAP on br-hostsync to HTTP-deliver blobs to 192.168.214.10
+    # hostsync: files VM gets a TAP on br-hostsync to HTTP-deliver blobs to 192.168.214.214
     "hostsync" = {
       tap = "mv-files-hsy";
       mac = "02:00:00:02:d6:02"; # CID 214 = 0xd6; :02 = files VM side on this bridge
