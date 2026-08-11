@@ -277,11 +277,18 @@ in {
             };
           };
         });
-        default = [];
+        default = lib.mapAttrsToList (name: p: {
+          inherit name;
+          inherit (p) subnet routerTap;
+        }) config.hydrix.microvm.defaultProfiles;
         description = ''
           All discovered profile networks, injected into the router VM at build time.
           Each entry configures an IP, DHCP range, and firewall subnet on the router.
-          Populated automatically by flake.nix from profiles/*/meta.nix; do not set manually.
+          Defaults to hydrix.microvm.defaultProfiles (browsing/comms/lurking), so the
+          router serves those out of the box. hydrix-config's flake.nix normally
+          populates this explicitly from profiles/*/meta.nix instead (passed as the
+          profileNetworks argument to mkMicrovmRouter, which only overrides this option
+          when non-empty) -- that fully supersedes this default whenever it applies.
         '';
       };
 

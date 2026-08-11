@@ -125,7 +125,7 @@ in rec {
     profile,
     hostname,
     modules ? [],
-    extraInputs ? [],
+    extraInputs ? {},
     userProfiles ? null,
     hostConfig ? {},
     userColorschemesDir ? null,

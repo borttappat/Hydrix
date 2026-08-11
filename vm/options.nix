@@ -68,6 +68,83 @@ in {
     };
   };
 
+  options.hydrix.microvm.defaultProfiles = lib.mkOption {
+    type = lib.types.attrsOf (lib.types.submodule {
+      options = {
+        vsockCid = lib.mkOption {
+          type = lib.types.int;
+          description = "Default vsock CID for this profile.";
+        };
+        bridge = lib.mkOption {
+          type = lib.types.str;
+          description = "Default host bridge this profile's VM attaches to.";
+        };
+        tapId = lib.mkOption {
+          type = lib.types.str;
+          description = "Default TAP interface name on the VM side.";
+        };
+        routerTap = lib.mkOption {
+          type = lib.types.str;
+          description = "Default TAP interface name on the router side for this profile's link.";
+        };
+        subnet = lib.mkOption {
+          type = lib.types.str;
+          description = "Default /24 subnet prefix (without the last octet).";
+        };
+        workspace = lib.mkOption {
+          type = lib.types.int;
+          description = "Default Hyprland workspace number, if a desktop is in use.";
+        };
+        label = lib.mkOption {
+          type = lib.types.str;
+          description = "Default display label for this profile.";
+        };
+      };
+    });
+    default = {
+      browsing = {
+        vsockCid = 103;
+        bridge = "br-browse";
+        tapId = "mv-browse";
+        routerTap = "mv-router-brow";
+        subnet = "192.168.103";
+        workspace = 3;
+        label = "BROWSING";
+      };
+      comms = {
+        vsockCid = 104;
+        bridge = "br-comms";
+        tapId = "mv-comms";
+        routerTap = "mv-router-comm";
+        subnet = "192.168.104";
+        workspace = 4;
+        label = "COMMS";
+      };
+      lurking = {
+        vsockCid = 106;
+        bridge = "br-lurking";
+        tapId = "mv-lurking";
+        routerTap = "mv-router-lurk";
+        subnet = "192.168.106";
+        workspace = 6;
+        label = "LURKING";
+      };
+    };
+    description = ''
+      Default CID/bridge/tapId/subnet/workspace metadata for Hydrix's built-in profile
+      VMs, so `hydrix.lib.mkMicroVM { profile = "browsing"; ... }` (etc for comms,
+      lurking) is buildable and reachable through the router with zero hydrix-config
+      customization -- no profiles/<name>/meta.nix required. hydrix-config's own
+      profiles/<name>/default.nix (plain assignment, not mkDefault) fully overrides any
+      entry here, so this is purely a fallback for consumers with nothing to override
+      with; it changes nothing for an existing hydrix-config setup.
+
+      `dev` and `pentest` are deliberately not included: pentest is
+      individually-tweaked per engagement and out of scope for a "regular" user (run
+      setup-hydrix instead); dev is not shipped as a zero-config default.
+    '';
+  };
+
   options.hydrix.vmMetrics = {
     vmCollectInterval = lib.mkOption {
       type = lib.types.int;

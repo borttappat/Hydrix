@@ -11,11 +11,23 @@
 #
 { config, lib, pkgs, ... }:
 
+let
+  meta = config.hydrix.microvm.defaultProfiles.comms;
+in
 {
-  imports = [ ./packages.nix ];
+  imports = [ ./packages.nix ./services.nix ];
 
   # VM identity
   hydrix.vmType = "comms";
+
+  # Default networking/identity from hydrix.microvm.defaultProfiles -- lets this VM
+  # build and be reachable through the router with zero hydrix-config customization.
+  # hydrix-config's own profiles/comms/default.nix (plain assignment, from its
+  # meta.nix) fully overrides these.
+  hydrix.microvm.vsockCid = lib.mkDefault meta.vsockCid;
+  hydrix.microvm.bridge = lib.mkDefault meta.bridge;
+  hydrix.microvm.tapId = lib.mkDefault meta.tapId;
+  hydrix.networking.vmSubnet = lib.mkDefault meta.subnet;
 
   # Sound (required for calls)
   services.pipewire = {
