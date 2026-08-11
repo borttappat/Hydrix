@@ -549,7 +549,7 @@
       "hyprland/workspaces"
       "custom/workspace-desc"
       "custom/sep"
-      #"hyprland/window"
+      "hyprland/window"
       "custom/focus"
     ];
     "modules-center" = [];
@@ -589,7 +589,7 @@
       escape = false;
     };
     "hyprland/window" = {
-      format = "{}";
+      format = "[{class}] {title}";
       "max-length" = 60;
       "separate-outputs" = false;
       tooltip = false;
@@ -877,6 +877,7 @@
     "modules-left" = [
       "hyprland/workspaces"
       "custom/workspace-desc"
+      "hyprland/window"
       "custom/focus"
     ];
     "modules-center" = [];
@@ -928,6 +929,12 @@
       format = "{}";
       tooltip = false;
       escape = false;
+    };
+    "hyprland/window" = {
+      format = "[{class}] {title}";
+      "max-length" = 60;
+      "separate-outputs" = false;
+      tooltip = false;
     };
     "custom/focus" = {
       exec = "${focusScript}";
