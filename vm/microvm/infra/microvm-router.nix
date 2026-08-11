@@ -161,15 +161,6 @@ in {
     ./vm-switch.nix
   ];
 
-  # ===== MicroVM Router Options =====
-  options.hydrix.microvm.router = {
-    wifiPciId = lib.mkOption {
-      type = lib.types.str;
-      default = "8086:a840";
-      description = "PCI vendor:device ID of WiFi card";
-    };
-  };
-
   config = {
     assertions = [
       {
@@ -328,13 +319,21 @@ in {
         }
       ];
 
-      # ===== /var/lib is ephemeral =====
-      # No volume declared - /var/lib (NetworkManager connections, dnsmasq
-      # leases, VPN assignment state) lives on the tmpfs root and is wiped on
-      # every restart. Declared config (wifi.nix, hydrix.router.vpn.mullvad.*)
-      # is the only source of truth; no `microvm purge` needed to clear stale
-      # runtime state anymore.
-      volumes = [];
+      # ===== /var/lib is ephemeral by default =====
+      # /var/lib (NetworkManager connections, dnsmasq leases, VPN assignment
+      # state) lives on the tmpfs root and is wiped on every restart unless
+      # hydrix.router.persistence.enable is set, in which case just
+      # /var/lib/NetworkManager gets a small persistent qcow2 volume so
+      # runtime-added (nmcli) connections survive. Declared config (wifi.nix,
+      # hydrix.router.vpn.mullvad.*) is the source of truth for anything
+      # declarative either way; no `microvm purge` needed to clear stale
+      # runtime state.
+      volumes = lib.optionals cfg.router.persistence.enable [{
+        image = "/var/lib/microvms/${vmName}/network-manager.qcow2";
+        mountPoint = "/var/lib/NetworkManager";
+        size = cfg.router.persistence.size;
+        autoCreate = true;
+      }];
 
       # ===== Vsock =====
       # lib.mkDefault: user can override via infra/router/default.nix (or meta.nix CID)

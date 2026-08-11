@@ -32,6 +32,29 @@ in {
         description = "Start router VM automatically at boot";
       };
 
+      persistence = {
+        enable = lib.mkOption {
+          type = lib.types.bool;
+          default = false;
+          description = ''
+            Persist /var/lib/NetworkManager across router VM restarts, via a small
+            qcow2 volume. By default the router's /var/lib is fully ephemeral
+            (tmpfs), so WiFi networks added at runtime via nmcli/NetworkManager's own
+            UI are lost on every restart — declaratively-managed networks
+            (hydrix.router.wifi.networks / modules/wifi.nix) are unaffected either
+            way, since those are baked into the build. Enable this if the router is
+            meant to be an everyday network gateway where ad-hoc connections should
+            survive a restart.
+          '';
+        };
+
+        size = lib.mkOption {
+          type = lib.types.int;
+          default = 256;
+          description = "Size in MB for the persistent /var/lib/NetworkManager volume.";
+        };
+      };
+
       username = lib.mkOption {
         type = lib.types.str;
         default = cfg.username;
@@ -140,10 +163,19 @@ in {
               };
             };
           });
-          default = [];
+          default = [
+            {
+              tap = "mv-router-mgmt";
+              subnet = lib.concatStringsSep "." (lib.take 3 (lib.splitString "." config.hydrix.networking.hostIp));
+            }
+          ];
           description = ''
             Infrastructure LAN segments the router serves (management, builder, etc.).
-            Populated by flake.nix from infra/*/meta.nix entries that declare routerTap + subnet.
+            Defaults to just the management LAN, derived from hydrix.networking.hostIp,
+            so the router is reachable from the host out of the box. hydrix-config's
+            flake.nix extends this with additional entries from infra/*/meta.nix entries
+            that declare routerTap + subnet (builder, etc.) — those are appended on top
+            of this default, not a replacement for it.
             These subnets get static IPs, DHCP ranges, and firewall rules in the router VM.
           '';
         };
@@ -307,14 +339,27 @@ in {
         pciIds = lib.mkOption {
           type = lib.types.listOf lib.types.str;
           default = [];
-          description = "PCI vendor:device IDs to bind to vfio-pci";
+          description = ''
+            PCI vendor:device IDs to bind to vfio-pci (drives boot.kernelParams).
+            Not derived from wifiPciAddress below — the two must be set together for
+            VFIO WiFi passthrough to work: this identifies the device (find with
+            `lspci -nn | grep -i network`), wifiPciAddress identifies its PCI slot
+            (used to pass the device into the router VM). setup-hydrix's
+            hardware-detection step fills in both from a live machine; a hand-written
+            flake must supply both by hand.
+          '';
           example = ["8086:a840" "10de:1b80"];
         };
 
         wifiPciAddress = lib.mkOption {
           type = lib.types.str;
           default = "";
-          description = "PCI address of WiFi card for passthrough (without domain)";
+          description = ''
+            PCI address of WiFi card for passthrough (without domain), e.g. from
+            `lspci -D | grep -i wireless`. Paired with pciIds above (vendor:device for
+            the same card) — both must be set for VFIO WiFi passthrough to work; this
+            option alone does not bind the device to vfio-pci.
+          '';
           example = "00:14.3";
         };
       };
@@ -561,8 +606,16 @@ in {
 
       knownVms = lib.mkOption {
         type = lib.types.listOf lib.types.str;
-        default = [];
-        description = "All VM names managed by this flake. Populated automatically by the flake — do not set manually.";
+        default = map (name: "microvm-${name}") (builtins.attrNames cfg.microvm.defaultProfiles);
+        description = ''
+          All VM names managed by this flake. Defaults to Hydrix's built-in profile
+          registry (hydrix.microvm.defaultProfiles: microvm-browsing, microvm-comms,
+          microvm-lurking) so those are known to the host's VM management (autostart,
+          secrets provisioning, vm-registry.json) with zero hydrix-config customization.
+          hydrix-config's flake.nix normally populates this explicitly instead (plain
+          assignment from profiles/*/meta.nix discovery), which fully supersedes this
+          default whenever it applies — do not set manually if using that convention.
+        '';
       };
 
       vmClasses = lib.mkOption {

@@ -76,9 +76,11 @@ in {
         VMS=enabled
       '';
 
-      # Host IP on br-mgmt — required for the default gateway route to resolve
+      # Host IP on br-mgmt — required for the default gateway route to resolve.
+      # Derived directly from hydrix.networking.hostIp (single source of truth,
+      # shared with the router VM's own infraLans default in host/options.nix).
       networking.interfaces.br-mgmt.ipv4.addresses = [{
-        address = "${netCfg.subnets.mgmt or "192.168.100"}.1";
+        address = netCfg.hostIp;
         prefixLength = 24;
       }];
 
@@ -168,7 +170,7 @@ in {
           ++ lib.unique (lib.attrValues netCfg.infraTapBridges)
           ++ map (n: "br-${n.name}") netCfg.extraNetworks
         )}"
-        MGMT_SUBNET="${netCfg.subnets.mgmt or "192.168.100"}"
+        MGMT_SUBNET="${lib.concatStringsSep "." (lib.take 3 (lib.splitString "." netCfg.hostIp))}"
 
         # Detect current mode
         get_current_mode() {
