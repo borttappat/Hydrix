@@ -135,6 +135,52 @@ microvm start browsing
 mvm rebuild browsing pentest dev comms lurking
 ```
 
+### Router-only (no desktop, hand-written flake)
+
+Hydrix doesn't require the full Hyprland desktop stack. An existing NixOS machine can
+import it for just boot-mode specialisations and a VFIO-isolated router VM, calling
+`hydrix.lib.mkHost`/`hydrix.lib.mkMicrovmRouter` directly instead of going through
+`install-hydrix.sh`/`setup-hydrix.sh`:
+
+```nix
+hydrix.hardware.vfio.enable = true;
+hydrix.hardware.vfio.pciIds = [ "8086:a840" ];   # from: lspci -nn | grep -i network
+hydrix.hardware.vfio.wifiPciAddress = "00:14.3"; # from: lspci -D | grep -i wireless
+hydrix.router.type = "microvm";                   # default, shown for clarity
+hydrix.router.persistence.enable = true;           # keep nmcli-added WiFi across restarts
+hydrix.graphical.enable = false;                   # no Hyprland/waybar/wofi/dunst/Alacritty
+```
+
+Bridges (`br-mgmt` and friends) and the router's management-LAN IP both have real
+built-in defaults now — no `infra/router/meta.nix`-style convention has to be
+replicated by hand for the router to be reachable from the host. The router VM itself is
+still declared separately in your flake via `hydrix.lib.mkMicrovmRouter { ... }` (see
+`lib/default.nix`); `pciIds` and `wifiPciAddress` both need to be set (one binds the
+device to `vfio-pci`, the other tells the router VM which PCI slot to take) — they're not
+derived from each other.
+
+With no profile VMs declared and `hydrix.graphical.enable = false`, the host builds with
+zero graphical packages. Three profile VMs (`browsing`, `comms`, `lurking`) ship with
+real default CID/bridge/subnet/workspace metadata baked into the framework
+(`hydrix.microvm.defaultProfiles`) — declare one with nothing but a profile name and
+hostname and it's buildable and reachable through the router with no
+`profiles/<name>/meta.nix`-equivalent required:
+
+```nix
+"microvm-browsing" = hydrix.lib.mkMicroVM {
+  profile = "browsing";
+  hostname = "microvm-browsing";
+};
+```
+
+(`dev` and `pentest` are not zero-config defaults — `pentest` especially is meant to be
+individually tweaked per engagement; use `setup-hydrix`/hand-write your own profile for
+either.) Each is usable from a plain terminal with no window manager at all:
+`microvm app <name> <cmd>` (e.g. `microvm app microvm-browsing firefox`) launches an app
+inside it and forwards its window via waypipe to *any* running Wayland compositor — it
+has no Hyprland dependency. `microvm console <name>` gives a real serial-console login
+with no compositor required at all.
+
 ---
 
 ## VM Profiles
