@@ -25,10 +25,15 @@ let
     raw      = builtins.floor (base * relation);
   in toString (if raw < 11 then 11 else raw);
 
-  wofiCornerRadius = let ui = config.hydrix.graphical.ui;
-    in toString (if (ui.pillRadius or null) != null
+  # Scaled up from the shared waybar pill-radius formula (which stays sharp
+  # at low cornerRadius values, e.g. 2px) so wofi reads as visibly rounded
+  # without changing waybar's own pill radius.
+  wofiCornerRadius = let
+    ui = config.hydrix.graphical.ui;
+    pillRadius = if (ui.pillRadius or null) != null
                  then ui.pillRadius
-                 else builtins.floor ((ui.cornerRadius or 2) * (ui.pillRadiusScale or 2.0)));
+                 else builtins.floor ((ui.cornerRadius or 2) * (ui.pillRadiusScale or 2.0));
+  in toString (pillRadius * 2);
   wofiWidth  = toString config.hydrix.graphical.ui.rofiWidth;
   wofiHeight = toString config.hydrix.graphical.ui.rofiHeight;
 
@@ -168,6 +173,8 @@ let
 
 #input {
     background-color: transparent;
+    box-shadow: none;
+    outline: none;
     border: none;
     border-bottom: 1px solid ''${accent};
     border-radius: 0;
@@ -206,8 +213,12 @@ EOF
     }
 
     # Common wofi flags used by all invocations
+    # use_search_box=false swaps the GtkSearchEntry for a plain GtkEntry,
+    # dropping its built-in search glyph and clear-text button.
+    # no_actions=true drops the expander arrow drun shows on .desktop entries
+    # that declare multiple actions (e.g. "New Window").
     wofi_args() {
-        echo "--show-icons --width=${wofiWidth} --height=${wofiHeight} --define=font=${fontFamily} ${wofiSize} --define=icon_theme=Papirus"
+        echo "--show-icons --width=${wofiWidth} --height=${wofiHeight} --define=font=${fontFamily} ${wofiSize} --define=icon_theme=Papirus --define=use_search_box=false --define=no_actions=true"
     }
 
     # ── Encrypted Volume Unlock ────────────────────────────────────────────
@@ -382,7 +393,7 @@ EOF
         local theme_file
         theme_file=$(${pkgs.coreutils}/bin/mktemp /tmp/wofi-launcher-XXXXXX.css)
         build_theme > "$theme_file"
-        ${pkgs.wofi}/bin/wofi --show drun --style="$theme_file" $(wofi_args) 2>/dev/null || true
+        ${pkgs.wofi}/bin/wofi --show drun --style="$theme_file" $(wofi_args) --prompt= 2>/dev/null || true
         ${pkgs.coreutils}/bin/rm -f "$theme_file"
     }
 
@@ -392,7 +403,7 @@ EOF
         local theme_file
         theme_file=$(${pkgs.coreutils}/bin/mktemp /tmp/wofi-launcher-XXXXXX.css)
         build_theme > "$theme_file"
-        ${pkgs.wofi}/bin/wofi --show run --style="$theme_file" $(wofi_args) 2>/dev/null || true
+        ${pkgs.wofi}/bin/wofi --show run --style="$theme_file" $(wofi_args) --prompt= 2>/dev/null || true
         ${pkgs.coreutils}/bin/rm -f "$theme_file"
     }
 
