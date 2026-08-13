@@ -82,13 +82,6 @@ in {
       '';
     };
 
-    # Disable hibernation for memory forensics protection
-    # Note: swapDevices = [ ] already in machines/mb-ux5406sa-hardware.nix
-    systemd.sleep.extraConfig = ''
-      # Disable hibernation - no swap devices configured
-      Hibernate=false
-      SuspendThenHibernate=false
-    '';
 
     # Firefox hardening for anonymity.
     # Uses lib.mkDefault so it merges with firefox.nix's lib.mkDefault policies
