@@ -1176,11 +1176,15 @@ generate_machine_nix() {
 
     # Best-effort detection of disko values from the running system.
     # These are informational for future reinstalls; disko is not re-run in setup mode.
-    local efi_part fstype layout swap_size grub_gfxmode
+    local efi_part layout swap_size grub_gfxmode
     efi_part=$(findmnt -n -o SOURCE /boot/efi 2>/dev/null || findmnt -n -o SOURCE /boot 2>/dev/null || echo "")
-    fstype=$(findmnt -n -o FSTYPE / 2>/dev/null || echo "ext4")
-    layout="full-disk-ext4"
-    [[ "$fstype" == "btrfs" ]] && layout="full-disk-btrfs"
+    # Detect LUKS by checking if root lives on a dm-crypt device.
+    if lsblk -no TYPE "$(findmnt -n -o SOURCE /)" 2>/dev/null | grep -q "crypt" || \
+       [[ "$(findmnt -n -o SOURCE /)" == /dev/mapper/* ]]; then
+        layout="full-disk-luks"
+    else
+        layout="full-disk-plain"
+    fi
     swap_size=$(swapon --show=SIZE --noheadings --bytes 2>/dev/null | head -1 | awk '{printf "%.0fG\n", $1/1024/1024/1024}')
     [[ -z "$swap_size" || "$swap_size" == "0G" ]] && swap_size="8G"
     grub_gfxmode="1920x1080x32"
