@@ -90,6 +90,11 @@ declare -A CONFIG=(
 # ========== SECURE CLEANUP ==========
 # Ensure sensitive data is cleared on exit (normal or error)
 
+# File-based caches survive subshell boundaries (variable assignments inside
+# $(...) are lost when the subshell exits; files are not).
+_HYDRIX_TMPL_CACHE_FILE="/tmp/hydrix-setup-tmpl-$$"
+_HYDRIX_TMPL_TMPDIR_FILE="/tmp/hydrix-setup-tmpl-tmpdir-$$"
+
 secure_cleanup() {
     # Clear sensitive variables from memory
     unset token pass pass1 pass2 password password_confirm key_content
@@ -99,9 +104,12 @@ secure_cleanup() {
     unset GIT_SSH_COMMAND
 
     # Remove temp clone used for template fetching
-    if [[ -n "${HYDRIX_TEMPLATES_TMPDIR:-}" ]] && [[ -d "$HYDRIX_TEMPLATES_TMPDIR" ]]; then
-        rm -rf "$HYDRIX_TEMPLATES_TMPDIR"
+    local tmpl_tmpdir=""
+    [[ -f "$_HYDRIX_TMPL_TMPDIR_FILE" ]] && tmpl_tmpdir=$(cat "$_HYDRIX_TMPL_TMPDIR_FILE")
+    if [[ -n "$tmpl_tmpdir" ]] && [[ -d "$tmpl_tmpdir" ]]; then
+        rm -rf "$tmpl_tmpdir"
     fi
+    rm -f "$_HYDRIX_TMPL_CACHE_FILE" "$_HYDRIX_TMPL_TMPDIR_FILE"
 }
 
 # Register cleanup handler for all exit paths
@@ -119,13 +127,12 @@ command_exists() { command -v "$1" &>/dev/null; }
 # Resolve the templates/user-config directory regardless of invocation method.
 # On first call when templates are not found locally (curl|bash on a fresh machine),
 # does a shallow clone of the Hydrix repo to a temp dir and caches the result.
-HYDRIX_TEMPLATES_CACHE=""
-HYDRIX_TEMPLATES_TMPDIR=""
+# Uses a file-based cache so the result survives $(...) subshell boundaries.
 
 find_hydrix_templates() {
     # Return cached result from previous call
-    if [[ -n "$HYDRIX_TEMPLATES_CACHE" ]]; then
-        echo "$HYDRIX_TEMPLATES_CACHE"; return 0
+    if [[ -f "$_HYDRIX_TMPL_CACHE_FILE" ]]; then
+        cat "$_HYDRIX_TMPL_CACHE_FILE"; return 0
     fi
 
     local found=""
@@ -165,7 +172,7 @@ find_hydrix_templates() {
         if git clone --depth=1 --branch "$branch" \
             https://github.com/borttappat/Hydrix.git "$clone_dir/Hydrix" >&2; then
             found="$clone_dir/Hydrix/templates/user-config"
-            HYDRIX_TEMPLATES_TMPDIR="$clone_dir"
+            echo "$clone_dir" > "$_HYDRIX_TMPL_TMPDIR_FILE"
             success "Templates fetched from GitHub (branch: $branch)" >&2
         else
             rm -rf "$clone_dir"
@@ -173,7 +180,7 @@ find_hydrix_templates() {
         fi
     fi
 
-    HYDRIX_TEMPLATES_CACHE="$found"
+    echo "$found" > "$_HYDRIX_TMPL_CACHE_FILE"
     echo "$found"
 }
 
@@ -1135,35 +1142,43 @@ generate_machine_nix() {
     local template_file="$tmpl_root/machines/installer.nix"
     [[ -f "$template_file" ]] || error "Machine config template not found: $template_file"
 
-    # Build hardware import line
-    local hardware_import
-    if [[ -n "${CONFIG[hardwareConfigPath]}" ]]; then
-        hardware_import="./${CONFIG[serial]}-hardware.nix"
-    else
-        hardware_import="# ./${CONFIG[serial]}-hardware.nix  # Add your hardware config here"
-    fi
+    # Best-effort detection of disko values from the running system.
+    # These are informational for future reinstalls; disko is not re-run in setup mode.
+    local efi_part fstype layout swap_size grub_gfxmode
+    efi_part=$(findmnt -n -o SOURCE /boot/efi 2>/dev/null || findmnt -n -o SOURCE /boot 2>/dev/null || echo "")
+    fstype=$(findmnt -n -o FSTYPE / 2>/dev/null || echo "ext4")
+    layout="full-disk-ext4"
+    [[ "$fstype" == "btrfs" ]] && layout="full-disk-btrfs"
+    swap_size=$(swapon --show=SIZE --noheadings --bytes 2>/dev/null | head -1 | awk '{printf "%.0fG\n", $1/1024/1024/1024}')
+    [[ -z "$swap_size" || "$swap_size" == "0G" ]] && swap_size="8G"
+    grub_gfxmode="1920x1080x32"
 
+    # Pipe through a second sed to drop the hashedPassword line: setup mode cannot
+    # safely read the existing hash (requires root), and setting "!" locks the account.
+    # The user can add their hash manually with: mkpasswd -m sha-512
     sed \
         -e "s|@SERIAL@|${CONFIG[serial]}|g" \
-        -e "s|@GEN_DATE@|${gen_date}|g" \
-        -e "s|@HARDWARE_IMPORT@|${hardware_import}|g" \
-        -e "s|@TIMEZONE@|${CONFIG[timezone]}|g" \
-        -e "s|@LANGUAGE@|${CONFIG[language]}|g" \
-        -e "s|@CONSOLE_KEYMAP@|${CONFIG[consoleKeymap]}|g" \
-        -e "s|@XKB_LAYOUT@|${CONFIG[xkbLayout]}|g" \
-        -e "s|@XKB_VARIANT@|${CONFIG[xkbVariant]}|g" \
+        -e "s|@DATE@|${gen_date}|g" \
+        -e "s|@PASSWORD_HASH@|__SETUP_NO_PASSWORD__|g" \
+        -e "s|@DEVICE@|${CONFIG[diskoDevice]}|g" \
+        -e "s|@SWAP_SIZE@|${swap_size}|g" \
+        -e "s|@LAYOUT@|${layout}|g" \
+        -e "s|@NIXOS_PARTITION@|${CONFIG[diskoDevice]}|g" \
+        -e "s|@EFI_PARTITION@|${efi_part}|g" \
+        -e "s|@EFI_BOOTLOADER_ID@|nixos|g" \
         -e "s|@ROUTER_TYPE@|${CONFIG[routerType]}|g" \
         -e "s|@PLATFORM@|${CONFIG[platform]}|g" \
         -e "s|@IS_ASUS@|${CONFIG[isAsus]}|g" \
         -e "s|@WIFI_PCI_ID@|${CONFIG[wifiPciId]}|g" \
         -e "s|@WIFI_PCI_ADDRESS@|${CONFIG[wifiPciAddress]}|g" \
         -e "s|@VFIO_ENABLE@|${CONFIG[vfioEnable]}|g" \
-        -e "s|@VFIO_PCI_IDS@|${CONFIG[vfioPciIds]}|g" \
         -e "s|@WAN_MODE@|${CONFIG[wanMode]}|g" \
-        -e "s|@WAN_DEVICE_LINE@|${CONFIG[wanDeviceLine]}|g" \
-        -e "s|@DISKO_DEVICE@|${CONFIG[diskoDevice]}|g" \
+        -e "s|@WAN_DEVICE@|${CONFIG[wanDevice]}|g" \
+        -e "s|@GRUB_GFXMODE@|${grub_gfxmode}|g" \
         -e "s|@STATE_VERSION@|${CONFIG[stateVersion]}|g" \
-        "$template_file" > "$CONFIG_DIR/machines/${CONFIG[serial]}.nix"
+        "$template_file" | \
+    sed -e "/__SETUP_NO_PASSWORD__/d" \
+        > "$CONFIG_DIR/machines/${CONFIG[serial]}.nix"
 
     log "  Created: $CONFIG_DIR/machines/${CONFIG[serial]}.nix"
 }
