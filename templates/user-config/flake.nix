@@ -550,35 +550,34 @@
     # from infra/*/meta.nix; see infraVMConfigs above.
 
     # =========================================================================
-    # VM IMAGES (libvirt)
+    # VM IMAGES (libvirt) - disabled by default
     # =========================================================================
-    # Libvirt VMs for multi-instance deployments and pentesting workflows.
-    # MicroVMs are recommended for single-instance use cases.
-    # Use libvirt when you need multiple named instances (e.g., pentest-target1, pentest-target2)
-    # Requires hydrix.libvirt.enable = true on the host to use the resulting images with virt-manager.
+    # Uncomment to enable libvirt VM image outputs.
+    # Requires hydrix.libvirt.enable = true on the host.
+    # Use when you need multiple named instances (e.g., pentest-target1, pentest-target2);
+    # for single-instance use cases, microvms are simpler.
     #
-    packages.x86_64-linux = {
-      # VM images for libvirt deployment (build on-demand)
-      vm-browsing =
-        (hydrix.lib.mkVM {
-          profile = "browsing";
-          inherit userProfiles hostConfig userColorschemesDir;
-        }).config.system.build.image;
-      vm-pentest =
-        (hydrix.lib.mkVM {
-          profile = "pentest";
-          inherit userProfiles hostConfig userColorschemesDir;
-        }).config.system.build.image;
-      vm-dev =
-        (hydrix.lib.mkVM {
-          profile = "dev";
-          inherit userProfiles hostConfig userColorschemesDir;
-        }).config.system.build.image;
-      vm-comms =
-        (hydrix.lib.mkVM {
-          profile = "comms";
-          inherit userProfiles hostConfig userColorschemesDir;
-        }).config.system.build.image;
-    };
+    # packages.x86_64-linux = {
+    #   vm-browsing =
+    #     (hydrix.lib.mkVM {
+    #       profile = "browsing";
+    #       inherit userProfiles hostConfig userColorschemesDir;
+    #     }).config.system.build.image;
+    #   vm-pentest =
+    #     (hydrix.lib.mkVM {
+    #       profile = "pentest";
+    #       inherit userProfiles hostConfig userColorschemesDir;
+    #     }).config.system.build.image;
+    #   vm-dev =
+    #     (hydrix.lib.mkVM {
+    #       profile = "dev";
+    #       inherit userProfiles hostConfig userColorschemesDir;
+    #     }).config.system.build.image;
+    #   vm-comms =
+    #     (hydrix.lib.mkVM {
+    #       profile = "comms";
+    #       inherit userProfiles hostConfig userColorschemesDir;
+    #     }).config.system.build.image;
+    # };
   };
 }

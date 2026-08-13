@@ -1667,19 +1667,16 @@ main() {
 
     local flake_ref="path:${CONFIG_DIR}"
 
-    # --- Step 1: Validate ---
+    # --- Step 1: Validate host config only ---
+    # nix flake check evaluates ALL outputs (packages, every VM) which is slow and
+    # hits outputs irrelevant to setup. Match what rebuild actually does: eval the
+    # host nixosConfiguration toplevel only.
     log "Validating configuration..."
-    if ! nix flake check "$flake_ref" --no-build 2>&1; then
-        error "Flake validation failed. Fix errors in $CONFIG_DIR and rebuild manually."
-    fi
-    success "Configuration valid"
-
-    log "Evaluating host configuration..."
     if ! nix eval "${flake_ref}#nixosConfigurations.${CONFIG[serial]}.config.system.build.toplevel" \
          --no-write-lock-file >/dev/null 2>&1; then
-        error "Host evaluation failed. Check $CONFIG_DIR/machines/${CONFIG[serial]}.nix"
+        error "Host evaluation failed. Fix errors in $CONFIG_DIR/machines/${CONFIG[serial]}.nix and rebuild manually."
     fi
-    success "Host evaluation OK"
+    success "Configuration valid"
 
     # --- Step 2: Build microvm-router ---
     local router_name="microvm-router-${CONFIG[serial]}"
