@@ -1188,6 +1188,7 @@ generate_machine_nix() {
         -e "s|@STATE_VERSION@|${CONFIG[stateVersion]}|g" \
         "$template_file" | \
     sed -e "/__SETUP_NO_PASSWORD__/d" \
+        -e "/grub-entries\.nix/d" \
         > "$CONFIG_DIR/machines/${CONFIG[serial]}.nix"
 
     log "  Created: $CONFIG_DIR/machines/${CONFIG[serial]}.nix"
