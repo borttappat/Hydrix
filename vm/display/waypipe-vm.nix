@@ -210,6 +210,7 @@ in {
           --vsock --socket ${waypipePort} \
           --compress none \
           --threads 4 \
+          --video h264,sw \
           --display waypipe-0 \
           ${titlePrefixArg} \
           server -- sleep infinity
