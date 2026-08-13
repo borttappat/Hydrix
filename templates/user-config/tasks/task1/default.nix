@@ -8,9 +8,9 @@
   # hydrix.vm.hostname = lib.mkForce "Win-aabbcc1122";
 
   hydrix.microvm = {
-    vsockCid = 115;
-    tapId    = "mv-task-1";
-    persistence.homeSize = 20480;  # 20GB (smaller than pentest's 100GB)
+    vsockCid = lib.mkForce 115;
+    tapId    = lib.mkForce "mv-task-1";
+    persistence.homeSize = lib.mkForce 20480;  # 20GB (smaller than pentest's 100GB)
     encryption.enable = true;      # On by default: task slots hold engagement data
   };
 }
