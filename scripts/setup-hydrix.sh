@@ -1030,6 +1030,28 @@ substitute_modules_user() {
 # prompt_wifi() are encrypted straight to secrets/wifi.yaml in the sops
 # step of main() instead, never written to modules/wifi.nix in plaintext.
 
+copy_template_fonts() {
+    log "Creating fonts from template..."
+
+    mkdir -p "$CONFIG_DIR/fonts"
+
+    local tmpl_root
+    tmpl_root=$(find_hydrix_templates) || error "Could not find Hydrix templates directory"
+    cp -r "$tmpl_root/fonts"/. "$CONFIG_DIR/fonts/"
+    log "  Copied from template"
+}
+
+copy_template_tasks() {
+    log "Creating task slots from template..."
+
+    mkdir -p "$CONFIG_DIR/tasks"
+
+    local tmpl_root
+    tmpl_root=$(find_hydrix_templates) || error "Could not find Hydrix templates directory"
+    cp -r "$tmpl_root/tasks"/. "$CONFIG_DIR/tasks/"
+    log "  Copied from template"
+}
+
 copy_template_custom() {
     log "Creating custom modules from template..."
 
@@ -1205,6 +1227,8 @@ generate_full_config() {
     copy_template_profiles
     copy_template_infra
     copy_template_modules
+    copy_template_fonts
+    copy_template_tasks
     substitute_modules_locale
     substitute_modules_user
     copy_template_custom
