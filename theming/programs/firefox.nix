@@ -411,6 +411,13 @@ in {
               if lib.hasInfix "Windows" resolvedUA then "Win32"
               else if lib.hasInfix "Macintosh" resolvedUA then "MacIntel"
               else "Linux x86_64";
+          } // lib.optionalAttrs (!isHost) {
+            # No GPU/VA-API in headless microVMs - every codec falls back to
+            # software decode. AV1 (YouTube's preferred codec when available)
+            # is meaningfully more expensive to software-decode than VP9/H264,
+            # so force sites to fall back to the cheaper codecs. Host keeps
+            # AV1 enabled since it has real hardware decode.
+            "media.av1.enabled" = false;
           };
 
           # Custom CSS for Firefox UI
