@@ -611,7 +611,7 @@
     };
     "custom/sync" = {
       exec = "${syncScript}";
-      interval = 30;
+      interval = 120;
       format = "{}";
       tooltip = false;
       escape = false;
@@ -953,7 +953,7 @@
     };
     "custom/sync" = {
       exec = "${syncScript}";
-      interval = 30;
+      interval = 120;
       format = "{}";
       tooltip = false;
       escape = false;
