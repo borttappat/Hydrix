@@ -2362,6 +2362,7 @@ generate_machine_nix() {
         -e "s|@SERIAL@|${CONFIG[serial]}|g" \
         -e "s|@DATE@|${gen_date}|g" \
         -e "s|@PASSWORD_HASH@|${password_hash}|g" \
+        -e "s|@DISKO_ENABLE@|true|g" \
         -e "s|@DEVICE@|${CONFIG[device]}|g" \
         -e "s|@SWAP_SIZE@|${CONFIG[swapSize]}|g" \
         -e "s|@LAYOUT@|${CONFIG[layout]}|g" \

@@ -82,7 +82,7 @@
     # vmThemeSync.focusDaemon.mode = "static";  # options: "dynamic" (default) | "static"
 
     disko = {
-      enable = true;
+      enable = @DISKO_ENABLE@;
       device = "@DEVICE@";
       swapSize = "@SWAP_SIZE@";
       layout = "@LAYOUT@";
