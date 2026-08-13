@@ -588,7 +588,7 @@ migrate_legacy_config() {
     (
         cd "$CONFIG_DIR"
         git add .
-        git -c user.name="Hydrix Setup" -c user.email="setup@hydrix" \
+        git -c user.name="${CONFIG[serial]}" -c user.email="${CONFIG[username]}@${CONFIG[serial]}.hydrix.local" \
             commit -m "Migrate to multi-machine format: machine.nix -> machines/${legacy_hostname}.nix" 2>/dev/null || true
     )
 
@@ -1223,7 +1223,7 @@ generate_full_config() {
         cd "$CONFIG_DIR"
         git init
         git add .
-        git -c user.name="Hydrix Setup" -c user.email="setup@hydrix" \
+        git -c user.name="${CONFIG[serial]}" -c user.email="${CONFIG[username]}@${CONFIG[serial]}.hydrix.local" \
             commit -m "Initial Hydrix configuration for ${CONFIG[serial]}"
     )
 
@@ -1255,7 +1255,7 @@ generate_machine_only() {
         if [[ -n "${CONFIG[hardwareConfigPath]}" ]]; then
             git add "machines/${CONFIG[serial]}-hardware.nix"
         fi
-        git -c user.name="Hydrix Setup" -c user.email="setup@hydrix" \
+        git -c user.name="${CONFIG[serial]}" -c user.email="${CONFIG[username]}@${CONFIG[serial]}.hydrix.local" \
             commit -m "Add machine: ${CONFIG[serial]}"
     )
 
@@ -1276,7 +1276,7 @@ use_existing_machine() {
         cd "$CONFIG_DIR"
         if [[ -f "machines/${CONFIG[serial]}-hardware.nix" ]]; then
             git add "machines/${CONFIG[serial]}-hardware.nix"
-            git -c user.name="Hydrix Setup" -c user.email="setup@hydrix" \
+            git -c user.name="${CONFIG[serial]}" -c user.email="${CONFIG[username]}@${CONFIG[serial]}.hydrix.local" \
                 commit -m "Update hardware config for ${CONFIG[serial]}" 2>/dev/null || true
         fi
     )
