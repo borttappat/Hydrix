@@ -588,7 +588,8 @@ migrate_legacy_config() {
     (
         cd "$CONFIG_DIR"
         git add .
-        git commit -m "Migrate to multi-machine format: machine.nix -> machines/${legacy_hostname}.nix" 2>/dev/null || true
+        git -c user.name="Hydrix Setup" -c user.email="setup@hydrix" \
+            commit -m "Migrate to multi-machine format: machine.nix -> machines/${legacy_hostname}.nix" 2>/dev/null || true
     )
 
     success "Migration complete: machine.nix -> machines/${legacy_hostname}.nix"
@@ -760,10 +761,19 @@ detect_current_config() {
     # Carried forward as-is; never re-derived from the currently running release.
     CONFIG[stateVersion]=$(parse_nix_value "system.stateVersion" "/etc/nixos/configuration.nix")
     if [[ -z "${CONFIG[stateVersion]}" ]]; then
-        read -rp "parameter system.stateVersion not found, enter value manually: " CONFIG[stateVersion]
-        while [[ -z "${CONFIG[stateVersion]}" ]]; do
-            read -rp "system.stateVersion cannot be empty, enter value manually: " CONFIG[stateVersion]
-        done
+        # Flake-managed systems have no /etc/nixos/configuration.nix.
+        # Fall back to the current NixOS release as a best-effort starting point.
+        local nixos_rel
+        nixos_rel=$(nixos-version 2>/dev/null | grep -oP '^\d+\.\d+')
+        if [[ -n "$nixos_rel" ]]; then
+            CONFIG[stateVersion]="$nixos_rel"
+            log "  State version: ${CONFIG[stateVersion]} (detected from nixos-version)"
+        else
+            read -rp "parameter system.stateVersion not found, enter value manually: " CONFIG[stateVersion]
+            while [[ -z "${CONFIG[stateVersion]}" ]]; do
+                read -rp "system.stateVersion cannot be empty, enter value manually: " CONFIG[stateVersion]
+            done
+        fi
     fi
     log "  State version: ${CONFIG[stateVersion]}"
 
@@ -1213,7 +1223,8 @@ generate_full_config() {
         cd "$CONFIG_DIR"
         git init
         git add .
-        git commit -m "Initial Hydrix configuration for ${CONFIG[serial]}"
+        git -c user.name="Hydrix Setup" -c user.email="setup@hydrix" \
+            commit -m "Initial Hydrix configuration for ${CONFIG[serial]}"
     )
 
     success "Configuration generated at: $CONFIG_DIR"
@@ -1244,7 +1255,8 @@ generate_machine_only() {
         if [[ -n "${CONFIG[hardwareConfigPath]}" ]]; then
             git add "machines/${CONFIG[serial]}-hardware.nix"
         fi
-        git commit -m "Add machine: ${CONFIG[serial]}"
+        git -c user.name="Hydrix Setup" -c user.email="setup@hydrix" \
+            commit -m "Add machine: ${CONFIG[serial]}"
     )
 
     success "Added: machines/${CONFIG[serial]}.nix"
@@ -1264,7 +1276,8 @@ use_existing_machine() {
         cd "$CONFIG_DIR"
         if [[ -f "machines/${CONFIG[serial]}-hardware.nix" ]]; then
             git add "machines/${CONFIG[serial]}-hardware.nix"
-            git commit -m "Update hardware config for ${CONFIG[serial]}" 2>/dev/null || true
+            git -c user.name="Hydrix Setup" -c user.email="setup@hydrix" \
+                commit -m "Update hardware config for ${CONFIG[serial]}" 2>/dev/null || true
         fi
     )
 
