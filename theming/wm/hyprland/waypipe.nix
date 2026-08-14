@@ -177,11 +177,19 @@ let
     if [[ "$WS" -eq 10 ]]; then
       log "WS10 (router) → opening console"
       _router_vm=$(${pkgs.jq}/bin/jq -r '.routerVmName // "microvm-router"' /etc/hydrix/host-config.json 2>/dev/null || echo "microvm-router")
+      _stable_vm=$(${pkgs.jq}/bin/jq -r '.stableRouterVmName // "microvm-router-stable"' /etc/hydrix/host-config.json 2>/dev/null || echo "microvm-router-stable")
+      _console_vm=""
       if systemctl is-active --quiet "microvm@$_router_vm.service" 2>/dev/null; then
+        _console_vm="$_router_vm"
+      elif systemctl is-active --quiet "microvm@$_stable_vm.service" 2>/dev/null; then
+        log "$_router_vm not running, falling back to $_stable_vm"
+        _console_vm="$_stable_vm"
+      fi
+      if [[ -n "$_console_vm" ]]; then
         exec alacritty -e sudo socat -,rawer \
-          unix-connect:/var/lib/microvms/$_router_vm/console.sock
+          unix-connect:/var/lib/microvms/$_console_vm/console.sock
       else
-        notify "Router VM not running"
+        notify "No router VM running"
         exec "$@"
       fi
     fi

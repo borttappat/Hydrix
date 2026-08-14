@@ -104,9 +104,14 @@ in {
           # Router console shortcut (host-only infrastructure)
           rc = ''
             set _router_vm (jq -r '.routerVmName // "microvm-router"' /etc/hydrix/host-config.json 2>/dev/null; or echo "microvm-router")
+            set _stable_vm (jq -r '.stableRouterVmName // "microvm-router-stable"' /etc/hydrix/host-config.json 2>/dev/null; or echo "microvm-router-stable")
             if systemctl is-active --quiet microvm@$_router_vm.service
               echo "Connecting to $_router_vm (Ctrl+] to disconnect)..."
               sudo socat -,rawer,escape=0x1d unix-connect:/var/lib/microvms/$_router_vm/console.sock
+            else if systemctl is-active --quiet microvm@$_stable_vm.service
+              echo "$_router_vm not running, falling back to $_stable_vm"
+              echo "Connecting to $_stable_vm (Ctrl+] to disconnect)..."
+              sudo socat -,rawer,escape=0x1d unix-connect:/var/lib/microvms/$_stable_vm/console.sock
             else
               echo "No router running. Start with:"
               echo "  sudo systemctl start microvm@$_router_vm"
