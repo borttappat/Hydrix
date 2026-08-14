@@ -836,8 +836,13 @@ copy_hardware_config() {
 detect_ethernet_interface() {
     local iface=""
 
-    # Prefer the interface currently carrying the default route
+    # Prefer the interface currently carrying the default route, but skip
+    # virtual/bridge interfaces (br-*, tap*, etc.) that may exist from a
+    # prior setup attempt — they are never valid WAN devices.
     iface=$(ip route show default 2>/dev/null | awk '/default/ { print $5; exit }')
+    if [[ "$iface" =~ ^(br|tap|veth|virbr|docker|dummy|bond|tun|wl) ]]; then
+        iface=""
+    fi
 
     if [[ -z "$iface" ]]; then
         # Fallback: first physical ethernet (skip loopback, wireless, virtual)
@@ -878,7 +883,24 @@ detect_wifi_hardware() {
         fi
     done
 
-    # Fallback: scan PCI
+    # Fallback 1: vfio-pci bound devices by PCI class 0x028000 (Network controller).
+    # Handles re-running setup on an existing Hydrix machine where the WiFi card is
+    # already passed through to the router VM and has no wl* interface.
+    if [[ -z "$pci_addr" ]]; then
+        for dev in /sys/bus/pci/drivers/vfio-pci/*/; do
+            [[ -e "$dev/class" ]] || continue
+            local class
+            class=$(cat "$dev/class" 2>/dev/null || echo "")
+            if [[ "$class" == "0x028000" ]]; then
+                pci_addr=$(basename "$dev")
+                pci_id=$(lspci -nn -s "$pci_addr" 2>/dev/null | grep -oP '\[\K[0-9a-f]{4}:[0-9a-f]{4}(?=\])' | head -1 || echo "")
+                log "  Found (vfio-pci): $pci_addr (ID: $pci_id)"
+                break
+            fi
+        done
+    fi
+
+    # Fallback 2: scan PCI by description string
     if [[ -z "$pci_addr" ]]; then
         local wifi_pci
         wifi_pci=$(lspci -nn | grep -iE "wireless|wi-fi|802\.11" | head -1 || true)
