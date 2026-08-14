@@ -22,6 +22,10 @@ if [[ ! -t 0 ]] && [[ -e /dev/tty ]]; then
     read() { builtin read "$@" < /dev/tty; }
 fi
 
+# Ensure nix experimental features are available (stock NixOS installs don't
+# enable flakes/nix-command by default)
+export NIX_CONFIG="experimental-features = nix-command flakes"
+
 # Source common library for validation functions
 if [[ -n "${BASH_SOURCE[0]:-}" ]] && [[ -f "${BASH_SOURCE[0]:-}" ]]; then
     SCRIPT_DIR_LIB="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
