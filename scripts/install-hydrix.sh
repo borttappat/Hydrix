@@ -902,6 +902,15 @@ detect_virtualization() {
     fi
 }
 
+# Read PCI vendor:device ID from sysfs. Always present, no pciutils dependency
+# (stock install media has lspci, but not every live/rescue environment does).
+pci_id_from_sysfs() {
+    local addr="$1" vendor device
+    vendor=$(cat "/sys/bus/pci/devices/$addr/vendor" 2>/dev/null || echo "")
+    device=$(cat "/sys/bus/pci/devices/$addr/device" 2>/dev/null || echo "")
+    [[ -n "$vendor" && -n "$device" ]] && echo "${vendor#0x}:${device#0x}"
+}
+
 detect_wifi_hardware() {
     log "Detecting WiFi hardware for VFIO passthrough..."
 
@@ -920,10 +929,7 @@ detect_wifi_hardware() {
             pci_addr=$(basename "$pci_path" 2>/dev/null || echo "")
 
             if [[ -n "$pci_addr" ]] && [[ "$pci_addr" != "device" ]]; then
-                # Get vendor:device ID
-                local device_info
-                device_info=$(lspci -nn -s "$pci_addr" 2>/dev/null || echo "")
-                pci_id=$(echo "$device_info" | grep -oP '\[\K[0-9a-f]{4}:[0-9a-f]{4}(?=\])' | head -1 || echo "")
+                pci_id=$(pci_id_from_sysfs "$pci_addr")
 
                 log "  Found: $iface_name"
                 log "    PCI: $pci_addr"
@@ -933,30 +939,23 @@ detect_wifi_hardware() {
         fi
     done
 
-    # Strategy 2: Scan PCI directly
+    # Strategy 2: scan all PCI devices by class 0x028000 (Network controller),
+    # covers WiFi cards with no wl* interface (e.g. already vfio-bound or
+    # driverless on this boot).
     if [[ -z "$pci_addr" ]]; then
         log "  Scanning PCI devices..."
 
-        local wifi_pci
-        wifi_pci=$(lspci -nn | grep -iE "network.*wireless|wireless.*network|wi-fi|802\.11" | head -1 || true)
-
-        if [[ -n "$wifi_pci" ]]; then
-            pci_addr=$(echo "$wifi_pci" | awk '{print $1}')
-            pci_id=$(echo "$wifi_pci" | grep -oP '\[\K[0-9a-f]{4}:[0-9a-f]{4}(?=\])' | head -1 || echo "")
-            log "  Found PCI: $pci_addr (ID: $pci_id)"
-        fi
-    fi
-
-    # Strategy 3: Any network controller
-    if [[ -z "$pci_addr" ]]; then
-        local net_pci
-        net_pci=$(lspci -nn | grep -i "Network controller" | head -1 || true)
-
-        if [[ -n "$net_pci" ]]; then
-            pci_addr=$(echo "$net_pci" | awk '{print $1}')
-            pci_id=$(echo "$net_pci" | grep -oP '\[\K[0-9a-f]{4}:[0-9a-f]{4}(?=\])' | head -1 || echo "")
-            log "  Found network controller: $pci_addr"
-        fi
+        for dev in /sys/bus/pci/devices/*/; do
+            [[ -e "$dev/class" ]] || continue
+            local class
+            class=$(cat "$dev/class" 2>/dev/null || echo "")
+            if [[ "$class" == "0x028000" ]]; then
+                pci_addr=$(basename "$dev")
+                pci_id=$(pci_id_from_sysfs "$pci_addr")
+                log "  Found network controller: $pci_addr (ID: $pci_id)"
+                break
+            fi
+        done
     fi
 
     if [[ -n "$pci_addr" ]]; then

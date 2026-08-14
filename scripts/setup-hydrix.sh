@@ -860,6 +860,15 @@ detect_ethernet_interface() {
     echo "${iface:-}"
 }
 
+# Read PCI vendor:device ID from sysfs. Always present, no pciutils dependency
+# (a bare NixOS install may not have lspci installed).
+pci_id_from_sysfs() {
+    local addr="$1" vendor device
+    vendor=$(cat "/sys/bus/pci/devices/$addr/vendor" 2>/dev/null || echo "")
+    device=$(cat "/sys/bus/pci/devices/$addr/device" 2>/dev/null || echo "")
+    [[ -n "$vendor" && -n "$device" ]] && echo "${vendor#0x}:${device#0x}"
+}
+
 detect_wifi_hardware() {
     log "Detecting WiFi hardware..."
 
@@ -876,7 +885,7 @@ detect_wifi_hardware() {
             pci_addr=$(basename "$pci_path" 2>/dev/null || echo "")
 
             if [[ -n "$pci_addr" ]] && [[ "$pci_addr" != "device" ]]; then
-                pci_id=$(lspci -nn -s "$pci_addr" 2>/dev/null | grep -oP '\[\K[0-9a-f]{4}:[0-9a-f]{4}(?=\])' | head -1 || echo "")
+                pci_id=$(pci_id_from_sysfs "$pci_addr")
                 log "  Found: $pci_addr (ID: $pci_id)"
                 break
             fi
@@ -893,22 +902,28 @@ detect_wifi_hardware() {
             class=$(cat "$dev/class" 2>/dev/null || echo "")
             if [[ "$class" == "0x028000" ]]; then
                 pci_addr=$(basename "$dev")
-                pci_id=$(lspci -nn -s "$pci_addr" 2>/dev/null | grep -oP '\[\K[0-9a-f]{4}:[0-9a-f]{4}(?=\])' | head -1 || echo "")
+                pci_id=$(pci_id_from_sysfs "$pci_addr")
                 log "  Found (vfio-pci): $pci_addr (ID: $pci_id)"
                 break
             fi
         done
     fi
 
-    # Fallback 2: scan PCI by description string
+    # Fallback 2: scan all PCI devices by class 0x028000 (Network controller),
+    # regardless of driver binding. Covers WiFi cards with no wl* interface and
+    # not yet bound to vfio-pci.
     if [[ -z "$pci_addr" ]]; then
-        local wifi_pci
-        wifi_pci=$(lspci -nn | grep -iE "wireless|wi-fi|802\.11" | head -1 || true)
-
-        if [[ -n "$wifi_pci" ]]; then
-            pci_addr=$(echo "$wifi_pci" | awk '{print $1}')
-            pci_id=$(echo "$wifi_pci" | grep -oP '\[\K[0-9a-f]{4}:[0-9a-f]{4}(?=\])' | head -1 || echo "")
-        fi
+        for dev in /sys/bus/pci/devices/*/; do
+            [[ -e "$dev/class" ]] || continue
+            local class
+            class=$(cat "$dev/class" 2>/dev/null || echo "")
+            if [[ "$class" == "0x028000" ]]; then
+                pci_addr=$(basename "$dev")
+                pci_id=$(pci_id_from_sysfs "$pci_addr")
+                log "  Found (pci scan): $pci_addr (ID: $pci_id)"
+                break
+            fi
+        done
     fi
 
     if [[ -n "$pci_addr" ]]; then
