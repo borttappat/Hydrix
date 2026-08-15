@@ -52,7 +52,13 @@
   # specialisation.leisure.configuration = {
   #   imports = [ ../specialisations/leisure.nix ];
   # };
-  
+
+  # Prevent hibernation exposing decrypted LUKS contents in a hibernation image.
+  systemd.sleep.settings.Sleep = {
+    Hibernate = false;
+    SuspendThenHibernate = false;
+  };
+
   users.users.${config.hydrix.username}.hashedPassword = "@PASSWORD_HASH@";
 
   # =========================================================================
