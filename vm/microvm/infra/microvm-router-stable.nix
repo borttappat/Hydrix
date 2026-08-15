@@ -65,13 +65,18 @@
   vmName = config.networking.hostName;
   extraNetworks = cfg.networking.extraNetworks;
   profileNetworks = cfg.networking.profileNetworks;
-  # Deduplicated: custom profiles appear in both profileNetworks and extraNetworks.
-  allNetworks = lib.foldl' (
-    acc: n:
-      if builtins.any (m: m.subnet == n.subnet) acc
-      then acc
-      else acc ++ [n]
-  ) [] (profileNetworks ++ extraNetworks);
+  # extraNetworks may contain user-defined profiles that are already in
+  # profileNetworks (profileNetworks = ALL discovered profiles; extraNetworks =
+  # non-framework profiles + infra VMs). Filter out duplicates to avoid double
+  # QEMU TAP entries (EBUSY) and duplicate dnsmasq/nftables config.
+  # Matches microvm-router.nix's extraOnlyNetworks exactly.
+  extraOnlyNetworks =
+    lib.filter (
+      n:
+        !(builtins.any (pn: pn.routerTap == n.routerTap) profileNetworks)
+    )
+    extraNetworks;
+  allNetworks = profileNetworks ++ extraOnlyNetworks;
 
   # Files VM subnet - derived from allNetworks by routerTap name (set in infra/files/meta.nix).
   # Falls back to the canonical default if the files VM is not present.
@@ -100,10 +105,31 @@
   frameworkLans = map stableInfraLan cfg.router.microvm.infraLans;
 
   # frameworkQemuTaps: infra TAPs that need their own QEMU -netdev arg.
-  # The management TAP (mv-rts-mgmt) is already declared in microvm.interfaces and must
-  # not be added again - QEMU would error "Device or resource busy".
-  _declaredTaps = map (iface: iface.id) (lib.filter (iface: iface.type == "tap") config.microvm.interfaces);
-  frameworkQemuTaps = lib.filter (l: !builtins.elem l.tap _declaredTaps) frameworkLans;
+  # The management TAP is declared explicitly in qemu.extraArgs below, so
+  # exclude it here to avoid duplicates.
+  frameworkQemuTaps = lib.filter (l: l.tap != "mv-rts-mgmt") frameworkLans;
+
+  # Script run by QEMU *after* TUNSETIFF to bridge the TAP to its host bridge.
+  # Using script= (not script=no) ensures QEMU holds the fd before bridge
+  # attachment - eliminating the EBUSY race where a pre-bridged TAP blocks
+  # TUNSETIFF (Linux rejects TUNSETIFF when an rx_handler is already registered).
+  # TAPs are created on-demand by QEMU itself via TUNSETIFF; no pre-creation needed.
+  tapBridgeScript = pkgs.writeShellScript "router-stable-tap-bridge" ''
+    TAP="$1"
+    case "$TAP" in
+      mv-rts-mgmt)  BRIDGE="br-mgmt"    ;;
+      mv-rts-bldr)  BRIDGE="br-builder" ;;
+      ${lib.concatMapStrings (pn: "${stableRouterTap pn}) BRIDGE=\"br-${pn.name}\" ;;\n      ") profileNetworks}${lib.concatMapStrings (n: "${stableRouterTap n}) BRIDGE=\"br-${n.name}\" ;;\n      ") extraOnlyNetworks}# Unknown infra TAPs: udev catch-all bridges them after QEMU has the fd open
+      *)               exit 0 ;;
+    esac
+    # Wait for bridge (max 5s; should exist via network.target before QEMU starts)
+    for i in $(seq 10); do
+      ${pkgs.iproute2}/bin/ip link show "$BRIDGE" > /dev/null 2>&1 && break
+      sleep 0.5
+    done
+    ${pkgs.iproute2}/bin/ip link set "$TAP" master "$BRIDGE" 2>/dev/null || true
+    ${pkgs.iproute2}/bin/ip link set "$TAP" up 2>/dev/null || true
+  '';
 
   # All profile/extra network LAN interfaces - derived from meta.nix at build time.
   profileLans =
@@ -149,13 +175,11 @@ in {
       writableStoreOverlay = "/nix/.rw-store";
       graphics.enable = false;
 
-      interfaces = [
-        {
-          type = "tap";
-          id = "mv-rts-mgmt";
-          mac = "02:00:00:03:00:01";
-        }
-      ];
+      # All TAPs are created on-demand by QEMU via TUNSETIFF and bridged via
+      # tapBridgeScript (called after TUNSETIFF, so QEMU holds the fd before
+      # bridge attachment). microvm.interfaces is empty to avoid any tap-up
+      # script that could race with QEMU's TUNSETIFF call.
+      interfaces = [];
 
       qemu.extraArgs =
         [
@@ -173,12 +197,18 @@ in {
           "pcie-root-port,id=pcie.1,slot=1,chassis=1"
           "-device"
           "vfio-pci,host=0000:${lib.removePrefix "0000:" wifiPciAddress},bus=pcie.1"
+
+          # Management TAP (br-mgmt) - created by QEMU, bridged by tapBridgeScript
+          "-netdev"
+          "tap,id=net-mgmt,ifname=mv-rts-mgmt,script=${tapBridgeScript},downscript=no"
+          "-device"
+          "virtio-net-pci,netdev=net-mgmt,mac=02:00:00:03:00:01"
         ]
         # Profile network TAPs - derived from profileNetworks (profiles/*/meta.nix).
         # MACs: 02:00:00:03:XX:01, index+1 (avoids collision with mgmt=00).
         ++ lib.concatLists (lib.imap0 (i: pn: [
             "-netdev"
-            "tap,id=net-${pn.name},ifname=${stableRouterTap pn},script=no,downscript=no"
+            "tap,id=net-${pn.name},ifname=${stableRouterTap pn},script=${tapBridgeScript},downscript=no"
             "-device"
             "virtio-net-pci,netdev=net-${pn.name},mac=02:00:00:03:${lib.fixedWidthString 2 "0" (builtins.toString (i + 1))}:01"
           ])
@@ -187,7 +217,7 @@ in {
         # MACs: 02:00:00:05:XX:01 - separate namespace from profiles (03) and extras (04).
         ++ lib.concatLists (lib.imap0 (i: l: [
             "-netdev"
-            "tap,id=net-infra-${builtins.toString i},ifname=${l.tap},script=no,downscript=no"
+            "tap,id=net-infra-${builtins.toString i},ifname=${l.tap},script=${tapBridgeScript},downscript=no"
             "-device"
             "virtio-net-pci,netdev=net-infra-${builtins.toString i},mac=02:00:00:05:${lib.fixedWidthString 2 "0" (builtins.toString i)}:01"
           ])
@@ -196,11 +226,11 @@ in {
         # MACs: 02:00:00:04:XX:01
         ++ lib.concatLists (lib.imap0 (i: n: [
             "-netdev"
-            "tap,id=net-extra-${n.name},ifname=${stableRouterTap n},script=no,downscript=no"
+            "tap,id=net-extra-${n.name},ifname=${stableRouterTap n},script=${tapBridgeScript},downscript=no"
             "-device"
             "virtio-net-pci,netdev=net-extra-${n.name},mac=02:00:00:04:${lib.fixedWidthString 2 "0" (builtins.toString i)}:01"
           ])
-          extraNetworks);
+          extraOnlyNetworks);
 
       shares = [
         {
@@ -295,7 +325,7 @@ in {
             linkConfig.Name = stableRouterTap n;
           };
         })
-        extraNetworks);
+        extraOnlyNetworks);
 
     # ===== Networking =====
     networking = {

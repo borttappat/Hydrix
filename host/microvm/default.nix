@@ -81,30 +81,6 @@
   stableRouterEnabled =
     builtins.hasAttr stableRouterVmName allVms && allVms.${stableRouterVmName}.enable;
 
-  # Stable router TAP → bridge mapping.
-  # Derived from profileNetworks (uses vmRegistry for correct bridge names)
-  # and extraNetworks (custom profiles + non-builtin infra VMs like files).
-  # Only mv-rts-bldr is hardcoded: builder is a builtinVm not in either list.
-  stableTaps =
-    {"mv-rts-bldr" = "br-builder";}
-    // lib.listToAttrs (map (pn: {
-        name =
-          if lib.hasPrefix "mv-router-" pn.routerTap
-          then "mv-rts-" + lib.removePrefix "mv-router-" pn.routerTap
-          else "mv-rts-${pn.name}";
-        value = (config.hydrix.networking.vmRegistry.${pn.name} or {}).bridge
-              or "br-${pn.name}";
-      })
-      config.hydrix.networking.profileNetworks)
-    // lib.listToAttrs (map (n: {
-        name =
-          if lib.hasPrefix "mv-router-" n.routerTap
-          then "mv-rts-" + lib.removePrefix "mv-router-" n.routerTap
-          else "mv-rts-${n.name}";
-        value = "br-${n.name}";
-      })
-      config.hydrix.networking.extraNetworks);
-
   # Router TAP interface to bridge mapping
   # TAP names must be max 15 chars (Linux limit)
   # Framework infrastructure TAPs are hardcoded; profile TAPs are generated
@@ -523,11 +499,16 @@ in {
           };
         })
 
-        # Stable Router TAP Interface Setup
-        # Creates mv-rts-* TAPs (same bridges as main router, different names)
+        # Stable router MicroVM TAP ordering hook.
+        # TAPs are created on-demand by QEMU via TUNSETIFF and bridged by
+        # tapBridgeScript (called after TUNSETIFF, post-fd-open) - same
+        # pattern as the main router. This service exists solely to ensure
+        # network.target (bridges up) is reached before
+        # microvm@microvm-router-stable.service starts. No TAP pre-creation
+        # needed.
         (lib.mkIf stableRouterEnabled {
           microvm-router-stable-taps = {
-            description = "Create TAP interfaces for stable router microVM";
+            description = "Ensure bridges are ready before stable router microVM starts";
             requiredBy = ["microvm@${stableRouterVmName}.service"];
             before = ["microvm@${stableRouterVmName}.service"];
             after = ["network.target"];
@@ -535,35 +516,8 @@ in {
             serviceConfig = {
               Type = "oneshot";
               RemainAfterExit = true;
+              ExecStart = "${pkgs.coreutils}/bin/true";
             };
-
-            path = [pkgs.iproute2];
-
-            script = ''
-              set -e
-              echo "Creating stable router TAP interfaces..."
-              ${lib.concatStringsSep "\n" (lib.mapAttrsToList (tap: bridge: ''
-                  if ! ip link show ${tap} &>/dev/null; then
-                    ip tuntap add dev ${tap} mode tap
-                    echo "  Created ${tap}"
-                  fi
-                  ip link set ${tap} master ${bridge} 2>/dev/null || true
-                  ip link set ${tap} up
-                  echo "  ${tap} -> ${bridge}"
-                '')
-                stableTaps)}
-              echo "Stable router TAP interfaces ready"
-            '';
-
-            preStop = ''
-              echo "Cleaning up stable router TAP interfaces..."
-              ${lib.concatStringsSep "\n" (lib.mapAttrsToList (tap: _: ''
-                  if ip link show ${tap} &>/dev/null; then
-                    ip link del ${tap} 2>/dev/null || true
-                  fi
-                '')
-                stableTaps)}
-            '';
           };
         })
 
