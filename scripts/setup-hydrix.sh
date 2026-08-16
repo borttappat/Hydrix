@@ -1545,6 +1545,227 @@ configure_custom_url() {
     done
 }
 
+# Initialize sops secrets and encrypt WiFi credentials captured by
+# prompt_wifi(), before nixos-rebuild switch. Uses nix run nixpkgs#{age,sops,
+# ssh-to-age} directly rather than the hydrix-sops-setup binary, which
+# doesn't exist until after a successful switch -- mirrors
+# install-hydrix.sh's init_sops_during_install(), adapted for a live
+# (non-chroot) target: no /mnt prefix, sudo only for /etc/ssh and
+# /var/lib/sops-nix writes.
+#
+# Gracefully skipped (with a warning) if age/sops/ssh-to-age cannot be
+# obtained, or SSH host key generation fails. Sops can be initialized
+# manually afterward with: hydrix-sops-setup && hydrix-sops-setup --gen-key
+init_sops_and_wifi() {
+    log "Initializing sops secrets..."
+
+    sudo mkdir -p /etc/ssh
+    if [[ ! -f /etc/ssh/ssh_host_ed25519_key ]]; then
+        sudo ssh-keygen -t ed25519 -f /etc/ssh/ssh_host_ed25519_key -N "" -C "" -q
+        sudo chmod 600 /etc/ssh/ssh_host_ed25519_key
+        sudo chmod 644 /etc/ssh/ssh_host_ed25519_key.pub
+        log "  Generated SSH host key"
+    else
+        log "  SSH host key already exists"
+    fi
+
+    local host_pubkey
+    host_pubkey=$(nix run --no-write-lock-file nixpkgs#ssh-to-age -- \
+        -i /etc/ssh/ssh_host_ed25519_key.pub 2>/dev/null) || true
+
+    if [[ -z "$host_pubkey" ]]; then
+        warn "  Could not derive age public key -- run hydrix-sops-setup after reboot"
+        return 0
+    fi
+    log "  Host age public key: $host_pubkey"
+
+    local sops_yaml="$CONFIG_DIR/secrets/.sops.yaml"
+    mkdir -p "$CONFIG_DIR/secrets"
+
+    # copy_template_secrets() seeds secrets/.sops.yaml from the unedited
+    # templates/secrets/.sops.yaml stub, which contains the literal
+    # placeholder below -- distinguish that from a real, already-keyed repo.
+    if [[ -f "$sops_yaml" ]] && ! grep -q "REPLACE_WITH_OUTPUT_OF_SOPS_AGE_PUBKEY" "$sops_yaml" 2>/dev/null; then
+        # Existing repo: this is an additional machine. Do not touch already
+        # encrypted files -- the caller cannot decrypt them yet.
+        if grep -qF "$host_pubkey" "$sops_yaml"; then
+            success "  This machine's age key is already in secrets/.sops.yaml"
+        else
+            awk -v key="$host_pubkey" '
+                /^[[:space:]]+-[[:space:]]+age1/ { last=NR; indent=$0; sub(/-[^-].*/, "", indent) }
+                { lines[NR]=$0 }
+                END {
+                    for (i=1; i<=NR; i++) {
+                        print lines[i]
+                        if (i==last) print indent "- " key
+                    }
+                }
+            ' "$sops_yaml" > "${sops_yaml}.tmp" && mv "${sops_yaml}.tmp" "$sops_yaml"
+            log "  Added this machine to existing secrets/.sops.yaml"
+
+            if [[ -f "$CONFIG_DIR/secrets/master-age-key.age" ]]; then
+                echo ""
+                log "  Found secrets/master-age-key.age -- unlocking it decrypts"
+                log "  secrets on this machine right away, no sops updatekeys needed."
+                read -p "  Unlock master key now? [Y/n]: " unlock_yn
+                if [[ "${unlock_yn:-y}" =~ ^[Yy] ]]; then
+                    echo "  (Enter the master key passphrase)"
+                    local tmpunlock age_ok=0
+                    tmpunlock=$(mktemp)
+                    if command -v age &>/dev/null; then
+                        age -d -o "$tmpunlock" "$CONFIG_DIR/secrets/master-age-key.age" && age_ok=1 || true
+                    else
+                        nix run --no-write-lock-file nixpkgs#age -- \
+                            -d -o "$tmpunlock" "$CONFIG_DIR/secrets/master-age-key.age" && age_ok=1 || true
+                    fi
+                    if [[ $age_ok -eq 1 ]]; then
+                        sudo mkdir -p /var/lib/sops-nix
+                        sudo chmod 700 /var/lib/sops-nix
+                        sudo cp "$tmpunlock" /var/lib/sops-nix/master-age-key.txt
+                        sudo chmod 600 /var/lib/sops-nix/master-age-key.txt
+                        log "  Master key unlocked -- secrets decrypt after this switch."
+                    else
+                        warn "  Decryption failed. Run 'hydrix-sops-setup --unlock' later."
+                    fi
+                    rm -f "$tmpunlock"
+                fi
+            else
+                log ""
+                log "  IMPORTANT: existing secrets are not yet re-keyed for this machine."
+                log "  From a machine that can already decrypt, run:"
+                log "    cd ~/hydrix-config/secrets && sops updatekeys --yes wifi.yaml github.yaml"
+                log "    git add secrets/ && git commit -m 'feat(secrets): add ${CONFIG[serial]} as recipient' && git push"
+                log "  Then here: cd $CONFIG_DIR && git pull"
+            fi
+        fi
+    else
+        # Fresh repo (or unedited template stub): create/overwrite
+        # secrets/.sops.yaml and encrypt WiFi/GitHub credentials from scratch.
+        printf 'creation_rules:\n  - path_regex: .*\\.yaml$\n    age:\n      - %s\n' \
+            "$host_pubkey" > "$sops_yaml"
+        log "  Created secrets/.sops.yaml"
+
+        local master_pubkey=""
+        echo ""
+        log "  A master key lets new machines decrypt secrets immediately on clone,"
+        log "  no 'sops updatekeys' round-trip from an existing machine required."
+        read -p "  Generate a password-protected master key now? [Y/n]: " master_yn
+        if [[ "${master_yn:-y}" =~ ^[Yy] ]]; then
+            local master_tmp
+            master_tmp=$(mktemp)
+            rm -f "$master_tmp"
+            if nix shell --no-write-lock-file nixpkgs#age -c age-keygen -o "$master_tmp" 2>/dev/null; then
+                master_pubkey=$(nix shell --no-write-lock-file nixpkgs#age -c age-keygen -y "$master_tmp" 2>/dev/null)
+                echo ""
+                echo "  Set a passphrase to protect the master key."
+                echo "  You will need this passphrase when setting up new machines or reinstalling."
+                echo ""
+                if nix shell --no-write-lock-file nixpkgs#age -c age --passphrase \
+                       -o "$CONFIG_DIR/secrets/master-age-key.age" "$master_tmp"; then
+                    sudo mkdir -p /var/lib/sops-nix
+                    sudo chmod 700 /var/lib/sops-nix
+                    sudo cp "$master_tmp" /var/lib/sops-nix/master-age-key.txt
+                    sudo chmod 600 /var/lib/sops-nix/master-age-key.txt
+                    printf '      - %s\n' "$master_pubkey" >> "$sops_yaml"
+                    log "  Master key generated: secrets/master-age-key.age"
+                else
+                    warn "  Master key encryption failed, continuing with the SSH-derived key only"
+                    master_pubkey=""
+                fi
+            else
+                warn "  Could not generate master key, continuing with the SSH-derived key only"
+            fi
+            rm -f "$master_tmp"
+        fi
+
+        local recipients="$host_pubkey"
+        [[ -n "$master_pubkey" ]] && recipients="$host_pubkey,$master_pubkey"
+
+        local machine_nix="$CONFIG_DIR/machines/${CONFIG[serial]}.nix"
+
+        # Encrypt WiFi credentials captured earlier by prompt_wifi()
+        if [[ -n "${CONFIG[wifiSsid]:-}" ]] && [[ -n "${CONFIG[wifiPassword]:-}" ]]; then
+            local ssid_esc psk_esc
+            ssid_esc=$(printf '%s' "${CONFIG[wifiSsid]}"     | sed 's/\\/\\\\/g; s/"/\\"/g')
+            psk_esc=$(printf  '%s' "${CONFIG[wifiPassword]}" | sed 's/\\/\\\\/g; s/"/\\"/g')
+            local plain_yaml
+            plain_yaml=$(mktemp --suffix=.yaml)
+            printf 'networks: "[{\\"ssid\\": \\"%s\\", \\"psk\\": \\"%s\\", \\"priority\\": 50}]"\n' \
+                "$ssid_esc" "$psk_esc" > "$plain_yaml"
+
+            if SOPS_AGE_RECIPIENTS="$recipients" \
+               nix run --no-write-lock-file nixpkgs#sops -- \
+                   --encrypt "$plain_yaml" > "$CONFIG_DIR/secrets/wifi.yaml" 2>/dev/null; then
+                rm -f "$plain_yaml"
+                log "  WiFi credentials encrypted to secrets/wifi.yaml"
+                sed -i 's/      enable = false;/      enable = true;/' "$machine_nix"
+                sed -i \
+                    's|# wifiSecretsFile   = ../secrets/wifi.yaml;|wifiSecretsFile = ../secrets/wifi.yaml;|' \
+                    "$machine_nix"
+                sed -i \
+                    "s|\"microvm-router-${CONFIG[serial]}\" = { autostart = true; };|\"microvm-router-${CONFIG[serial]}\" = { autostart = true; secrets = [ \"wifi\" ]; };|" \
+                    "$machine_nix"
+            else
+                rm -f "$plain_yaml"
+                warn "  sops encryption failed, add WiFi credentials later with: wifi-sync add SSID PASSWORD"
+            fi
+        fi
+
+        # Dedicated SSH deploy key for microvm-gitsync (offline lockdown
+        # push/pull). Registering the public key with GitHub stays a manual
+        # step, by design.
+        echo ""
+        log "  A dedicated SSH deploy key lets microvm-gitsync push/pull this repo"
+        log "  offline. You add the printed public key to GitHub yourself afterward."
+        read -p "  Generate an SSH deploy key for gitsync now? [Y/n]: " deploy_yn
+        if [[ "${deploy_yn:-y}" =~ ^[Yy] ]]; then
+            local deploy_tmp
+            deploy_tmp=$(mktemp)
+            rm -f "$deploy_tmp"
+            if ssh-keygen -t ed25519 -f "$deploy_tmp" -N "" -C "hydrix-gitsync-${CONFIG[serial]}" -q; then
+                local plain_gh_yaml
+                plain_gh_yaml=$(mktemp --suffix=.yaml)
+                {
+                    echo "id_ed25519: |"
+                    sed 's/^/    /' "$deploy_tmp"
+                    printf 'id_ed25519_pub: "%s"\n' "$(cat "$deploy_tmp.pub")"
+                } > "$plain_gh_yaml"
+
+                if SOPS_AGE_RECIPIENTS="$recipients" \
+                   nix run --no-write-lock-file nixpkgs#sops -- \
+                       --encrypt "$plain_gh_yaml" > "$CONFIG_DIR/secrets/github.yaml" 2>/dev/null; then
+                    rm -f "$plain_gh_yaml"
+                    sed -i 's/      enable = false;/      enable = true;/' "$machine_nix"
+                    sed -i \
+                        's|# githubSecretsFile = ../secrets/github.yaml;|githubSecretsFile = ../secrets/github.yaml;|' \
+                        "$machine_nix"
+                    sed -i \
+                        's|# "microvm-gitsync"  = { secrets = \[ "github" \]; };|"microvm-gitsync" = { secrets = [ "github" ]; };|' \
+                        "$machine_nix"
+                    echo ""
+                    echo "  Deploy key generated. Add this public key to GitHub (github.com/settings/keys):"
+                    echo "    $(cat "$deploy_tmp.pub")"
+                else
+                    rm -f "$plain_gh_yaml"
+                    warn "  sops encryption failed, deploy key not saved."
+                fi
+            else
+                warn "  Could not generate SSH deploy key"
+            fi
+            shred -u "$deploy_tmp" "$deploy_tmp.pub" 2>/dev/null || rm -f "$deploy_tmp" "$deploy_tmp.pub"
+        fi
+
+        echo ""
+        echo "  Generate a personal age key (works across machines, bridge until Yubikey):"
+        echo "    hydrix-sops-setup --gen-key"
+        echo ""
+        echo "  Commit the sops config:"
+        echo "    cd $CONFIG_DIR && git add -f secrets/ machines/${CONFIG[serial]}.nix && git commit -m 'feat(secrets): init sops'"
+    fi
+
+    success "  Sops initialized"
+}
+
 # ========== MAIN ==========
 
 main() {
@@ -1677,6 +1898,13 @@ main() {
     fi
 
     # =========================================================================
+    # SOPS & WIFI SECRETS
+    # =========================================================================
+    # Runs before the build/switch below so a switch failure can never
+    # discard the WiFi credentials prompt_wifi() already captured.
+    init_sops_and_wifi
+
+    # =========================================================================
     # BUILD & APPLY
     # =========================================================================
 
@@ -1761,132 +1989,6 @@ main() {
         success "Host configuration applied"
     else
         error "nixos-rebuild switch failed. Check errors above."
-    fi
-
-    # --- Step 5: Sops initialization ---
-    echo ""
-    log "=== Setting up sops secrets ==="
-    echo ""
-
-    HYDRIX_FLAKE_DIR="$CONFIG_DIR"
-    export HYDRIX_FLAKE_DIR
-
-    SOPS_YAML="$CONFIG_DIR/secrets/.sops.yaml"
-
-    if command -v hydrix-sops-setup &>/dev/null; then
-        PUBKEY=$(hydrix-sops-setup --print-key 2>/dev/null || true)
-
-        if [[ -f "$SOPS_YAML" ]]; then
-            # Existing repo: this is an additional machine
-            if [[ -n "$PUBKEY" ]] && grep -qF "$PUBKEY" "$SOPS_YAML" 2>/dev/null; then
-                success "This machine's age key is already in secrets/.sops.yaml"
-            elif [[ -f "$CONFIG_DIR/secrets/master-age-key.age" ]]; then
-                # A password-protected master key is already a recipient in
-                # .sops.yaml; unlocking it here decrypts secrets immediately,
-                # no sops updatekeys round-trip from an already-enrolled
-                # machine needed.
-                echo "Found secrets/master-age-key.age in the repo."
-                echo "Unlocking it decrypts secrets on this machine right away."
-                read -p "Unlock master key now? [Y/n]: " do_unlock
-                if [[ "${do_unlock:-y}" =~ ^[Yy] ]]; then
-                    hydrix-sops-setup --unlock
-                else
-                    echo "Skipped. Run 'hydrix-sops-setup --unlock' later to decrypt secrets."
-                fi
-            else
-                echo "This machine's age key must be added to secrets/.sops.yaml."
-                echo ""
-                echo "  Age public key: ${PUBKEY:-<run sops-age-pubkey to get it>}"
-                echo ""
-                echo "On a machine that can already decrypt, add the key above to"
-                echo "secrets/.sops.yaml and run:"
-                echo "  sops updatekeys secrets/*.yaml"
-                echo "  git add secrets/.sops.yaml secrets/*.yaml && git commit"
-                echo ""
-                echo "Until then, VMs start without secrets (graceful degradation)."
-            fi
-        else
-            # Fresh repo: initialize sops (offers a password-protected master key itself)
-            hydrix-sops-setup
-            echo ""
-
-            local machine_nix="$CONFIG_DIR/machines/${CONFIG[serial]}.nix"
-
-            # Encrypt WiFi credentials collected earlier by prompt_wifi() straight
-            # to secrets/wifi.yaml -- modules/wifi.nix stays the sops stub, never
-            # holds plaintext.
-            if [[ -f "$SOPS_YAML" ]] && [[ ! -f "$CONFIG_DIR/secrets/wifi.yaml" ]] \
-               && [[ -n "${CONFIG[wifiSsid]:-}" ]] && [[ -n "${CONFIG[wifiPassword]:-}" ]]; then
-                local ssid_esc psk_esc
-                ssid_esc=$(printf '%s' "${CONFIG[wifiSsid]}"     | sed 's/\\/\\\\/g; s/"/\\"/g')
-                psk_esc=$(printf  '%s' "${CONFIG[wifiPassword]}" | sed 's/\\/\\\\/g; s/"/\\"/g')
-                printf 'networks: "[{\\"ssid\\": \\"%s\\", \\"psk\\": \\"%s\\", \\"priority\\": 50}]"\n' \
-                    "$ssid_esc" "$psk_esc" > "$CONFIG_DIR/secrets/wifi.yaml"
-                if sops --encrypt --in-place "$CONFIG_DIR/secrets/wifi.yaml" 2>/dev/null; then
-                    sed -i 's/      enable = false;/      enable = true;/' "$machine_nix"
-                    sed -i \
-                        's|# wifiSecretsFile   = ../secrets/wifi.yaml;|wifiSecretsFile = ../secrets/wifi.yaml;|' \
-                        "$machine_nix"
-                    sed -i \
-                        "s|\"microvm-router-${CONFIG[serial]}\" = { autostart = true; };|\"microvm-router-${CONFIG[serial]}\" = { autostart = true; secrets = [ \"wifi\" ]; };|" \
-                        "$machine_nix"
-                    echo "WiFi credentials encrypted to secrets/wifi.yaml."
-                else
-                    rm -f "$CONFIG_DIR/secrets/wifi.yaml"
-                    warn "sops encryption failed, add WiFi credentials later with: wifi-sync add SSID PASSWORD"
-                fi
-            fi
-
-            # Offer a dedicated SSH deploy key so microvm-gitsync can push/pull
-            # this repo with no host internet (lockdown mode). Registering the
-            # public key with GitHub stays a manual step, by design.
-            if [[ -f "$SOPS_YAML" ]] && [[ ! -f "$CONFIG_DIR/secrets/github.yaml" ]]; then
-                echo ""
-                echo "A dedicated SSH deploy key lets microvm-gitsync push/pull this repo"
-                echo "offline. You add the printed public key to GitHub yourself afterward;"
-                echo "nothing is registered automatically."
-                read -p "Generate an SSH deploy key for gitsync now? [Y/n]: " do_deploy
-                if [[ "${do_deploy:-y}" =~ ^[Yy] ]]; then
-                    local deploy_tmp
-                    deploy_tmp=$(mktemp)
-                    rm -f "$deploy_tmp"
-                    if ssh-keygen -t ed25519 -f "$deploy_tmp" -N "" -C "hydrix-gitsync-${CONFIG[serial]}" -q; then
-                        {
-                            echo "id_ed25519: |"
-                            sed 's/^/    /' "$deploy_tmp"
-                            printf 'id_ed25519_pub: "%s"\n' "$(cat "$deploy_tmp.pub")"
-                        } > "$CONFIG_DIR/secrets/github.yaml"
-                        if sops --encrypt --in-place "$CONFIG_DIR/secrets/github.yaml" 2>/dev/null; then
-                            sed -i 's/      enable = false;/      enable = true;/' "$machine_nix"
-                            sed -i \
-                                's|# githubSecretsFile = ../secrets/github.yaml;|githubSecretsFile = ../secrets/github.yaml;|' \
-                                "$machine_nix"
-                            sed -i \
-                                's|# "microvm-gitsync"  = { secrets = \[ "github" \]; };|"microvm-gitsync" = { secrets = [ "github" ]; };|' \
-                                "$machine_nix"
-                            echo ""
-                            echo "Deploy key generated. Add this public key to GitHub (github.com/settings/keys):"
-                            echo "  $(cat "$deploy_tmp.pub")"
-                        else
-                            rm -f "$CONFIG_DIR/secrets/github.yaml"
-                            warn "sops encryption failed, deploy key not saved."
-                        fi
-                    else
-                        warn "Could not generate SSH deploy key"
-                    fi
-                    shred -u "$deploy_tmp" "$deploy_tmp.pub" 2>/dev/null || rm -f "$deploy_tmp" "$deploy_tmp.pub"
-                fi
-            fi
-
-            echo ""
-            echo "Generate a personal age key (works across machines, bridge until Yubikey):"
-            echo "  hydrix-sops-setup --gen-key"
-            echo ""
-            echo "Commit the sops config:"
-            echo "  cd $CONFIG_DIR && git add -f secrets/ machines/${CONFIG[serial]}.nix && git commit -m 'feat(secrets): init sops'"
-        fi
-    else
-        warn "hydrix-sops-setup not found. Run 'hydrix-sops-setup' after reboot to initialize sops."
     fi
 
     # --- Done ---
