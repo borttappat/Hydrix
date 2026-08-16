@@ -402,6 +402,12 @@ in {
         # subdirectory) causes the condition to always fail, preventing the runner
         # symlink from being created on first boot.
         # The config subdirectory is created by hydrix-microvm-config-dirs below.
+        # Re-asserts microvm:kvm ownership of /var/lib/microvms/<name> itself on
+        # every activation. `z` (non-recursive, existing-path-only) so it can't
+        # create the directory (preserving the ConditionPathExists=! gate above)
+        # and can't touch config/ underneath, which must stay root:root.
+        ++ (lib.mapAttrsToList (name: _: "z /var/lib/microvms/${name} 0755 microvm kvm -")
+          enabledVMs)
         # Parent dir per enabled VM — virtiofsd needs this path to exist at start.
         ++ (lib.mapAttrsToList (name: _: "d /run/hydrix-secrets/${name} 0700 root root -")
           (lib.filterAttrs (_: v: v.enable) cfg.vms))
