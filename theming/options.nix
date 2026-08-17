@@ -70,9 +70,12 @@ in {
     firefox.extensionRegistry = lib.mkOption {
       type = lib.types.attrsOf (lib.types.submodule {
         options = {
-          id          = lib.mkOption { type = lib.types.str; };
-          url         = lib.mkOption { type = lib.types.str; };
-          description = lib.mkOption { type = lib.types.str; default = ""; };
+          id = lib.mkOption {type = lib.types.str;};
+          url = lib.mkOption {type = lib.types.str;};
+          description = lib.mkOption {
+            type = lib.types.str;
+            default = "";
+          };
         };
       });
       default = {
@@ -333,8 +336,8 @@ in {
     ranger.extraRifle = lib.mkOption {
       type = lib.types.listOf (lib.types.submodule {
         options = {
-          condition = lib.mkOption { type = lib.types.str; };
-          command   = lib.mkOption { type = lib.types.str; };
+          condition = lib.mkOption {type = lib.types.str;};
+          command = lib.mkOption {type = lib.types.str;};
         };
       });
       default = [];
@@ -383,6 +386,32 @@ in {
       default = "dark";
       description = "Color scheme polarity";
     };
+
+    stylix.autoTheme =
+      (lib.mkEnableOption ''
+        full Stylix auto-theming (stylix.autoEnable) instead of Hydrix's curated
+        target whitelist. Only meaningful when the consuming flake supplies the
+        `stylix` input at all -- otherwise Stylix isn't loaded and this is a
+        no-op. Lets Stylix theme any program it recognizes, including ones
+        Hydrix has no curated wiring for (a new terminal, a new browser, etc.).
+        GTK, zathura, alacritty, and fish stay wal-owned regardless of this
+        setting -- see hydrix.graphical.stylix.exclusive to hand those over too
+      '')
+      // {
+        default = true;
+      };
+
+    stylix.exclusive = lib.mkEnableOption ''
+      let Stylix theme GTK, zathura, alacritty, and fish too, instead of
+      Hydrix's own wal-driven theming for those specific apps. Only
+      meaningful when the consuming flake supplies the `stylix` input at all.
+      This is an all-or-nothing switch for those four apps: it doesn't just
+      lift Stylix's `mkForce false`, it also disables Hydrix's own delivery
+      mechanisms for them (the gtk-wal.css @import, the zathura launch
+      wrapper) which would otherwise keep overriding whatever Stylix sets.
+      For users who want Stylix as their sole theming engine rather than
+      Hydrix's wal-based per-app theming
+    '';
 
     # Font
     font = {
@@ -528,7 +557,6 @@ in {
             ''';
         '';
       };
-
     };
 
     # UI
@@ -658,7 +686,6 @@ in {
           default = {alacritty = 0.95;};
           description = "Per-app overrides for overlay opacity";
         };
-
       };
 
       rofiWidth = lib.mkOption {
@@ -882,7 +909,6 @@ in {
       };
     };
 
-
     # Lockscreen
     lockscreen = {
       idleTimeout = lib.mkOption {
@@ -1015,7 +1041,7 @@ in {
     };
 
     extraBinds = lib.mkOption {
-      type    = lib.types.lines;
+      type = lib.types.lines;
       default = "";
       description = ''
         Machine-specific Hyprland bind lines appended after the shared config.

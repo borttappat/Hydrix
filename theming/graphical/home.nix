@@ -1,7 +1,8 @@
 # Home Manager Configuration Aggregator
 #
 # Central module that configures all user-level programs via Home Manager.
-# Stylix will automatically theme most of these when enabled.
+# Colors come from wal at runtime by default; Stylix (opt-in, see stylix.nix)
+# will additionally auto-theme most of these if the consuming flake supplies it.
 #
 # This replaces:
 # - modules/desktop/xinitrc.nix (template deployment)
@@ -12,6 +13,7 @@
   config,
   lib,
   pkgs,
+  hasStylix ? false,
   ...
 }: let
   username = config.hydrix.username;
@@ -36,33 +38,36 @@ in {
 
   config = lib.mkIf config.hydrix.graphical.enable {
     # Home Manager user configuration
-    home-manager.users.${username} = {pkgs, ...}: {
-      home.stateVersion = hostStateVersion;
-      stylix.enableReleaseChecks = false;
+    home-manager.users.${username} = {pkgs, ...}:
+      lib.mkMerge [
+        (lib.optionalAttrs hasStylix {stylix.enableReleaseChecks = false;})
+        {
+          home.stateVersion = hostStateVersion;
 
-      # Make variables available to program modules
-      home.sessionVariables = {
-        HYDRIX_IS_VM =
-          if isVM
-          then "1"
-          else "0";
-        HYDRIX_MOD_KEY = modKey;
-      };
+          # Make variables available to program modules
+          home.sessionVariables = {
+            HYDRIX_IS_VM =
+              if isVM
+              then "1"
+              else "0";
+            HYDRIX_MOD_KEY = modKey;
+          };
 
-      # Common packages available to user
-      # Note: starship, ranger, joshuto, vim are configured in hydrix-config/shared/
-      home.packages = with pkgs; [
-        # Terminal utilities
-        tmux
-        fzf
-        jq
+          # Common packages available to user
+          # Note: starship, ranger, joshuto, vim are configured in hydrix-config/shared/
+          home.packages = with pkgs; [
+            # Terminal utilities
+            tmux
+            fzf
+            jq
 
-        # Notifications
-        libnotify
+            # Notifications
+            libnotify
 
-        # Pywal for color experimentation
-        pywal
+            # Pywal for color experimentation
+            pywal
+          ];
+        }
       ];
-    };
   };
 }

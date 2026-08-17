@@ -29,7 +29,6 @@
     # Change nixpkgs.url to switch NixOS channel for all VMs and the host.
     hydrix.inputs.nixpkgs.follows = "nixpkgs";
     hydrix.inputs.nixpkgs-unstable.follows = "nixpkgs-unstable";
-    hydrix.inputs.stylix.follows = "stylix";
 
     # Your NixOS channel: change to nixos-unstable, nixos-24.11, etc.
     nixpkgs.url = "github:nixos/nixpkgs/nixos-26.05";
@@ -37,11 +36,18 @@
     # Unstable packages channel (optional, for latest versions)
     nixpkgs-unstable.url = "github:nixos/nixpkgs/nixos-unstable";
 
-    # Stylix theming (version tracks your nixpkgs channel above)
-    stylix.url = "github:danth/stylix/release-26.05";
-    stylix.inputs.nixpkgs.follows = "nixpkgs";
-
     # Optional framework inputs (user-controlled versions)
+    # Stylix isn't declared by default (keeps flake.lock lean -- fonts, console
+    # colors, and wallpaper are already handled natively; GTK/zathura/alacritty/
+    # firefox/dunst/waybar are already wal-themed at runtime). Add it back if you
+    # want Stylix's broader auto-theming reach for packages Hydrix doesn't
+    # curate itself:
+    #   stylix.url = "github:danth/stylix/release-26.05";
+    #   stylix.inputs.nixpkgs.follows = "nixpkgs";
+    #   hydrix.inputs.stylix.follows = "stylix";
+    # then add `stylix` to extraInputs below (see nix-index-database/disko for
+    # the pattern) and set hydrix.graphical.stylix.autoTheme = true; for full
+    # auto-theming instead of Hydrix's curated target whitelist.
     disko.url = "github:nix-community/disko";
     disko.inputs.nixpkgs.follows = "nixpkgs";
 
@@ -60,7 +66,6 @@
     hydrix,
     nixpkgs,
     nixpkgs-unstable,
-    stylix,
     ...
   } @ inputs: let
     # =========================================================================

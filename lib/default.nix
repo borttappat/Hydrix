@@ -41,7 +41,6 @@ let
   commonModules = [
     { nixpkgs.config.allowUnfree = true; }
     { nixpkgs.overlays = [ overlay-unstable overlay-lkl-memory ]; }
-    inputs.stylix.nixosModules.stylix
   ] ++ optionsModules ++ [
     ../shared/core
     home-manager.nixosModules.home-manager
@@ -70,12 +69,14 @@ in rec {
     nixpkgs' = inputs.nixpkgs;
   in nixpkgs'.lib.nixosSystem {
     inherit system;
-    specialArgs = specialArgs // { inputs = allInputs; };
+    specialArgs = specialArgs // { inputs = allInputs; hasStylix = allInputs ? stylix; };
     modules = commonModules
       ++ nixpkgs'.lib.optional (allInputs ? nix-index-database)
            allInputs.nix-index-database.nixosModules.nix-index
       ++ nixpkgs'.lib.optional (allInputs ? disko)
            allInputs.disko.nixosModules.disko
+      ++ nixpkgs'.lib.optional (allInputs ? stylix)
+           allInputs.stylix.nixosModules.stylix
       ++ [
         { hydrix.userColorschemesDir = userColorschemesDir; }
         # Host-only defaults (GTK dark theme, etc.)
@@ -135,10 +136,12 @@ in rec {
     nixpkgs' = inputs.nixpkgs;
   in nixpkgs'.lib.nixosSystem {
     inherit system;
-    specialArgs = { inputs = allInputs; };
+    specialArgs = { inputs = allInputs; hasStylix = allInputs ? stylix; };
     modules = commonModules
       ++ nixpkgs'.lib.optional (allInputs ? nix-index-database)
            allInputs.nix-index-database.nixosModules.nix-index
+      ++ nixpkgs'.lib.optional (allInputs ? stylix)
+           allInputs.stylix.nixosModules.stylix
       ++ [
       { hydrix.userColorschemesDir = userColorschemesDir; }
       microvm.nixosModules.microvm
@@ -180,9 +183,9 @@ in rec {
     modules = [
       { nixpkgs.config.allowUnfree = true; }
       { nixpkgs.overlays = [ overlay-unstable overlay-lkl-memory ]; }
-    ] ++ optionsModules ++
-      [ inputs.stylix.nixosModules.stylix ] ++
-      [
+    ] ++ optionsModules
+      ++ nixpkgs'.lib.optional (allInputs ? stylix) allInputs.stylix.nixosModules.stylix
+      ++ [
       home-manager.nixosModules.home-manager
       { home-manager.useGlobalPkgs = true; home-manager.useUserPackages = true; }
       microvm.nixosModules.microvm
@@ -237,9 +240,9 @@ in rec {
     modules = [
       { nixpkgs.config.allowUnfree = true; }
       { nixpkgs.overlays = [ overlay-unstable overlay-lkl-memory ]; }
-    ] ++ optionsModules ++
-      [ inputs.stylix.nixosModules.stylix ] ++
-      [
+    ] ++ optionsModules
+      ++ nixpkgs'.lib.optional (allInputs ? stylix) allInputs.stylix.nixosModules.stylix
+      ++ [
       home-manager.nixosModules.home-manager
       { home-manager.useGlobalPkgs = true; home-manager.useUserPackages = true; }
       microvm.nixosModules.microvm
@@ -272,9 +275,9 @@ in rec {
     modules = [
       { nixpkgs.config.allowUnfree = true; }
       { nixpkgs.overlays = [ overlay-unstable overlay-lkl-memory ]; }
-    ] ++ optionsModules ++
-      [ inputs.stylix.nixosModules.stylix ] ++
-      [
+    ] ++ optionsModules
+      ++ nixpkgs'.lib.optional (allInputs ? stylix) allInputs.stylix.nixosModules.stylix
+      ++ [
       home-manager.nixosModules.home-manager
       { home-manager.useGlobalPkgs = true; home-manager.useUserPackages = true; }
       microvm.nixosModules.microvm
@@ -317,9 +320,9 @@ in rec {
     modules = [
       { nixpkgs.config.allowUnfree = true; }
       { nixpkgs.overlays = [ overlay-unstable overlay-lkl-memory ]; }
-    ] ++ optionsModules ++
-      [ inputs.stylix.nixosModules.stylix ] ++
-      [
+    ] ++ optionsModules
+      ++ nixpkgs'.lib.optional (allInputs ? stylix) allInputs.stylix.nixosModules.stylix
+      ++ [
       home-manager.nixosModules.home-manager
       { home-manager.useGlobalPkgs = true; home-manager.useUserPackages = true; }
       microvm.nixosModules.microvm
@@ -348,7 +351,10 @@ in rec {
     nixpkgs' = inputs.nixpkgs;
   in nixpkgs'.lib.nixosSystem {
     inherit system;
+    specialArgs = { hasStylix = allInputs ? stylix; };
     modules = commonModules
+      ++ nixpkgs'.lib.optional (allInputs ? stylix)
+           allInputs.stylix.nixosModules.stylix
       ++ [
       { hydrix.userColorschemesDir = userColorschemesDir; }
       ../vm/libvirt/vm-base.nix  # VM base configuration

@@ -113,15 +113,22 @@
 #   values (like isVM), only options-level checks. Config values inside
 #   are wrapped in mkIf for proper lazy evaluation.
 #
-{ config, lib, pkgs, options, ... }:
-
-let
+{
+  config,
+  lib,
+  pkgs,
+  options,
+  ...
+}: let
   cfg = config.hydrix.vmThemeSync;
   username = config.hydrix.username;
   vmType = config.hydrix.vmType;
   isVM = vmType != null && vmType != "" && vmType != "host";
   isHost = !isVM;
   hasMicrovmShares = (options ? microvm) && (options.microvm ? shares);
+  # Same plain-`if` guard as hasMicrovmShares above (not mkIf) for the same
+  # reason: mkIf false does not prevent "option does not exist" errors.
+  hasStylix = options ? stylix;
   jq = "${pkgs.jq}/bin/jq";
 
   # Script to generate colors-runtime.toml from host wal colors
@@ -166,7 +173,6 @@ let
     ${pkgs.coreutils}/bin/mv "$RUNTIME_TOML.tmp" "$RUNTIME_TOML"
     ${pkgs.coreutils}/bin/chown $USERNAME:users "$RUNTIME_TOML"
   '';
-
 in {
   options.hydrix.vmThemeSync = {
     enable = lib.mkOption {
@@ -197,12 +203,10 @@ in {
   };
 
   config = lib.mkIf cfg.enable (lib.mkMerge [
-
     # =========================================================================
     # HOST-SIDE CONFIGURATION
     # =========================================================================
     (lib.mkIf isHost {
-
       # 1. Ensure wal cache dir exists at boot (before VMs start)
       # Virtiofsd crashes if the source path doesn't exist, and VMs start
       # at multi-user.target — before the user session creates the dir.
@@ -213,7 +217,7 @@ in {
       # Also keep the user service for redundancy
       systemd.user.services.wal-cache-ensure = {
         description = "Ensure wal cache directory exists for VM virtiofs";
-        wantedBy = [ "default.target" ];
+        wantedBy = ["default.target"];
         serviceConfig = {
           Type = "oneshot";
           RemainAfterExit = true;
@@ -224,14 +228,14 @@ in {
       # 2. Pre-populate wal cache on first boot if empty
       systemd.user.services.wal-cache-init = {
         description = "Initialize wal cache from declared wallpaper/colorscheme";
-        wantedBy = [ "default.target" ];
-        after = [ "wal-cache-ensure.service" ];
-        before = [ "wal-cache-notify.path" ];
+        wantedBy = ["default.target"];
+        after = ["wal-cache-ensure.service"];
+        before = ["wal-cache-notify.path"];
         serviceConfig = {
           Type = "oneshot";
           RemainAfterExit = true;
         };
-        path = [ pkgs.pywal ];
+        path = [pkgs.pywal];
         script = let
           wallpaper = config.hydrix.graphical.wallpaper;
           colorscheme = config.hydrix.colorscheme;
@@ -242,29 +246,33 @@ in {
             echo "wal cache already populated, skipping"
             exit 0
           fi
-          ${if wallpaper != null then ''
-            echo "Generating wal cache from wallpaper: ${wallpaper}"
-            wal -q -i "${wallpaper}"
-          '' else ''
-            echo "Generating wal cache from colorscheme: ${colorscheme}"
-            SCHEME=""
-            if [ -f "${configDir}/colorschemes/${colorscheme}.json" ]; then
-              SCHEME="${configDir}/colorschemes/${colorscheme}.json"
-            fi
-            if [ -n "$SCHEME" ]; then
-              wal -q --theme "$SCHEME"
-            else
-              echo "Colorscheme file not found: ${colorscheme}"
-              exit 1
-            fi
-          ''}
+          ${
+            if wallpaper != null
+            then ''
+              echo "Generating wal cache from wallpaper: ${wallpaper}"
+              wal -q -i "${wallpaper}"
+            ''
+            else ''
+              echo "Generating wal cache from colorscheme: ${colorscheme}"
+              SCHEME=""
+              if [ -f "${configDir}/colorschemes/${colorscheme}.json" ]; then
+                SCHEME="${configDir}/colorschemes/${colorscheme}.json"
+              fi
+              if [ -n "$SCHEME" ]; then
+                wal -q --theme "$SCHEME"
+              else
+                echo "Colorscheme file not found: ${colorscheme}"
+                exit 1
+              fi
+            ''
+          }
         '';
       };
 
       # 3. Path watcher for automatic VM notification on color changes
       systemd.user.paths.wal-cache-notify = {
         description = "Watch wal cache for color changes";
-        wantedBy = [ "default.target" ];
+        wantedBy = ["default.target"];
         pathConfig = {
           PathChanged = "/home/${username}/.cache/wal/colors.json";
           Unit = "wal-cache-notify.service";
@@ -296,7 +304,8 @@ in {
                 done < <(${pkgs.jq}/bin/jq -r 'keys[]' "$VM_REGISTRY")
               fi
             '';
-          in notifyScript;
+          in
+            notifyScript;
         };
       };
 
@@ -356,7 +365,6 @@ in {
           esac
         '')
       ];
-
     })
 
     # =========================================================================
@@ -366,18 +374,23 @@ in {
     # 5. Virtiofs share for host wal cache
     # Uses plain `if` on hasMicrovmShares (doesn't depend on config, avoids infinite recursion)
     # The mkIf inside guards on actual config values
-    (if hasMicrovmShares then {
-      microvm.shares = lib.mkIf (isVM && cfg.useHostWal) [{
-        tag = "wal-cache";
-        source = "/home/${username}/.cache/wal";
-        mountPoint = "/mnt/wal-cache";
-        proto = "virtiofs";
-        readOnly = true;
-      }];
-    } else {})
+    (
+      if hasMicrovmShares
+      then {
+        microvm.shares = lib.mkIf (isVM && cfg.useHostWal) [
+          {
+            tag = "wal-cache";
+            source = "/home/${username}/.cache/wal";
+            mountPoint = "/mnt/wal-cache";
+            proto = "virtiofs";
+            readOnly = true;
+          }
+        ];
+      }
+      else {}
+    )
 
     (lib.mkIf (isVM && cfg.useHostWal) {
-
       # 6. Copy host wal cache into VM's own local directory
       # The VM has an isolated ~/.cache/wal — writes from restore-colorscheme,
       # wal-sync, pywal, etc. stay inside the VM and never reach the host.
@@ -385,13 +398,13 @@ in {
       # we copy from it at boot and on every REFRESH signal from the host.
       systemd.services.wal-cache-link = {
         description = "Copy host wal cache into VM local directory";
-        wantedBy = [ "multi-user.target" ];
-        after = [ "local-fs.target" ] ++ lib.optionals (hasMicrovmShares && config.hydrix.microvm.persistence.enable) [ "home.mount" ];
+        wantedBy = ["multi-user.target"];
+        after = ["local-fs.target"] ++ lib.optionals (hasMicrovmShares && config.hydrix.microvm.persistence.enable) ["home.mount"];
         serviceConfig = {
           Type = "oneshot";
           RemainAfterExit = true;
         };
-        path = [ pkgs.util-linux pkgs.coreutils ];
+        path = [pkgs.util-linux pkgs.coreutils];
         script = ''
           USER_HOME="/home/${username}"
           WAL_DIR="$USER_HOME/.cache/wal"
@@ -439,8 +452,8 @@ in {
       # 7. Refresh server on vsock port 14503
       systemd.services.vm-colorscheme-refresh = {
         description = "VM colorscheme refresh server (vsock)";
-        wantedBy = [ "multi-user.target" ];
-        after = [ "network.target" "wal-cache-link.service" ];
+        wantedBy = ["multi-user.target"];
+        after = ["network.target" "wal-cache-link.service"];
         serviceConfig = {
           Type = "simple";
           ExecStart = let
@@ -489,7 +502,8 @@ in {
 
               echo "OK: refreshed"
             '';
-          in server;
+          in
+            server;
           Restart = "always";
           RestartSec = 5;
         };
@@ -497,7 +511,6 @@ in {
 
       # 8. Override scripts installed by vm-theming.nix with VM-local-cache versions
       environment.systemPackages = [
-
         # wal-sync: pull host colors into VM's local cache (manual trigger)
         (lib.hiPrio (pkgs.writeShellScriptBin "wal-sync" ''
           WAL_DIR="$HOME/.cache/wal"
@@ -592,7 +605,7 @@ in {
 
       # Disable init-wal-cache — it rm -rf's ~/.cache/wal and regenerates
       # from the VM's own colorscheme, overwriting the host colors we copied in
-      home-manager.users.${username} = { ... }: {
+      home-manager.users.${username} = {...}: {
         systemd.user.services.init-wal-cache = lib.mkForce {
           Unit.Description = "Initialize pywal cache (disabled by vm-theme-sync)";
           Service = {
@@ -600,19 +613,20 @@ in {
             RemainAfterExit = true;
             ExecStart = "${pkgs.coreutils}/bin/true";
           };
-          Install.WantedBy = [ "default.target" ];
+          Install.WantedBy = ["default.target"];
         };
       };
-
-      # 9. Disable Stylix fish target (system-level)
-      # Stylix injects a base16 fish script that applies terminal colors via OSC
-      # escape sequences on every interactive shell start. This overrides alacritty's
-      # config-based colors (from colors-runtime.toml import), causing a visible flash
-      # and forcing Stylix's build-time palette over the host's live wal colors.
-      # Note: home-manager's stylix.targets.fish.enable only affects the HM-level target;
-      # this disables the system-level /etc/fish/config.fish integration.
-      stylix.targets.fish.enable = lib.mkForce false;
     })
+
+    # 9. Disable Stylix fish target (system-level). See "Stylix (opt-in
+    # theming)" in DOCUMENTATION.md for the hasStylix/exclusive pattern.
+    (
+      if hasStylix
+      then {
+        stylix.targets.fish.enable = lib.mkIf (isVM && cfg.useHostWal && !config.hydrix.graphical.stylix.exclusive) (lib.mkForce false);
+      }
+      else {}
+    )
 
     # =========================================================================
     # VM-SIDE: useHostWal = false (keep existing behavior)
