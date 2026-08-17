@@ -215,15 +215,50 @@
     '';
   };
 
-  # Watcher: opens left-overlay after a brief delay so the first poll cycle
-  # completes before the window renders (avoids layout jitter on spawn).
+  # Watcher: opens left-overlay on every connected monitor (one instance per
+  # output, id `left-overlay-<name>`, e.g. `left-overlay-eDP-1`) after a
+  # brief delay so the first poll cycle completes before rendering. Then
+  # listens on Hyprland's event socket for monitoradded/monitorremoved and
+  # re-syncs left-overlay instances, so plugging/unplugging an external
+  # monitor doesn't require a Hyprland restart. Mirrors the debounce pattern
+  # used by waybarMonitorWatch in modules/hyprland.nix.
   ewwLeftWatcher = pkgs.writeShellApplication {
     name = "eww-left-watch";
-    runtimeInputs = [pkgs.eww pkgs.coreutils];
+    runtimeInputs = [pkgs.eww pkgs.hyprland pkgs.jq pkgs.socat pkgs.gnugrep pkgs.coreutils];
     text = ''
+      sync_left_overlay() {
+        mons=$(hyprctl monitors -j | jq -r '.[].name')
+        eww active-windows 2>/dev/null | grep '^left-overlay-' | while IFS=: read -r wid _; do
+          mon=''${wid#left-overlay-}
+          echo "$mons" | grep -qxF "$mon" || eww close "$wid" 2>/dev/null || true
+        done || true
+        while IFS= read -r mon; do
+          [ -z "$mon" ] && continue
+          eww active-windows 2>/dev/null | grep -q "^left-overlay-$mon:" \
+            || eww open left-overlay --id "left-overlay-$mon" --screen "$mon" 2>/dev/null || true
+        done <<< "$mons"
+      }
+
       sleep 3
-      eww open left-overlay 2>/dev/null || true
-      sleep infinity
+      sync_left_overlay
+
+      _sock="''${XDG_RUNTIME_DIR}/hypr/''${HYPRLAND_INSTANCE_SIGNATURE}/.socket2.sock"
+      [ -S "$_sock" ] || exit 1
+      _seq="''${XDG_RUNTIME_DIR}/eww-left-watch-seq"
+      echo 0 > "$_seq"
+      socat -u "UNIX-CONNECT:$_sock" - | while IFS= read -r line; do
+        case "$line" in
+          monitoradded*|monitorremoved*)
+            _n=$(( $(cat "$_seq") + 1 ))
+            echo "$_n" > "$_seq"
+            _my=$_n
+            ( sleep 1
+              [ "$(cat "$_seq" 2>/dev/null)" = "$_my" ] || exit 0
+              sync_left_overlay
+            ) &
+            ;;
+        esac
+      done
     '';
   };
 
