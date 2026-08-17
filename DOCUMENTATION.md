@@ -25,6 +25,7 @@ Hydrix is an options-driven NixOS framework that provides complete network isola
 - [Configuration](#configuration)
 - [Colorscheme System](#colorscheme-system)
 - [VM Theme Sync](#vm-theme-sync)
+- [Stylix (Opt-in Theming)](#stylix-opt-in-theming)
 - [Font System](#font-system)
 - [MicroVM Management](#microvm-management)
   - [Task Pentest VMs](#task-pentest-vms-per-engagement)
@@ -1379,6 +1380,13 @@ hydrix.microvmHost.coupleProfiles = true;
       text = "initializing...";
       maxTimeout = 15;
     };
+
+    # Stylix opt-in (see "Stylix (Opt-in Theming)") -- only meaningful if your
+    # flake supplies the `stylix` input at all; both default as shown here.
+    stylix = {
+      autoTheme = true;   # auto-theme apps Hydrix has no curated wiring for
+      exclusive = false;  # hand GTK/zathura/alacritty/fish to Stylix too
+    };
   };
 }
 ```
@@ -1778,6 +1786,8 @@ Inside VMs (on REFRESH from host or after `walrgb`/`wal-sync` inside VM):
 - **Alacritty**  all ANSI colors + cursor color (via `colors-runtime.toml`, triggers `live_config_reload`)
 - **Running terminals**  ANSI palette + cursor updated immediately via OSC sequences pushed to all `/dev/pts/*`
 - **Starship / fastfetch**  pick up updated ANSI palette in running terminals
+- **GTK apps**  `gtk-wal.css` regenerated and re-imported (file pickers, virt-manager, etc.)
+- **Zathura**  already-open windows updated live via D-Bus; new windows always open with current colors regardless
 - **Dunst**  notification colors
 - **Firefox**  via pywalfox
 
@@ -1786,9 +1796,13 @@ On the host (after `walrgb` / `randomwalrgb` / `restore-colorscheme`):
 - **status bar**  all bar colors
 - **Alacritty**  all ANSI colors + cursor color (via `colors-runtime.toml`)
 - **Running terminals**  ANSI palette + cursor via sequences to all `/dev/pts/*`
+- **GTK apps**  `gtk-wal.css` regenerated and re-imported
+- **Zathura**  already-open windows updated live via D-Bus; new windows always open with current colors regardless
 - **Dunst**  notification colors
 - **Firefox**  via pywalfox extension
 - **RGB lighting**  ASUS Aura / OpenRGB
+
+See "Stylix (Opt-in Theming)" below for how this list changes if Stylix is enabled.
 
 #### VM Color Commands
 
@@ -1810,7 +1824,7 @@ Without theme sync, VMs show default colors for ~500ms while pywal runs. This is
 
 1. **wal-cache-link service**  copies host colors into VM's local `~/.cache/wal` before apps start, so colors exist from the first shell
 2. **Pre-generated `colors-runtime.toml`**  built at VM boot from the copied `colors.json` via jq; available before any terminal opens
-3. **Stylix fish target disabled**  prevents OSC escape sequences from overriding colors on every shell start (`stylix.targets.fish.enable = mkForce false`)
+3. **Stylix fish target disabled**  if Stylix is enabled at all (opt-in, see below), its fish target is disabled by default so it can't override colors with OSC escape sequences on every shell start
 4. **Conflicting services disabled**  `vm-colorscheme`, `wal-sync` timer, and `init-wal-cache` are disabled so they cannot overwrite the VM's local cache
 
 #### Wal Cache Pre-population (Cold Start)
@@ -1940,6 +1954,84 @@ Import `vmThemeSyncModule` in your flake for both the host and all VMs.
 
 ---
 
+## Stylix (Opt-in Theming)
+
+Stylix is **not** a Hydrix input by default. Fonts, console (TTY) colors, and
+wallpaper are handled natively (`theming/graphical/native-theme.nix`); GTK, zathura,
+alacritty, firefox, and fish are themed at runtime by the wal pipeline described
+above. None of that requires Stylix. It's available purely as an opt-in for users who
+want its much broader auto-theming reach (arbitrary terminals, browsers, and other
+apps Hydrix has no curated wiring for).
+
+### Enabling
+
+Stylix follows the same "consumer-supplied, purely optional" pattern as
+`nix-index-database`/`disko`: it isn't declared anywhere in Hydrix's own `flake.nix`,
+so it costs nothing (not even a `flake.lock` entry) unless *your* flake supplies it.
+
+```nix
+# In your flake.nix inputs:
+stylix.url = "github:danth/stylix/release-26.05";
+stylix.inputs.nixpkgs.follows = "nixpkgs";
+hydrix.inputs.stylix.follows = "stylix";
+
+# Then pass it through extraInputs on your mkHost/mkMicroVM calls, same as
+# disko/nix-index-database:
+extraInputs = { inherit stylix; /* ...disko, nix-index-database, etc. */ };
+```
+
+`hydrix.lib.mkHost`/`mkVM`/`mkMicroVM` detect its presence (`allInputs ? stylix`) and
+load `stylix.nixosModules.stylix` plus Hydrix's own `theming/graphical/stylix.nix`
+automatically. Every consumer of `hasStylix` (a `specialArgs` value, not a
+`hydrix.*` option) treats its absence as the default, zero-footprint state.
+
+### Two Tiers
+
+Both require the `stylix` input to be present at all -- neither does anything on its
+own otherwise.
+
+```nix
+hydrix.graphical.stylix.autoTheme = true;   # default once Stylix is opted in
+hydrix.graphical.stylix.exclusive = false;  # default
+```
+
+- **`autoTheme`** (default `true`): sets `stylix.autoEnable`, letting Stylix theme
+  any program it recognizes that Hydrix has no curated wiring for -- a new terminal,
+  a new browser, whatever. Set `false` to fall back to Stylix's own curated target
+  whitelist only (`theming/graphical/stylix.nix`'s `stylix.targets`/HM `targets`
+  blocks).
+- **`exclusive`** (default `false`): hands GTK, zathura, alacritty, and fish over to
+  Stylix too, instead of Hydrix's own wal-based theming for those four. This is an
+  all-or-nothing switch, not a priority nudge -- for GTK and zathura specifically,
+  Hydrix's wal theming isn't just a competing `mkForce`, it's an active delivery
+  mechanism (a CSS `@import`, a binary wrapper) that would keep overriding Stylix even
+  with its own `mkForce false` lifted. `exclusive` disables those mechanisms too, not
+  just the force-disable. Firefox is unaffected either way -- its Stylix target has
+  always been enabled by default, coexisting with the pywalfox extension.
+
+### Per-App Handoff (what `exclusive` actually changes)
+
+| App | Normal (curated/autoTheme) | Under `exclusive = true` |
+|---|---|---|
+| GTK | wal-owned: `gtk-wal.css` generated by `generate-gtk-colors`, imported via `gtk3.extraCss`/`gtk-4.0/gtk.css`. Stylix's GTK target force-disabled. | Hydrix's CSS import and color-generator script are **not installed at all**. Stylix's GTK target runs normally. |
+| Zathura | wal-owned: `zathura` is wrapped (`theming/programs/zathura.nix`) -- every launch builds a temp `--config-dir` with fresh wal colors; open windows get pushed live updates via D-Bus. Stylix's zathura target force-disabled. | Plain unwrapped `pkgs.zathura` is installed instead. Stylix's zathura target manages `~/.config/zathura/zathurarc` itself. `hydrix.graphical.zathura.*` (recolor, padding, scroll/zoom, sandbox, mappings, `extraConfig`) **stops applying** -- those only exist inside the wrapper. |
+| Alacritty | wal-owned: colors come from `colors-runtime.toml` (`write-alacritty-colors`, pushed on `walrgb`/vsock). Stylix's alacritty target disabled. | Stylix's alacritty target enabled instead. |
+| Fish | System-level Stylix fish target disabled (only relevant in VMs with `vmThemeSync.useHostWal`) to avoid an OSC-sequence race with alacritty's `colors-runtime.toml` import. | Re-enabled -- no longer racing anything, since alacritty is Stylix-owned too in this mode. |
+
+### The Build-Time Caveat
+
+Whichever tier you pick, **Stylix only themes at rebuild time.** It bakes in whatever
+`hydrix.graphical.colorscheme`/wallpaper resolves to when the system builds --
+`stylix.base16Scheme` is fed from the exact same colorscheme-resolution pipeline
+(`theming/lib.nix`: base16 YAML lookup, pywal JSON conversion, vmType fallback) that
+everything else uses, so it's not a second/disconnected palette. But Stylix never
+plugs into the live `walrgb`/`refresh-colors` runtime path. A new app it covers won't
+recolor live when you run `walrgb <wallpaper>`; it needs a rebuild. The wal-owned apps
+(GTK, zathura, alacritty, firefox, dunst, waybar, console) always update live
+regardless of any of this.
+
+---
+
 ## Font System
 
 Fonts are configured via `hydrix.graphical.font` and flow through two separate pipelines for host and VMs.
@@ -1965,16 +2057,21 @@ Fonts are configured via `hydrix.graphical.font` and flow through two separate p
 
 Hyprland handles DPI scaling natively per-monitor (fractional compositor scale), so
 Alacritty and other apps read their font size directly from the Nix-generated
-`alacritty.toml` (Stylix, build-time) with no runtime DPI wrapper needed. Firefox is
-the one app that still needs a runtime wrapper (`firefox-dpi`), because Firefox's own
-scaling doesn't follow the compositor scale automatically - it reads the scale via
+`alacritty.toml` (home-manager, `theming/programs/alacritty.nix`, build-time) with no
+runtime DPI wrapper needed. That file sets `font.size` from `hydrix.graphical.font`
+directly, but deliberately leaves `font.normal.family` unset -- alacritty resolves it
+via fontconfig's `monospace` alias instead, which `theming/graphical/native-theme.nix`
+points at `hydrix.graphical.font.family` (see "Stylix (Opt-in Theming)" above for why
+this indirection exists and what changes if Stylix is enabled). Firefox is the one app
+that still needs a runtime wrapper (`firefox-dpi`), because Firefox's own scaling
+doesn't follow the compositor scale automatically - it reads the scale via
 `hyprctl monitors` at launch time (see `theming/programs/firefox.nix`).
 
 ### VM Font Pipeline
 
 VMs use their own `alacritty.toml` directly - no wrapper overrides:
 
-1. Stylix generates `alacritty.toml` with font family and size from `hydrix.graphical.font`
+1. home-manager generates `alacritty.toml` with font size from `hydrix.graphical.font`; family resolves via the fontconfig `monospace` alias, same as the host
 2. Apps are launched inside the VM via `hypr-ws-app` / waypipe
 3. Alacritty reads its own config with the correct font
 
