@@ -21,7 +21,7 @@
 { config, lib, pkgs, hydrix, ... }:
 
 {
-  # System state version — set once, never changed after install
+  # System state version. Set once, never changed after install
   system.stateVersion = "@STATE_VERSION@";
 
   imports = [
@@ -74,7 +74,7 @@
     # ─────────────────────────────────────────────────────────────────────
     # ENVIRONMENT DEFAULTS
     # ─────────────────────────────────────────────────────────────────────
-    # shell    = "fish";   # DEFAULT: "fish"  — options: "fish" | "bash" | "zsh"
+    # shell    = "fish";   # DEFAULT: "fish"    options: "fish" | "bash" | "zsh"
     # terminal = "alacritty";                 # DEFAULT: "alacritty"
     # editor   = "vim";                       # DEFAULT: "vim" (sets EDITOR/VISUAL)
 
@@ -83,7 +83,7 @@
 
     # ── VM focus border colors ────────────────────────────────────────────
     # Controls how the active window border color changes when you switch to a VM workspace.
-    # Default (set by the hyprland module): "dynamic" — maps each VM type to a wal palette color.
+    # Default (set by the hyprland module): "dynamic"; maps each VM type to a wal palette color.
     # Override here to lock to the static per-VM colorscheme instead:
     # vmThemeSync.focusDaemon.mode = "static";  # options: "dynamic" (default) | "static"
 
@@ -269,9 +269,9 @@
     # GRAPHICAL
     # ─────────────────────────────────────────────────────────────────────
     # Shared UI preferences live in modules/graphical.nix (imported for all machines).
-    # All options listed there — override here with plain assignment (no mkForce needed).
+    # All options listed there; override here with plain assignment (no mkForce needed).
     graphical = {
-      enable = true; # DEFAULT: false — required now (no longer auto-enabled for hosts)
+      enable = true; # DEFAULT: false; required now (no longer auto-enabled for hosts)
 
       # polarity = "dark";  # DEFAULT: "dark"
 
@@ -340,5 +340,5 @@
 
   # Uncomment to enable libvirt/QEMU/virt-manager (pentest VMs, Windows VMs, etc.)
   # hydrix.libvirt.enable = true;
-  # hydrix.libvirt.grabKey = "65507,65513";  # Left Ctrl+Alt — find keysyms with `xev`
+  # hydrix.libvirt.grabKey = "65507,65513";  # Left Ctrl+Alt - find keysyms with `xev`
 }
