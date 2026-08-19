@@ -1415,6 +1415,16 @@ hydrix.graphical.standalone = true;   # libvirt VM with own display -> full WM t
 hydrix.graphical.standalone = false;  # microVM -> theming only, display forwarded via waypipe (default)
 ```
 
+**`hydrix.vm.desktopEnvironment`** (`vm/libvirt/vm-base.nix`) is the higher-level switch for libvirt VMs specifically, one option instead of wiring `graphical.standalone`/`hyprland.enable`/`greetd.enable` by hand:
+
+```nix
+hydrix.vm.desktopEnvironment = "none";     # headless, like a microVM (default)
+hydrix.vm.desktopEnvironment = "xfce";     # recommended: real X11 session, spice-vdagent clipboard/resize just works
+hydrix.vm.desktopEnvironment = "hyprland"; # sets graphical.standalone + hyprland.enable + greetd.enable above
+```
+
+`"xfce"` is recommended over `"hyprland"` for standalone libvirt desktops: XFCE is a real X11 session manager with native XDG autostart, so `spice-vdagent` (SPICE clipboard sync, display resize) works with zero extra wiring. `"hyprland"` reuses the Hydrix Hyprland/waypipe stack, but it's a bare WM with no session manager, `spice-vdagent` is X11-native and needs manual `exec-once` wiring to reach XWayland at all, and a fresh VM's Hyprland session falls back to its own stock example config (not Hydrix's) until `home-manager-<user>.service` finishes activating.
+
 ### Shared Modules
 
 The `modules/` directory in your `hydrix-config` holds settings that apply to all machines. Each file is a NixOS module imported by every machine (and, where relevant, by VMs via `hostConfig`). Settings use `lib.mkDefault` so individual machine configs can override with plain assignment.
@@ -4074,8 +4084,13 @@ The `hypr-clip-guard` Hyprland C++ plugin hooks all clipboard delivery methods i
 | VM → host | **Allowed** (paste on host terminal) |
 | Host → focused VM | **Allowed** (paste into active VM) |
 | VM-A → VM-B | **Blocked** (cross-VM isolation) |
+| microVM ↔ libvirt VM | **Blocked** (libvirt VMs are their own group, see below) |
 
 "Host" means any window without a `[vm-name]` title prefix. VM group identity comes from the waypipe `--title-prefix "[vm-name] "` convention - the plugin extracts the group from the window title, falling back to PID/PPID lineage for windowless clients (e.g. `wl-paste` through waypipe).
+
+**Libvirt VMs (virt-manager/virt-viewer):** these have no waypipe title prefix to tag them with, since libvirt controls the window title, not Hydrix. Without special handling they'd fall through to the untagged "host" default and become an unrestricted bridge between otherwise isolated microVM groups, since any group can always reach "host" and "host" can always reach whatever's currently focused. Instead, `classifyWindow()` checks window **class** first: any window whose class contains `virt-manager`, `virt-viewer`, or `remote-viewer` is tagged into its own `"libvirt"` group before falling back to the title-prefix check, so it's isolated from every microVM group exactly like microVM groups are isolated from each other. No changes to the allow/block policy itself were needed, correct tagging alone was sufficient.
+
+**Known limitation:** class-based tagging can't distinguish *which* libvirt VM a window belongs to, so all libvirt VM instances currently share the same `"libvirt"` group and can freely clipboard-share with each other. Isolation from microVMs (and from other libvirt guests, via the host as an explicit intermediary) holds regardless, but per-instance libvirt isolation is unimplemented.
 
 #### Architecture
 
@@ -4132,6 +4147,8 @@ Shows:
 - Client → group mapping with PID/PPID
 - Current source groups (selection + primary)
 - Timestamped event log (last 256 entries with HH:MM:SS.mmm)
+
+**Testing gotcha:** after rebuilding the plugin, do a full Hyprland restart, not `hyprctl plugin unload` followed by `load`. Live reload can leave the underlying `CFunctionHook` trampolines corrupted, silently disabling all blocking (not just anything related to a specific change) while `hyprctl plugin list` still reports the plugin as loaded. This produces a false "everything leaks" result across every group pair, a full restart resolves it with no code changes needed.
 
 #### Vault Interaction
 
