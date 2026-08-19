@@ -85,6 +85,26 @@ static std::string extractVmGroup(const std::string& title) {
     return title.substr(1, end - 1);
 }
 
+// libvirt guests (virt-manager/virt-viewer SPICE console windows) have no
+// waypipe --title-prefix equivalent, so unlike microVMs they can't be tagged
+// via a "[group] " title prefix. Their window class is stable instead (NixOS
+// wrapProgram yields class ".virt-manager-wrapped"/".virt-viewer-wrapped").
+// Without this, these windows fall through to extractVmGroup's "host"
+// default and become an unrestricted bridge between otherwise-isolated
+// microVM clipboard groups (any group -> host is always allowed, and
+// host -> any group is allowed for whatever's focused).
+static bool isLibvirtViewerClass(const std::string& cls) {
+    return cls.find("virt-manager")  != std::string::npos
+        || cls.find("virt-viewer")   != std::string::npos
+        || cls.find("remote-viewer") != std::string::npos;
+}
+
+static std::string classifyWindow(PHLWINDOW w) {
+    if (isLibvirtViewerClass(w->m_class))
+        return "libvirt";
+    return extractVmGroup(w->m_title);
+}
+
 static pid_t getPid(wl_client* cl) {
     pid_t pid = 0;
     if (cl)
@@ -144,7 +164,7 @@ static void onWindowOpen(PHLWINDOW w) {
     auto* cl = clientFromWindow(w);
     if (!cl)
         return;
-    tagClient(cl, extractVmGroup(w->m_title));
+    tagClient(cl, classifyWindow(w));
 }
 
 static void onWindowTitle(PHLWINDOW w) {
@@ -153,7 +173,7 @@ static void onWindowTitle(PHLWINDOW w) {
     auto* cl = clientFromWindow(w);
     if (!cl)
         return;
-    tagClient(cl, extractVmGroup(w->m_title));
+    tagClient(cl, classifyWindow(w));
 }
 
 static void onWindowClose(PHLWINDOW w) {
@@ -524,7 +544,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
             continue;
         auto* cl = clientFromWindow(w);
         if (cl)
-            tagClient(cl, extractVmGroup(w->m_title));
+            tagClient(cl, classifyWindow(w));
     }
 
     auto matches = HyprlandAPI::findFunctionsByName(handle, "sendSelectionToDevice");
