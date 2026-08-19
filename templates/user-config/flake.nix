@@ -562,26 +562,40 @@
     # Use when you need multiple named instances (e.g., pentest-target1, pentest-target2);
     # for single-instance use cases, microvms are simpler.
     #
-    # packages.x86_64-linux = {
+    # These are standalone desktop VMs: hydrix.vm.desktopEnvironment = "xfce" boots
+    # to a real XFCE desktop viewable through virt-manager's SPICE console (unlike
+    # microVMs, which are headless and waypipe-forwarded). XFCE is recommended over
+    # "hyprland" here: it's a real X11 session manager, so spice-vdagent clipboard/
+    # resize sync just works, no extra wiring needed.
+    #
+    # packages.x86_64-linux = let
+    #   standaloneDesktop = {
+    #     hydrix.vm.desktopEnvironment = "xfce";
+    #   };
+    # in {
     #   vm-browsing =
     #     (hydrix.lib.mkVM {
     #       profile = "browsing";
     #       inherit userProfiles hostConfig userColorschemesDir;
+    #       modules = [ standaloneDesktop ];
     #     }).config.system.build.image;
     #   vm-pentest =
     #     (hydrix.lib.mkVM {
     #       profile = "pentest";
     #       inherit userProfiles hostConfig userColorschemesDir;
+    #       modules = [ standaloneDesktop ];
     #     }).config.system.build.image;
     #   vm-dev =
     #     (hydrix.lib.mkVM {
     #       profile = "dev";
     #       inherit userProfiles hostConfig userColorschemesDir;
+    #       modules = [ standaloneDesktop ];
     #     }).config.system.build.image;
     #   vm-comms =
     #     (hydrix.lib.mkVM {
     #       profile = "comms";
     #       inherit userProfiles hostConfig userColorschemesDir;
+    #       modules = [ standaloneDesktop ];
     #     }).config.system.build.image;
     # };
   };

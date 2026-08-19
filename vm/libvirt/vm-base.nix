@@ -5,11 +5,19 @@
 # - Common imports (qemu-guest, shared-store, bake-config, etc.)
 # - Parameterized rebuild script
 #
-# By default, libvirt VMs run headless like microVMs - hydrix.graphical.enable
-# defaults to false (standalone = false). Set hydrix.graphical.standalone = true
-# together with hydrix.hyprland.enable = true for a VM with its own desktop,
-# viewable via virt-manager's SPICE/VNC console. No profile currently does this;
-# verify it works end-to-end before relying on it (see CLAUDE.md's Libvirt section).
+# By default, libvirt VMs run headless like microVMs (hydrix.vm.desktopEnvironment
+# = "none"). Set hydrix.vm.desktopEnvironment = "xfce" or "hyprland" for a VM with
+# its own desktop, viewable via virt-manager's SPICE/VNC console.
+#
+# "xfce" is the recommended choice: a real X11 session manager with native XDG
+# autostart, so spice-vdagent (clipboard sync, display resize) just works with
+# zero extra wiring. "hyprland" reuses the same Wayland/waypipe stack microVMs
+# use, but it's a bare WM with no session manager, which showed real friction in
+# practice: spice-vdagent is X11-native and needs manual exec-once wiring to
+# reach XWayland at all, and greetd needs its own login screen (greetd.nix is
+# imported below purely for this path, normally only pulled in by the host-only
+# theming/default.nix). Prefer "xfce" unless you specifically need the Hydrix
+# Hyprland/waypipe stack running standalone inside the guest.
 #
 # Profiles should import this module and only set profile-specific config:
 # - hydrix.vmType
@@ -60,6 +68,10 @@ in {
     # Unified graphical environment (Stylix + Home Manager)
     # Only activates when hydrix.graphical.enable = true
     ../../theming/graphical
+
+    # Login manager for standalone desktop mode
+    # Only activates when hydrix.greetd.enable = true
+    ../../theming/dm/greetd.nix
   ];
 
   options.hydrix.vm = {
@@ -74,15 +86,44 @@ in {
       default = "vm-${config.hydrix.vmType or "unknown"}";
       description = "Flake target for rebuild script (e.g., vm-pentest)";
     };
+
+    desktopEnvironment = lib.mkOption {
+      type = lib.types.enum [ "none" "xfce" "hyprland" ];
+      default = "none";
+      description = ''
+        Desktop environment for a standalone libvirt VM, viewable via
+        virt-manager's SPICE/VNC console. "none" (default) keeps the VM
+        headless, same as a microVM. "xfce" gets a real X11 session with
+        working spice-vdagent clipboard/resize out of the box. "hyprland"
+        activates the same Hydrix Hyprland/waypipe stack microVMs use, but
+        needs manual spice-vdagent wiring to get clipboard sync working.
+      '';
+    };
   };
 
-  config = {
-    # ===== Graphical environment =====
-    # When standalone = true, the graphical stack activates for a Hyprland desktop
-    # (also requires hydrix.hyprland.enable = true), viewable via virt-manager.
-    # When standalone = false (default), the graphical stack stays off.
-    # The graphical modules are always imported but only activate when enable = true
-    hydrix.graphical.enable = lib.mkDefault cfg.graphical.standalone;
+  config = lib.mkMerge [
+    (lib.mkIf (cfg.vm.desktopEnvironment == "hyprland") {
+      hydrix.graphical.enable = true;
+      hydrix.graphical.standalone = true;
+      hydrix.hyprland.enable = true;
+      hydrix.greetd.enable = true;
+    })
+
+    (lib.mkIf (cfg.vm.desktopEnvironment == "xfce") {
+      services.xserver.enable = true;
+      services.xserver.desktopManager.xfce.enable = true;
+      services.displayManager.sddm.enable = true;
+      services.displayManager.autoLogin = {
+        enable = lib.mkDefault true;
+        user = lib.mkDefault config.hydrix.username;
+      };
+      # home-manager requires this; theming/graphical/home.nix normally sets it
+      # but that module only activates for hydrix.graphical.enable (Hyprland).
+      home-manager.users.${config.hydrix.username}.home.stateVersion =
+        lib.mkDefault config.system.stateVersion;
+    })
+
+    {
 
     # ===== Entropy generation =====
     # Ensures reliable entropy for VMs (fixes potential stalls)
@@ -752,5 +793,6 @@ FLAKE_EOF
       '';
     };
 
-  };
+    }
+  ];
 }
