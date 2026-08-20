@@ -1373,14 +1373,6 @@ hydrix.microvmHost.coupleProfiles = true;
       blur = true;
     };
 
-    # Splash screen
-    splash = {
-      enable = true;
-      title = "HYDRIX";
-      text = "initializing...";
-      maxTimeout = 15;
-    };
-
     # Stylix opt-in (see "Stylix (Opt-in Theming)") -- only meaningful if your
     # flake supplies the `stylix` input at all; both default as shown here.
     stylix = {

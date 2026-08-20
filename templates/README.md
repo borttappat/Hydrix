@@ -171,7 +171,6 @@ Not populated by the installer. Copied from templates with all options commented
 - Window opacity (active, inactive, per-class rules)
 - Bluelight filter (temperature, schedule)
 - Lockscreen (timeout, text, blur)
-- Splash screen
 - HiDPI scaling defaults
 
 All options use `lib.mkDefault` so per-machine overrides work with plain assignment.

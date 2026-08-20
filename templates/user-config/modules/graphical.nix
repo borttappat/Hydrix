@@ -67,13 +67,6 @@
     # lockscreen.wrongText   = lib.mkDefault "Wrong password"; # set to whatever you like
     # lockscreen.verifyText  = lib.mkDefault "Verifying...";
     # lockscreen.blur        = lib.mkDefault true;
-
-    # ─── Splash screen ─────────────────────────────────────────────────
-    # splash.enable     = lib.mkDefault false;
-    # splash.title      = lib.mkDefault "HYDRIX";
-    # splash.text       = lib.mkDefault "initializing...";
-    # splash.maxTimeout = lib.mkDefault 15;
-    # splash.font       = lib.mkDefault null;  # null = CozetteVector
   };
 
   hydrix.colorscheme = lib.mkDefault "hydrix";

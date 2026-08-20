@@ -960,34 +960,6 @@ in {
       };
     };
 
-    # Splash
-    splash = {
-      enable = lib.mkEnableOption "splash screen during startup";
-
-      title = lib.mkOption {
-        type = lib.types.str;
-        default = "HYDRIX";
-        description = "Splash title";
-      };
-
-      text = lib.mkOption {
-        type = lib.types.str;
-        default = "initializing...";
-        description = "Splash subtitle";
-      };
-
-      maxTimeout = lib.mkOption {
-        type = lib.types.int;
-        default = 15;
-        description = "Safety timeout in seconds";
-      };
-
-      font = lib.mkOption {
-        type = lib.types.nullOr lib.types.str;
-        default = null;
-        description = "Splash font (null = CozetteVector)";
-      };
-    };
   };
 
   # =========================================================================
