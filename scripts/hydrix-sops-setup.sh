@@ -20,7 +20,7 @@
 #   First machine:
 #     hydrix-sops-setup --gen-master-key   # creates secrets/master-age-key.age
 #     # Add printed public key to secrets/.sops.yaml, re-encrypt, commit
-#     git add -f secrets/master-age-key.age secrets/.sops.yaml && git commit
+#     git add secrets/master-age-key.age secrets/.sops.yaml && git commit
 #   New machine or reinstall (after cloning hydrix-config and first rebuild):
 #     hydrix-sops-setup --unlock           # prompts for passphrase, activates key
 #     # Secrets decrypt immediately without sops updatekeys
@@ -147,7 +147,7 @@ if [[ "${1:-}" == "--gen-key" ]]; then
         echo -e "${GREEN}Done. Commit the updated secrets:${NC}"
         echo "  git add secrets/.sops.yaml secrets/*.yaml && git commit -m 'feat(secrets): add personal age key as recipient'"
       else
-        echo "  git add -f secrets/.sops.yaml && git commit -m 'feat(secrets): add personal age key as recipient'"
+        echo "  git add secrets/.sops.yaml && git commit -m 'feat(secrets): add personal age key as recipient'"
       fi
     fi
   else
@@ -275,7 +275,7 @@ if [[ "${1:-}" == "--enroll-fido2" ]]; then
       else
         echo ""
         echo -e "Commit the updated .sops.yaml:"
-        echo "  git add -f $SOPS_YAML && git commit -m 'feat(secrets): add FIDO2 key as recipient'"
+        echo "  git add $SOPS_YAML && git commit -m 'feat(secrets): add FIDO2 key as recipient'"
       fi
     fi
   else
@@ -347,7 +347,7 @@ if [[ "${1:-}" == "--gen-master-key" ]]; then
   echo ""
   echo "5. Commit everything:"
   echo -e "   ${BOLD}cd $CONFIG_DIR${NC}"
-  echo -e "   ${BOLD}git add -f secrets/master-age-key.age secrets/.sops.yaml secrets/wifi.yaml secrets/github.yaml${NC}"
+  echo -e "   ${BOLD}git add secrets/master-age-key.age secrets/.sops.yaml secrets/wifi.yaml secrets/github.yaml${NC}"
   echo -e "   ${BOLD}git commit -m 'feat(secrets): add password-protected master age key'${NC}"
   echo ""
   echo "On a new machine or reinstall, after cloning hydrix-config and first rebuild:"
@@ -492,9 +492,9 @@ echo ""
 echo "Next steps:"
 echo -e "  Create a secret:  ${BOLD}sops $SECRETS_DIR/mysecret.yaml${NC}"
 if [[ -n "$MASTER_PUBKEY" ]]; then
-  echo -e "  Commit the config:  ${BOLD}git add -f $SOPS_YAML $MASTER_KEY_ENC && git commit${NC}"
+  echo -e "  Commit the config:  ${BOLD}git add $SOPS_YAML $MASTER_KEY_ENC && git commit${NC}"
 else
-  echo -e "  Commit the config:  ${BOLD}git add -f $SOPS_YAML && git commit${NC}"
+  echo -e "  Commit the config:  ${BOLD}git add $SOPS_YAML && git commit${NC}"
 fi
 echo ""
 

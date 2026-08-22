@@ -45,8 +45,3 @@ Thumbs.db
 # Markdown - ignore most but keep key docs
 *.md
 !README.md
-!secrets/README.md
-
-# sops-nix - only .sops.yaml is machine-specific (contains age public key)
-# Encrypted yaml files are SAFE to commit - that's the point of sops!
-secrets/.sops.yaml

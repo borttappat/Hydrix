@@ -2109,6 +2109,17 @@ copy_template_readme() {
     fi
 }
 
+copy_template_gitignore() {
+    local config_dir="$1"
+    local template_dir="$SCRIPT_DIR/../templates/user-config"
+
+    mkdir -p "$config_dir/secrets"
+    if [[ -f "$template_dir/.gitignore" ]]; then
+        cp "$template_dir/.gitignore" "$config_dir/.gitignore"
+        log "  Copied .gitignore from template"
+    fi
+}
+
 # ========== CONFIG GENERATION AND VALIDATION ==========
 
 # Returns the path to Hydrix source already available to the installer
@@ -2207,6 +2218,7 @@ generate_config_to_temp() {
         copy_template_configs "$TEMP_CONFIG"
         copy_template_vpn "$TEMP_CONFIG"
         copy_template_readme "$TEMP_CONFIG"
+        copy_template_gitignore "$TEMP_CONFIG"
         generate_machine_nix "$TEMP_CONFIG"
         generate_hardware_config "$TEMP_CONFIG"
     fi
@@ -3142,7 +3154,7 @@ init_sops_during_install() {
         cd "$config_dir"
         # -f: secrets/*.yaml and secrets/*.age are gitignored by default (only the
         # encrypted forms belong in the repo, so force past the ignore rule for them).
-        git add -f secrets/ modules/wifi.nix "machines/${CONFIG[serial]}.nix" 2>/dev/null || true
+        git add secrets/ modules/wifi.nix "machines/${CONFIG[serial]}.nix" 2>/dev/null || true
         git -c user.name="Hydrix Installer" -c user.email="installer@hydrix" \
             commit -m "feat(secrets): initialize sops for ${CONFIG[serial]}" 2>/dev/null || true
     )

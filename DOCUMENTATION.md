@@ -634,6 +634,7 @@ The installer will:
    - `specialisations/` - Boot mode configurations
    - `profiles/`, `infra/`, `tasks/` - VM configs copied from templates
 7. **Pre-build infrastructure VMs**: `microvm-router-<serial>`, `microvm-router-stable-<serial>`, `microvm-builder`
+8. **Initialize secrets** (`init_sops_during_install` in the installer, chrooted into `/mnt`): generates this machine's SSH host key so the sops-nix activation script derives the matching age key on first boot, writes `secrets/.sops.yaml`, and on a fresh repo encrypts any WiFi credentials collected in step 3 to `secrets/wifi.yaml` and wires `hydrix.secrets` + the router's `secrets = [ "wifi" ]` into `machines/<serial>.nix` automatically - nothing left to configure by hand for WiFi alone. It also offers (interactive `[Y/n]`, defaults yes) to generate the [master key](#secrets-management) and an SSH deploy key for gitsync, then commits everything as a standalone `feat(secrets): initialize sops for <serial>` commit. If it can generate the master key, it also offers to unlock it into `/mnt/var/lib/sops-nix/` right away, so secrets decrypt on the very first boot with no post-install step. On an **add**-mode install (existing repo cloned in), it adds this machine's key as a recipient automatically, and - if `secrets/master-age-key.age` is already present in the cloned repo - offers the same immediate unlock; only skips straight to a manual `sops updatekeys` instruction (see [§ Adding a Machine to an Existing Config](#adding-a-machine-to-an-existing-config)) when no master key exists yet. Any part of this can fail gracefully (no `sops`/`ssh-to-age` available, etc.) with a warning to run `hydrix-sops-setup` after first boot instead.
 
 Profile VMs (browsing, pentest, dev, comms, lurking) are **not** built during install. Build them on demand after first boot:
 
@@ -684,6 +685,8 @@ hydrix.microvmHost.profileOverrides = {
 
 This auto-detects your current system configuration and generates a minimal Hydrix config preserving your existing disk layout. Same three installer modes apply - if `~/hydrix-config/` already exists, it detects the serial and selects add or use-existing automatically. `system.stateVersion` is read from your existing `/etc/nixos/configuration.nix` (prompting for manual entry if that line isn't found), never re-detected from the currently running release - see [§ System State Version](#system-state-version).
 
+Secrets are initialized the same way as `install-hydrix.sh` (SSH host key, `.sops.yaml`, master-key offer, WiFi/deploy-key encryption, automatic master-key unlock in add mode if the cloned repo already has one), via `init_sops_and_wifi` - adapted to run against the live system with `sudo` instead of a chroot. One difference: it does not auto-commit the result, it prints the `git add secrets/ ... && git commit` command to run yourself afterward.
+
 ### Adding a Machine to an Existing Config
 
 When you have a working `hydrix-config` on one machine and want to bring a second machine in without repeating all the setup steps:
@@ -699,14 +702,17 @@ When you have a working `hydrix-config` on one machine and want to bring a secon
 
    The installer clones your repo, detects the hardware serial, and generates only `machines/<serial>.nix`. It does **not** prompt for username, colorscheme, or locale - those are already in `modules/user.nix` and `modules/common.nix`.
 
-3. **After first boot** - provision secrets for the new machine. The new machine has a new SSH host key, so a new age key:
+   The new machine has a new SSH host key, so a new age key that isn't yet a recipient on any existing encrypted file - the installer's `init_sops_during_install` handles this without further prompting in the common case:
+   - It adds this machine's key to the cloned `secrets/.sops.yaml` automatically.
+   - **If the repo already has `secrets/master-age-key.age`** (see [§ Installs and reinstalls](#installs-and-reinstalls)), it also offers to unlock it right there during install. Say yes, and secrets decrypt on the very first boot - nothing left to do.
+
+3. **Only if there is no master key yet** - re-key manually from a machine that can already decrypt:
 
    ```bash
-   # On the new machine:
+   # On the new machine (or read it back from the installer's own output):
    hydrix-sops-setup --print-key   # prints the new host's age pubkey
 
-   # On any existing machine (or wherever you manage secrets):
-   # Add the key to secrets/.sops.yaml, then re-key all secrets:
+   # On any existing machine that can already decrypt:
    cd ~/hydrix-config/secrets
    sops updatekeys --yes wifi.yaml github.yaml
    git add secrets/.sops.yaml secrets/wifi.yaml secrets/github.yaml
@@ -714,14 +720,14 @@ When you have a working `hydrix-config` on one machine and want to bring a secon
    git push
    ```
 
-4. **Pull the updated secrets** on the new machine:
+4. **Pull the updated secrets** on the new machine (manual-rekey path only):
 
    ```bash
    git -C ~/hydrix-config pull
    rebuild
    ```
 
-   Once rebuilt with the updated `.sops.yaml`, all secrets decrypt automatically on that machine.
+   Once rebuilt with the updated `.sops.yaml`, all secrets decrypt automatically on that machine. Generating a master key once (`hydrix-sops-setup --gen-master-key` on any existing machine, committed to the repo) turns every future machine addition into the zero-step path in step 2.
 
 **What the installer skips in add mode:**
 - Username, hostname, colorscheme prompts (already in `modules/user.nix`)
@@ -1144,7 +1150,7 @@ To migrate from legacy to sops mode:
 
 ```bash
 setup-wifi-secrets    # reads modules/wifi.nix, encrypts to secrets/wifi.yaml
-git add -f secrets/wifi.yaml && git commit -m 'feat(secrets): add encrypted wifi credentials'
+git add secrets/wifi.yaml && git commit -m 'feat(secrets): add encrypted wifi credentials'
 ```
 
 In `machines/<serial>.nix`, wire up the secret and deliver it to the router VM:
@@ -1564,7 +1570,28 @@ The status bar PWR module shows the current mode (SAVE/AUTO/PERF) and left-click
 
 ### Secrets Management
 
-Hydrix uses [sops](https://github.com/getsops/sops) with age keys derived from the SSH host key. Encrypted files are safe to commit to your hydrix-config repo; only your machine can decrypt them.
+Hydrix uses [sops](https://github.com/getsops/sops) with age encryption. Each machine derives its own age key from its SSH host key at boot, so encrypted files are safe to commit: only a machine holding a matching private key (SSH-derived, or one of the portable keys below) can decrypt them.
+
+```
+secrets/
+├── .sops.yaml               # recipient list (age public keys, one per machine + optional portable keys)
+├── wifi.yaml                # WiFi credentials (encrypted)
+├── github.yaml               # GitHub SSH key (encrypted)
+└── master-age-key.age       # optional, password-protected portable key (see below)
+```
+
+#### `hydrix-sops-setup`
+
+Single entry point for all key management. Run bare once per machine; the flags below cover portable-key and multi-machine workflows.
+
+| Command | Purpose |
+|---|---|
+| `hydrix-sops-setup` | Create/check `secrets/.sops.yaml` with this machine's age key. On first run (no `.sops.yaml` yet) offers to generate a password-protected master key as a second recipient. |
+| `hydrix-sops-setup --print-key` | Print this machine's age public key and exit. |
+| `hydrix-sops-setup --gen-key` | Generate a personal age key not tied to any machine's SSH host key; adds it as a recipient. Portable by copying `~/.config/sops/age/plugin-identities.txt` to a new machine. |
+| `hydrix-sops-setup --enroll-fido2` | Enroll a FIDO2 hardware key (YubiKey, Titan, ...) as a recipient via `age-plugin-fido2-hmac`. Decryption then requires a touch. |
+| `hydrix-sops-setup --gen-master-key` | Generate a password-protected portable master key (`secrets/master-age-key.age`), committed to the repo. **This is the install/reinstall path** - see below. |
+| `hydrix-sops-setup --unlock` | Decrypt the master key with its passphrase and activate it on this machine, at `/var/lib/sops-nix/master-age-key.txt` (outside the Nix store, survives rebuilds). |
 
 #### Initial setup
 
@@ -1575,13 +1602,38 @@ Hydrix uses [sops](https://github.com/getsops/sops) with age keys derived from t
 rebuild
 
 # 2. Initialize secrets/.sops.yaml with your machine's age public key
+#    (offers to generate a master key here too, see "Installs and reinstalls" below)
 hydrix-sops-setup
 
 # 3. Commit the sops config
-cd ~/hydrix-config && git add -f secrets/.sops.yaml && git commit -m 'feat(secrets): init sops'
+cd ~/hydrix-config && git add secrets/.sops.yaml && git commit -m 'feat(secrets): init sops'
 ```
 
 After the first rebuild, the age key is automatically made available to user-level sops commands via `~/.config/sops/age/keys.txt`. No manual key management is required.
+
+#### Installs and reinstalls
+
+A fresh install or reinstall gives the machine a new SSH host key, and therefore a new age key that isn't yet a recipient on any existing encrypted file. `hydrix-sops-setup --gen-master-key` / `--unlock` exists specifically to avoid the round-trip of copying the new key to another machine and re-encrypting there - and both `install-hydrix.sh` and `setup-hydrix.sh` already drive this automatically in the common case, so most of the time you never type these commands yourself:
+
+- **On a fresh `hydrix-config`**, both installers offer to generate the master key interactively (`[Y/n]`, default yes) as part of their sops-init step, then offer to unlock it into `/var/lib/sops-nix/` immediately - the machine that creates the key never needs `--unlock` at all.
+- **On an add-mode install** (bringing in a second/third machine, an existing repo is cloned in), both installers add the new machine's key as a recipient automatically, and - if the cloned repo already has `secrets/master-age-key.age` - offer to unlock it right there too. See [§ Adding a Machine to an Existing Config](#adding-a-machine-to-an-existing-config).
+
+Run the flags manually only when that automation didn't run or was skipped (declined a prompt, `sops`/`ssh-to-age` unavailable during install, initializing sops post-boot instead):
+
+```bash
+# Generate the master key after the fact, on any machine that can already decrypt:
+hydrix-sops-setup --gen-master-key
+# Prints a passphrase prompt, then next steps: add the printed public key to
+# secrets/.sops.yaml, re-key existing secrets with 'sops updatekeys', commit.
+
+# Unlock it on a machine where the installer's automatic offer was skipped or declined:
+hydrix-sops-setup --unlock
+# Prompts for the passphrase, decrypts secrets/master-age-key.age, and
+# restarts the hydrix-sops-decrypt-*.service units. Secrets are available
+# immediately - no 'sops updatekeys' round-trip, no waiting on another machine.
+```
+
+The master key is the only recipient that needs no re-keying to onboard a new machine; SSH-derived and FIDO2 keys still require adding the new public key to `.sops.yaml` and running `sops updatekeys`. Replace the master key with a FIDO2 hardware key once one is available: enroll it with `--enroll-fido2`, drop the master key from `secrets/.sops.yaml`, `sops updatekeys` to re-encrypt, and optionally delete `secrets/master-age-key.age` from the repo.
 
 #### Declaring secret files
 
@@ -1659,13 +1711,37 @@ sudo systemctl restart hydrix-secrets-microvm-router-<serial>
 # (inside router VM) systemctl restart hydrix-wifi-from-sops
 ```
 
+#### How secrets reach VMs
+
+```
+secrets/wifi.yaml (age-encrypted, git-tracked)
+  |
+  | hydrix-sops-decrypt-wifi.service (host, runs at boot)
+  v
+/run/secrets/wifi/networks.json (decrypted, tmpfs)
+  |
+  | hydrix-secrets-microvm-router-<serial>.service (host)
+  v
+/run/hydrix-secrets/microvm-router-<serial>/wifi/ (host, tmpfs)
+  |
+  | virtiofs (live passthrough)
+  v
+/mnt/vm-secrets/wifi/networks.json (inside the router VM only)
+```
+
+Other VMs have no access to `/mnt/vm-secrets/wifi/`; the pentest, browsing, and dev VMs only receive the secret types listed in their own `secrets = [...]` declaration.
+
 #### Adding a new machine
 
-On a fresh machine, the age key is derived automatically at first boot. To decrypt existing secrets on the new machine:
+On a fresh machine, the age key is derived automatically at first boot. `install-hydrix.sh`/`setup-hydrix.sh` already drive both paths below automatically when bringing in a new machine through an installer (see [§ Installs and reinstalls](#installs-and-reinstalls)); use these directly only for a hand-written flake or when redoing the step manually.
+
+**Master key (recommended, no round-trip)**: `hydrix-sops-setup --unlock` on the new machine, done.
+
+**Manual re-key (SSH-derived or FIDO2 keys only, no master key set up)**:
 
 ```bash
 # On the new machine after first rebuild:
-sops-age-pubkey           # prints the machine's age public key
+hydrix-sops-setup --print-key   # prints the machine's age public key
 
 # On a machine that can already decrypt:
 # Add the new key to secrets/.sops.yaml recipients, then:
@@ -1673,7 +1749,38 @@ sops updatekeys secrets/*.yaml
 git add secrets/.sops.yaml secrets/*.yaml && git commit -m 'feat(secrets): add new machine key'
 ```
 
-Until re-keyed, decrypt services exit with a warning and VMs start without secrets.
+Until re-keyed (or unlocked with the master key), decrypt services exit with a warning and VMs start without secrets.
+
+#### Troubleshooting
+
+**`sops: could not decrypt`**
+
+The age key may not be set up yet. Run `rebuild` once to generate and install it, or `hydrix-sops-setup --unlock` if this machine should be using the master key.
+
+**Secret not appearing in VM**
+
+Check the host decrypt service:
+```bash
+journalctl -u hydrix-sops-decrypt-wifi
+```
+
+Check the provisioning service:
+```bash
+journalctl -u hydrix-secrets-microvm-router-<serial>
+```
+
+Check the virtiofs mount inside the VM:
+```bash
+ls /mnt/vm-secrets/
+```
+
+**`wifi-sync list` shows 0 networks after setup**
+
+`secrets/wifi.yaml` may not be committed. Files referenced via `wifiSecretsFile` must be git-tracked (Nix copies them into the store at eval time):
+```bash
+git add secrets/wifi.yaml && git commit -m 'feat(secrets): add wifi credentials'
+rebuild
+```
 
 ### Disk Configuration (Disko)
 
@@ -4253,11 +4360,3 @@ waybar is used as the status bar, managed via a systemd user service and restart
 | `/var/lib/microvms/<name>/config/.switch-reg` | Nix DB registration for live switch |
 | `/var/lib/libvirt/base-images/` | Libvirt base images |
 | `/etc/HYDRIX_MODE` | Current boot mode (lockdown/administrative/fallback) |
-
----
-
-## Related Documentation
-
-- [secrets/README.md](./secrets/README.md) - Secrets management setup
-
----

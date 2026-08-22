@@ -30,6 +30,7 @@ Templates are **one-time provisioning**. After the initial install, `~/hydrix-co
 ```
 templates/user-config/               # Becomes ~/hydrix-config/
 ├── flake.nix                        # Main flake (imports Hydrix, discovers all VMs)
+├── .gitignore                       # Nix build output symlink (result)
 ├── machines/
 │   └── installer.nix                # Machine config template (copied, @PLACEHOLDERS@ filled)
 ├── modules/                         # Shared settings (all machines + VMs)
@@ -106,9 +107,6 @@ templates/user-config/               # Becomes ~/hydrix-config/
 │   ├── htop/htoprc                  # htop config
 │   ├── zathura/zathurarc            # Zathura PDF viewer config
 │   └── vm-workspaces.json           # Workspace→VM label overrides
-├── secrets/
-│   ├── .sops.yaml.example           # sops recipient config example
-│   └── github.yaml.example          # GitHub SSH key secret example
 ├── vpn/
 │   └── mullvad.nix                  # Per-bridge Mullvad exit node mapping
 ├── custom/
@@ -119,6 +117,8 @@ templates/user-config/               # Becomes ~/hydrix-config/
         ├── default.nix              # colorscheme, RAM, vCPU defaults
         └── packages/default.nix    # Empty package list
 ```
+
+`secrets/` is not templated here - both installers generate `secrets/.sops.yaml` (and encrypt any WiFi/GitHub credentials collected during install) directly at install time via `init_sops_during_install`/`init_sops_and_wifi`. See [DOCUMENTATION.md § Secrets Management](../DOCUMENTATION.md#secrets-management) for the full `hydrix-sops-setup` reference and the master-key install/reinstall workflow.
 
 ---
 
