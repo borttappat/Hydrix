@@ -112,14 +112,24 @@ init_messages();
 
 # ── Boot progress callback ──────────────────────────────────────────
 # progress is reliable during boot (calibrated against boot.json), but
-# stalls around a small fraction during shutdown/reboot — approximate
+# stalls around a small fraction during shutdown/reboot - approximate
 # with elapsed time there instead so the bar doesn't look stuck.
+# Frozen at frozen_progress while awaiting_password is set (by
+# password_cb / display_normal_cb below), so entering a LUKS password
+# doesn't advance the bar on its own.
+global.awaiting_password = false;
+global.frozen_progress = 0;
+
 fun boot_progress_cb(time, progress) {
+  global.awaiting_password; global.frozen_progress;
   mode = Plymouth.GetMode();
   if (mode == "shutdown" || mode == "reboot") {
     display_progress = 1 - 1 / (1 + time);
+  } else if (awaiting_password) {
+    display_progress = frozen_progress;
   } else {
     display_progress = progress;
+    frozen_progress = progress;
   }
   bar_w = Math.Int(display_progress * bar_max_width);
   if (bar_w < 1) bar_w = 1;
@@ -216,13 +226,6 @@ fun message_cb(text) {
 }
 Plymouth.SetMessageFunction(message_cb);
 
-fun display_normal_cb() {
-  for (i = 0; i < max_messages; i++)
-    msg_sprites[i].SetImage(Image(""));
-  global.msg_count = 0;
-  global.last_status = "";
-}
-Plymouth.SetDisplayNormalFunction(display_normal_cb);
 '' else ''
 fun message_cb(text) { }
 Plymouth.SetMessageFunction(message_cb);
@@ -233,6 +236,8 @@ global.prompt_sprite = Sprite();
 global.bullet_sprite = Sprite();
 
 fun password_cb(prompt, bullets) {
+  global.awaiting_password = true;
+
   bullet_string = "";
   for (i = 0; i < bullets; i++)
     bullet_string = bullet_string + "●";
@@ -248,6 +253,17 @@ fun password_cb(prompt, bullets) {
   }
 }
 Plymouth.SetDisplayPasswordFunction(password_cb);
+
+fun display_normal_cb() {
+  global.awaiting_password = false;
+  ${if cfg.showMessages then ''
+  for (i = 0; i < max_messages; i++)
+    msg_sprites[i].SetImage(Image(""));
+  global.msg_count = 0;
+  global.last_status = "";
+  '' else ""}
+}
+Plymouth.SetDisplayNormalFunction(display_normal_cb);
   '';
 
   hydrixPlymouthTheme = pkgs.runCommand "plymouth-theme-hydrix" {
@@ -287,6 +303,85 @@ ${plymouthScript}
 SCRIPT
   '';
 
+  # Runs for the whole uptime (started at boot, DefaultDependencies=false
+  # below keeps it alive through the shutdown.target wave), subscribed to
+  # systemd's JobNew signal the entire time. Stays silent until a /run flag
+  # is set, then queues events until plymouthd (mode=shutdown) answers
+  # --ping, flushing the queue paced with a small sleep between updates so
+  # it reads as a scroll rather than one static block.
+  #
+  # The flag is set by whichever fires first: a background watcher on
+  # logind's PrepareForShutdown(true) signal, or the JobNew watcher itself
+  # seeing one of the shutdown/reboot/poweroff/halt/kexec target units go
+  # by. Both busctl monitor invocations run inside a retry loop with a
+  # journal line on every restart, so a dead subprocess can't silently
+  # disable forwarding for the rest of the boot.
+  shutdownStatusScript = pkgs.writeShellScript "hydrix-plymouth-shutdown-status" ''
+    set -u
+    plymouth="${pkgs.plymouth}/bin/plymouth"
+    busctl="${pkgs.systemd}/bin/busctl"
+    jq="${pkgs.jq}/bin/jq"
+    flag=/run/hydrix-plymouth-shutdown-active
+    tag=hydrix-plymouth-shutdown-status
+
+    (
+      while :; do
+        "$busctl" monitor --system --json=short \
+          --match="type='signal',interface='org.freedesktop.login1.Manager',member='PrepareForShutdown'" \
+          org.freedesktop.login1 2>/dev/null \
+        | "$jq" --unbuffered -r \
+            'select(.type=="signal" and .member=="PrepareForShutdown" and .payload.data[0]==true) | "1"' \
+        | while IFS= read -r _; do
+            touch "$flag"
+          done
+        echo "$tag: login1 watcher exited, restarting" >&2
+        sleep 1
+      done
+    ) &
+
+    while :; do
+      ready=0
+      declare -a queue=()
+
+      "$busctl" monitor --system --json=short \
+        --match="type='signal',interface='org.freedesktop.systemd1.Manager',member='JobNew'" \
+        org.freedesktop.systemd1 2>/dev/null \
+      | "$jq" --unbuffered -r \
+          'select(.type=="signal" and .member=="JobNew") | .payload.data[2]' \
+      | while IFS= read -r unit; do
+          [ -z "$unit" ] && continue
+
+          case "$unit" in
+            shutdown.target|reboot.target|poweroff.target|halt.target|kexec.target)
+              touch "$flag"
+              ;;
+          esac
+          [ -e "$flag" ] || continue
+
+          if [ "$ready" = 0 ]; then
+            if "$plymouth" --ping 2>/dev/null; then
+              ready=1
+              for q in "''${queue[@]:-}"; do
+                if [ -n "$q" ]; then
+                  "$plymouth" --update="$q" 2>/dev/null
+                  sleep 0.03
+                fi
+              done
+              queue=()
+              "$plymouth" --update="$unit" 2>/dev/null
+            else
+              queue+=("$unit")
+            fi
+          else
+            "$plymouth" --update="$unit" 2>/dev/null
+          fi
+        done
+
+      echo "$tag: job watcher exited, restarting" >&2
+      sleep 1
+    done
+  '';
+
 in {
   options.hydrix.plymouth = {
     enable = lib.mkEnableOption "Hydrix Plymouth boot animation";
@@ -300,6 +395,17 @@ in {
       type    = lib.types.bool;
       default = false;
       description = "Show systemd boot messages during boot";
+    };
+
+    showShutdownMessages = lib.mkOption {
+      type    = lib.types.bool;
+      default = cfg.showMessages;
+      description = ''
+        Show systemd job status during shutdown/reboot/halt, forwarded from a
+        dedicated D-Bus watcher (upstream Plymouth's own shutdown status
+        rarely has anything to show, since plymouth-poweroff/halt/reboot.service
+        only start once most of shutdown.target's own jobs are already done).
+      '';
     };
 
     fontSize = lib.mkOption {
@@ -368,5 +474,24 @@ in {
     boot.kernelParams = [ "quiet" ];
     boot.consoleLogLevel = 0;
     boot.initrd.verbose = false;
+
+    systemd.services.hydrix-plymouth-shutdown-status = lib.mkIf cfg.showShutdownMessages {
+      description = "Forward systemd shutdown job status to Plymouth";
+      unitConfig = {
+        # No DefaultDependencies: a normal service gets an implicit
+        # Conflicts=/Before=shutdown.target, which would stop this alongside
+        # everything else in the very burst it exists to observe.
+        DefaultDependencies = false;
+        ConditionKernelCommandLine = "!plymouth.enable=0";
+        ConditionVirtualization = "!container";
+      };
+      serviceConfig = {
+        Type = "simple";
+        ExecStart = "${shutdownStatusScript}";
+        Restart = "on-failure";
+        RestartSec = 2;
+      };
+      wantedBy = [ "multi-user.target" ];
+    };
   };
 }

@@ -6,6 +6,7 @@
   hydrix.plymouth = {
     enable = lib.mkDefault true;
     showMessages = lib.mkDefault true;  # Show systemd boot messages scrolling during boot
+    # showShutdownMessages = lib.mkDefault true;  # DEFAULT: follows showMessages
     # fontSize = lib.mkDefault 18;  # DEFAULT: 18 — match hydrix.grub.theme.fontSize
 
     # title = "HYDRIX";
