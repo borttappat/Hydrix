@@ -117,6 +117,35 @@ let
             && echo "$vm_system" || return 1
     }
 
+    # Lists real GUI apps from a VM's .desktop entries rather than every raw
+    # executable in bin/ (which includes CLI noise like coreutils' own "[").
+    # Both sw/share/applications (systemPackages) and the user's home-manager
+    # profile (etc/profiles/per-user/<user>/share/applications, statically
+    # part of the same system closure when useUserPackages is set) --
+    # packages installed only via home-manager (e.g. programs.burp) ship
+    # their .desktop file in the latter, not sw/share. Outputs "Name<TAB>exec"
+    # pairs; exec is the bare command hypr-ws-app resolves via the VM's PATH.
+    list_vm_apps() {
+        local vm_system="$1" dir f name exec_line bin
+        for dir in \
+            "''${vm_system}/etc/profiles/per-user/${username}/share/applications" \
+            "''${vm_system}/sw/share/applications"; do
+            [[ -d "$dir" ]] || continue
+            for f in "''${dir}"/*.desktop; do
+                [[ -f "$f" ]] || continue
+                # Terminal=true apps (htop, joshuto, etc.) need a terminal
+                # emulator wrapped around them -- hypr-ws-app just execs the
+                # bare command with no tty, so nothing visibly happens.
+                ${pkgs.gnugrep}/bin/grep -qE '^(NoDisplay|Hidden|Terminal)=true' "$f" 2>/dev/null && continue
+                name=$(${pkgs.gnugrep}/bin/grep -m1 '^Name=' "$f" 2>/dev/null | ${pkgs.coreutils}/bin/cut -d= -f2-)
+                exec_line=$(${pkgs.gnugrep}/bin/grep -m1 '^Exec=' "$f" 2>/dev/null | ${pkgs.coreutils}/bin/cut -d= -f2-)
+                # First token of Exec=, field codes (%f/%U/etc.) and any path stripped.
+                bin=$(echo "$exec_line" | ${pkgs.gawk}/bin/awk '{print $1}' | ${pkgs.gnused}/bin/sed 's#.*/##')
+                [[ -n "$name" && -n "$bin" ]] && printf '%s\t%s\n' "$name" "$bin"
+            done
+        done | ${pkgs.coreutils}/bin/sort -u -t $'\t' -k1,1
+    }
+
     # ── Theme Generation ───────────────────────────────────────────────────
     # Reads wal colors from colors.json (same data refresh-colors uses).
     # Falls back to colors.sh, then to puccy-neutral defaults matching Stylix.
@@ -358,17 +387,20 @@ EOF
         theme_file=$(${pkgs.coreutils}/bin/mktemp /tmp/wofi-launcher-XXXXXX.css)
         build_theme > "$theme_file"
 
-        # List executables from VM's nix store profile (host-accessible via /nix/store)
-        local vm_system selected_app
+        # List VM apps from .desktop entries (host-accessible via /nix/store) --
+        # see list_vm_apps for why, not a raw bin/ listing.
+        local vm_system app_list selected_name selected_app
         if vm_system=$(get_vm_system_path "$selected"); then
-            selected_app=$(${pkgs.coreutils}/bin/ls -1 "''${vm_system}/sw/bin/" 2>/dev/null \
-                | ${pkgs.coreutils}/bin/sort -u \
+            app_list=$(list_vm_apps "$vm_system")
+            selected_name=$(echo "$app_list" | ${pkgs.coreutils}/bin/cut -f1 \
                 | ${pkgs.wofi}/bin/wofi --show dmenu \
                   --style="$theme_file" \
                   $(wofi_args) \
                   --prompt="''${selected}" \
                   --insensitive \
                   2>/dev/null) || true
+            selected_app=$(echo "$app_list" \
+                | ${pkgs.gawk}/bin/awk -F'\t' -v n="$selected_name" '$1==n{print $2; exit}')
 
             if [[ -n "$selected_app" ]]; then
                 if [[ -n "''${HYPRLAND_INSTANCE_SIGNATURE:-}" ]]; then
@@ -591,6 +623,35 @@ EOF
             && echo "$vm_system" || return 1
     }
 
+    # Lists real GUI apps from a VM's .desktop entries rather than every raw
+    # executable in bin/ (which includes CLI noise like coreutils' own "[").
+    # Both sw/share/applications (systemPackages) and the user's home-manager
+    # profile (etc/profiles/per-user/<user>/share/applications, statically
+    # part of the same system closure when useUserPackages is set) --
+    # packages installed only via home-manager (e.g. programs.burp) ship
+    # their .desktop file in the latter, not sw/share. Outputs "Name<TAB>exec"
+    # pairs; exec is the bare command hypr-ws-app resolves via the VM's PATH.
+    list_vm_apps() {
+        local vm_system="$1" dir f name exec_line bin
+        for dir in \
+            "''${vm_system}/etc/profiles/per-user/${username}/share/applications" \
+            "''${vm_system}/sw/share/applications"; do
+            [[ -d "$dir" ]] || continue
+            for f in "''${dir}"/*.desktop; do
+                [[ -f "$f" ]] || continue
+                # Terminal=true apps (htop, joshuto, etc.) need a terminal
+                # emulator wrapped around them -- hypr-ws-app just execs the
+                # bare command with no tty, so nothing visibly happens.
+                ${pkgs.gnugrep}/bin/grep -qE '^(NoDisplay|Hidden|Terminal)=true' "$f" 2>/dev/null && continue
+                name=$(${pkgs.gnugrep}/bin/grep -m1 '^Name=' "$f" 2>/dev/null | ${pkgs.coreutils}/bin/cut -d= -f2-)
+                exec_line=$(${pkgs.gnugrep}/bin/grep -m1 '^Exec=' "$f" 2>/dev/null | ${pkgs.coreutils}/bin/cut -d= -f2-)
+                # First token of Exec=, field codes (%f/%U/etc.) and any path stripped.
+                bin=$(echo "$exec_line" | ${pkgs.gawk}/bin/awk '{print $1}' | ${pkgs.gnused}/bin/sed 's#.*/##')
+                [[ -n "$name" && -n "$bin" ]] && printf '%s\t%s\n' "$name" "$bin"
+            done
+        done | ${pkgs.coreutils}/bin/sort -u -t $'\t' -k1,1
+    }
+
     main() {
         local running_vms selected_vm selected_app
 
@@ -610,11 +671,13 @@ EOF
             [[ -z "$selected_vm" ]] && exit 0
         fi
 
-        local vm_system
+        local vm_system app_list selected_name
         if vm_system=$(get_vm_system_path "$selected_vm"); then
-            selected_app=$(${pkgs.coreutils}/bin/ls -1 "''${vm_system}/sw/bin/" 2>/dev/null \
-                | ${pkgs.coreutils}/bin/sort -u \
-                | wofi_pick "''${selected_vm}")
+            app_list=$(list_vm_apps "$vm_system")
+            selected_name=$(echo "$app_list" | ${pkgs.coreutils}/bin/cut -f1 | wofi_pick "''${selected_vm}")
+            [[ -z "$selected_name" ]] && exit 0
+            selected_app=$(echo "$app_list" \
+                | ${pkgs.gawk}/bin/awk -F'\t' -v n="$selected_name" '$1==n{print $2; exit}')
             [[ -z "$selected_app" ]] && exit 0
 
             if [[ -n "''${HYPRLAND_INSTANCE_SIGNATURE:-}" ]]; then
