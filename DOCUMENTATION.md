@@ -42,6 +42,7 @@ Hydrix is an options-driven NixOS framework that provides complete network isola
 - [Lockscreen](#lockscreen)
 - [Keybindings](#keybindings)
 - [Scripts Reference](#scripts-reference)
+- [Pentesting VM](#pentesting-vm)
 - [Troubleshooting](#troubleshooting)
 
 ---
@@ -4331,6 +4332,88 @@ No configuration required \- audio works automatically for all profile VMs as so
 ### Status Bar Notes
 
 waybar is used as the status bar, managed via a systemd user service and restarted automatically on monitor add/remove events.
+
+---
+
+## Pentesting VM
+
+The pentest profile template (`profiles/pentest/`) ships with BurpSuite pre-wired via
+[burpsuite-nix](https://github.com/Red-Flake/burpsuite-nix), plus the Xwayland support it
+needs to actually render. Both live in `profiles/pentest/burpsuite.nix` and
+`profiles/pentest/xwayland.nix`, scoped to this one VM only.
+
+### Why Xwayland
+
+BurpSuite, Ghidra, and most Java-based reverse-engineering GUI tools are AWT/Swing
+applications. Stock OpenJDK has no native Wayland backend, so these apps need a real X11
+`DISPLAY` to render at all — under the Hyprland + waypipe stack (pure Wayland, no X11
+anywhere by default), they fail outright with no window and, for BurpSuite specifically, a
+`java.lang.Error: no ComponentUI class for: ...` crash partway through its own UI init.
+
+A hand-rolled rootless Xwayland client of the VM's `waypipe-0` socket was tried first and
+never got a single window mapped — waypipe is a generic Wayland *proxy*, not a compositor,
+so it doesn't implement whatever rootless Xwayland needs for surface positioning. The
+working fix is waypipe's own `--xwls` flag, which runs
+[xwayland-satellite](https://github.com/Supreeeme/xwayland-satellite) alongside the
+`waypipe server` process — the purpose-built way to forward X11 clients through a waypipe
+tunnel. `xwayland.nix` overrides the VM's `waypipe-vsock` service to add `--xwls`.
+
+`--xwls` only sets `$DISPLAY` for the one process waypipe directly execs as its server
+command (normally a throwaway `sleep infinity`), not for any shell or app launched
+afterwards. `xwayland.nix` works around this by having that placeholder process write the
+resolved display value to `/run/user/1000/xwayland-display`, which is then read by:
+
+- **Interactive shells** — via `programs.fish.interactiveShellInit`, so typing `burpsuite`
+  in a VM terminal picks up `$DISPLAY` on login.
+- **`waypipe-launch` (vsock:14508)** — the receiver behind mod+D / `wofi-launcher` /
+  `hypr-ws-app`. This service builds its own environment from scratch and never goes
+  through a login shell, so the fish fix above is invisible to it; it needs its own
+  override (also in `xwayland.nix`) that reads the display file fresh on every launch
+  request, matching Hydrix's shared `vm/display/waypipe-vm.nix` `waypipe-launch` service
+  exactly plus that one line. Without this override, apps launched via the app-launcher
+  keybind (rather than typed in a terminal) silently get no `$DISPLAY` and hang.
+
+Also note: `waypipe execs "xwayland-satellite"` by bare name, and systemd services don't
+inherit `/run/current-system/sw/bin` the way interactive shells do — `xwayland.nix` adds
+`pkgs.xwayland-satellite` to the `waypipe-vsock` unit's `path` explicitly, or the service
+fails with `Failed to run program "xwayland-satellite": No such file or directory`.
+
+### Pinning burpsuite-nix
+
+`burpsuite.nix` fetches burpsuite-nix directly:
+
+```nix
+burpsuite-nix = builtins.getFlake "github:Red-Flake/burpsuite-nix/<full-commit-sha>";
+```
+
+This is deliberately **not** a toplevel flake input. Passing it through `extraInputs` (the
+mechanism `mkHost`/`mkMicroVM` use to thread flake inputs into per-VM/per-host builds) would
+mean every VM and host build carries it, even though only the pentest VM uses it. Fetching
+it inline with a full pinned commit SHA keeps it fully scoped to `profiles/pentest/` and
+evaluates purely (no `--impure` needed, since the ref is a fully locked commit).
+
+**To update:** replace the commit SHA in `burpsuite.nix` with a newer commit from the
+burpsuite-nix repo, then rebuild. `nix flake update` does **not** touch this — it isn't a
+flake input, so there's no lockfile entry tracking it. Bumping it is a manual edit.
+
+### Isolation
+
+Nothing outside `profiles/pentest/` references `burpsuite-nix` or `xwayland-satellite`: no
+`extraInputs` site passes it to another VM or the host, and no other profile/infra/task VM's
+config imports either file. The packages do get built into the shared `/nix/store` like
+anything else (content-addressed, visible from every VM), but that's irrelevant — what
+matters is that no other VM's NixOS config or closure references them, and none do.
+
+### Clipboard isolation still applies
+
+[`hypr-clip-guard`](#clipboard-isolation-hypr-clip-guard) classifies clients by their
+window's title prefix (`[pentest] `, from waypipe's `--title-prefix`) at the real host
+compositor, hooking all four Wayland clipboard-selection protocols directly. Since
+`xwayland-satellite` is itself just another Wayland client of the same `waypipe-0`/vsock
+tunnel, BurpSuite's window gets the same title prefix as any other forwarded pentest-VM
+window and falls into the same isolation group automatically — the mechanism operates below
+the Wayland-vs-X11 distinction entirely. Verify live with `hyprctl clipguard` while BurpSuite
+is open; its client should show up tagged `pentest`, not `host`.
 
 ---
 

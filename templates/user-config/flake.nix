@@ -56,9 +56,6 @@
 
     nix-index-database.url = "github:Mic92/nix-index-database";
     nix-index-database.inputs.nixpkgs.follows = "nixpkgs";
-
-    burpsuite-nix.url = "github:Red-Flake/burpsuite-nix";
-    burpsuite-nix.inputs.nixpkgs.follows = "nixpkgs";
   };
 
   outputs = {
@@ -165,103 +162,104 @@
         allNixFiles;
     in
       builtins.listToAttrs (map (file: let
-        machineName = builtins.replaceStrings [".nix"] [""] file;
-      in {
-        name = machineName;
-        value = hydrix.lib.mkHost {
-          specialArgs = {inherit self hydrix machineName;};
-          extraInputs = {inherit (inputs) disko sops-nix nix-index-database burpsuite-nix;};
-          inherit userColorschemesDir;
-          modules = [
-            (machinesDir + "/${file}")
-            ./modules/wifi.nix # WiFi networks (legacy: move to secrets/wifi.yaml via setup-wifi-secrets)
-            ./modules/repos.nix # Declarative git repos (add yours, or leave repos = {})
-            ./modules/fonts.nix # Font packages and profiles
-            ./modules/hyprland.nix # Hyprland keybindings + config (user-customizable)
-            ./modules/waybar.nix # Waybar layout and modules (user-customizable)
-            ./modules/grub-theme.nix # Hydrix-themed GRUB bootloader
-            ./modules/plymouth.nix # Hydrix boot animation
-            ./modules/greetd.nix # greetd login manager (tuigreet/regreet)
-            vmThemeSyncModule # VM theme sync (host-side)
-            {
-              hydrix.vmThemeSync.enable = true;
-              # Every profile VM and task VM is its own per-machine nixosConfiguration
-              # (like router already is), so the registry's vmName for each needs the
-              # same per-machine suffix override router/router-stable already use --
-              # extended here to every profile/task key instead of just those two.
-              # Infra VMs (files/gitsync/hostsync/usb-sandbox/vault/builder) stay
-              # unsuffixed: they're shared, ephemeral, and out of scope for this.
-              hydrix.networking.vmRegistry = let
-                perMachineKeys =
-                  map (m: m._profileName) discoveredMetas
-                  ++ map (m: "pentest-${m._taskName}") discoveredTasks;
-                base =
-                  vmRegistry
-                  // {
-                    router = vmRegistry.router // {vmName = "microvm-router-${machineName}";};
-                    router-stable = vmRegistry.router-stable // {vmName = "microvm-router-stable-${machineName}";};
-                  };
-              in
-                builtins.mapAttrs (
-                  k: v:
-                    if builtins.elem k perMachineKeys
-                    then v // {vmName = "${v.vmName}-${machineName}";}
-                    else v
-                )
-                base;
-              hydrix.networking.profileNetworks = allProfileNetworks;
-              hydrix.networking.extraNetworks = extraNetworks;
-              hydrix.networking.infraTapBridges = infraTapBridges;
-              hydrix.microvmHost.knownVms =
-                map (m: "microvm-${m._profileName}-${machineName}") discoveredMetas
-                ++ map (m: "microvm-${m._infraName}") (builtins.filter (m: !(m.builtinVm or false)) discoveredInfra)
-                ++ map (m: "microvm-pentest-${m._taskName}-${machineName}") discoveredTasks;
-              # Tags each known VM with its category (infra/profile/task) so
-              # the host module can decouple profile/task VMs from the host
-              # build closure by default (see host/microvm/default.nix).
-              hydrix.microvmHost.vmClasses =
-                builtins.listToAttrs (map (m: {
-                    name = "microvm-${m._profileName}-${machineName}";
-                    value = "profile";
-                  })
-                  discoveredMetas)
-                // builtins.listToAttrs (map (m: {
-                    name = "microvm-${m._infraName}";
-                    value = "infra";
-                  })
-                  (builtins.filter (m: !(m.builtinVm or false)) discoveredInfra))
-                // builtins.listToAttrs (map (m: {
-                    name = "microvm-pentest-${m._taskName}-${machineName}";
-                    value = "task";
-                  })
-                  discoveredTasks);
-              # Uncomment to build/rebuild ALL profile and task VMs together with the
-              # host (pre-decoupling behavior: every `rebuild` also builds their full
-              # toplevel). Off by default: profile/task VMs are built and managed only
-              # via `microvm build/start/update <name>`, keeping host rebuilds fast.
-              # hydrix.microvmHost.coupleProfiles = true;
-              # Per-machine router VM names: each machine gets its own router
-              # nixosConfiguration with the correct wifiPciAddress baked in.
-              hydrix.microvmHost.vmNames.router = "microvm-router-${machineName}";
-              hydrix.microvmHost.vmNames.routerStable = "microvm-router-stable-${machineName}";
-            }
-            ./modules/common.nix # Locale + shared settings (all machines)
-            ./modules/user.nix # Username, colorscheme; shared across machines
-            ./modules/graphical.nix # UI preferences (opacity, bluelight, etc.)
-            ./modules/waybar.nix # Waybar module
-            ./modules/fish.nix # Shell abbreviations + functions (user additions)
-            ./modules/alacritty.nix # Terminal cursor, keyboard overrides
-            ./modules/dunst.nix # Notification sound + size preferences
-            ./modules/ranger.nix # File manager mappings + rifle rules
-            ./modules/zathura.nix # PDF viewer settings
-            ./modules/starship.nix # Prompt env vars (config is in configs/starship/)
-            ./modules/vim.nix # Vim plugins (config is in configs/vim/)
-            ./modules/helix.nix
-            ./modules/firefox.nix # Host Firefox toggle + user-agent
-            ./modules/vault.nix # Vault VM credential launcher (vault-cli + vault-pick)
-          ];
-        };
-      }) machineFiles);
+          machineName = builtins.replaceStrings [".nix"] [""] file;
+        in {
+          name = machineName;
+          value = hydrix.lib.mkHost {
+            specialArgs = {inherit self hydrix machineName;};
+            extraInputs = {inherit (inputs) disko sops-nix nix-index-database;};
+            inherit userColorschemesDir;
+            modules = [
+              (machinesDir + "/${file}")
+              ./modules/wifi.nix # WiFi networks (legacy: move to secrets/wifi.yaml via setup-wifi-secrets)
+              ./modules/repos.nix # Declarative git repos (add yours, or leave repos = {})
+              ./modules/fonts.nix # Font packages and profiles
+              ./modules/hyprland.nix # Hyprland keybindings + config (user-customizable)
+              ./modules/waybar.nix # Waybar layout and modules (user-customizable)
+              ./modules/grub-theme.nix # Hydrix-themed GRUB bootloader
+              ./modules/plymouth.nix # Hydrix boot animation
+              ./modules/greetd.nix # greetd login manager (tuigreet/regreet)
+              vmThemeSyncModule # VM theme sync (host-side)
+              {
+                hydrix.vmThemeSync.enable = true;
+                # Every profile VM and task VM is its own per-machine nixosConfiguration
+                # (like router already is), so the registry's vmName for each needs the
+                # same per-machine suffix override router/router-stable already use --
+                # extended here to every profile/task key instead of just those two.
+                # Infra VMs (files/gitsync/hostsync/usb-sandbox/vault/builder) stay
+                # unsuffixed: they're shared, ephemeral, and out of scope for this.
+                hydrix.networking.vmRegistry = let
+                  perMachineKeys =
+                    map (m: m._profileName) discoveredMetas
+                    ++ map (m: "pentest-${m._taskName}") discoveredTasks;
+                  base =
+                    vmRegistry
+                    // {
+                      router = vmRegistry.router // {vmName = "microvm-router-${machineName}";};
+                      router-stable = vmRegistry.router-stable // {vmName = "microvm-router-stable-${machineName}";};
+                    };
+                in
+                  builtins.mapAttrs (
+                    k: v:
+                      if builtins.elem k perMachineKeys
+                      then v // {vmName = "${v.vmName}-${machineName}";}
+                      else v
+                  )
+                  base;
+                hydrix.networking.profileNetworks = allProfileNetworks;
+                hydrix.networking.extraNetworks = extraNetworks;
+                hydrix.networking.infraTapBridges = infraTapBridges;
+                hydrix.microvmHost.knownVms =
+                  map (m: "microvm-${m._profileName}-${machineName}") discoveredMetas
+                  ++ map (m: "microvm-${m._infraName}") (builtins.filter (m: !(m.builtinVm or false)) discoveredInfra)
+                  ++ map (m: "microvm-pentest-${m._taskName}-${machineName}") discoveredTasks;
+                # Tags each known VM with its category (infra/profile/task) so
+                # the host module can decouple profile/task VMs from the host
+                # build closure by default (see host/microvm/default.nix).
+                hydrix.microvmHost.vmClasses =
+                  builtins.listToAttrs (map (m: {
+                      name = "microvm-${m._profileName}-${machineName}";
+                      value = "profile";
+                    })
+                    discoveredMetas)
+                  // builtins.listToAttrs (map (m: {
+                      name = "microvm-${m._infraName}";
+                      value = "infra";
+                    })
+                    (builtins.filter (m: !(m.builtinVm or false)) discoveredInfra))
+                  // builtins.listToAttrs (map (m: {
+                      name = "microvm-pentest-${m._taskName}-${machineName}";
+                      value = "task";
+                    })
+                    discoveredTasks);
+                # Uncomment to build/rebuild ALL profile and task VMs together with the
+                # host (pre-decoupling behavior: every `rebuild` also builds their full
+                # toplevel). Off by default: profile/task VMs are built and managed only
+                # via `microvm build/start/update <name>`, keeping host rebuilds fast.
+                # hydrix.microvmHost.coupleProfiles = true;
+                # Per-machine router VM names: each machine gets its own router
+                # nixosConfiguration with the correct wifiPciAddress baked in.
+                hydrix.microvmHost.vmNames.router = "microvm-router-${machineName}";
+                hydrix.microvmHost.vmNames.routerStable = "microvm-router-stable-${machineName}";
+              }
+              ./modules/common.nix # Locale + shared settings (all machines)
+              ./modules/user.nix # Username, colorscheme; shared across machines
+              ./modules/graphical.nix # UI preferences (opacity, bluelight, etc.)
+              ./modules/waybar.nix # Waybar module
+              ./modules/fish.nix # Shell abbreviations + functions (user additions)
+              ./modules/alacritty.nix # Terminal cursor, keyboard overrides
+              ./modules/dunst.nix # Notification sound + size preferences
+              ./modules/ranger.nix # File manager mappings + rifle rules
+              ./modules/zathura.nix # PDF viewer settings
+              ./modules/starship.nix # Prompt env vars (config is in configs/starship/)
+              ./modules/vim.nix # Vim plugins (config is in configs/vim/)
+              ./modules/helix.nix
+              ./modules/firefox.nix # Host Firefox toggle + user-agent
+              ./modules/vault.nix # Vault VM credential launcher (vault-cli + vault-pick)
+            ];
+          };
+        })
+        machineFiles);
 
     # =========================================================================
     # PROFILE AUTO-DISCOVERY
@@ -332,7 +330,7 @@
           value = hydrix.lib.mkMicroVM {
             profile = "pentest";
             hostname = vmName;
-            extraInputs = {inherit (inputs) nix-index-database burpsuite-nix hydrix;};
+            extraInputs = {inherit (inputs) nix-index-database hydrix;};
             modules = [
               (./tasks + "/${m._taskName}/default.nix")
               vmThemeSyncModule
@@ -514,7 +512,7 @@
           value = hydrix.lib.mkMicroVM {
             profile = m._profileName;
             hostname = name;
-            extraInputs = {inherit (inputs) nix-index-database burpsuite-nix hydrix;};
+            extraInputs = {inherit (inputs) nix-index-database hydrix;};
             modules =
               [
                 vmThemeSyncModule
