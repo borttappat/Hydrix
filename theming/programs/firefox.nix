@@ -30,14 +30,27 @@ let
   allExtensions = ffCfg.extensionRegistry;
   currentExtensions = ffCfg.extensions;
 
-  # Build ExtensionSettings from extension list
+  # Build ExtensionSettings from extension list. When an extension has a
+  # pinned hash, fetch and verify it once at build time instead of letting
+  # Firefox fetch url live at runtime; extensions without a hash are
+  # unaffected (opt-in per extension, see firefox.extensionRegistry.<name>.hash).
   buildExtensionSettings = extNames:
     builtins.listToAttrs (map (name:
-      let ext = allExtensions.${name};
+      let
+        ext = allExtensions.${name};
+        installUrl =
+          if ext.hash != null
+          then "file://${pkgs.fetchFirefoxAddon {
+                 inherit name;
+                 url = ext.url;
+                 hash = ext.hash;
+                 fixedExtid = ext.id;
+               }}/${ext.id}.xpi"
+          else ext.url;
       in {
         name = ext.id;
         value = {
-          install_url = ext.url;
+          install_url = installUrl;
           installation_mode = "force_installed";
         };
       }

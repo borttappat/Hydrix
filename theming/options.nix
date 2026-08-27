@@ -72,6 +72,22 @@ in {
         options = {
           id = lib.mkOption {type = lib.types.str;};
           url = lib.mkOption {type = lib.types.str;};
+          hash = lib.mkOption {
+            type = lib.types.nullOr lib.types.str;
+            default = null;
+            description = ''
+              Optional pinned content hash (SRI format, e.g. "sha256-...=") for
+              this extension's .xpi. When set, the extension is fetched once at
+              build time via pkgs.fetchFirefoxAddon and hash-verified instead of
+              Firefox fetching url live at runtime. Opt-in per extension; users
+              who don't need reproducible/audited fetches can leave this null
+              and nothing changes. Get a hash with:
+                nix store prefetch-file --hash-type sha256 <versioned-xpi-url>
+              Use a specific versioned download URL for `url` when setting a
+              hash, not an AMO "latest" redirect, since the pinned hash will
+              stop matching once "latest" moves on to a new version.
+            '';
+          };
           description = lib.mkOption {
             type = lib.types.str;
             default = "";

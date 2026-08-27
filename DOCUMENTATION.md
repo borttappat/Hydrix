@@ -1467,6 +1467,23 @@ firefox-extension-add <slug>
 # slug = last part of addons.mozilla.org/en-US/firefox/addon/<slug>/
 ```
 
+Each registry entry (`firefox.extensionRegistry.<name>`) can optionally pin a
+content hash instead of trusting AMO's "latest" URL live at runtime:
+
+```nix
+hydrix.graphical.firefox.extensionRegistry.ublock-origin = {
+  # versioned download URL, not the "latest" redirect (its content changes over time)
+  url = "https://addons.mozilla.org/firefox/downloads/file/<id>/<slug>-<version>.xpi";
+  hash = "sha256-...="; # nix store prefetch-file --hash-type sha256 <url>
+};
+```
+
+When `hash` is set, the extension is fetched once at build time via
+`pkgs.fetchFirefoxAddon` and hash-verified, instead of Firefox fetching `url`
+live on every install. This is opt-in per extension: entries without a
+`hash` keep the default live-fetch behavior, so users who don't need
+reproducible/audited fetches don't have to do anything differently.
+
 #### obsidian.nix
 
 ```nix
