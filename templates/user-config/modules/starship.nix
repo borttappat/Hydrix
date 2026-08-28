@@ -1,21 +1,18 @@
 # Starship Prompt — User Configuration
 #
 # Installs starship, initializes it in fish, and deploys starship.toml.
+#
+# starship.toml is written as a plain writable file via home.activation (not
+# xdg.configFile, which symlinks into the read-only nix store), editable
+# freely between rebuilds, like hyprland/waybar/eww. Rebuild restores it to
+# the value below.
 
 { config, lib, pkgs, ... }:
 
 let
   username = config.hydrix.username;
-in {
-  config = lib.mkIf config.hydrix.graphical.enable {
-    environment.systemPackages = [ pkgs.starship ];
 
-    home-manager.users.${username} = { pkgs, ... }: {
-      programs.fish.interactiveShellInit = lib.mkAfter ''
-        ${pkgs.starship}/bin/starship init fish | source
-      '';
-
-      xdg.configFile."starship.toml".text = ''
+  starshipToml = pkgs.writeText "starship.toml" ''
         "$schema" = 'https://starship.rs/config-schema.json'
 
         format = """
@@ -127,6 +124,21 @@ in {
 
         [aws]
         disabled = true
+      '';
+in {
+  config = lib.mkIf config.hydrix.graphical.enable {
+    environment.systemPackages = [ pkgs.starship ];
+
+    home-manager.users.${username} = { lib, pkgs, ... }: {
+      programs.fish.interactiveShellInit = lib.mkAfter ''
+        ${pkgs.starship}/bin/starship init fish | source
+      '';
+
+      home.activation.starshipConfig = lib.hm.dag.entryAfter ["writeBoundary"] ''
+        _dir="$HOME/.config"
+        mkdir -p "$_dir"
+        [ -L "$_dir/starship.toml" ] && rm -f "$_dir/starship.toml"
+        cat ${starshipToml} > "$_dir/starship.toml"
       '';
     };
   };

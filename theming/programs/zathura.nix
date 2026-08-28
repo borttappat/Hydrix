@@ -1,15 +1,20 @@
 # Zathura PDF Viewer
 #
-# A launch wrapper builds a temp --config-dir with the base zathurarc plus
-# colors read fresh from the wal cache, so every new window opens with the
-# current colorscheme (adapted from
+# The base zathurarc is written as a plain writable file via home.activation
+# (not xdg.configFile, which symlinks into the read-only nix store), editable
+# freely between rebuilds, like hyprland/waybar/eww in hydrix-config. Rebuild
+# restores it to the settings below.
+#
+# A launch wrapper builds a temp --config-dir from that same writable file
+# plus colors read fresh from the wal cache, so every new window opens with
+# the current colorscheme and any live zathurarc edits (adapted from
 # https://github.com/GideonWolfe/Zathura-Pywal). Already-open windows are
 # updated live via zathura's D-Bus interface (org.pwmt.zathura.ExecuteCommand
 # runs a command exactly as if typed in the inputbar) -- called from
 # refresh-colors, so a colorscheme change applies immediately with no
 # restart needed.
 #
-# All non-color settings come from hydrix.graphical.zathura.* options — set
+# All non-color settings come from hydrix.graphical.zathura.* options, set
 # defaults here or override in hydrix-config/shared/zathura.nix.
 {
   config,
@@ -124,18 +129,18 @@
   '';
 
   # Wraps the real zathura binary: every launch builds a temp config dir
-  # containing the Nix-managed base zathurarc plus colors read fresh from the
-  # wal cache, then execs zathura against it -- a brand new window always
-  # opens with the current colorscheme, no dependency on any previous
-  # refresh-colors run having written a separate include file.
+  # containing the writable base zathurarc (home.activation seeds it, the
+  # user can edit it between rebuilds) plus colors read fresh from the wal
+  # cache, then execs zathura against it -- a brand new window always opens
+  # with the current colorscheme and any live zathurarc edits, no dependency
+  # on any previous refresh-colors run having written a separate include
+  # file.
   zathuraWrapped = pkgs.writeShellScriptBin "zathura" ''
     set -eu
     tmp=$(mktemp -d)
     trap 'rm -rf "$tmp"' EXIT
 
-    # cat > (not cp): the Nix store source is read-only (mode 444), and cp
-    # preserves that mode on the copy, which would make the append below fail.
-    cat ${zathurarc} > "$tmp/zathurarc"
+    cat "$HOME/.config/zathura/zathurarc" > "$tmp/zathurarc"
 
     ${colorCommands}
     for cmd in "''${COMMANDS[@]}"; do
@@ -175,6 +180,17 @@ in {
     (lib.optionalAttrs hasStylix (lib.mkIf (config.hydrix.graphical.enable && !handOffToStylix) {
       home-manager.users.${username}.stylix.targets.zathura.enable = lib.mkForce false;
     }))
+
+    (lib.mkIf (config.hydrix.graphical.enable && !handOffToStylix) {
+      home-manager.users.${username} = { lib, ... }: {
+        home.activation.zathuraConfig = lib.hm.dag.entryAfter ["writeBoundary"] ''
+          _dir="$HOME/.config/zathura"
+          mkdir -p "$_dir"
+          [ -L "$_dir/zathurarc" ] && rm -f "$_dir/zathurarc"
+          cat ${zathurarc} > "$_dir/zathurarc"
+        '';
+      };
+    })
 
     (lib.mkIf config.hydrix.graphical.enable {
       environment.systemPackages =

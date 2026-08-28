@@ -9,6 +9,13 @@
 # - Background: from host colorscheme (config.hydrix.vmColors.hostColorscheme)
 # - Text colors: from VM's own colorscheme (hydrix.colorscheme)
 # This makes terminal text the visual differentiator between host and VM windows.
+#
+# programs.alacritty normally symlinks alacritty.toml into the read-only nix
+# store. That placement is disabled below and the same generated content is
+# copied into a plain writable file instead, editable between rebuilds (on
+# top of the already-live colors-runtime.toml import), like
+# hyprland/waybar/eww in hydrix-config. Rebuild restores it to the settings
+# above.
 
 { config, lib, pkgs, ... }:
 
@@ -130,7 +137,7 @@ in {
       text = buildTimeAlacrittyToml;
     };
 
-    home-manager.users.${username} = { pkgs, ... }: {
+    home-manager.users.${username} = { lib, pkgs, ... } @ hmArgs: {
       programs.alacritty = {
         enable = lib.mkDefault true;
 
@@ -227,6 +234,15 @@ in {
           };
         };
       };
+
+      xdg.configFile."alacritty/alacritty.toml".enable = lib.mkForce false;
+
+      home.activation.alacrittyConfig = lib.hm.dag.entryAfter ["writeBoundary"] ''
+        _dir="$HOME/.config/alacritty"
+        mkdir -p "$_dir"
+        [ -L "$_dir/alacritty.toml" ] && rm -f "$_dir/alacritty.toml"
+        cat ${hmArgs.config.xdg.configFile."alacritty/alacritty.toml".source} > "$_dir/alacritty.toml"
+      '';
     };
   };
 }

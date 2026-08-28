@@ -4,6 +4,13 @@
 # vi key bindings (hydrix.graphical.fish.viKeyBindings), lockdown git wrapper.
 #
 # This file sets: abbreviations, fish colors, cursor, key bindings, functions.
+#
+# programs.fish normally symlinks config.fish and every functions/*.fish file
+# (including functions contributed by the Hydrix framework module, not just
+# the ones declared below) into the read-only nix store. Every fish/* entry
+# is converted to a plain writable file instead below, editable between
+# rebuilds, like hyprland/waybar/eww. Rebuild restores them to the config
+# below.
 {
   config,
   lib,
@@ -18,7 +25,7 @@ in {
     # vi key bindings on (framework default)
     hydrix.graphical.fish.viKeyBindings = lib.mkDefault true;
 
-    home-manager.users.${username} = {pkgs, ...}: {
+    home-manager.users.${username} = {lib, pkgs, ...} @ hmArgs: {
       programs.fish = {
 
         interactiveShellInit = ''
@@ -285,6 +292,23 @@ in {
             w = "hyprland-launch";
           };
       };
+
+      xdg.configFile = let
+        fishFileNames = ["fish/config.fish"]
+          ++ map (n: "fish/functions/${n}.fish")
+               (builtins.attrNames hmArgs.config.programs.fish.functions);
+      in lib.genAttrs fishFileNames (_: {enable = lib.mkForce false;});
+
+      home.activation.fishConfig = lib.hm.dag.entryAfter ["writeBoundary"] ''
+        ${lib.concatStringsSep "\n" (map (name: ''
+          _dest="$HOME/.config/${name}"
+          mkdir -p "$(dirname "$_dest")"
+          [ -L "$_dest" ] && rm -f "$_dest"
+          cat ${hmArgs.config.xdg.configFile.${name}.source} > "$_dest"
+        '') (["fish/config.fish"]
+          ++ map (n: "fish/functions/${n}.fish")
+               (builtins.attrNames hmArgs.config.programs.fish.functions)))}
+      '';
     };
   };
 }

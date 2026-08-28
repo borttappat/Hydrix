@@ -2,6 +2,12 @@
 #
 # Full ranger configuration. Settings, mappings, and rifle rules are all
 # defined here. Override per-machine in machines/*.nix.
+#
+# programs.ranger normally symlinks rc.conf/rifle.conf into the read-only nix
+# store. That placement is disabled below and the same generated content is
+# copied into plain writable files instead, editable between rebuilds, like
+# hyprland/waybar/eww. Rebuild restores them to the settings/mappings/rifle
+# below.
 
 { config, lib, pkgs, ... }:
 
@@ -9,7 +15,7 @@ let
   username = config.hydrix.username;
 in {
   config = lib.mkIf config.hydrix.graphical.enable {
-    home-manager.users.${username} = { pkgs, ... }: {
+    home-manager.users.${username} = { lib, pkgs, ... } @ hmArgs: {
       programs.ranger = {
         enable = lib.mkDefault true;
 
@@ -96,6 +102,18 @@ in {
 
       # Joshuto as alternative file manager
       home.packages = [ pkgs.joshuto ];
+
+      xdg.configFile."ranger/rc.conf".enable = lib.mkForce false;
+      xdg.configFile."ranger/rifle.conf".enable = lib.mkForce false;
+
+      home.activation.rangerConfig = lib.hm.dag.entryAfter ["writeBoundary"] ''
+        _dir="$HOME/.config/ranger"
+        mkdir -p "$_dir"
+        [ -L "$_dir/rc.conf" ] && rm -f "$_dir/rc.conf"
+        [ -L "$_dir/rifle.conf" ] && rm -f "$_dir/rifle.conf"
+        cat ${hmArgs.config.xdg.configFile."ranger/rc.conf".source} > "$_dir/rc.conf"
+        cat ${hmArgs.config.xdg.configFile."ranger/rifle.conf".source} > "$_dir/rifle.conf"
+      '';
     };
   };
 }
