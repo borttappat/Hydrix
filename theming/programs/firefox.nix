@@ -156,7 +156,7 @@ let
   firefoxExtensionAdd = pkgs.writeShellScriptBin "firefox-extension-add" ''
     set -euo pipefail
 
-    FIREFOX_NIX="$HOME/hydrix-config/shared/firefox.nix"
+    FIREFOX_NIX="$HOME/hydrix-config/modules/firefox.nix"
 
     usage() {
       echo "Usage: firefox-extension-add <slug> [profile1,profile2,...]"

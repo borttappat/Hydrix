@@ -1,7 +1,7 @@
 # VM Minimal Module - Essential shell and login configuration for headless VMs
 #
 # Packages and environment variables are configured in the user's
-# hydrix-config/shared/vm-packages.nix.
+# hydrix-config/modules/vm-packages.nix.
 #
 # This module provides only the shell setup and auto-login (plumbing).
 #

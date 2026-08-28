@@ -54,7 +54,7 @@ in {
           };
 
           # Common packages available to user
-          # Note: starship, ranger, joshuto, vim are configured in hydrix-config/shared/
+          # Note: starship, ranger, joshuto, vim are configured in hydrix-config/modules/
           home.packages = with pkgs; [
             # Terminal utilities
             tmux

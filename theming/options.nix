@@ -148,7 +148,7 @@ in {
       };
       description = ''
         Registry of available Firefox extensions. Merge additional entries here
-        in hydrix-config/shared/firefox.nix to make custom extensions available
+        in hydrix-config/modules/firefox.nix to make custom extensions available
         for selection via firefox.extensions.
       '';
     };

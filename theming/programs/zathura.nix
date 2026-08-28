@@ -15,7 +15,7 @@
 # restart needed.
 #
 # All non-color settings come from hydrix.graphical.zathura.* options, set
-# defaults here or override in hydrix-config/shared/zathura.nix.
+# defaults here or override in hydrix-config/modules/zathura.nix.
 {
   config,
   lib,
