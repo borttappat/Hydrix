@@ -374,14 +374,22 @@ if [[ "${1:-}" == "--unlock" ]]; then
   fi
 
   echo -e "${CYAN}Unlocking master age key...${NC}"
-  echo "(Enter the passphrase you set when generating the master key)"
   echo ""
 
   # age prompts for the passphrase interactively on the terminal
   TMPUNLOCK=$(mktemp)
   trap 'rm -f "$TMPUNLOCK"' EXIT
-  if ! age -d -o "$TMPUNLOCK" "$MASTER_KEY_ENC"; then
-    echo -e "${RED}Decryption failed — wrong passphrase?${NC}" >&2
+  AGE_OK=0
+  for attempt in 1 2 3; do
+    echo "(Enter the passphrase you set when generating the master key)"
+    if age -d -o "$TMPUNLOCK" "$MASTER_KEY_ENC"; then
+      AGE_OK=1
+      break
+    fi
+    [[ $attempt -lt 3 ]] && echo -e "${RED}Incorrect passphrase, try again ($attempt/3).${NC}" >&2
+  done
+  if [[ $AGE_OK -ne 1 ]]; then
+    echo -e "${RED}Decryption failed after 3 attempts.${NC}" >&2
     exit 1
   fi
 

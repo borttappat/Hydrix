@@ -3171,15 +3171,18 @@ init_sops_during_install() {
         echo "  If you skip, run 'hydrix-sops-setup --unlock' after first boot."
         read -p "  Unlock master key now? [Y/n]: " unlock_yn
         if [[ "${unlock_yn:-y}" =~ ^[Yy] ]]; then
-            echo "  (Enter the master key passphrase)"
-            local tmpunlock
+            local tmpunlock age_ok=0 attempt
             tmpunlock=$(mktemp)
-            local age_ok=0
-            if command -v age &>/dev/null; then
-                age -d -o "$tmpunlock" "$master_enc" && age_ok=1 || true
-            else
-                nix run --no-write-lock-file nixpkgs#age -- -d -o "$tmpunlock" "$master_enc" && age_ok=1 || true
-            fi
+            for attempt in 1 2 3; do
+                echo "  (Enter the master key passphrase)"
+                if command -v age &>/dev/null; then
+                    age -d -o "$tmpunlock" "$master_enc" && age_ok=1 || true
+                else
+                    nix run --no-write-lock-file nixpkgs#age -- -d -o "$tmpunlock" "$master_enc" && age_ok=1 || true
+                fi
+                [[ $age_ok -eq 1 ]] && break
+                [[ $attempt -lt 3 ]] && warn "  Incorrect passphrase, try again ($attempt/3)."
+            done
             if [[ $age_ok -eq 1 ]]; then
                 mkdir -p /mnt/var/lib/sops-nix
                 chmod 700 /mnt/var/lib/sops-nix
@@ -3189,7 +3192,7 @@ init_sops_during_install() {
                 log "  Master key written to $master_dest — secrets will decrypt on first boot."
             else
                 rm -f "$tmpunlock"
-                warn "  Decryption failed. Run 'hydrix-sops-setup --unlock' after first boot."
+                warn "  Decryption failed after 3 attempts. Run 'hydrix-sops-setup --unlock' after first boot."
             fi
         fi
     fi

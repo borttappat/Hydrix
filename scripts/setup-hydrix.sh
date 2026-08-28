@@ -1609,15 +1609,19 @@ init_sops_and_wifi() {
                 log "  secrets on this machine right away, no sops updatekeys needed."
                 read -p "  Unlock master key now? [Y/n]: " unlock_yn
                 if [[ "${unlock_yn:-y}" =~ ^[Yy] ]]; then
-                    echo "  (Enter the master key passphrase)"
-                    local tmpunlock age_ok=0
+                    local tmpunlock age_ok=0 attempt
                     tmpunlock=$(mktemp)
-                    if command -v age &>/dev/null; then
-                        age -d -o "$tmpunlock" "$CONFIG_DIR/secrets/master-age-key.age" && age_ok=1 || true
-                    else
-                        nix run --no-write-lock-file nixpkgs#age -- \
-                            -d -o "$tmpunlock" "$CONFIG_DIR/secrets/master-age-key.age" && age_ok=1 || true
-                    fi
+                    for attempt in 1 2 3; do
+                        echo "  (Enter the master key passphrase)"
+                        if command -v age &>/dev/null; then
+                            age -d -o "$tmpunlock" "$CONFIG_DIR/secrets/master-age-key.age" && age_ok=1 || true
+                        else
+                            nix run --no-write-lock-file nixpkgs#age -- \
+                                -d -o "$tmpunlock" "$CONFIG_DIR/secrets/master-age-key.age" && age_ok=1 || true
+                        fi
+                        [[ $age_ok -eq 1 ]] && break
+                        [[ $attempt -lt 3 ]] && warn "  Incorrect passphrase, try again ($attempt/3)."
+                    done
                     if [[ $age_ok -eq 1 ]]; then
                         sudo mkdir -p /var/lib/sops-nix
                         sudo chmod 700 /var/lib/sops-nix
@@ -1625,7 +1629,7 @@ init_sops_and_wifi() {
                         sudo chmod 600 /var/lib/sops-nix/master-age-key.txt
                         log "  Master key unlocked -- secrets decrypt after this switch."
                     else
-                        warn "  Decryption failed. Run 'hydrix-sops-setup --unlock' later."
+                        warn "  Decryption failed after 3 attempts. Run 'hydrix-sops-setup --unlock' later."
                     fi
                     rm -f "$tmpunlock"
                 fi
