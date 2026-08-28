@@ -26,15 +26,30 @@
 # To add a custom extension, use firefox-extension-add <slug> to get the entry,
 # then add it to firefox.extensionRegistry below and select it per-profile.
 
-{ config, lib, ... }:
+{ config, lib, pkgs, ... }:
 
 let
   reg  = config.hydrix.graphical.firefox.extensionRegistry;
   exts = config.hydrix.graphical.firefox.extensions;
+  # Extensions with a pinned reg.<name>.hash are fetched once at build time
+  # and hash-verified instead of Firefox fetching install_url live at runtime.
+  # Opt-in per extension; see firefox.extensionRegistry.<name>.hash in
+  # Hydrix/theming/options.nix.
   mkExtSettings = names:
-    builtins.listToAttrs (map (n: {
-      name  = reg.${n}.id;
-      value = { install_url = reg.${n}.url; installation_mode = "force_installed"; };
+    builtins.listToAttrs (map (n: let
+      ext = reg.${n};
+      installUrl =
+        if ext.hash != null
+        then "file://${pkgs.fetchFirefoxAddon {
+               name = n;
+               url = ext.url;
+               hash = ext.hash;
+               fixedExtid = ext.id;
+             }}/${ext.id}.xpi"
+        else ext.url;
+    in {
+      name  = ext.id;
+      value = { install_url = installUrl; installation_mode = "force_installed"; };
     }) (builtins.filter (n: reg ? ${n}) names));
 in
 

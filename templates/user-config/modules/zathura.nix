@@ -50,9 +50,12 @@
   #   J = "zoom out";
   #   i = "recolor";
   #   p = "print";
+  #   "+" = "zoom in";
+  #   "-" = "zoom out";
   # };
 
   # ── Extra config ───────────────────────────────────────────────────────────
+  # Appended verbatim to zathurarc:
   # hydrix.graphical.zathura.extraConfig = ''
   #   set pages-per-row 1
   #   set adjust-open best-fit

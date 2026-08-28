@@ -311,7 +311,7 @@
     bind = $mod SHIFT, W, exec, wallpaper-black
 
     # Lock / Suspend / Exit
-    bind = $mod SHIFT,      E, exec, hyprlock
+    bind = $mod SHIFT,      E, exec, ${lockScreen}
     bind = $mod SHIFT,      S, exec, systemctl suspend
     bind = $mod CTRL SHIFT, E, exec, exit-wayland
 

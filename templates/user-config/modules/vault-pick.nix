@@ -22,6 +22,7 @@ let
     in toString (if (ui.pillRadius or null) != null
                  then ui.pillRadius
                  else builtins.floor ((ui.cornerRadius or 2) * (ui.pillRadiusScale or 2.0)));
+  wofiWidth = toString config.hydrix.graphical.ui.rofiWidth;
 
   vaultPickTui = pkgs.writeShellApplication {
     name = "vault-pick-tui";
@@ -30,7 +31,6 @@ let
       CID="${toString cfg.vsockCid}"
       PORT="${toString cfg.vsockPort}"
       CLEAR_DELAY=30
-      SCALING_JSON="$HOME/.config/hydrix/scaling.json"
       WAL_JSON="$HOME/.cache/wal/colors.json"
 
       vsend() {
@@ -39,16 +39,6 @@ let
 
       notify() {
         notify-send "Vault" "$1" -u "''${2:-normal}" -t "''${3:-3000}" 2>/dev/null || true
-      }
-
-      scaling_val() {
-        local key="$1" default="$2"
-        if [ -f "$SCALING_JSON" ]; then
-          val=$(jq -r "$key // empty" "$SCALING_JSON" 2>/dev/null)
-          echo "''${val:-$default}"
-        else
-          echo "$default"
-        fi
       }
 
       wal_color() {
@@ -62,10 +52,10 @@ let
       }
 
       build_theme() {
-        local corner_radius font_size font_name bg fg accent
-        corner_radius=$(scaling_val '.sizes.corner_radius' '${wofiCornerRadius}')
-        font_size=$(scaling_val '.fonts.wofi' '${wofiSize}')
-        font_name=$(scaling_val '.font_names.wofi' "$(scaling_val '.font_name' '${fontFamily}')")
+        local corner_radius='${wofiCornerRadius}'
+        local font_size='${wofiSize}'
+        local font_name='${fontFamily}'
+        local bg fg accent
         bg=$(wal_color '.colors.color0' '#0e0f17')
         fg=$(wal_color '.colors.color7' '#e4d1ef')
         accent=$(wal_color '.colors.color4' '#f09ea2')
@@ -74,6 +64,8 @@ let
     font-family: ''${font_name};
     font-size: ''${font_size}px;
     color: ''${fg};
+    transition: none;
+    animation: none;
 }
 
 #window {
@@ -129,12 +121,12 @@ EOF
       trap 'rm -f "$THEME"' EXIT
       build_theme > "$THEME"
 
-      WOFI_W=$(scaling_val '.sizes.rofi_width'  '600')
-      WOFI_H=$(scaling_val '.sizes.rofi_height' '400')
-
+      # Width is fixed to prevent horizontal resize on open.
+      # Height is intentionally omitted — all content is pre-loaded so wofi sizes
+      # to fit naturally without a collapse animation.
       wofi_dmenu() {
         wofi --show dmenu --style="$THEME" \
-          --width="$WOFI_W" --height="$WOFI_H" \
+          --width=${wofiWidth} \
           "$@" 2>/dev/null || true
       }
 
@@ -182,8 +174,10 @@ EOF
         notify "Vault is empty" normal 3000; exit 1
       fi
 
-      # Pick entry via wofi
-      selected=$(echo "$entries" | wofi_dmenu --prompt "Entry:" --insensitive --width 500)
+      # Pick entry via wofi — width overrides default; height sizes to content
+      entry_count=$(echo "$entries" | wc -l)
+      selected=$(echo "$entries" | wofi_dmenu --prompt "Entry:" --insensitive \
+        --width 500 --lines "$entry_count")
       [ -z "$selected" ] && exit 0
 
       # Pick action
