@@ -69,140 +69,143 @@
       + lib.optionalString (userCsDir != null) ''
         cp -r ${userCsDir}/*.json $out/colorschemes/ 2>/dev/null || true
         cp -r ${userCsDir}/*.yaml $out/colorschemes/ 2>/dev/null || true
+        cp -r ${userCsDir}/*.png $out/colorschemes/ 2>/dev/null || true
+        cp -r ${userCsDir}/*.jpg $out/colorschemes/ 2>/dev/null || true
+        cp -r ${userCsDir}/*.jpeg $out/colorschemes/ 2>/dev/null || true
       '';
   };
 
   # Shared script to refresh all color-aware applications
   # Called by walrgb, randomwalrgb, apply-colorscheme, restore-colorscheme
   refreshColorsScript = pkgs.writeShellScriptBin "refresh-colors" ''
-        #!/usr/bin/env bash
-        # Refresh all applications with current wal colors
-        # Reads from ~/.cache/wal/colors.json
+    #!/usr/bin/env bash
+    # Refresh all applications with current wal colors
+    # Reads from ~/.cache/wal/colors.json
 
-        WAL_COLORS="$HOME/.cache/wal/colors.json"
+    WAL_COLORS="$HOME/.cache/wal/colors.json"
 
-        if [ ! -f "$WAL_COLORS" ]; then
-            echo "Error: No wal colors found at $WAL_COLORS"
-            exit 1
-        fi
+    if [ ! -f "$WAL_COLORS" ]; then
+        echo "Error: No wal colors found at $WAL_COLORS"
+        exit 1
+    fi
 
-        echo "Refreshing colors from wal cache..."
+    echo "Refreshing colors from wal cache..."
 
-        # Extract colors
-        COLOR0=$(${jq} -r '.colors.color0' "$WAL_COLORS")
-        COLOR1=$(${jq} -r '.colors.color1' "$WAL_COLORS")
-        COLOR2=$(${jq} -r '.colors.color2' "$WAL_COLORS")
-        COLOR3=$(${jq} -r '.colors.color3' "$WAL_COLORS")
-        COLOR4=$(${jq} -r '.colors.color4' "$WAL_COLORS")
-        COLOR5=$(${jq} -r '.colors.color5' "$WAL_COLORS")
-        COLOR6=$(${jq} -r '.colors.color6' "$WAL_COLORS")
-        COLOR7=$(${jq} -r '.colors.color7' "$WAL_COLORS")
-        COLOR8=$(${jq} -r '.colors.color8' "$WAL_COLORS")
-        BG=$(${jq} -r '.special.background' "$WAL_COLORS")
-        FG=$(${jq} -r '.special.foreground' "$WAL_COLORS")
+    # Extract colors
+    COLOR0=$(${jq} -r '.colors.color0' "$WAL_COLORS")
+    COLOR1=$(${jq} -r '.colors.color1' "$WAL_COLORS")
+    COLOR2=$(${jq} -r '.colors.color2' "$WAL_COLORS")
+    COLOR3=$(${jq} -r '.colors.color3' "$WAL_COLORS")
+    COLOR4=$(${jq} -r '.colors.color4' "$WAL_COLORS")
+    COLOR5=$(${jq} -r '.colors.color5' "$WAL_COLORS")
+    COLOR6=$(${jq} -r '.colors.color6' "$WAL_COLORS")
+    COLOR7=$(${jq} -r '.colors.color7' "$WAL_COLORS")
+    COLOR8=$(${jq} -r '.colors.color8' "$WAL_COLORS")
+    BG=$(${jq} -r '.special.background' "$WAL_COLORS")
+    FG=$(${jq} -r '.special.foreground' "$WAL_COLORS")
 
-        # === Window manager reload ===
-        if [[ -n "''${HYPRLAND_INSTANCE_SIGNATURE:-}" ]]; then
-          # Hyprland: write colors.conf, reload compositor, re-apply VM borders
-          echo "  Applying hyprland colors..."
-          if command -v hypr-apply-colors >/dev/null 2>&1; then
-            hypr-apply-colors
-          fi
-        fi
+    # === Window manager reload ===
+    if [[ -n "''${HYPRLAND_INSTANCE_SIGNATURE:-}" ]]; then
+      # Hyprland: write colors.conf, reload compositor, re-apply VM borders
+      echo "  Applying hyprland colors..."
+      if command -v hypr-apply-colors >/dev/null 2>&1; then
+        hypr-apply-colors
+      fi
+    fi
 
-        # === Firefox (pywalfox) ===
-        if command -v pywalfox >/dev/null 2>&1; then
-            echo "  Updating Firefox..."
-            pywalfox update 2>/dev/null || true
-        fi
+    # === Firefox (pywalfox) ===
+    if command -v pywalfox >/dev/null 2>&1; then
+        echo "  Updating Firefox..."
+        pywalfox update 2>/dev/null || true
+    fi
 
-        # === Zathura ===
-        # New windows already get fresh colors at launch (zathura is wrapped,
-        # see theming/programs/zathura.nix); this pushes the update live into
-        # any already-open windows via zathura's D-Bus interface.
-        if command -v zathura-reload-colors >/dev/null 2>&1; then
-            echo "  Updating open zathura windows..."
-            zathura-reload-colors
-        fi
+    # === Zathura ===
+    # New windows already get fresh colors at launch (zathura is wrapped,
+    # see theming/programs/zathura.nix); this pushes the update live into
+    # any already-open windows via zathura's D-Bus interface.
+    if command -v zathura-reload-colors >/dev/null 2>&1; then
+        echo "  Updating open zathura windows..."
+        zathura-reload-colors
+    fi
 
-        # === GTK wal colors ===
-        echo "  Generating GTK wal colors..."
-        if command -v generate-gtk-colors >/dev/null 2>&1; then
-            generate-gtk-colors
-        fi
+    # === GTK wal colors ===
+    echo "  Generating GTK wal colors..."
+    if command -v generate-gtk-colors >/dev/null 2>&1; then
+        generate-gtk-colors
+    fi
 
-        # === Dunst ===
-        echo "  Regenerating dunst config..."
-        if command -v generate-dunstrc >/dev/null 2>&1; then
-            generate-dunstrc
-        fi
-        # Restart dunst to pick up new colors (kill + let systemd restart, or start manually)
-        echo "  Restarting dunst..."
-        ${pkgs.procps}/bin/pkill -9 dunst 2>/dev/null || true
-        sleep 0.3
-        # Try systemd first, fall back to direct start
-        if systemctl --user start dunst 2>/dev/null; then
-            true
+    # === Dunst ===
+    echo "  Regenerating dunst config..."
+    if command -v generate-dunstrc >/dev/null 2>&1; then
+        generate-dunstrc
+    fi
+    # Restart dunst to pick up new colors (kill + let systemd restart, or start manually)
+    echo "  Restarting dunst..."
+    ${pkgs.procps}/bin/pkill -9 dunst 2>/dev/null || true
+    sleep 0.3
+    # Try systemd first, fall back to direct start
+    if systemctl --user start dunst 2>/dev/null; then
+        true
+    else
+        ${pkgs.dunst}/bin/dunst &>/dev/null &
+        disown 2>/dev/null || true
+    fi
+
+    # === GTK (for virt-manager, nautilus, etc) ===
+    # GTK reads colors from the theme, we use wal-gtk if available
+    if command -v wal-gtk >/dev/null 2>&1; then
+        echo "  Updating GTK theme..."
+        wal-gtk 2>/dev/null || true
+    fi
+
+    # === Alacritty ===
+    # Update runtime colors TOML for live_config_reload (all alacritty instances reload)
+    if command -v write-alacritty-colors >/dev/null 2>&1; then
+        echo "  Updating alacritty runtime colors..."
+        write-alacritty-colors
+    fi
+
+    # Send wal escape sequences to terminals (host only - VMs use live_config_reload)
+    # VMs don't need sequences because alacritty imports colors-runtime.toml
+    WAL_SEQUENCES="$HOME/.cache/wal/sequences"
+    if [ -f "$WAL_SEQUENCES" ] && [ ! -e "/mnt/hydrix-config" ]; then
+        echo "  Updating terminals via sequences..."
+        for pts in /dev/pts/[0-9]*; do
+            # Only write to our own terminals
+            if [ -O "$pts" ] 2>/dev/null; then
+                ${pkgs.coreutils}/bin/cat "$WAL_SEQUENCES" > "$pts" 2>/dev/null || true
+            fi
+        done
+    fi
+
+    # === Starship prompt ===
+    # Uses static config from configs/starship/starship.toml
+    # No runtime generation needed
+
+    # === Sync wal cache to hydrix-config for VMs ===
+    # VMs mount ~/.config/hydrix via 9p and can read wal colors from there
+    # Skip this in VMs (they have /mnt/hydrix-config as a read-only mount)
+    HYDRIX_CONFIG="$HOME/.config/hydrix"
+    WAL_ACTIVE="$HOME/.cache/wal/.active"
+    if [ ! -e "/mnt/hydrix-config" ] && [ -d "$HYDRIX_CONFIG" ] && [ -f "$WAL_COLORS" ]; then
+        echo "  Syncing wal cache to hydrix-config..."
+        mkdir -p "$HYDRIX_CONFIG/wal"
+        cp -n "$WAL_COLORS" "$HYDRIX_CONFIG/wal/colors.json" 2>/dev/null || true
+        # Also sync the .active marker so VMs know when wal is active
+        if [ -f "$WAL_ACTIVE" ]; then
+            touch "$HYDRIX_CONFIG/wal/.active"
         else
-            ${pkgs.dunst}/bin/dunst &>/dev/null &
-            disown 2>/dev/null || true
+            rm -f "$HYDRIX_CONFIG/wal/.active"
         fi
 
-        # === GTK (for virt-manager, nautilus, etc) ===
-        # GTK reads colors from the theme, we use wal-gtk if available
-        if command -v wal-gtk >/dev/null 2>&1; then
-            echo "  Updating GTK theme..."
-            wal-gtk 2>/dev/null || true
+        # Push colors to running VMs via vsock for instant sync (background)
+        if command -v push-colors-to-vms >/dev/null 2>&1; then
+            echo "  Pushing to VMs via vsock..."
+            push-colors-to-vms &
         fi
+    fi
 
-        # === Alacritty ===
-        # Update runtime colors TOML for live_config_reload (all alacritty instances reload)
-        if command -v write-alacritty-colors >/dev/null 2>&1; then
-            echo "  Updating alacritty runtime colors..."
-            write-alacritty-colors
-        fi
-
-        # Send wal escape sequences to terminals (host only - VMs use live_config_reload)
-        # VMs don't need sequences because alacritty imports colors-runtime.toml
-        WAL_SEQUENCES="$HOME/.cache/wal/sequences"
-        if [ -f "$WAL_SEQUENCES" ] && [ ! -e "/mnt/hydrix-config" ]; then
-            echo "  Updating terminals via sequences..."
-            for pts in /dev/pts/[0-9]*; do
-                # Only write to our own terminals
-                if [ -O "$pts" ] 2>/dev/null; then
-                    ${pkgs.coreutils}/bin/cat "$WAL_SEQUENCES" > "$pts" 2>/dev/null || true
-                fi
-            done
-        fi
-
-        # === Starship prompt ===
-        # Uses static config from configs/starship/starship.toml
-        # No runtime generation needed
-
-        # === Sync wal cache to hydrix-config for VMs ===
-        # VMs mount ~/.config/hydrix via 9p and can read wal colors from there
-        # Skip this in VMs (they have /mnt/hydrix-config as a read-only mount)
-        HYDRIX_CONFIG="$HOME/.config/hydrix"
-        WAL_ACTIVE="$HOME/.cache/wal/.active"
-        if [ ! -e "/mnt/hydrix-config" ] && [ -d "$HYDRIX_CONFIG" ] && [ -f "$WAL_COLORS" ]; then
-            echo "  Syncing wal cache to hydrix-config..."
-            mkdir -p "$HYDRIX_CONFIG/wal"
-            cp -n "$WAL_COLORS" "$HYDRIX_CONFIG/wal/colors.json" 2>/dev/null || true
-            # Also sync the .active marker so VMs know when wal is active
-            if [ -f "$WAL_ACTIVE" ]; then
-                touch "$HYDRIX_CONFIG/wal/.active"
-            else
-                rm -f "$HYDRIX_CONFIG/wal/.active"
-            fi
-
-            # Push colors to running VMs via vsock for instant sync (background)
-            if command -v push-colors-to-vms >/dev/null 2>&1; then
-                echo "  Pushing to VMs via vsock..."
-                push-colors-to-vms &
-            fi
-        fi
-
-        echo "Colors refreshed!"
+    echo "Colors refreshed!"
   '';
 
   # Write alacritty colors TOML from wal colors.json
@@ -306,9 +309,11 @@
     if [ -f "$SCHEME_JSON" ]; then
         echo "Restoring default colorscheme: $SCHEME_NAME"
         ${pkgs.pywal}/bin/wal -q --theme "$SCHEME_JSON" 2>&1 | grep -v "WARNING: The convert command is deprecated" || true
+        SCHEME_JSON_USED="$SCHEME_JSON"
     elif [ -f "$VM_SCHEME_JSON" ]; then
         echo "Restoring default colorscheme (from /etc): $SCHEME_NAME"
         ${pkgs.pywal}/bin/wal -q --theme "$VM_SCHEME_JSON" 2>&1 | grep -v "WARNING: The convert command is deprecated" || true
+        SCHEME_JSON_USED="$VM_SCHEME_JSON"
     else
         echo "Error: Colorscheme file not found."
         echo "  Tried: $SCHEME_JSON"
@@ -324,6 +329,31 @@
 
     # Refresh all color-aware apps
     ${refreshColorsScript}/bin/refresh-colors
+
+    ${lib.optionalString (!isVM) ''
+      # Restore the wallpaper declared by the colorscheme itself (colocated
+      # image, "wallpaper" field resolved relative to the JSON's own directory)
+      WALLPAPER_FIELD=$(${jq} -r '.wallpaper // empty' "$SCHEME_JSON_USED" 2>/dev/null || true)
+      if [ -n "$WALLPAPER_FIELD" ]; then
+          WALLPAPER_PATH="$(dirname "$SCHEME_JSON_USED")/$WALLPAPER_FIELD"
+          if [ -f "$WALLPAPER_PATH" ]; then
+              echo "Restoring wallpaper: $WALLPAPER_PATH"
+              pkill swaybg 2>/dev/null || true
+              ${pkgs.swaybg}/bin/swaybg -i "$WALLPAPER_PATH" -m fill &
+              if ${pkgs.procps}/bin/pgrep -x hyprland >/dev/null 2>&1; then
+                  ${pkgs.hyprland}/bin/hyprctl reload 2>/dev/null || true
+              fi
+              if command -v generate-lockscreen >/dev/null 2>&1; then
+                  generate-lockscreen "$WALLPAPER_PATH" &
+              fi
+          fi
+      fi
+
+      # Wallpaper state is now deliberately settled; nothing should auto-set it again
+      WALLPAPER_INIT_MARKER="$HOME/.cache/hydrix/wallpaper-initialized"
+      mkdir -p "$(dirname "$WALLPAPER_INIT_MARKER")"
+      touch "$WALLPAPER_INIT_MARKER"
+    ''}
 
     echo "Default colorscheme restored"
   '';
@@ -392,14 +422,12 @@
       fi
     fi
 
-    # Set wallpaper: feh on X11 (wal handles it), swaybg on Wayland
-    if [[ -n "''${WAYLAND_DISPLAY:-}" ]]; then
-      pkill swaybg 2>/dev/null || true
-      ${pkgs.swaybg}/bin/swaybg -i "$FILE_PATH" -m fill &
-      # Reload Hyprland if running (applies colorscheme to decorations)
-      if ${pkgs.procps}/bin/pgrep -x hyprland >/dev/null 2>&1; then
-        ${pkgs.hyprland}/bin/hyprctl reload 2>/dev/null || true
-      fi
+    # Set wallpaper
+    pkill swaybg 2>/dev/null || true
+    ${pkgs.swaybg}/bin/swaybg -i "$FILE_PATH" -m fill &
+    # Reload Hyprland if running (applies colorscheme to decorations)
+    if ${pkgs.procps}/bin/pgrep -x hyprland >/dev/null 2>&1; then
+      ${pkgs.hyprland}/bin/hyprctl reload 2>/dev/null || true
     fi
 
     # Run nixwal to update nix-specific cache
@@ -425,7 +453,11 @@
   # Random wallpaper theme applicator
   randomWalRgbScript = pkgs.writeShellScriptBin "randomwalrgb" ''
     #!/usr/bin/env bash
-    WALLPAPER_DIR="''${1:-$HOME/wallpapers}"
+    DEFAULT_WALLPAPER_DIR="$HOME/hydrix-config/wallpapers"
+    if [ ! -d "$DEFAULT_WALLPAPER_DIR" ]; then
+      DEFAULT_WALLPAPER_DIR="$HOME/wallpapers"
+    fi
+    WALLPAPER_DIR="''${1:-$DEFAULT_WALLPAPER_DIR}"
     WAL_ACTIVE="$HOME/.cache/wal/.active"
 
     if [ ! -d "$WALLPAPER_DIR" ]; then
@@ -468,10 +500,9 @@
       fi
     fi
 
-    # Set wallpaper: feh on X11 (wal handles it), swaybg on Wayland
-    # pywal saves the selected wallpaper path in ~/.cache/wal/wal
+    # Set wallpaper (pywal saves the selected wallpaper path in ~/.cache/wal/wal)
     SELECTED_WALLPAPER=$(cat "$HOME/.cache/wal/wal" 2>/dev/null)
-    if [[ -n "''${WAYLAND_DISPLAY:-}" ]] && [ -n "$SELECTED_WALLPAPER" ] && [ -f "$SELECTED_WALLPAPER" ]; then
+    if [ -n "$SELECTED_WALLPAPER" ] && [ -f "$SELECTED_WALLPAPER" ]; then
       pkill swaybg 2>/dev/null || true
       ${pkgs.swaybg}/bin/swaybg -i "$SELECTED_WALLPAPER" -m fill &
       # Reload Hyprland if running (applies colorscheme to decorations)
@@ -503,7 +534,6 @@
   '';
 
   # Wallpaper-only scripts (no colorscheme regeneration)
-  # Wayland: swaybg, X11: feh
   wallpaperScript = pkgs.writeShellScriptBin "wallpaper" ''
     #!/usr/bin/env bash
     if [ -z "$1" ]; then
@@ -516,24 +546,19 @@
       exit 1
     fi
 
-    if [[ -n "$${WAYLAND_DISPLAY:-}" ]]; then
-      pkill swaybg 2>/dev/null || true
-      swaybg -i "$1" -m fill &
-      echo "Wallpaper set (Wayland)"
-    else
-      feh --bg-fill "$1"
-      echo "Wallpaper set (X11)"
-    fi
+    pkill swaybg 2>/dev/null || true
+    ${pkgs.swaybg}/bin/swaybg -i "$1" -m fill &
+    echo "Wallpaper set"
   '';
 
   wallpaperBlackScript = pkgs.writeShellScriptBin "wallpaper-black" ''
     #!/usr/bin/env bash
-    if [[ -n "$${WAYLAND_DISPLAY:-}" ]]; then
-      pkill swaybg 2>/dev/null || true
-      swaybg -i ~/wallpapers/Black.jpg -m fill &
-    else
-      feh --bg-fill ~/wallpapers/Black.jpg
+    BLACK="$HOME/hydrix-config/wallpapers/Black.jpg"
+    if [ ! -f "$BLACK" ]; then
+      BLACK="$HOME/wallpapers/Black.jpg"
     fi
+    pkill swaybg 2>/dev/null || true
+    ${pkgs.swaybg}/bin/swaybg -i "$BLACK" -m fill &
   '';
 
   # Initialize wal cache from configured colorscheme
@@ -597,29 +622,9 @@
         echo "$SCHEME_NAME" > "$SCHEME_MARKER"
 
         ${lib.optionalString (!isVM) ''
-      # Set wallpaper on first login (before user sets their own)
-      ${lib.optionalString (cfg.wallpaper != null) ''
-        WALLPAPER_INIT_MARKER="$HOME/.cache/hydrix/wallpaper-initialized"
-        if [ ! -f "$WALLPAPER_INIT_MARKER" ]; then
-            echo "Setting initial wallpaper: ${cfg.wallpaper}"
-            if [[ -n "''${WAYLAND_DISPLAY:-}" ]]; then
-                pkill swaybg 2>/dev/null || true
-                ${pkgs.swaybg}/bin/swaybg -i "${cfg.wallpaper}" -m fill &
-            else
-                ${pkgs.feh}/bin/feh --bg-fill "${cfg.wallpaper}" 2>/dev/null || true
-            fi
-            mkdir -p "$(dirname "$WALLPAPER_INIT_MARKER")"
-            touch "$WALLPAPER_INIT_MARKER"
-        fi
-
-        # Pre-generate lockscreen cache so lock/lock-instant show pixelated wallpaper
-        if [ ! -f "$HOME/.cache/lockscreen.png" ]; then
-            echo "Generating initial lockscreen cache..."
-            generate-lockscreen "${cfg.wallpaper}" &
-        fi
-      ''}
-
       # Refresh all color-aware apps with the new wal cache
+      # (wallpaper itself is never touched here -- see restore-colorscheme
+      # and the restore-wallpaper systemd unit for the only places that do)
       if command -v refresh-colors >/dev/null 2>&1; then
           echo "Refreshing app colors..."
           refresh-colors 2>/dev/null || true
@@ -1027,7 +1032,6 @@
     esac
   '';
 
-
   # Path to the colorscheme JSON file (user dir first, then framework)
   colorschemeJsonPath = config.hydrix.resolveColorscheme colorscheme;
   colorschemeJsonExists = builtins.pathExists colorschemeJsonPath;
@@ -1137,6 +1141,28 @@ in {
         };
       };
 
+      # One-time wallpaper restore on first graphical login (host only). Reuses
+      # restore-colorscheme so there's a single implementation of "apply the
+      # declared colorscheme's wallpaper" — the ConditionPathExists guard makes
+      # this a permanent no-op after the first successful run, independent of
+      # how often the unit itself gets restarted by home-manager.
+      systemd.user.services.restore-wallpaper = lib.mkIf (!isVM) {
+        Unit = {
+          Description = "One-time wallpaper restore on first login";
+          ConditionPathExists = "!%h/.cache/hydrix/wallpaper-initialized";
+          After = ["graphical-session-pre.target"];
+          PartOf = ["graphical-session.target"];
+        };
+        Service = {
+          Type = "oneshot";
+          ExecStart = "${restoreSchemeScript}/bin/restore-colorscheme";
+          Environment = [
+            "HOME=/home/${username}"
+          ];
+        };
+        Install.WantedBy = ["graphical-session.target"];
+      };
+
       # VM color inheritance is handled entirely by:
       # 1. Build-time: /etc/hydrix-alacritty-colors.toml (full VM colorscheme)
       # 2. Runtime: vm-colorscheme vsock service writes colors-runtime.toml (bg override)
@@ -1147,7 +1173,7 @@ in {
       systemd.user.paths.pywalfox-update = lib.mkIf isVM {
         Unit.Description = "Watch wal colors for pywalfox";
         Path.PathChanged = "%h/.cache/wal/colors.json";
-        Install.WantedBy = [ "default.target" ];
+        Install.WantedBy = ["default.target"];
       };
 
       systemd.user.services.pywalfox-update = lib.mkIf isVM {
@@ -1156,9 +1182,8 @@ in {
           Type = "oneshot";
           ExecStart = "/run/current-system/sw/bin/pywalfox update";
         };
-        Install.WantedBy = [ "pywalfox-update.path" ];
+        Install.WantedBy = ["pywalfox-update.path"];
       };
-
     };
   };
 }

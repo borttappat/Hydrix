@@ -6,7 +6,7 @@
 #
 # Saves ~/.cache/wal/colors.json to hydrix-config/colorschemes/<name>.json.
 # User colorschemes take priority over framework built-ins — use any name
-# to override a built-in (e.g. "nvid") or add a new one.
+# to override the built-in (e.g. "hydrix") or add a new one.
 
 set -euo pipefail
 
@@ -43,6 +43,22 @@ fi
 
 mkdir -p "$SCHEMES_DIR"
 cp ~/.cache/wal/colors.json "$SCHEMES_DIR/${NAME}.json"
+
+# Colocate the wallpaper image (pywal records the last "-i" image path at
+# ~/.cache/wal/wal) so the saved scheme is self-contained and portable,
+# rewriting the copied JSON's "wallpaper" field to the bare colocated filename.
+WAL_IMAGE_PTR="$HOME/.cache/wal/wal"
+if [ -f "$WAL_IMAGE_PTR" ]; then
+    SRC_IMG=$(cat "$WAL_IMAGE_PTR")
+    if [ -n "$SRC_IMG" ] && [ -f "$SRC_IMG" ]; then
+        EXT="${SRC_IMG##*.}"
+        cp "$SRC_IMG" "$SCHEMES_DIR/${NAME}.${EXT}"
+        jq --arg wp "${NAME}.${EXT}" '.wallpaper = $wp' "$SCHEMES_DIR/${NAME}.json" \
+            > "$SCHEMES_DIR/${NAME}.json.tmp" \
+            && mv "$SCHEMES_DIR/${NAME}.json.tmp" "$SCHEMES_DIR/${NAME}.json"
+        echo "Saved wallpaper: $SCHEMES_DIR/${NAME}.${EXT}"
+    fi
+fi
 
 echo "Saved: $SCHEMES_DIR/${NAME}.json"
 echo ""

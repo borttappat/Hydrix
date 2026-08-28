@@ -4,9 +4,14 @@
 # Hydrix base provides: waypipe forwarding, sound, graphical stack
 # This profile adds: packages, Docker, development tools
 #
-{ config, lib, pkgs, ... }:
-let meta = import ./meta.nix; in
 {
+  config,
+  lib,
+  pkgs,
+  ...
+}: let
+  meta = import ./meta.nix;
+in {
   imports = [
     # Core VM packages (editors, shell, utils)
     ../../modules/vm-packages.nix
@@ -25,7 +30,7 @@ let meta = import ./meta.nix; in
   # hydrix.vm.hostname = "my-dev";
 
   # Colorscheme for this VM
-  hydrix.colorscheme = "nvid";
+  hydrix.colorscheme = "hydrix";
 
   # Firefox user-agent: unset (null) keeps the real UA — useful when testing
   # web apps where accurate browser detection matters.
@@ -34,7 +39,10 @@ let meta = import ./meta.nix; in
   # Available: ublock-origin, pywalfox, vimium-ff, detach-tab,
   #            bitwarden, foxyproxy, wappalyzer, singlefile, darkreader, styl-us
   hydrix.graphical.firefox.extensions = [
-    "ublock-origin" "pywalfox" "vimium-ff" "detach-tab"
+    "ublock-origin"
+    "pywalfox"
+    "vimium-ff"
+    "detach-tab"
     "bitwarden"
   ];
 
@@ -44,16 +52,18 @@ let meta = import ./meta.nix; in
   # MicroVM resources (must match CID in host scripts)
   hydrix.microvm = {
     vcpu = 4;
-    mem = 8192;  # 8GB (balloon reclaims idle)
+    mem = 8192; # 8GB (balloon reclaims idle)
     inherit (meta) vsockCid bridge tapId;
     persistence = {
       enable = true;
-      homeSize = 51200;  # 50GB
-      extraVolumes = [{
-        name = "docker";
-        size = 20480;
-        mountPoint = "/var/lib/docker";
-      }];
+      homeSize = 51200; # 50GB
+      extraVolumes = [
+        {
+          name = "docker";
+          size = 20480;
+          mountPoint = "/var/lib/docker";
+        }
+      ];
     };
   };
   hydrix.networking.vmSubnet = meta.subnet;
@@ -72,7 +82,7 @@ let meta = import ./meta.nix; in
     enableOnBoot = false;
   };
 
-  users.users.${config.hydrix.username}.extraGroups = [ "docker" ];
+  users.users.${config.hydrix.username}.extraGroups = ["docker"];
 
   # =========================================================================
   # EXTRA PACKAGES

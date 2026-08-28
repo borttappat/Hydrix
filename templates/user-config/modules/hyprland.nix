@@ -15,21 +15,29 @@
 # Set all compositor preferences, keybindings, and appearance here.
 # Machine-specific overrides go in machines/<serial>.nix via lib.mkAfter on extraConfig.
 #
-{ config, lib, pkgs, ... }:
-let
-  username    = config.hydrix.username;
-  sc          = config.hydrix.graphical.scaling.computed;
-  ui          = config.hydrix.graphical.ui;
-  gaps        = ui.gaps or 10;
-  barType     = config.hydrix.graphical.waybar.barType or "monobar";
-  borderSize  = toString (sc.border or 2);
-  rounding    = toString (sc.cornerRadius or 0);
-  lkRounding  = toString (if (ui.cornerRadius or 0) > 0 then ui.cornerRadius * 2 else 2);
+{
+  config,
+  lib,
+  pkgs,
+  ...
+}: let
+  username = config.hydrix.username;
+  sc = config.hydrix.graphical.scaling.computed;
+  ui = config.hydrix.graphical.ui;
+  gaps = ui.gaps or 10;
+  barType = config.hydrix.graphical.waybar.barType or "monobar";
+  borderSize = toString (sc.border or 2);
+  rounding = toString (sc.cornerRadius or 0);
+  lkRounding = toString (
+    if (ui.cornerRadius or 0) > 0
+    then ui.cornerRadius * 2
+    else 2
+  );
 
-  lk          = config.hydrix.graphical.lockscreen;
+  lk = config.hydrix.graphical.lockscreen;
   idleTimeout = toString (lk.idleTimeout or 300);
-  configDir   = config.hydrix.paths.configDir;
-  kb          = config.hydrix.graphical.keyboard;
+  configDir = config.hydrix.paths.configDir;
+  kb = config.hydrix.graphical.keyboard;
 
   # Restarts waybar (via systemd) on monitor plug/unplug.
   # Waybar picks up the transient reconfiguration state and doesn't recover once
@@ -101,19 +109,19 @@ let
   # Writes ~/.config/hypr/hypridle.conf with the current timeout then starts hypridle.
   # hypridle uses a config file rather than CLI args, so we regenerate it each time.
   startHypridle = pkgs.writeShellScript "start-hypridle" ''
-    _t=$(cat "$HOME/.local/state/lock-timeout" 2>/dev/null || echo "${idleTimeout}")
-    mkdir -p "$HOME/.config/hypr"
-    cat > "$HOME/.config/hypr/hypridle.conf" <<EOF
-general {
-  lock_cmd = ${lockScreen}
-}
+        _t=$(cat "$HOME/.local/state/lock-timeout" 2>/dev/null || echo "${idleTimeout}")
+        mkdir -p "$HOME/.config/hypr"
+        cat > "$HOME/.config/hypr/hypridle.conf" <<EOF
+    general {
+      lock_cmd = ${lockScreen}
+    }
 
-listener {
-  timeout = $_t
-  on-timeout = ${pkgs.systemd}/bin/loginctl lock-session
-}
-EOF
-    exec ${pkgs.hypridle}/bin/hypridle
+    listener {
+      timeout = $_t
+      on-timeout = ${pkgs.systemd}/bin/loginctl lock-session
+    }
+    EOF
+        exec ${pkgs.hypridle}/bin/hypridle
   '';
 
   # lock-timeout [seconds] -- read or adjust the idle lock timeout at runtime.
@@ -144,7 +152,6 @@ EOF
     exec-once = systemctl --user set-environment WAYLAND_DISPLAY=$WAYLAND_DISPLAY
     exec-once = systemctl --user start hyprland-session.target
     exec-once = sh -c 'wal -Rnq; hypr-apply-colors'
-    exec-once = sh -c 'WALL=$(cat "$HOME/.cache/wal/wal" 2>/dev/null); [ -n "$WALL" ] && swaybg -i "$WALL" -m fill'
     exec-once = ${pkgs.dunst}/bin/dunst
     exec-once = sh -c 'sleep 2 && hypr-apply-colors'
     exec-once = ${startHypridle}
@@ -155,7 +162,11 @@ EOF
       # top=0,right=gaps,bottom=?,left=gaps — comma-separated (Hyprland CSS-like format).
       # Top gap comes from the bar's exclusive zone + pill margin, not gaps_out.
       # Bottom gap: dualbar bottom bar provides it via exclusive zone; monobar needs gaps_out.
-      gaps_out = 0, ${toString gaps}, ${if barType == "monobar" then toString gaps else "0"}, ${toString gaps}
+      gaps_out = 0, ${toString gaps}, ${
+      if barType == "monobar"
+      then toString gaps
+      else "0"
+    }, ${toString gaps}
       border_size  = ${borderSize}
       col.active_border   = $activeBorder
       col.inactive_border = $inactiveBorder
@@ -196,13 +207,15 @@ EOF
     # takes precedence when set in machines/<serial>.nix; otherwise layout/variant
     # from hydrix.graphical.keyboard (populated from @XKB_LAYOUT@ by the installer).
     input {
-      ${if kb.xkbFile != null
-        then "kb_file     = ~/.config/hypr/keymap.xkb"
-        else ''
-          kb_layout   = ${kb.layout}
-          ${lib.optionalString (kb.variant != "") "kb_variant  = ${kb.variant}"}
-          ${lib.optionalString (kb.xkbOptions != "") "kb_options  = ${kb.xkbOptions}"}
-        ''}
+      ${
+      if kb.xkbFile != null
+      then "kb_file     = ~/.config/hypr/keymap.xkb"
+      else ''
+        kb_layout   = ${kb.layout}
+        ${lib.optionalString (kb.variant != "") "kb_variant  = ${kb.variant}"}
+        ${lib.optionalString (kb.xkbOptions != "") "kb_options  = ${kb.xkbOptions}"}
+      ''
+    }
       follow_mouse   = 1
       sensitivity    = -0.2
       natural_scroll = false
@@ -471,99 +484,100 @@ EOF
       valign = center
     }
   '';
-in lib.mkIf config.hydrix.hyprland.enable {
-  environment.systemPackages = [ lockTimeout ];
-  security.pam.services.hyprlock = {};
+in
+  lib.mkIf config.hydrix.hyprland.enable {
+    environment.systemPackages = [lockTimeout];
+    security.pam.services.hyprlock = {};
 
-  # Qt apps default to xcb unless told otherwise, which fails outright when
-  # no XWayland client has started an X server yet. Prefer the native
-  # wayland platform plugin, falling back to xcb only if unavailable.
-  environment.variables.QT_QPA_PLATFORM = "wayland;xcb";
+    # Qt apps default to xcb unless told otherwise, which fails outright when
+    # no XWayland client has started an X server yet. Prefer the native
+    # wayland platform plugin, falling back to xcb only if unavailable.
+    environment.variables.QT_QPA_PLATFORM = "wayland;xcb";
 
-  # Allow wheel users to suspend from Hyprland keybinds (exec runs outside logind session context).
-  # suspend-multiple-sessions covers the common case where VMs are running as separate sessions.
-  security.polkit.extraConfig = ''
-    polkit.addRule(function(action, subject) {
-      if ((action.id == "org.freedesktop.login1.suspend" ||
-           action.id == "org.freedesktop.login1.suspend-multiple-sessions") &&
-          subject.isInGroup("wheel")) {
-        return polkit.Result.YES;
-      }
-    });
-  '';
+    # Allow wheel users to suspend from Hyprland keybinds (exec runs outside logind session context).
+    # suspend-multiple-sessions covers the common case where VMs are running as separate sessions.
+    security.polkit.extraConfig = ''
+      polkit.addRule(function(action, subject) {
+        if ((action.id == "org.freedesktop.login1.suspend" ||
+             action.id == "org.freedesktop.login1.suspend-multiple-sessions") &&
+            subject.isInGroup("wheel")) {
+          return polkit.Result.YES;
+        }
+      });
+    '';
 
-  # Send Lock signal to all sessions before the system goes to sleep.
-  # hypridle's lock_cmd fires in response and starts hyprlock.
-  # The 2s pause gives hyprlock time to grab input before suspend completes.
-  systemd.services."lock-before-sleep" = {
-    description = "Lock screen before sleep";
-    before = [ "sleep.target" "suspend.target" "hibernate.target" "hybrid-sleep.target" "suspend-then-hibernate.target" ];
-    wantedBy = [ "sleep.target" "suspend.target" "hibernate.target" "hybrid-sleep.target" "suspend-then-hibernate.target" ];
-    serviceConfig = {
-      Type = "oneshot";
-      ExecStart = pkgs.writeShellScript "lock-before-sleep" ''
-        ${pkgs.systemd}/bin/loginctl lock-sessions
-        sleep 2
+    # Send Lock signal to all sessions before the system goes to sleep.
+    # hypridle's lock_cmd fires in response and starts hyprlock.
+    # The 2s pause gives hyprlock time to grab input before suspend completes.
+    systemd.services."lock-before-sleep" = {
+      description = "Lock screen before sleep";
+      before = ["sleep.target" "suspend.target" "hibernate.target" "hybrid-sleep.target" "suspend-then-hibernate.target"];
+      wantedBy = ["sleep.target" "suspend.target" "hibernate.target" "hybrid-sleep.target" "suspend-then-hibernate.target"];
+      serviceConfig = {
+        Type = "oneshot";
+        ExecStart = pkgs.writeShellScript "lock-before-sleep" ''
+          ${pkgs.systemd}/bin/loginctl lock-sessions
+          sleep 2
+        '';
+        TimeoutSec = 15;
+      };
+    };
+
+    home-manager.users.${username} = {lib, ...}: {
+      home.activation.hyprlandKeymap = lib.hm.dag.entryAfter ["writeBoundary"] ''
+        _dir="$HOME/.config/hypr"
+        mkdir -p "$_dir"
+        ${lib.optionalString (kb.xkbFile != null) ''
+          rm -f "$_dir/keymap.xkb"
+          cat ${kb.xkbFile} > "$_dir/keymap.xkb"
+        ''}
       '';
-      TimeoutSec = 15;
-    };
-  };
 
-  home-manager.users.${username} = { lib, ... }: {
-    home.activation.hyprlandKeymap = lib.hm.dag.entryAfter ["writeBoundary"] ''
-      _dir="$HOME/.config/hypr"
-      mkdir -p "$_dir"
-      ${lib.optionalString (kb.xkbFile != null) ''
-        rm -f "$_dir/keymap.xkb"
-        cat ${kb.xkbFile} > "$_dir/keymap.xkb"
-      ''}
-    '';
+      home.activation.hyprlandConfig = lib.hm.dag.entryAfter ["hyprlandKeymap"] ''
+        _dir="$HOME/.config/hypr"
+        # Remove stale symlink if HM previously managed this file
+        [ -L "$_dir/hyprland.conf" ] && rm -f "$_dir/hyprland.conf"
+        # Skip write when content unchanged — nix store path is a content hash.
+        # Unconditional writes trigger an inotify-based Hyprland reload on every rebuild.
+        _stamp="$_dir/.hyprland-conf-stamp"
+        if [ "$(cat "$_stamp" 2>/dev/null)" != "${hyprlandConf}" ]; then
+          cat ${hyprlandConf} > "$_dir/hyprland.conf"
+          echo "${hyprlandConf}" > "$_stamp"
+        fi
+      '';
 
-    home.activation.hyprlandConfig = lib.hm.dag.entryAfter ["hyprlandKeymap"] ''
-      _dir="$HOME/.config/hypr"
-      # Remove stale symlink if HM previously managed this file
-      [ -L "$_dir/hyprland.conf" ] && rm -f "$_dir/hyprland.conf"
-      # Skip write when content unchanged — nix store path is a content hash.
-      # Unconditional writes trigger an inotify-based Hyprland reload on every rebuild.
-      _stamp="$_dir/.hyprland-conf-stamp"
-      if [ "$(cat "$_stamp" 2>/dev/null)" != "${hyprlandConf}" ]; then
-        cat ${hyprlandConf} > "$_dir/hyprland.conf"
-        echo "${hyprlandConf}" > "$_stamp"
-      fi
-    '';
+      home.activation.hyprlandLockConfig = lib.hm.dag.entryAfter ["writeBoundary"] ''
+        _dir="$HOME/.config/hypr"
+        mkdir -p "$_dir"
+        [ -L "$_dir/hyprlock.conf" ] && rm -f "$_dir/hyprlock.conf"
+        cat ${hyprlock_conf} > "$_dir/hyprlock.conf"
+      '';
 
-    home.activation.hyprlandLockConfig = lib.hm.dag.entryAfter ["writeBoundary"] ''
-      _dir="$HOME/.config/hypr"
-      mkdir -p "$_dir"
-      [ -L "$_dir/hyprlock.conf" ] && rm -f "$_dir/hyprlock.conf"
-      cat ${hyprlock_conf} > "$_dir/hyprlock.conf"
-    '';
+      # Target activated by Hyprland exec-once; waybar and other services WantedBy this.
+      systemd.user.targets.hyprland-session = {
+        Unit = {
+          Description = "Hyprland compositor session";
+          BindsTo = ["graphical-session.target"];
+          After = ["graphical-session-pre.target"];
+          Wants = ["graphical-session-pre.target"];
+        };
+      };
 
-    # Target activated by Hyprland exec-once; waybar and other services WantedBy this.
-    systemd.user.targets.hyprland-session = {
-      Unit = {
-        Description = "Hyprland compositor session";
-        BindsTo     = [ "graphical-session.target" ];
-        After       = [ "graphical-session-pre.target" ];
-        Wants       = [ "graphical-session-pre.target" ];
+      # Systemd user service — starts automatically with hyprland-session.target,
+      # restartable immediately after rebuild without a Hyprland restart.
+      systemd.user.services.waybar-monitor-watch = {
+        Unit = {
+          Description = "Restart waybar on Hyprland monitor/config events";
+          After = ["hyprland-session.target"];
+          PartOf = ["hyprland-session.target"];
+        };
+        Service = {
+          Type = "simple";
+          ExecStart = "${waybarMonitorWatch}";
+          Restart = "on-failure";
+          RestartSec = 2;
+        };
+        Install.WantedBy = ["hyprland-session.target"];
       };
     };
-
-    # Systemd user service — starts automatically with hyprland-session.target,
-    # restartable immediately after rebuild without a Hyprland restart.
-    systemd.user.services.waybar-monitor-watch = {
-      Unit = {
-        Description = "Restart waybar on Hyprland monitor/config events";
-        After = [ "hyprland-session.target" ];
-        PartOf = [ "hyprland-session.target" ];
-      };
-      Service = {
-        Type = "simple";
-        ExecStart = "${waybarMonitorWatch}";
-        Restart = "on-failure";
-        RestartSec = 2;
-      };
-      Install.WantedBy = [ "hyprland-session.target" ];
-    };
-  };
-}
+  }

@@ -333,7 +333,7 @@ profiles/browsing/
 { config, lib, pkgs, ... }: let meta = import ./meta.nix; in {
   imports = [ ./packages ];
   hydrix.networking.vmSubnet = meta.subnet;  # drives static IP derivation
-  hydrix.colorscheme = "nord";
+  hydrix.colorscheme = "hydrix";
   environment.systemPackages = with pkgs; [ gobuster ffuf ];
 }
 ```

@@ -4,9 +4,14 @@
 # Hydrix base provides: waypipe forwarding, sound (required for calls), graphical stack
 # This profile adds: packages (Signal, Firefox)
 #
-{ config, lib, pkgs, ... }:
-let meta = import ./meta.nix; in
 {
+  config,
+  lib,
+  pkgs,
+  ...
+}: let
+  meta = import ./meta.nix;
+in {
   imports = [
     # Core VM packages (editors, shell, utils)
     ../../modules/vm-packages.nix
@@ -25,7 +30,7 @@ let meta = import ./meta.nix; in
   # hydrix.vm.hostname = "my-comms";
 
   # Colorscheme for this VM
-  hydrix.colorscheme = "nvid";
+  hydrix.colorscheme = "hydrix";
 
   # Firefox user-agent: avoid standing out on messaging platforms.
   # Presets: "edge-windows" | "chrome-windows" | "chrome-mac" | "safari-mac" | "firefox-windows"
@@ -34,8 +39,12 @@ let meta = import ./meta.nix; in
   # Available: ublock-origin, pywalfox, vimium-ff, detach-tab,
   #            bitwarden, foxyproxy, wappalyzer, singlefile, darkreader, styl-us
   hydrix.graphical.firefox.extensions = [
-    "ublock-origin" "pywalfox" "vimium-ff" "detach-tab"
-    "bitwarden" "darkreader"
+    "ublock-origin"
+    "pywalfox"
+    "vimium-ff"
+    "detach-tab"
+    "bitwarden"
+    "darkreader"
   ];
 
   # Inherit host colors for consistent look
@@ -44,11 +53,11 @@ let meta = import ./meta.nix; in
   # MicroVM resources
   hydrix.microvm = {
     vcpu = 2;
-    mem = 2304;  # 2.25GB (avoid QEMU 2GB-exact hang bug)
+    mem = 2304; # 2.25GB (avoid QEMU 2GB-exact hang bug)
     inherit (meta) vsockCid bridge tapId;
     persistence = {
       enable = true;
-      homeSize = 10240;  # 10GB - accounts, chat history, credentials
+      homeSize = 10240; # 10GB - accounts, chat history, credentials
     };
     # Set persistence.enable = false for ephemeral/privacy-first comms
   };

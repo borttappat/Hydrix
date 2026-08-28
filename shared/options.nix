@@ -114,9 +114,9 @@ in {
 
     colorscheme = lib.mkOption {
       type = lib.types.str;
-      default = "nvid";
+      default = "hydrix";
       description = "Colorscheme name (from colorschemes/ directory)";
-      example = "nvid";
+      example = "hydrix";
     };
 
     userColorschemesDir = lib.mkOption {
@@ -171,7 +171,6 @@ in {
           description = "Enable Tailscale VPN";
         };
       };
-
     };
 
     # =========================================================================
@@ -216,20 +215,20 @@ in {
       vsockPorts = lib.mkOption {
         type = lib.types.attrsOf lib.types.int;
         default = {
-          metrics       = 14501;
-          staging       = 14502;
-          colorscheme   = 14503;
-          switch        = 14504;
-          pulse         = 14505;
+          metrics = 14501;
+          staging = 14502;
+          colorscheme = 14503;
+          switch = 14504;
+          pulse = 14505;
           waypipeLaunch = 14508;
-          displayMode   = 14509;
-          builderBuild  = 14510;
+          displayMode = 14509;
+          builderBuild = 14510;
           builderStatus = 14511;
-          gitsyncGit    = 14512;
+          gitsyncGit = 14512;
           gitsyncStatus = 14513;
-          vaultAgent    = 14514;
-          exitNodes     = 14515;
-          lanControl    = 14516;
+          vaultAgent = 14514;
+          exitNodes = 14515;
+          lanControl = 14516;
         };
         description = "vsock port assignments for Hydrix services. Override to avoid collisions with other software.";
       };
@@ -277,10 +276,12 @@ in {
             };
           };
         });
-        default = lib.mapAttrsToList (name: p: {
-          inherit name;
-          inherit (p) subnet routerTap;
-        }) config.hydrix.microvm.defaultProfiles;
+        default =
+          lib.mapAttrsToList (name: p: {
+            inherit name;
+            inherit (p) subnet routerTap;
+          })
+          config.hydrix.microvm.defaultProfiles;
         description = ''
           All discovered profile networks, injected into the router VM at build time.
           Each entry configures an IP, DHCP range, and firewall subnet on the router.
@@ -351,10 +352,22 @@ in {
           options = {
             vmName = lib.mkOption {type = lib.types.str;};
             cid = lib.mkOption {type = lib.types.int;};
-            bridge = lib.mkOption {type = lib.types.nullOr lib.types.str; default = null;};
-            subnet = lib.mkOption {type = lib.types.nullOr lib.types.str; default = null;};
-            workspace = lib.mkOption {type = lib.types.nullOr lib.types.int; default = null;};
-            label = lib.mkOption {type = lib.types.str; default = "";};
+            bridge = lib.mkOption {
+              type = lib.types.nullOr lib.types.str;
+              default = null;
+            };
+            subnet = lib.mkOption {
+              type = lib.types.nullOr lib.types.str;
+              default = null;
+            };
+            workspace = lib.mkOption {
+              type = lib.types.nullOr lib.types.int;
+              default = null;
+            };
+            label = lib.mkOption {
+              type = lib.types.str;
+              default = "";
+            };
             hasDisplay = lib.mkOption {
               type = lib.types.bool;
               default = false;
@@ -405,8 +418,11 @@ in {
             keys = lib.mkOption {
               type = lib.types.attrsOf (lib.types.submodule {
                 options = {
-                  outFile = lib.mkOption { type = lib.types.str; };
-                  mode    = lib.mkOption { type = lib.types.str; default = "0600"; };
+                  outFile = lib.mkOption {type = lib.types.str;};
+                  mode = lib.mkOption {
+                    type = lib.types.str;
+                    default = "0600";
+                  };
                 };
               });
               default = {};

@@ -391,12 +391,6 @@ in {
       description = "Graphical colorscheme (defaults to hydrix.colorscheme)";
     };
 
-    wallpaper = lib.mkOption {
-      type = lib.types.nullOr lib.types.path;
-      default = null;
-      description = "Wallpaper image path";
-    };
-
     polarity = lib.mkOption {
       type = lib.types.enum ["dark" "light"];
       default = "dark";
@@ -975,7 +969,6 @@ in {
         description = "Apply blur effect";
       };
     };
-
   };
 
   # =========================================================================

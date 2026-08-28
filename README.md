@@ -357,7 +357,7 @@ randomwalrgb                 # random wallpaper from configured directory
 Declarative colorschemes in `profiles/<name>/default.nix`:
 
 ```nix
-hydrix.colorscheme = "nord";   # nord, hydrix, ... add more with `save-colorscheme xyz` 
+hydrix.colorscheme = "hydrix";   # add more with `save-colorscheme xyz`
 ```
 
 User-defined colorschemes in `hydrix-config/colorschemes/` (pywal JSON format) take priority over framework ones with the same name.

@@ -4,9 +4,14 @@
 # Hydrix base provides: waypipe forwarding, sound, graphical stack
 # This profile adds: packages, colorscheme, styling preferences
 #
-{ config, lib, pkgs, ... }:
-let meta = import ./meta.nix; in
 {
+  config,
+  lib,
+  pkgs,
+  ...
+}: let
+  meta = import ./meta.nix;
+in {
   imports = [
     # Core VM packages (editors, shell, utils)
     ../../modules/vm-packages.nix
@@ -25,7 +30,7 @@ let meta = import ./meta.nix; in
   # hydrix.vm.hostname = "my-browsing";
 
   # Colorscheme for this VM (see colorschemes/ in Hydrix repo)
-  hydrix.colorscheme = "punk";
+  hydrix.colorscheme = "hydrix";
 
   # Firefox user-agent: blend in with the dominant browser/OS fingerprint.
   # Presets: "edge-windows" | "chrome-windows" | "chrome-mac" | "safari-mac" | "firefox-windows"
@@ -35,8 +40,13 @@ let meta = import ./meta.nix; in
   # Available: ublock-origin, pywalfox, vimium-ff, detach-tab,
   #            bitwarden, foxyproxy, wappalyzer, singlefile, darkreader, styl-us
   hydrix.graphical.firefox.extensions = [
-    "ublock-origin" "pywalfox" "vimium-ff" "detach-tab"
-    "bitwarden" "darkreader" "styl-us"
+    "ublock-origin"
+    "pywalfox"
+    "vimium-ff"
+    "detach-tab"
+    "bitwarden"
+    "darkreader"
+    "styl-us"
   ];
 
   # MicroVM resources (must match CID in host scripts)
@@ -45,11 +55,11 @@ let meta = import ./meta.nix; in
   # microvm.virtiofsd.threadPoolSize = lib.mkForce 1;
   hydrix.microvm = {
     vcpu = 3;
-    mem = 3072;  # 3GB
+    mem = 3072; # 3GB
     inherit (meta) vsockCid bridge tapId;
     persistence = {
       enable = true;
-      homeSize = 10240;  # 10GB
+      homeSize = 10240; # 10GB
     };
   };
   hydrix.networking.vmSubnet = meta.subnet;

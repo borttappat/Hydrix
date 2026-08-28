@@ -5,16 +5,18 @@
 # Libvirt VMs can layer user profiles on top for graphical settings.
 #
 # User profiles (in ~/hydrix-config/profiles/browsing/) can add:
-# - hydrix.colorscheme = "nord";
+# - hydrix.colorscheme = "hydrix";
 # - hydrix.graphical.enable = true; (for standalone mode)
 # - Additional packages
 #
-{ config, lib, pkgs, ... }:
-
-let
-  meta = config.hydrix.microvm.defaultProfiles.browsing;
-in
 {
+  config,
+  lib,
+  pkgs,
+  ...
+}: let
+  meta = config.hydrix.microvm.defaultProfiles.browsing;
+in {
   imports = [
     ./packages.nix
   ];

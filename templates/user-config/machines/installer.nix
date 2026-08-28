@@ -69,7 +69,6 @@
     # IDENTITY
     # ─────────────────────────────────────────────────────────────────────
     # username, hostname, colorscheme live in modules/user.nix (shared)
-    graphical.wallpaper = "${hydrix}/theming/wallpapers/Hydrix.png";
 
     # ─────────────────────────────────────────────────────────────────────
     # ENVIRONMENT DEFAULTS

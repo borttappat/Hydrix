@@ -6,9 +6,14 @@
 #
 # EPHEMERAL by design - all data lost on restart for maximum privacy.
 #
-{ config, lib, pkgs, ... }:
-let meta = import ./meta.nix; in
 {
+  config,
+  lib,
+  pkgs,
+  ...
+}: let
+  meta = import ./meta.nix;
+in {
   imports = [
     # Core VM packages (editors, shell, utils)
     ../../modules/vm-packages.nix
@@ -29,7 +34,7 @@ let meta = import ./meta.nix; in
   # hydrix.vm.hostname = "my-lurking";
 
   # Colorscheme for this VM
-  hydrix.colorscheme = "punk";
+  hydrix.colorscheme = "hydrix";
 
   # Firefox user-agent: "firefox-windows" matches the Tor Browser UA, maximising
   # anonymity set when browsing over Tor (all Tor Browser users look identical).
@@ -39,7 +44,10 @@ let meta = import ./meta.nix; in
   # Available: ublock-origin, pywalfox, vimium-ff, detach-tab,
   #            bitwarden, foxyproxy, wappalyzer, singlefile, darkreader, styl-us
   hydrix.graphical.firefox.extensions = [
-    "ublock-origin" "pywalfox" "vimium-ff" "detach-tab"
+    "ublock-origin"
+    "pywalfox"
+    "vimium-ff"
+    "detach-tab"
   ];
 
   # Inherit host colors for consistent look
@@ -48,7 +56,7 @@ let meta = import ./meta.nix; in
   # MicroVM resources (ephemeral - no persistence)
   hydrix.microvm = {
     vcpu = 2;
-    mem = 2304;  # 2.25GB (avoid QEMU 2GB-exact hang bug)
+    mem = 2304; # 2.25GB (avoid QEMU 2GB-exact hang bug)
     # Audio disabled for maximum privacy - microphone access leaks identity over Tor.
     # To enable (e.g. for voice calls): audio.enable = true;
     audio.enable = false;
@@ -78,7 +86,7 @@ let meta = import ./meta.nix; in
 
     # Level controls how router-side traffic shaping should behave
     # (Router VM must also be configured for this to take effect)
-    level = "moderate";  # minimal | moderate | paranoid
+    level = "moderate"; # minimal | moderate | paranoid
   };
 
   # =========================================================================

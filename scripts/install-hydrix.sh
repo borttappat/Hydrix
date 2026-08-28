@@ -2059,9 +2059,9 @@ copy_template_colorschemes() {
 }
 
 copy_wallpapers() {
-    local home_dir="$1"
+    local config_dir="$1"
     log "Setting up wallpapers..."
-    mkdir -p "$home_dir/wallpapers"
+    mkdir -p "$config_dir/wallpapers"
     # Copy wallpapers from Hydrix repo (bundled in nix store or local clone)
     local hydrix_wp="$SCRIPT_DIR/../theming/wallpapers"
     if [[ -d "$hydrix_wp" ]]; then
@@ -2071,13 +2071,13 @@ copy_wallpapers() {
         wps=("$hydrix_wp"/*.png "$hydrix_wp"/*.jpg "$hydrix_wp"/*.jpeg)
         shopt -u nullglob
         if [[ ${#wps[@]} -gt 0 ]]; then
-            cp "${wps[@]}" "$home_dir/wallpapers/"
+            cp "${wps[@]}" "$config_dir/wallpapers/"
             log "  Copied ${#wps[@]} wallpaper(s) from Hydrix"
         else
-            log "  Created $home_dir/wallpapers/ (no wallpapers found in $hydrix_wp)"
+            log "  Created $config_dir/wallpapers/ (no wallpapers found in $hydrix_wp)"
         fi
     else
-        log "  Created $home_dir/wallpapers/ (add wallpapers here)"
+        log "  Created $config_dir/wallpapers/ (add wallpapers here)"
     fi
 }
 
@@ -3394,8 +3394,8 @@ EOF
             git -c user.name="Hydrix Installer" -c user.email="installer@hydrix" commit --amend --no-edit)
     fi
 
-    # Copy wallpapers to user home (disk is now mounted)
-    copy_wallpapers "/mnt/home/${CONFIG[username]}"
+    # Copy wallpapers into hydrix-config (disk is now mounted)
+    copy_wallpapers "$config_dir"
 
     # Fix ownership
     local uid gid
@@ -3690,7 +3690,7 @@ check_resume() {
             git -c user.name="Hydrix Installer" -c user.email="installer@hydrix" commit --amend --no-edit)
     fi
 
-    copy_wallpapers "/mnt/home/${CONFIG[username]}"
+    copy_wallpapers "$config_dir"
     local uid gid
     uid=$(nixos-enter -c "id -u ${CONFIG[username]}" 2>/dev/null || echo "1000")
     gid=$(nixos-enter -c "id -g ${CONFIG[username]}" 2>/dev/null || echo "100")

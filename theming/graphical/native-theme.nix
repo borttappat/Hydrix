@@ -7,9 +7,8 @@
 # both this file and Stylix.
 #
 # Usage in profiles:
-#   hydrix.graphical.colorscheme = "hydrix";  # Uses colorschemes/base16/hydrix.yaml
-#   # OR
-#   hydrix.graphical.colorscheme = "nvid";    # Auto-converts colorschemes/nvid.json if no yaml exists
+#   hydrix.graphical.colorscheme = "hydrix";  # Auto-converts colorschemes/hydrix.json
+#   # Add more with `save-colorscheme <name>`, then reference by that name
 {
   config,
   lib,

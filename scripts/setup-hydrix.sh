@@ -1128,25 +1128,30 @@ copy_template_configs() {
 create_colorschemes_dir() {
     log "Creating colorschemes directory..."
     mkdir -p "$CONFIG_DIR/colorschemes"
+    # Intentionally left empty (not template-copied like install-hydrix.sh's
+    # copy_template_colorschemes()): this script reprovisions an already-live
+    # system, and resolveColorscheme's framework fallback (theming/colorschemes/)
+    # makes an empty user dir safe, whereas force-copying image files here risks
+    # clobbering ones the user has already customized.
     log "  Created $CONFIG_DIR/colorschemes/ (add custom .json colorschemes here)"
 }
 
 copy_wallpapers() {
     log "Setting up wallpapers..."
-    local home_dir="$HOME"
-    mkdir -p "$home_dir/wallpapers"
+    local config_dir="$CONFIG_DIR"
+    mkdir -p "$config_dir/wallpapers"
     # Copy wallpapers from Hydrix repo (local clone or framework)
     local hydrix_wp=""
     if [[ -d "$(dirname "$0")/../theming/wallpapers" ]]; then
         hydrix_wp="$(cd "$(dirname "$0")/.." && pwd)/theming/wallpapers"
     fi
     if [[ -n "$hydrix_wp" ]] && ls "$hydrix_wp"/*.{png,jpg} &>/dev/null; then
-        cp "$hydrix_wp"/*.png "$hydrix_wp"/*.jpg "$home_dir/wallpapers/" 2>/dev/null || true
+        cp "$hydrix_wp"/*.png "$hydrix_wp"/*.jpg "$config_dir/wallpapers/" 2>/dev/null || true
         local count
-        count=$(ls "$home_dir/wallpapers/" 2>/dev/null | wc -l)
+        count=$(ls "$config_dir/wallpapers/" 2>/dev/null | wc -l)
         log "  Copied $count wallpaper(s) from Hydrix"
     else
-        log "  Created $home_dir/wallpapers/ (add wallpapers here)"
+        log "  Created $config_dir/wallpapers/ (add wallpapers here)"
     fi
 }
 
@@ -1401,7 +1406,7 @@ prompt_wifi() {
 
 prompt_colorscheme() {
     echo ""
-    log "Available colorschemes: hydrix, nord"
+    log "Available colorschemes: hydrix (add more with save-colorscheme)"
     read -p "Colorscheme [hydrix]: " cs
     CONFIG[colorscheme]="${cs:-hydrix}"
 }

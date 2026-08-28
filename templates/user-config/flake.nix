@@ -85,7 +85,7 @@
     # USER COLORSCHEMES
     # =========================================================================
     # Custom colorschemes in ./colorschemes/ (pywal JSON format)
-    # These extend the framework's built-in colorschemes (nord, nvid, punk, etc.)
+    # These extend the framework's built-in "hydrix" colorscheme.
     # Your custom schemes take priority over framework ones with the same name.
     # Use them by name in profiles: hydrix.colorscheme = "my-custom-scheme";
     userColorschemesDir =

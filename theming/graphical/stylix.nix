@@ -10,9 +10,8 @@
 # - VM-type based colors (pentest=red, comms=blue, browsing=green, dev=purple)
 #
 # Usage in profiles:
-#   hydrix.graphical.colorscheme = "hydrix";  # Uses colorschemes/base16/hydrix.yaml
-#   # OR
-#   hydrix.graphical.colorscheme = "nvid";    # Auto-converts colorschemes/nvid.json if no yaml exists
+#   hydrix.graphical.colorscheme = "hydrix";  # Auto-converts colorschemes/hydrix.json
+#   # Add more with `save-colorscheme <name>`, then reference by that name
 {
   config,
   lib,
@@ -53,6 +52,7 @@
     else vmColorscheme;
 
   vmType = config.hydrix.vmType;
+  isVM = vmType != null && vmType != "host";
 
   # Check for pre-converted base16 YAML
   base16YamlPath = ../colorschemes/base16/${colorscheme}.yaml;
@@ -89,10 +89,27 @@ in {
     stylix.polarity = config.hydrix.graphical.polarity;
 
     # Wallpaper (required by Stylix)
-    # If no wallpaper specified, create a simple solid color placeholder
-    stylix.image =
-      if config.hydrix.graphical.wallpaper != null
-      then config.hydrix.graphical.wallpaper
+    # Derived from the resolved colorscheme JSON's "wallpaper" field, a bare
+    # filename colocated in the same directory as the JSON itself. Every step
+    # is existence-checked and falls through to a solid color placeholder.
+    # VMs never get a real wallpaper here: waypipe forwards individual app
+    # windows, not a full desktop, so there's no visual benefit, only closure cost.
+    stylix.image = let
+      wallpaperField =
+        if hasPywalJson
+        then (builtins.fromJSON (builtins.readFile pywalJsonPath)).wallpaper or null
+        else null;
+      wallpaperCandidate =
+        if wallpaperField != null && wallpaperField != ""
+        then builtins.dirOf pywalJsonPath + "/${wallpaperField}"
+        else null;
+      wallpaperFromScheme =
+        if !isVM && wallpaperCandidate != null && builtins.pathExists wallpaperCandidate
+        then wallpaperCandidate
+        else null;
+    in
+      if wallpaperFromScheme != null
+      then wallpaperFromScheme
       else
         pkgs.runCommand "wallpaper.png" {buildInputs = [pkgs.imagemagick];} ''
           convert -size 1920x1080 xc:#${resolvedScheme.base00 or "0B0E1B"} $out
@@ -145,7 +162,6 @@ in {
         alacritty.enable = lib.mkDefault config.hydrix.graphical.stylix.exclusive;
         bat.enable = lib.mkDefault true;
         cava.enable = lib.mkDefault true;
-        feh.enable = lib.mkDefault true;
         firefox = {
           enable = lib.mkDefault true;
           profileNames = lib.mkDefault ["default"];

@@ -227,7 +227,7 @@ in {
 
       # 2. Pre-populate wal cache on first boot if empty
       systemd.user.services.wal-cache-init = {
-        description = "Initialize wal cache from declared wallpaper/colorscheme";
+        description = "Initialize wal cache from declared colorscheme";
         wantedBy = ["default.target"];
         after = ["wal-cache-ensure.service"];
         before = ["wal-cache-notify.path"];
@@ -237,7 +237,6 @@ in {
         };
         path = [pkgs.pywal];
         script = let
-          wallpaper = config.hydrix.graphical.wallpaper;
           colorscheme = config.hydrix.colorscheme;
           configDir = config.hydrix.paths.configDir;
         in ''
@@ -246,26 +245,17 @@ in {
             echo "wal cache already populated, skipping"
             exit 0
           fi
-          ${
-            if wallpaper != null
-            then ''
-              echo "Generating wal cache from wallpaper: ${wallpaper}"
-              wal -q -i "${wallpaper}"
-            ''
-            else ''
-              echo "Generating wal cache from colorscheme: ${colorscheme}"
-              SCHEME=""
-              if [ -f "${configDir}/colorschemes/${colorscheme}.json" ]; then
-                SCHEME="${configDir}/colorschemes/${colorscheme}.json"
-              fi
-              if [ -n "$SCHEME" ]; then
-                wal -q --theme "$SCHEME"
-              else
-                echo "Colorscheme file not found: ${colorscheme}"
-                exit 1
-              fi
-            ''
-          }
+          echo "Generating wal cache from colorscheme: ${colorscheme}"
+          SCHEME=""
+          if [ -f "${configDir}/colorschemes/${colorscheme}.json" ]; then
+            SCHEME="${configDir}/colorschemes/${colorscheme}.json"
+          fi
+          if [ -n "$SCHEME" ]; then
+            wal -q --theme "$SCHEME"
+          else
+            echo "Colorscheme file not found: ${colorscheme}"
+            exit 1
+          fi
         '';
       };
 

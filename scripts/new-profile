@@ -107,7 +107,7 @@ SUGGESTED_TAP="mv-${PROFILE_NAME:0:12}"
 SUGGESTED_ROUTER_TAP="mv-router-${first_seg:0:5}"   # mv-router- = 10, + ≤5 = ≤15
 SUGGESTED_LABEL="${PROFILE_NAME//-/ }"
 SUGGESTED_LABEL="${SUGGESTED_LABEL^^}"
-SUGGESTED_COLORSCHEME="punk"
+SUGGESTED_COLORSCHEME="hydrix"
 
 # ---------------------------------------------------------------------------
 # Prompt for confirmation / override (Y/n style)

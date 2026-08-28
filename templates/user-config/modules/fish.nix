@@ -25,9 +25,12 @@ in {
     # vi key bindings on (framework default)
     hydrix.graphical.fish.viKeyBindings = lib.mkDefault true;
 
-    home-manager.users.${username} = {lib, pkgs, ...} @ hmArgs: {
+    home-manager.users.${username} = {
+      lib,
+      pkgs,
+      ...
+    } @ hmArgs: {
       programs.fish = {
-
         interactiveShellInit = ''
           # Fish syntax colors
           set -g fish_color_autosuggestion 555 brblack
@@ -94,86 +97,90 @@ in {
         shellAbbrs =
           {
             # Nix
-            nsp  = "nix-shell --run fish -p";
-            nfu  = "nix flake update --flake ${config.hydrix.paths.configDir}";
+            nsp = "nix-shell --run fish -p";
+            nfu = "nix flake update --flake ${config.hydrix.paths.configDir}";
             nfuh = "nix flake update --flake ${config.hydrix.paths.configDir} hydrix";
 
             # System
-            reboot   = "systemctl reboot";
+            reboot = "systemctl reboot";
             shutdown = "shutdown -h now";
-            sd       = "shutdown -h now";
-            ncg      = "sudo nix-collect-garbage -d";
+            sd = "shutdown -h now";
+            ncg = "sudo nix-collect-garbage -d";
 
             # Editors
-            v    = "vim";
+            v = "vim";
             nano = "vim";
-            vn   = "vim notes.txt";
+            vn = "vim notes.txt";
 
             # Navigation
             "..." = "cd ../..";
-            j     = "joshuto";
-            r     = "ranger";
-            wp    = "cd ~/wallpapers && joshuto";
-            hyd   = "cd ${config.hydrix.paths.configDir} && git status";
+            j = "joshuto";
+            r = "ranger";
+            wp = "cd ${config.hydrix.paths.configDir}/wallpapers && joshuto";
+            hyd = "cd ${config.hydrix.paths.configDir} && git status";
             hydrix = "cd ${config.hydrix.paths.configDir}";
 
             # File listing (eza)
             ls = "eza -A --color=always --group-directories-first";
-            l  = "eza -Al --color=always --group-directories-first";
+            l = "eza -Al --color=always --group-directories-first";
             lt = "eza -AT --color=always --group-directories-first";
 
             # Grep (ugrep)
-            grep  = "ugrep --color=auto";
+            grep = "ugrep --color=auto";
             egrep = "ugrep -E --color=auto";
             fgrep = "ugrep -F --color=auto";
 
             # Git
-            gs  = "git status";
-            ga  = "git add";
-            gd  = "git diff";
-            gc  = "git commit -m";
-            gp  = "git push -uf origin main";
+            gs = "git status";
+            ga = "git add";
+            gd = "git diff";
+            gc = "git commit -m";
+            gp = "git push -uf origin main";
             gur = "git add -A && git commit -m 'updates' && git push -uf origin main";
-            gu  = "git add -u && git commit -m 'updates' && git push -uf origin main";
-            gl  = "git log --oneline --graph --decorate -20";
+            gu = "git add -u && git commit -m 'updates' && git push -uf origin main";
+            gl = "git log --oneline --graph --decorate -20";
 
             # Utilities
-            h   = "htop";
-            ka  = "killall";
+            h = "htop";
+            ka = "killall";
             bat = "bat --theme=ansi";
-            cb  = "cbonsai -l -t 1";
-            g   = "glances";
-            cm  = "cmatrix -u 10";
-            p   = "pipes-rs -f 25 -p 7 -r 1.0";
-            bw  = "sudo bandwhich";
-            md  = "mkdir -p";
-            ip  = "ip -color";
-            cf  = "clear && fastfetch";
+            cb = "cbonsai -l -t 1";
+            g = "glances";
+            cm = "cmatrix -u 10";
+            p = "pipes-rs -f 25 -p 7 -r 1.0";
+            bw = "sudo bandwhich";
+            md = "mkdir -p";
+            ip = "ip -color";
+            cf = "clear && fastfetch";
 
             # Multi-VM commands
             mvm = "microvm";
 
             # Config files
-            f     = "vim ~/.config/fish/config.fish";
+            f = "vim ~/.config/fish/config.fish";
             flake = "vim ${config.hydrix.paths.configDir}/flake.nix";
 
             # Pentesting
-            msf      = "figlet -f cricket 'msf' && sudo msfconsole -q";
-            sesp     = "searchsploit";
-            ptime    = "sudo pentest-time -r ${if config.time.timeZone == null then "UTC" else config.time.timeZone}";
+            msf = "figlet -f cricket 'msf' && sudo msfconsole -q";
+            sesp = "searchsploit";
+            ptime = "sudo pentest-time -r ${
+              if config.time.timeZone == null
+              then "UTC"
+              else config.time.timeZone
+            }";
             pyserver = "sudo python -m http.server 8002";
 
             # Applications
-            zath    = "zathura --fork=false";
+            zath = "zathura --fork=false";
             zathura = "zathura --fork=false";
-            ai      = "aichat -H --save-session -s";
-            nf      = "nix search nixpkgs";
+            ai = "aichat -H --save-session -s";
+            nf = "nix search nixpkgs";
           }
           // lib.optionalAttrs (!isVM) {
             suspend = "systemctl suspend";
-            x       = "startx";
-            w       = "hyprland-launch";
-            rb      = "rebuild";
+            x = "startx";
+            w = "hyprland-launch";
+            rb = "rebuild";
             machine = "vim ${config.hydrix.paths.configDir}/machines/${config.hydrix.hostname}.nix";
           };
 
@@ -181,11 +188,11 @@ in {
           {
             # cd and ls
             mkcd = "mkdir -p $argv[1] && cd $argv[1]";
-            c    = "cd $argv && ls";
+            c = "cd $argv && ls";
 
             # Filtered listing
             sls = "ls | grep -i $argv";
-            sl  = "eza -Al --color=always --group-directories-first | grep -i $argv";
+            sl = "eza -Al --color=always --group-directories-first | grep -i $argv";
 
             # Python environment
             pyenv = "pyenvshell $argv";
@@ -294,20 +301,22 @@ in {
       };
 
       xdg.configFile = let
-        fishFileNames = ["fish/config.fish"]
+        fishFileNames =
+          ["fish/config.fish"]
           ++ map (n: "fish/functions/${n}.fish")
-               (builtins.attrNames hmArgs.config.programs.fish.functions);
-      in lib.genAttrs fishFileNames (_: {enable = lib.mkForce false;});
+          (builtins.attrNames hmArgs.config.programs.fish.functions);
+      in
+        lib.genAttrs fishFileNames (_: {enable = lib.mkForce false;});
 
       home.activation.fishConfig = lib.hm.dag.entryAfter ["writeBoundary"] ''
         ${lib.concatStringsSep "\n" (map (name: ''
-          _dest="$HOME/.config/${name}"
-          mkdir -p "$(dirname "$_dest")"
-          [ -L "$_dest" ] && rm -f "$_dest"
-          cat ${hmArgs.config.xdg.configFile.${name}.source} > "$_dest"
-        '') (["fish/config.fish"]
-          ++ map (n: "fish/functions/${n}.fish")
-               (builtins.attrNames hmArgs.config.programs.fish.functions)))}
+            _dest="$HOME/.config/${name}"
+            mkdir -p "$(dirname "$_dest")"
+            [ -L "$_dest" ] && rm -f "$_dest"
+            cat ${hmArgs.config.xdg.configFile.${name}.source} > "$_dest"
+          '') (["fish/config.fish"]
+            ++ map (n: "fish/functions/${n}.fish")
+            (builtins.attrNames hmArgs.config.programs.fish.functions)))}
       '';
     };
   };
