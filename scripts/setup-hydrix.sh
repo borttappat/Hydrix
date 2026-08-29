@@ -1603,6 +1603,38 @@ init_sops_and_wifi() {
             ' "$sops_yaml" > "${sops_yaml}.tmp" && mv "${sops_yaml}.tmp" "$sops_yaml"
             log "  Added this machine to existing secrets/.sops.yaml"
 
+            # Wire this machine's config to secrets already present in the repo.
+            # Decryption capability itself depends on the master-key unlock below
+            # (or a later 'sops updatekeys'); without this, hydrix.secrets.enable
+            # and the per-VM secrets lists were left at template defaults for any
+            # machine added into an existing repo, so the decrypt services never
+            # got created at all.
+            local machine_nix="$CONFIG_DIR/machines/${CONFIG[serial]}.nix"
+            if [[ -f "$CONFIG_DIR/secrets/wifi.yaml" ]]; then
+                sed -i \
+                    's/      enable = false;/      enable = true;/' \
+                    "$machine_nix"
+                sed -i \
+                    's|# wifiSecretsFile   = ../secrets/wifi.yaml;|wifiSecretsFile = ../secrets/wifi.yaml;|' \
+                    "$machine_nix"
+                sed -i \
+                    "s|\"microvm-router-${CONFIG[serial]}\" = { autostart = true; };|\"microvm-router-${CONFIG[serial]}\" = { autostart = true; secrets = [ \"wifi\" ]; };|" \
+                    "$machine_nix"
+                log "  Wired existing secrets/wifi.yaml into ${CONFIG[serial]}.nix"
+            fi
+            if [[ -f "$CONFIG_DIR/secrets/github.yaml" ]]; then
+                sed -i \
+                    's/      enable = false;/      enable = true;/' \
+                    "$machine_nix"
+                sed -i \
+                    's|# githubSecretsFile = ../secrets/github.yaml;|githubSecretsFile = ../secrets/github.yaml;|' \
+                    "$machine_nix"
+                sed -i \
+                    's|# "microvm-gitsync"  = { secrets = \[ "github" \]; };|"microvm-gitsync" = { secrets = [ "github" ]; };|' \
+                    "$machine_nix"
+                log "  Wired existing secrets/github.yaml into ${CONFIG[serial]}.nix"
+            fi
+
             if [[ -f "$CONFIG_DIR/secrets/master-age-key.age" ]]; then
                 echo ""
                 log "  Found secrets/master-age-key.age -- unlocking it decrypts"
