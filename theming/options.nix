@@ -78,11 +78,17 @@ in {
             description = ''
               Optional pinned content hash (SRI format, e.g. "sha256-...=") for
               this extension's .xpi. When set, the extension is fetched once at
-              build time via pkgs.fetchFirefoxAddon and hash-verified instead of
+              build time via pkgs.fetchurl and hash-verified instead of
               Firefox fetching url live at runtime. Opt-in per extension; users
               who don't need reproducible/audited fetches can leave this null
-              and nothing changes. Get a hash with:
-                nix store prefetch-file --hash-type sha256 <versioned-xpi-url>
+              and nothing changes. Deliberately not pkgs.fetchFirefoxAddon --
+              that function unpacks the .xpi, rewrites manifest.json (injects
+              a legacy "applications" key) and re-zips, but keeps the
+              *original* META-INF/manifest.mf, so the digest it lists for
+              manifest.json no longer matches; Firefox rejects the result as
+              "not correctly signed". Plain fetchurl makes zero content
+              changes, keeping the signature intact. Get a hash with:
+                nix store prefetch-file <versioned-xpi-url>
               Use a specific versioned download URL for `url` when setting a
               hash, not an AMO "latest" redirect, since the pinned hash will
               stop matching once "latest" moves on to a new version.

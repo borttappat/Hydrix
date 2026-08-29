@@ -34,18 +34,22 @@ let
   # pinned hash, fetch and verify it once at build time instead of letting
   # Firefox fetch url live at runtime; extensions without a hash are
   # unaffected (opt-in per extension, see firefox.extensionRegistry.<name>.hash).
+  #
+  # Uses plain pkgs.fetchurl, not pkgs.fetchFirefoxAddon -- the latter
+  # unpacks the .xpi, rewrites manifest.json (injects a legacy "applications"
+  # key via jq) and re-zips, but reuses the *original* META-INF/manifest.mf,
+  # which still lists the digest of the pre-rewrite manifest.json. That
+  # mismatch makes Firefox reject the install as "not correctly signed"
+  # (confirmed via Browser Console: addons.xpi-utils WARN Add-on <id> is not
+  # correctly signed). fetchurl does zero content modification -- the hash
+  # pins the exact untouched upstream bytes, signature intact.
   buildExtensionSettings = extNames:
     builtins.listToAttrs (map (name:
       let
         ext = allExtensions.${name};
         installUrl =
           if ext.hash != null
-          then "file://${pkgs.fetchFirefoxAddon {
-                 inherit name;
-                 url = ext.url;
-                 hash = ext.hash;
-                 fixedExtid = ext.id;
-               }}/${ext.id}.xpi"
+          then "file://${pkgs.fetchurl { inherit name; url = ext.url; hash = ext.hash; }}"
           else ext.url;
       in {
         name = ext.id;

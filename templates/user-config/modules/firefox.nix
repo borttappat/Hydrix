@@ -35,17 +35,21 @@ let
   # and hash-verified instead of Firefox fetching install_url live at runtime.
   # Opt-in per extension; see firefox.extensionRegistry.<name>.hash in
   # Hydrix/theming/options.nix.
+  #
+  # Uses plain pkgs.fetchurl, not pkgs.fetchFirefoxAddon -- the latter
+  # unpacks the .xpi, rewrites manifest.json (injects a legacy "applications"
+  # key via jq) and re-zips, but reuses the *original* META-INF/manifest.mf,
+  # which still lists the digest of the pre-rewrite manifest.json. That
+  # mismatch makes Firefox reject the install as "not correctly signed"
+  # (confirmed via Browser Console: addons.xpi-utils WARN Add-on <id> is not
+  # correctly signed). fetchurl does zero content modification -- the hash
+  # pins the exact untouched upstream bytes, signature intact.
   mkExtSettings = names:
     builtins.listToAttrs (map (n: let
       ext = reg.${n};
       installUrl =
         if ext.hash != null
-        then "file://${pkgs.fetchFirefoxAddon {
-               name = n;
-               url = ext.url;
-               hash = ext.hash;
-               fixedExtid = ext.id;
-             }}/${ext.id}.xpi"
+        then "file://${pkgs.fetchurl { name = "${n}.xpi"; url = ext.url; hash = ext.hash; }}"
         else ext.url;
     in {
       name  = ext.id;

@@ -1479,10 +1479,25 @@ hydrix.graphical.firefox.extensionRegistry.ublock-origin = {
 ```
 
 When `hash` is set, the extension is fetched once at build time via
-`pkgs.fetchFirefoxAddon` and hash-verified, instead of Firefox fetching `url`
+`pkgs.fetchurl` and hash-verified, instead of Firefox fetching `url`
 live on every install. This is opt-in per extension: entries without a
 `hash` keep the default live-fetch behavior, so users who don't need
 reproducible/audited fetches don't have to do anything differently.
+
+Deliberately `pkgs.fetchurl`, not `pkgs.fetchFirefoxAddon` — the latter
+unpacks the `.xpi`, rewrites `manifest.json` (injects a legacy
+`applications` key alongside `browser_specific_settings`) and re-zips, but
+keeps the *original* `META-INF/manifest.mf`, which still lists the digest
+of the pre-rewrite `manifest.json`. That mismatch makes Firefox reject the
+install:
+```
+addons.xpi-utils  WARN  Add-on <id> is not correctly signed.
+```
+silently — no install, no visible error outside the Browser Console
+(hamburger menu → More tools → Browser Console). `fetchurl` makes zero
+content changes, so the pinned hash matches the exact bytes Mozilla signed.
+Verify a fetch is safe by diffing it against a fresh download of the same
+URL — it should be byte-identical.
 
 #### obsidian.nix
 
