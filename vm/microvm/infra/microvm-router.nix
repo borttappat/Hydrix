@@ -376,7 +376,6 @@ in {
     ];
 
     # ===== Firmware for WiFi =====
-    hardware.enableAllFirmware = true;
     hardware.enableRedistributableFirmware = true;
 
     # ===== Predictable Interface Naming =====

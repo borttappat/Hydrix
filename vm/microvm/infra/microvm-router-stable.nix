@@ -286,7 +286,6 @@ in {
       "mac80211"
     ];
 
-    hardware.enableAllFirmware = true;
     hardware.enableRedistributableFirmware = true;
 
     # ===== Predictable Interface Naming =====
