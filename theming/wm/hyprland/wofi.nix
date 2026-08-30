@@ -562,7 +562,11 @@ in {
   config = lib.mkIf (config.hydrix.graphical.enable && config.hydrix.hyprland.enable) {
     environment.systemPackages = [wofiLauncher vmLaunch];
 
-    home-manager.users.${username} = {pkgs, ...}: {
+    home-manager.users.${username} = {
+      lib,
+      pkgs,
+      ...
+    }: {
       programs.wofi = {
         enable = lib.mkDefault true;
         package = lib.mkDefault pkgs.wofi;
