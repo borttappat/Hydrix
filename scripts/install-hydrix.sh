@@ -506,7 +506,13 @@ try_clone_with_auth() {
                     git clone "${branch_args[@]}" "$token_url" "$dest_dir"
                     local rc=$?
                     unset token_url
-                    [[ $rc -eq 0 ]] || warn "Clone with gh token failed"
+                    if [[ $rc -eq 0 ]]; then
+                        # Strip the embedded token from origin now that the clone
+                        # succeeded -- it must not persist in .git/config
+                        git -C "$dest_dir" remote set-url origin "$repo_url"
+                    else
+                        warn "Clone with gh token failed"
+                    fi
                     return $rc
                 else
                     warn "No token available after gh auth"
@@ -537,7 +543,13 @@ try_clone_with_auth() {
             git clone "${branch_args[@]}" "$token_url" "$dest_dir"
             local rc=$?
             unset token_url
-            [[ $rc -eq 0 ]] || warn "Token authentication failed"
+            if [[ $rc -eq 0 ]]; then
+                # Strip the embedded token from origin now that the clone
+                # succeeded -- it must not persist in .git/config
+                git -C "$dest_dir" remote set-url origin "$repo_url"
+            else
+                warn "Token authentication failed"
+            fi
             return $rc
             ;;
         3)
@@ -576,7 +588,13 @@ try_clone_with_auth() {
             git clone "${branch_args[@]}" "$token_url" "$dest_dir"
             local rc=$?
             unset token_url
-            [[ $rc -eq 0 ]] || warn "Token authentication failed"
+            if [[ $rc -eq 0 ]]; then
+                # Strip the embedded token from origin now that the clone
+                # succeeded -- it must not persist in .git/config
+                git -C "$dest_dir" remote set-url origin "$repo_url"
+            else
+                warn "Token authentication failed"
+            fi
             return $rc
             ;;
         5|*)
@@ -2186,7 +2204,7 @@ generate_config_to_temp() {
     if [[ "$MODE" == "use-existing" ]] && [[ -n "$CLONED_REPO" ]]; then
         # Use existing machine config, only regenerate hardware
         log "  Using existing machine config from cloned repo..."
-        cp -r "$CLONED_REPO"/* "$TEMP_CONFIG/"
+        cp -r "$CLONED_REPO"/. "$TEMP_CONFIG/"
 
         # If the flake uses a local path: for hydrix, redirect it so nix flake lock works
         handle_local_hydrix_path "$TEMP_CONFIG"
@@ -2200,7 +2218,7 @@ generate_config_to_temp() {
     elif [[ "$MODE" == "add" ]] && [[ -n "$CLONED_REPO" ]]; then
         # Clone mode with overwrite: copy cloned repo and generate new machine config
         log "  Using cloned configuration (generating new machine config)..."
-        cp -r "$CLONED_REPO"/* "$TEMP_CONFIG/"
+        cp -r "$CLONED_REPO"/. "$TEMP_CONFIG/"
         handle_local_hydrix_path "$TEMP_CONFIG"
         generate_machine_nix "$TEMP_CONFIG"
         generate_hardware_config "$TEMP_CONFIG"
@@ -3254,13 +3272,25 @@ install_nixos() {
         if [[ ! -d .git ]]; then
             git init
         fi
+        # .git/config is local to this clone (git never transfers the remote's config),
+        # so set the same local identity home-manager's hydrixGitIdentity activation
+        # (templates/user-config/modules/user.nix) would derive on first rebuild --
+        # this way it's already correct before that first activation ever runs.
+        git config --local user.name "${CONFIG[serial]}"
+        git config --local user.email "${CONFIG[username]}@${CONFIG[serial]}.hydrix.local"
         git -c user.name="Hydrix Installer" -c user.email="installer@hydrix" add .
-        if [[ "$MODE" == "add" ]]; then
+        if git diff --cached --quiet; then
+            log "  No changes to commit (existing config already up to date)"
+        elif [[ "$MODE" == "add" ]]; then
             git -c user.name="Hydrix Installer" -c user.email="installer@hydrix" commit -m "Add machine: ${CONFIG[serial]}"
+        elif [[ "$MODE" == "use-existing" ]]; then
+            git -c user.name="Hydrix Installer" -c user.email="installer@hydrix" commit -m "Regenerate hardware config for ${CONFIG[serial]}"
         else
             git -c user.name="Hydrix Installer" -c user.email="installer@hydrix" commit -m "Initial Hydrix configuration for ${CONFIG[serial]}"
         fi
-        if [[ -n "$CLONED_REPO_URL" ]]; then
+        # .git carried through from CLONED_REPO already has origin set (use-existing/add
+        # modes) -- only wire it up here for a genuinely fresh init
+        if [[ -n "$CLONED_REPO_URL" ]] && ! git remote get-url origin &>/dev/null; then
             git remote add origin "$CLONED_REPO_URL"
         fi
     )

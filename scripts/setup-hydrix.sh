@@ -380,6 +380,9 @@ try_clone_with_auth() {
             log "Retrying clone with token..."
             if git clone "$token_url" "$dest_dir" 2>&1; then
                 unset token_url  # Clear URL containing token
+                # Strip the embedded token from origin now that the clone
+                # succeeded -- it must not persist in .git/config
+                git -C "$dest_dir" remote set-url origin "$repo_url"
                 return 0
             fi
             unset token_url  # Clear URL containing token
