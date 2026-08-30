@@ -116,7 +116,10 @@ init_messages();
 # with elapsed time there instead so the bar doesn't look stuck.
 # Frozen at frozen_progress while awaiting_password is set (by
 # password_cb / display_normal_cb below), so entering a LUKS password
-# doesn't advance the bar on its own.
+# doesn't advance the bar on its own. password_cb also hides the bar
+# sprite outright (opacity 0) - freezing the value alone still left a
+# faint sub-pixel jitter on some renderers, since SetImage(Scale(...))
+# keeps re-issuing every tick even when bar_w is unchanged.
 global.awaiting_password = false;
 global.frozen_progress = 0;
 
@@ -237,6 +240,7 @@ global.bullet_sprite = Sprite();
 
 fun password_cb(prompt, bullets) {
   global.awaiting_password = true;
+  global.bar_sprite.SetOpacity(0);
 
   bullet_string = "";
   for (i = 0; i < bullets; i++)
@@ -256,6 +260,7 @@ Plymouth.SetDisplayPasswordFunction(password_cb);
 
 fun display_normal_cb() {
   global.awaiting_password = false;
+  global.bar_sprite.SetOpacity(1);
   ${if cfg.showMessages then ''
   for (i = 0; i < max_messages; i++)
     msg_sprites[i].SetImage(Image(""));
