@@ -47,12 +47,14 @@
           # Service running — check if socket actually exists (connection alive)
           if [[ ! -S "/run/user/1000/waypipe-0" ]]; then
             # Socket missing: vsock connection dead. Restart to reconnect to host.
-            systemctl restart waypipe-vsock waypipe-launch 2>/dev/null || true
+            ${pkgs.util-linux}/bin/flock -n /run/waypipe-reconnect.lock -c \
+              'systemctl restart waypipe-vsock waypipe-launch' 2>/dev/null || true
           fi
           # Socket exists and service active: leave running apps undisturbed.
           # waypipe-vsock will self-heal via Restart=always if connection drops.
         else
-          systemctl start waypipe-vsock waypipe-launch 2>/dev/null || true
+          ${pkgs.util-linux}/bin/flock -n /run/waypipe-reconnect.lock -c \
+            'systemctl start waypipe-vsock waypipe-launch' 2>/dev/null || true
         fi
         ${lib.optionalString audioEnabled "systemctl start pulse-vsock 2>/dev/null || true"}
         echo "waypipe"
@@ -61,7 +63,15 @@
         # Unconditional restart — used by waypipe-connect on startup/reconnect.
         # Unlike "waypipe", this always restarts regardless of socket state,
         # so a fresh host-side listener always gets a fresh VM connection.
-        systemctl restart waypipe-vsock waypipe-launch 2>/dev/null || true
+        # flock -n: the host can have more than one reconnect trigger in
+        # flight for the same VM (its own start-up reconnect plus a
+        # long-running waypipe-connect-all poller both reacting to the same
+        # boot). Without this, overlapping restarts stack and can pull the
+        # socket out from under an app that just launched. A second
+        # concurrent reconnect while one is already running is redundant, so
+        # it's dropped rather than queued.
+        ${pkgs.util-linux}/bin/flock -n /run/waypipe-reconnect.lock -c \
+          'systemctl restart waypipe-vsock waypipe-launch' 2>/dev/null || true
         ${lib.optionalString audioEnabled "systemctl start pulse-vsock 2>/dev/null || true"}
         echo "waypipe"
         ;;
