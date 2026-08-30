@@ -1,8 +1,9 @@
 # Dunst Notification Daemon — User Preferences
 #
-# Dunst config is generated at runtime by the framework (generate-dunstrc) from
-# scaling.json and wal colors. Notifications appear top-right, below the bar.
-# Options below configure behaviour via hydrix.graphical.ui.dunst* options.
+# Layout (offset/sizing/timeouts) is written once per rebuild by
+# generate-dunstrc-layout; colors come from wal via generate-dunstrc-colors,
+# rewritten on every colorscheme change. Notifications appear top-right,
+# below the bar. Options below configure behaviour via hydrix.graphical.ui.dunst* options.
 
 { lib, ... }:
 

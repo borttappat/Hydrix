@@ -12,9 +12,12 @@
 # The host pushes colors via vsock (vm-colorscheme service in microvm-profile-base.nix),
 # but these scripts provide manual control and fallback mechanisms.
 #
-{ config, lib, pkgs, ... }:
-
-let
+{
+  config,
+  lib,
+  pkgs,
+  ...
+}: let
   username = config.hydrix.username;
   vmType = config.hydrix.vmType;
   isVM = vmType != null && vmType != "host";
@@ -40,8 +43,8 @@ let
     fi
 
     # Dunst notifications
-    if command -v generate-dunstrc >/dev/null 2>&1; then
-      generate-dunstrc 2>/dev/null || true
+    if command -v generate-dunstrc-colors >/dev/null 2>&1; then
+      generate-dunstrc-colors 2>/dev/null || true
       ${pkgs.procps}/bin/pkill dunst 2>/dev/null || true
     fi
 
@@ -174,7 +177,6 @@ let
     # Refresh apps
     refresh-colors 2>/dev/null || true
   '';
-
 in {
   config = lib.mkIf isVM {
     environment.systemPackages = [
@@ -190,7 +192,7 @@ in {
     # Poll for host color changes (fallback if vsock push doesn't work)
     systemd.user.services.wal-sync = {
       description = "Sync colors from host";
-      wantedBy = [ "default.target" ];
+      wantedBy = ["default.target"];
       serviceConfig = {
         Type = "oneshot";
         ExecStart = "${walSyncScript}/bin/wal-sync";
@@ -199,10 +201,10 @@ in {
 
     systemd.user.timers.wal-sync = {
       description = "Periodic color sync from host";
-      wantedBy = [ "timers.target" ];
+      wantedBy = ["timers.target"];
       timerConfig = {
         OnBootSec = "5s";
-        OnUnitActiveSec = "10s";  # Poll every 10s as fallback
+        OnUnitActiveSec = "10s"; # Poll every 10s as fallback
         Unit = "wal-sync.service";
       };
     };

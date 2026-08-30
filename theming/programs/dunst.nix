@@ -1,8 +1,18 @@
 # Dunst Notification Daemon Configuration
 #
-# Dynamic wal colors support — dunstrc is generated at runtime by the
-# generate-dunstrc script from the wal colors cache (~/.cache/wal/colors.json).
-# Sizing and layout values come from hydrix.graphical.* (Nix config).
+# Split into two config files, like alacritty.toml/colors-runtime.toml:
+# - dunstrc-layout: everything except colors (offset, sizing, timeouts, font).
+#   Written only by home.activation, unconditionally overwritten on every
+#   rebuild - never touched by a colorscheme change. Safe to hand-edit for
+#   testing between rebuilds.
+# - dunstrc-colors: background/foreground/frame_color per urgency level only.
+#   Written by generate-dunstrc-colors, unconditionally overwritten on every
+#   rebuild AND on every walrgb/randomwalrgb colorscheme change (same trigger
+#   as write-alacritty-colors), so it must never carry hand edits.
+# dunst merges both via multiple -config flags (later files override earlier
+# keys within the same section), so the daemon just runs against combined
+# state.
+#
 # Notifications appear top-right. X offset is gaps + ui.dunstOffset from the screen
 # edge, mirroring a tiled window's gaps_out on the sides. Y offset is ui.dunstOffset
 # alone: Hyprland's exclusive-zone reservation for the bar already pushes dunst below
@@ -12,8 +22,8 @@
 #
 # This module:
 # - Disables home-manager's dunst service (we manage it ourselves)
-# - Provides a dunstrc generation script with all settings + wal colors
-# - Creates a systemd user service that generates config then runs dunst
+# - Provides layout + colors generation scripts
+# - Creates a systemd user service that runs dunst against both config files
 {
   config,
   lib,
@@ -26,86 +36,39 @@
   fontName = cfg.font.family;
   fontSize = cfg.font.size;
 
-  generateDunstrc = pkgs.writeShellScript "generate-dunstrc" ''
-        #!/usr/bin/env bash
-        # Generate dunstrc with wal colors and dynamic sizing from scaling.json
+  generateDunstLayout = pkgs.writeShellScript "generate-dunstrc-layout" ''
+    #!/usr/bin/env bash
+    # Generate dunstrc-layout: sizing/timeouts/font from Nix config, no colors.
 
-        DUNST_DIR="$HOME/.config/dunst"
-        DUNSTRC="$DUNST_DIR/dunstrc"
+    DUNST_DIR="$HOME/.config/dunst"
+    DUNSTRC="$DUNST_DIR/dunstrc-layout"
 
-        ${pkgs.coreutils}/bin/mkdir -p "$DUNST_DIR"
+    ${pkgs.coreutils}/bin/mkdir -p "$DUNST_DIR"
 
-        # Sizing from Nix config — rebuild to change layout/font
-        GAPS=${toString cfg.ui.gaps}
-        BAR_HEIGHT=${toString cfg.ui.barHeight}
-        BORDER=${toString cfg.ui.border}
-        CORNER_RADIUS=${toString cfg.ui.cornerRadius}
-        FONT_NAME="${fontName}"
-        FONT_SIZE=${toString fontSize}
-        OVERLAY_ALPHA="D9"
-        DUNST_WIDTH=${toString cfg.ui.dunstWidth}
-        DUNST_OFFSET=${toString cfg.ui.dunstOffset}
+    GAPS=${toString cfg.ui.gaps}
+    BAR_HEIGHT=${toString cfg.ui.barHeight}
+    BORDER=${toString cfg.ui.border}
+    CORNER_RADIUS=${toString cfg.ui.cornerRadius}
+    FONT_NAME="${fontName}"
+    FONT_SIZE=${toString fontSize}
+    DUNST_WIDTH=${toString cfg.ui.dunstWidth}
+    DUNST_OFFSET=${toString cfg.ui.dunstOffset}
 
-        # Padding scaled from bar height
-        PADDING=$((BAR_HEIGHT / 4))
-        [ "$PADDING" -lt 4 ] && PADDING=4
-        [ "$PADDING" -gt 8 ] && PADDING=8
-        H_PADDING=$((PADDING + 4))
+    # Padding scaled from bar height
+    PADDING=$((BAR_HEIGHT / 4))
+    [ "$PADDING" -lt 4 ] && PADDING=4
+    [ "$PADDING" -gt 8 ] && PADDING=8
+    H_PADDING=$((PADDING + 4))
 
-        # Pill radius: matches waybar island pills (cornerRadius * pillRadiusScale)
-        PILL_RADIUS=$((CORNER_RADIUS * ${toString (builtins.floor cfg.ui.pillRadiusScale)}))
+    # Pill radius: matches waybar island pills (cornerRadius * pillRadiusScale)
+    PILL_RADIUS=$((CORNER_RADIUS * ${toString (builtins.floor cfg.ui.pillRadiusScale)}))
 
-        # Offset (see module header): X = gaps + dunstOffset, Y = dunstOffset
-        # User override: edit the offset line in dunstrc - script preserves non-default values
-        if [ -n "$OFFSET_X" ] && [ -n "$OFFSET_Y" ]; then
-          : # Use env vars from home.activation
-        elif [ -f "$DUNSTRC" ]; then
-          # Read existing offset from dunstrc to preserve user customization
-          _old_offset=$(${pkgs.gnugrep}/bin/grep "^offset = " "$DUNSTRC" 2>/dev/null | ${pkgs.gnused}/bin/sed 's/offset = //' | ${pkgs.gnused}/bin/sed 's/x/ /')
-          if [ -n "$_old_offset" ]; then
-            read -r _old_x _old_y <<< "$_old_offset"
-            # Only preserve if different from current formula
-            if [ "$_old_x" != "$((GAPS + DUNST_OFFSET))" ] || [ "$_old_y" != "$DUNST_OFFSET" ]; then
-              OFFSET_X=$_old_x
-              OFFSET_Y=$_old_y
-            else
-              OFFSET_X=$((GAPS + DUNST_OFFSET))
-              OFFSET_Y=$DUNST_OFFSET
-            fi
-          else
-            OFFSET_X=$((GAPS + DUNST_OFFSET))
-            OFFSET_Y=$DUNST_OFFSET
-          fi
-        else
-          OFFSET_X=$((GAPS + DUNST_OFFSET))
-          OFFSET_Y=$DUNST_OFFSET
-        fi
+    # Offset (see module header): X = gaps + dunstOffset, Y = dunstOffset
+    OFFSET_X=$((GAPS + DUNST_OFFSET))
+    OFFSET_Y=$DUNST_OFFSET
 
-        # Extract colors from wal cache (host and VMs)
-        WAL_COLORS="$HOME/.cache/wal/colors.json"
-        if [ -f "$WAL_COLORS" ]; then
-          BG_RAW=$(${pkgs.jq}/bin/jq -r '.special.background // .colors.color0' "$WAL_COLORS")
-          FG=$(${pkgs.jq}/bin/jq -r '.special.foreground // .colors.color7' "$WAL_COLORS")
-          PREFIX=$(${pkgs.jq}/bin/jq -r '.colors.color3' "$WAL_COLORS")
-          FRAME=$(${pkgs.jq}/bin/jq -r '.colors.color5' "$WAL_COLORS")
-          FRAME_LOW=$(${pkgs.jq}/bin/jq -r '.colors.color2' "$WAL_COLORS")
-          FRAME_CRIT=$(${pkgs.jq}/bin/jq -r '.colors.color1' "$WAL_COLORS")
-        else
-          BG_RAW="#101116"
-          FG="#c0caf5"
-          PREFIX="#e0af68"
-          FRAME="#bb9af7"
-          FRAME_LOW="#98971a"
-          FRAME_CRIT="#cc241d"
-        fi
-        BG_LOW_RAW="$BG_RAW"
-        BG="''${BG_RAW}''${OVERLAY_ALPHA}"
-        BG_LOW="''${BG_LOW_RAW}''${OVERLAY_ALPHA}"
-
-        # Generate the full dunstrc
-        ${pkgs.coreutils}/bin/cat > "$DUNSTRC" << DUNSTRC_EOF
-    # Generated by Hydrix - DO NOT EDIT
-    # Regenerated when colors change (walrgb, randomwalrgb, etc.)
+    ${pkgs.coreutils}/bin/cat > "$DUNSTRC" << DUNSTRC_EOF
+    # Generated by Hydrix on rebuild - edit freely, restored on next rebuild
 
     [global]
     font = $FONT_NAME $FONT_SIZE
@@ -143,7 +106,7 @@
 
     line_height = 0
     markup = full
-    format = "<b><span foreground='$PREFIX'>%s</span></b>\n<span foreground='$FG'>%b</span>"
+    format = "<b>%s</b>\n%b"
     alignment = left
     vertical_alignment = center
     show_age_threshold = 60
@@ -184,22 +147,68 @@
     mouse_right_click = close_all
 
     [urgency_low]
-    background = "$BG_LOW"
+    timeout = ${toString cfg.ui.dunstUrgencyTimeout.low}
+
+    [urgency_normal]
+    timeout = ${toString cfg.ui.dunstUrgencyTimeout.normal}
+
+    [urgency_critical]
+    timeout = ${toString cfg.ui.dunstUrgencyTimeout.critical}
+    DUNSTRC_EOF
+  '';
+
+  generateDunstColors = pkgs.writeShellScript "generate-dunstrc-colors" ''
+    #!/usr/bin/env bash
+    # Generate dunstrc-colors from the wal colors cache. Called on rebuild and
+    # on every colorscheme change (walrgb, randomwalrgb) - never hand-edit this.
+
+    DUNST_DIR="$HOME/.config/dunst"
+    DUNSTRC="$DUNST_DIR/dunstrc-colors"
+
+    ${pkgs.coreutils}/bin/mkdir -p "$DUNST_DIR"
+
+    OVERLAY_ALPHA="D9"
+    PREFIX_DEFAULT="#e0af68"
+    FG_DEFAULT="#c0caf5"
+
+    WAL_COLORS="$HOME/.cache/wal/colors.json"
+    if [ -f "$WAL_COLORS" ]; then
+      BG_RAW=$(${pkgs.jq}/bin/jq -r '.special.background // .colors.color0' "$WAL_COLORS")
+      FG=$(${pkgs.jq}/bin/jq -r '.special.foreground // .colors.color7' "$WAL_COLORS")
+      PREFIX=$(${pkgs.jq}/bin/jq -r '.colors.color3' "$WAL_COLORS")
+      FRAME=$(${pkgs.jq}/bin/jq -r '.colors.color5' "$WAL_COLORS")
+      FRAME_LOW=$(${pkgs.jq}/bin/jq -r '.colors.color2' "$WAL_COLORS")
+      FRAME_CRIT=$(${pkgs.jq}/bin/jq -r '.colors.color1' "$WAL_COLORS")
+    else
+      BG_RAW="#101116"
+      FG="$FG_DEFAULT"
+      PREFIX="$PREFIX_DEFAULT"
+      FRAME="#bb9af7"
+      FRAME_LOW="#98971a"
+      FRAME_CRIT="#cc241d"
+    fi
+    BG="''${BG_RAW}''${OVERLAY_ALPHA}"
+
+    ${pkgs.coreutils}/bin/cat > "$DUNSTRC" << DUNSTRC_EOF
+    # Generated by Hydrix from wal colors - do not edit, overwritten on every colorscheme change
+
+    [global]
+    format = "<b><span foreground='$PREFIX'>%s</span></b>\n<span foreground='$FG'>%b</span>"
+
+    [urgency_low]
+    background = "$BG"
     foreground = "$FG"
     frame_color = "$FRAME_LOW"
-    timeout = ${toString cfg.ui.dunstUrgencyTimeout.low}
 
     [urgency_normal]
     background = "$BG"
     foreground = "$FG"
     frame_color = "$FRAME"
-    timeout = ${toString cfg.ui.dunstUrgencyTimeout.normal}
 
     [urgency_critical]
     background = "$BG"
     foreground = "$FG"
     frame_color = "$FRAME_CRIT"
-    timeout = ${toString cfg.ui.dunstUrgencyTimeout.critical}
     DUNSTRC_EOF
   '';
 in {
@@ -207,19 +216,27 @@ in {
     environment.systemPackages = [
       pkgs.dunst
       pkgs.libnotify
-      (pkgs.runCommand "generate-dunstrc" {} ''
+      (pkgs.runCommand "generate-dunstrc-layout" {} ''
         mkdir -p $out/bin
-        cp ${generateDunstrc} $out/bin/generate-dunstrc
-        chmod +x $out/bin/generate-dunstrc
+        cp ${generateDunstLayout} $out/bin/generate-dunstrc-layout
+        chmod +x $out/bin/generate-dunstrc-layout
+      '')
+      (pkgs.runCommand "generate-dunstrc-colors" {} ''
+        mkdir -p $out/bin
+        cp ${generateDunstColors} $out/bin/generate-dunstrc-colors
+        chmod +x $out/bin/generate-dunstrc-colors
       '')
     ];
 
     home-manager.users.${username} = {lib, ...}: {
       services.dunst.enable = false;
 
-      # Write dunstrc via home.activation (like hyprland.conf) - user can edit afterwards
+      # Layout: rebuild-only, unconditional overwrite, hand-editable in between.
+      # Colors: also written here so a fresh rebuild has content immediately;
+      # walrgb/randomwalrgb keep it fresh afterward via generate-dunstrc-colors.
       home.activation.writeDunstrc = lib.hm.dag.entryAfter ["writeBoundary"] ''
-        ${generateDunstrc}
+        ${generateDunstLayout}
+        ${generateDunstColors}
       '';
 
       systemd.user.services.dunst = {
@@ -232,7 +249,7 @@ in {
         Service = {
           Type = "dbus";
           BusName = "org.freedesktop.Notifications";
-          ExecStart = "${pkgs.dunst}/bin/dunst";
+          ExecStart = "${pkgs.dunst}/bin/dunst -config %h/.config/dunst/dunstrc-layout -config %h/.config/dunst/dunstrc-colors";
           Restart = "on-failure";
           RestartSec = 1;
           ExecReload = "${pkgs.coreutils}/bin/kill -HUP $MAINPID";

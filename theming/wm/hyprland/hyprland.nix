@@ -31,7 +31,7 @@
     pluginName = "hypr-clip-guard";
     version = "0.1.0";
     src = ./plugins/hypr-clip-guard;
-    nativeBuildInputs = [ pkgs.cmake ];
+    nativeBuildInputs = [pkgs.cmake];
     meta.description = "VM clipboard isolation for Hyprland";
     meta.license = lib.licenses.mit;
   };
@@ -53,10 +53,19 @@
 
   namedColorToRgba = name: let
     table = {
-      "red" = "ff0000ff"; "orange" = "ff8c00ff"; "yellow" = "ffff00ff";
-      "green" = "00ff00ff"; "cyan" = "00ffffff"; "blue" = "0000ffff";
-      "purple" = "800080ff"; "pink" = "ffc0cbff"; "magenta" = "ff00ffff";
-      "white" = "ffffffff"; "black" = "000000ff"; "gray" = "808080ff"; "grey" = "808080ff";
+      "red" = "ff0000ff";
+      "orange" = "ff8c00ff";
+      "yellow" = "ffff00ff";
+      "green" = "00ff00ff";
+      "cyan" = "00ffffff";
+      "blue" = "0000ffff";
+      "purple" = "800080ff";
+      "pink" = "ffc0cbff";
+      "magenta" = "ff00ffff";
+      "white" = "ffffffff";
+      "black" = "000000ff";
+      "gray" = "808080ff";
+      "grey" = "808080ff";
     };
   in
     table.${name} or "${lib.removePrefix "#" name}ff";
@@ -75,8 +84,7 @@
 
   workspaceColors = config.hydrix.hyprland.workspaceColors;
   workspaceColorRules = lib.concatStringsSep "\n" (
-    lib.mapAttrsToList (ws: color:
-      "windowrule = border_color rgba(${color}), match:workspace ${ws}")
+    lib.mapAttrsToList (ws: color: "windowrule = border_color rgba(${color}), match:workspace ${ws}")
     workspaceColors
   );
 
@@ -128,20 +136,20 @@
     }
 
     ${lib.optionalString xwaylandEnabled ''
-    # ── XWayland (hydrix.hyprland.xwayland.enable) ───────────────────────────
-    # Render XWayland apps at physical resolution rather than logical resolution.
-    # Needed for apps (Steam, games) that work better under XWayland — without
-    # this, fractional scaling causes them to render at the lower logical size.
-    xwayland {
-      force_zero_scaling = true
-    }
+      # ── XWayland (hydrix.hyprland.xwayland.enable) ───────────────────────────
+      # Render XWayland apps at physical resolution rather than logical resolution.
+      # Needed for apps (Steam, games) that work better under XWayland — without
+      # this, fractional scaling causes them to render at the lower logical size.
+      xwayland {
+        force_zero_scaling = true
+      }
 
-    # Disable blur and restore full opacity for Steam game windows and any
-    # fullscreen surface — avoids compositor overhead on those frames.
-    windowrule = no_blur 1, match:class ^(steam_app_.*)$
-    windowrule = opacity 1.0 override, match:class ^(steam_app_.*)$
-    windowrule = no_blur 1, match:fullscreen 1
-    windowrule = opacity 1.0 override, match:fullscreen 1
+      # Disable blur and restore full opacity for Steam game windows and any
+      # fullscreen surface — avoids compositor overhead on those frames.
+      windowrule = no_blur 1, match:class ^(steam_app_.*)$
+      windowrule = opacity 1.0 override, match:class ^(steam_app_.*)$
+      windowrule = no_blur 1, match:fullscreen 1
+      windowrule = opacity 1.0 override, match:fullscreen 1
     ''}
   '';
 
@@ -192,6 +200,12 @@
     printf '@define-color vram       %s;\n' "$color1" >> "$BAR_OUT"
     printf '@define-color vcpu       %s;\n' "$color1" >> "$BAR_OUT"
 
+    WOFI_OUT="$HOME/.config/wofi/colors.css"
+    mkdir -p "$(dirname "$WOFI_OUT")"
+    printf '@define-color background %s;\n' "$color0" > "$WOFI_OUT"
+    printf '@define-color foreground %s;\n' "$color7" >> "$WOFI_OUT"
+    printf '@define-color accent     %s;\n' "$color4" >> "$WOFI_OUT"
+
     LOCK_OUT="$HOME/.config/hypr/colors-lock.conf"
     mkdir -p "$(dirname "$LOCK_OUT")"
     printf '$lockBg = rgba(%sff)\n$lockFg = rgba(%sff)\n$lockAccent = rgba(%sff)\n$lockWrong = rgba(%sff)\n' \
@@ -230,59 +244,59 @@
   '';
 
   hydrixVibrancyHypr = pkgs.writeShellScriptBin "hydrix-vibrancy-hypr" ''
-    STEP=5
-    STATE_DIR="$HOME/.cache/hydrix"
-    STATE_FILE="$STATE_DIR/vibrancy"
-    SHADER_FILE="$STATE_DIR/vibrancy.glsl"
-    MONITOR=$(${pkgs.hyprland}/bin/hyprctl monitors -j \
-      | ${pkgs.jq}/bin/jq -r '.[] | select(.focused) | .name')
-    [ -z "$MONITOR" ] && exit 1
-    if [[ "$MONITOR" != eDP-* ]]; then
-      DISPLAY_NUM=$(${pkgs.ddcutil}/bin/ddcutil detect --brief 2>/dev/null \
-        | ${pkgs.gnugrep}/bin/grep -E "^Display [0-9]+" \
-        | while IFS= read -r line; do
-            NUM=$(echo "$line" | grep -oE "[0-9]+")
-            DRMSYS=$(ls /sys/class/drm/card*-"$MONITOR" 2>/dev/null | head -1 || true)
-            [ -n "$DRMSYS" ] && echo "$NUM" && break
-          done)
-      if [ -n "$DISPLAY_NUM" ]; then
+        STEP=5
+        STATE_DIR="$HOME/.cache/hydrix"
+        STATE_FILE="$STATE_DIR/vibrancy"
+        SHADER_FILE="$STATE_DIR/vibrancy.glsl"
+        MONITOR=$(${pkgs.hyprland}/bin/hyprctl monitors -j \
+          | ${pkgs.jq}/bin/jq -r '.[] | select(.focused) | .name')
+        [ -z "$MONITOR" ] && exit 1
+        if [[ "$MONITOR" != eDP-* ]]; then
+          DISPLAY_NUM=$(${pkgs.ddcutil}/bin/ddcutil detect --brief 2>/dev/null \
+            | ${pkgs.gnugrep}/bin/grep -E "^Display [0-9]+" \
+            | while IFS= read -r line; do
+                NUM=$(echo "$line" | grep -oE "[0-9]+")
+                DRMSYS=$(ls /sys/class/drm/card*-"$MONITOR" 2>/dev/null | head -1 || true)
+                [ -n "$DRMSYS" ] && echo "$NUM" && break
+              done)
+          if [ -n "$DISPLAY_NUM" ]; then
+            case "$1" in
+              +) ${pkgs.ddcutil}/bin/ddcutil --display "$DISPLAY_NUM" setvcp 8A + $STEP 2>/dev/null && exit 0 ;;
+              -) ${pkgs.ddcutil}/bin/ddcutil --display "$DISPLAY_NUM" setvcp 8A - $STEP 2>/dev/null && exit 0 ;;
+              *) exit 1 ;;
+            esac
+          fi
+        fi
+        mkdir -p "$STATE_DIR"
+        CURRENT=$(cat "$STATE_FILE" 2>/dev/null); : "''${CURRENT:=100}"
         case "$1" in
-          +) ${pkgs.ddcutil}/bin/ddcutil --display "$DISPLAY_NUM" setvcp 8A + $STEP 2>/dev/null && exit 0 ;;
-          -) ${pkgs.ddcutil}/bin/ddcutil --display "$DISPLAY_NUM" setvcp 8A - $STEP 2>/dev/null && exit 0 ;;
+          +) NEW=$(( CURRENT + STEP * 2 )) ;;
+          -) NEW=$(( CURRENT - STEP * 2 )) ;;
           *) exit 1 ;;
         esac
-      fi
-    fi
-    mkdir -p "$STATE_DIR"
-    CURRENT=$(cat "$STATE_FILE" 2>/dev/null); : "''${CURRENT:=100}"
-    case "$1" in
-      +) NEW=$(( CURRENT + STEP * 2 )) ;;
-      -) NEW=$(( CURRENT - STEP * 2 )) ;;
-      *) exit 1 ;;
-    esac
-    [ "$NEW" -lt 0 ] && NEW=0; [ "$NEW" -gt 200 ] && NEW=200
-    echo "$NEW" > "$STATE_FILE"
-    SAT=$(${pkgs.gawk}/bin/awk "BEGIN { printf \"%.4f\", $NEW / 100.0 }")
-    cat > "$SHADER_FILE" <<'GLSL'
-#version 300 es
-precision mediump float;
-in vec2 v_texcoord;
-uniform sampler2D tex;
-out vec4 fragColor;
-void main() {
-    vec4 col = texture(tex, v_texcoord);
-    float luma = dot(col.rgb, vec3(0.299, 0.587, 0.114));
-    col.rgb = mix(vec3(luma), col.rgb, SAT_VALUE);
-    fragColor = col;
-}
-GLSL
-    ${pkgs.gnused}/bin/sed -i "s/SAT_VALUE/$SAT/" "$SHADER_FILE"
-    if [ "$NEW" -eq 100 ]; then
-      ${pkgs.hyprland}/bin/hyprctl keyword decoration:screen_shader "" >/dev/null 2>&1
-    else
-      ${pkgs.hyprland}/bin/hyprctl keyword decoration:screen_shader "$SHADER_FILE" >/dev/null 2>&1
-    fi
-    ${pkgs.libnotify}/bin/notify-send "Vibrancy" "Saturation: $NEW%" --urgency=low
+        [ "$NEW" -lt 0 ] && NEW=0; [ "$NEW" -gt 200 ] && NEW=200
+        echo "$NEW" > "$STATE_FILE"
+        SAT=$(${pkgs.gawk}/bin/awk "BEGIN { printf \"%.4f\", $NEW / 100.0 }")
+        cat > "$SHADER_FILE" <<'GLSL'
+    #version 300 es
+    precision mediump float;
+    in vec2 v_texcoord;
+    uniform sampler2D tex;
+    out vec4 fragColor;
+    void main() {
+        vec4 col = texture(tex, v_texcoord);
+        float luma = dot(col.rgb, vec3(0.299, 0.587, 0.114));
+        col.rgb = mix(vec3(luma), col.rgb, SAT_VALUE);
+        fragColor = col;
+    }
+    GLSL
+        ${pkgs.gnused}/bin/sed -i "s/SAT_VALUE/$SAT/" "$SHADER_FILE"
+        if [ "$NEW" -eq 100 ]; then
+          ${pkgs.hyprland}/bin/hyprctl keyword decoration:screen_shader "" >/dev/null 2>&1
+        else
+          ${pkgs.hyprland}/bin/hyprctl keyword decoration:screen_shader "$SHADER_FILE" >/dev/null 2>&1
+        fi
+        ${pkgs.libnotify}/bin/notify-send "Vibrancy" "Saturation: $NEW%" --urgency=low
   '';
 
   hyprVmBorders = pkgs.writeShellScriptBin "hypr-vm-borders" ''
@@ -461,7 +475,6 @@ GLSL
         done ;;
     esac
   '';
-
 in
   lib.mkIf (cfg.enable && config.hydrix.hyprland.enable) {
     # Ensure ~/.config/hypr exists with correct ownership before home-manager runs.
@@ -505,7 +518,7 @@ in
 
       # Prevent HM from creating a read-only hyprland.conf symlink.
       # Our activation writes a plain editable file instead.
-      xdg.configFile."hypr/hyprland.conf" = lib.mkForce { enable = false; };
+      xdg.configFile."hypr/hyprland.conf" = lib.mkForce {enable = false;};
 
       # Seed gap state files on first install / rebuild.
       home.activation.initHyprGaps = lib.hm.dag.entryAfter ["writeBoundary"] ''
@@ -548,17 +561,17 @@ in
       systemd.user.services.hypr-vm-borders-init = {
         Unit = {
           Description = "Initialize Hyprland VM window border rules";
-          After  = [ "hyprland-session.target" ];
-          PartOf = [ "hyprland-session.target" ];
+          After = ["hyprland-session.target"];
+          PartOf = ["hyprland-session.target"];
         };
         Service = {
-          Type             = "oneshot";
-          RemainAfterExit  = true;
-          ExecStart        = "${hyprVmBorders}/bin/hypr-vm-borders init";
-          Restart          = "on-failure";
-          RestartSec       = 2;
+          Type = "oneshot";
+          RemainAfterExit = true;
+          ExecStart = "${hyprVmBorders}/bin/hypr-vm-borders init";
+          Restart = "on-failure";
+          RestartSec = 2;
         };
-        Install.WantedBy = [ "hyprland-session.target" ];
+        Install.WantedBy = ["hyprland-session.target"];
       };
     };
   }

@@ -11,43 +11,133 @@
 #
 # Mirrors host-rofi functionality for Wayland/Hyprland.
 # Gated on hydrix.hyprland.enable.
-
-{ config, lib, pkgs, ... }:
-
-let
+#
+# Style: split like waybar (style.css imports colors.css). style.css is
+# structural (font/padding/radius from Nix), written once per rebuild via
+# home.activation and hand-editable in between. colors.css holds only
+# @define-color background/foreground/accent, written by hypr-apply-colors
+# on every colorscheme change, same as waybar's own colors.css.
+{
+  config,
+  lib,
+  pkgs,
+  ...
+}: let
   username = config.hydrix.username;
   fontFamily = config.hydrix.graphical.font.family;
 
   # Compute font size from Nix options - same formula as waybar.nix.
   wofiSize = let
-    base     = config.hydrix.graphical.font.size;
+    base = config.hydrix.graphical.font.size;
     relation = config.hydrix.graphical.font.relations.wofi or 1.0;
-    raw      = builtins.floor (base * relation);
-  in toString (if raw < 11 then 11 else raw);
+    raw = builtins.floor (base * relation);
+  in
+    toString (
+      if raw < 11
+      then 11
+      else raw
+    );
 
   # Scaled up from the shared waybar pill-radius formula (which stays sharp
   # at low cornerRadius values, e.g. 2px) so wofi reads as visibly rounded
   # without changing waybar's own pill radius.
   wofiCornerRadius = let
     ui = config.hydrix.graphical.ui;
-    pillRadius = if (ui.pillRadius or null) != null
-                 then ui.pillRadius
-                 else builtins.floor ((ui.cornerRadius or 2) * (ui.pillRadiusScale or 2.0));
-  in toString (pillRadius * 2);
-  wofiWidth  = toString config.hydrix.graphical.ui.rofiWidth;
+    pillRadius =
+      if (ui.pillRadius or null) != null
+      then ui.pillRadius
+      else builtins.floor ((ui.cornerRadius or 2) * (ui.pillRadiusScale or 2.0));
+  in
+    toString (pillRadius * 2);
+  wofiWidth = toString config.hydrix.graphical.ui.rofiWidth;
   wofiHeight = toString config.hydrix.graphical.ui.rofiHeight;
 
   # wofi is a layer-shell surface, so Hyprland's decoration active_opacity
   # (window-only) never reaches it; transparency has to be baked into its
   # own GTK CSS instead, same as Alacritty manages its own opacity.
-  wofiOpacity = let o = config.hydrix.graphical.ui.opacity;
-    in toString (o.overlayOverrides.wofi or o.overlay);
+  wofiOpacity = let
+    o = config.hydrix.graphical.ui.opacity;
+  in
+    toString (o.overlayOverrides.wofi or o.overlay);
+
+  homeDir = "/home/${username}";
+
+  # Structural CSS only - all color values come from colors.css via @import.
+  wofiStyleContent = ''
+    @import url("file://${homeDir}/.config/wofi/colors.css");
+
+    * {
+        font-family: ${fontFamily};
+        font-size: ${wofiSize}px;
+        color: @foreground;
+        transition: none;
+        animation: none;
+    }
+
+    #window {
+        background-color: alpha(@background, ${wofiOpacity});
+        border-radius: ${wofiCornerRadius}px;
+        border: 0px solid transparent;
+    }
+
+    #outer-box {
+        padding: 8px;
+    }
+
+    #input {
+        background-color: transparent;
+        box-shadow: none;
+        outline: none;
+        border: none;
+        border-bottom: 1px solid @accent;
+        border-radius: 0;
+        padding: 4px 8px;
+        margin-bottom: 4px;
+        color: @foreground;
+    }
+
+    #scroll { }
+
+    #inner-box {
+        padding: 4px;
+    }
+
+    #entry {
+        padding: 6px 8px;
+        border-radius: ${wofiCornerRadius}px;
+    }
+
+    #entry:selected {
+        background-color: @accent;
+    }
+
+    #text {
+        color: @foreground;
+    }
+
+    #text:selected {
+        color: @background;
+    }
+
+    #img {
+        margin-right: 6px;
+    }
+  '';
+
+  # Fallback only - hypr-apply-colors owns this file from here on (matches
+  # waybar's colors.css default in modules/waybar.nix).
+  defaultWofiColorsCss = ''
+    @define-color background #0c0c0c;
+    @define-color foreground #d8dee9;
+    @define-color accent     #7aa2f7;
+  '';
 
   wofiLauncher = pkgs.writeShellScriptBin "wofi-launcher" ''
     set -euo pipefail
 
     readonly MICROVM_SCRIPT="microvm"
     readonly VM_REGISTRY="/etc/hydrix/vm-registry.json"
+    readonly WOFI_STYLE="$HOME/.config/wofi/style.css"
 
     # ── Workspace Detection ────────────────────────────────────────────────
 
@@ -146,108 +236,13 @@ let
         done | ${pkgs.coreutils}/bin/sort -u -t $'\t' -k1,1
     }
 
-    # ── Theme Generation ───────────────────────────────────────────────────
-    # Reads wal colors from colors.json (same data refresh-colors uses).
-    # Falls back to colors.sh, then to puccy-neutral defaults matching Stylix.
-
-    get_wal_color() {
-        local key="$1"   # jq path, e.g. '.colors.color0'
-        local fallback="$2"
-        local wal_json="$HOME/.cache/wal/colors.json"
-        local wal_sh="$HOME/.cache/wal/colors.sh"
-        local color=""
-
-        if [[ -f "$wal_json" ]]; then
-            color=$(${pkgs.jq}/bin/jq -r "$key // empty" "$wal_json" 2>/dev/null)
-        fi
-        if [[ -z "$color" && -f "$wal_sh" ]]; then
-            local sh_key
-            sh_key=$(echo "$key" | ${pkgs.gnused}/bin/sed 's|.*\.\(color[0-9]*\)|\1|')
-            color=$(${pkgs.gnugrep}/bin/grep -E "^''${sh_key}=" "$wal_sh" \
-                | head -1 \
-                | ${pkgs.gnused}/bin/sed "s/^[^=]*='//;s/'$//")
-        fi
-        echo "''${color:-$fallback}"
-    }
-
-    build_theme() {
-        local corner_radius='${wofiCornerRadius}'
-        local font_size='${wofiSize}'
-        local font_name='${fontFamily}'
-
-        local bg fg accent bg_rgba
-        bg=$(get_wal_color '.colors.color0' '#0e0f17')
-        fg=$(get_wal_color '.colors.color7' '#e4d1ef')
-        accent=$(get_wal_color '.colors.color4' '#f09ea2')
-        bg_rgba="rgba($((16#''${bg:1:2})), $((16#''${bg:3:2})), $((16#''${bg:5:2})), ${wofiOpacity})"
-
-        cat <<EOF
-* {
-    font-family: ''${font_name};
-    font-size: ''${font_size}px;
-    color: ''${fg};
-    transition: none;
-    animation: none;
-}
-
-#window {
-    background-color: ''${bg_rgba};
-    border-radius: ''${corner_radius}px;
-    border: 0px solid transparent;
-}
-
-#outer-box {
-    padding: 8px;
-}
-
-#input {
-    background-color: transparent;
-    box-shadow: none;
-    outline: none;
-    border: none;
-    border-bottom: 1px solid ''${accent};
-    border-radius: 0;
-    padding: 4px 8px;
-    margin-bottom: 4px;
-    color: ''${fg};
-}
-
-#scroll { }
-
-#inner-box {
-    padding: 4px;
-}
-
-#entry {
-    padding: 6px 8px;
-    border-radius: ''${corner_radius}px;
-}
-
-#entry:selected {
-    background-color: ''${accent};
-}
-
-#text {
-    color: ''${fg};
-}
-
-#text:selected {
-    color: ''${bg};
-}
-
-#img {
-    margin-right: 6px;
-}
-EOF
-    }
-
     # Common wofi flags used by all invocations
     # use_search_box=false swaps the GtkSearchEntry for a plain GtkEntry,
     # dropping its built-in search glyph and clear-text button.
     # no_actions=true drops the expander arrow drun shows on .desktop entries
     # that declare multiple actions (e.g. "New Window").
     wofi_args() {
-        echo "--show-icons --width=${wofiWidth} --height=${wofiHeight} --define=font=${fontFamily} ${wofiSize} --define=icon_theme=Papirus --define=use_search_box=false --define=no_actions=true"
+        echo "--show-icons --width=${wofiWidth} --height=${wofiHeight} --style=$WOFI_STYLE --define=icon_theme=Papirus --define=use_search_box=false --define=no_actions=true"
     }
 
     # ── Encrypted Volume Unlock ────────────────────────────────────────────
@@ -265,12 +260,8 @@ EOF
         [[ -f "$luks_path" ]] || return 0
         [[ -b "/dev/mapper/''${mapper_name}" ]] && return 0
 
-        local theme_file password
-        theme_file=$(${pkgs.coreutils}/bin/mktemp /tmp/wofi-luks-XXXXXX.css)
-        build_theme > "$theme_file"
-
+        local password
         password=$(echo | ${pkgs.wofi}/bin/wofi --show dmenu \
-            --style="$theme_file" \
             $(wofi_args) \
             --password \
             --prompt="Unlock ''${vm_name}:" \
@@ -278,8 +269,6 @@ EOF
             --lines=0 \
             --hide-scroll \
             2>/dev/null) || true
-
-        ${pkgs.coreutils}/bin/rm -f "$theme_file"
 
         if [[ -z "$password" ]]; then
             ${pkgs.libnotify}/bin/notify-send -t 3000 "MicroVM" "Unlock cancelled for ''${vm_name}"
@@ -330,19 +319,13 @@ EOF
 
         display_list+="cancel"
 
-        local theme_file selection
-        theme_file=$(${pkgs.coreutils}/bin/mktemp /tmp/wofi-launcher-XXXXXX.css)
-        build_theme > "$theme_file"
-
+        local selection
         selection=$(echo -n "$display_list" \
             | ${pkgs.wofi}/bin/wofi --show dmenu \
-              --style="$theme_file" \
               $(wofi_args) \
               --prompt="Start ''${vm_type} VM" \
               --no-search \
               2>/dev/null) || true
-
-        ${pkgs.coreutils}/bin/rm -f "$theme_file"
 
         [[ -z "$selection" || "$selection" == "cancel" ]] && return
 
@@ -368,24 +351,14 @@ EOF
         if [[ "$vm_count" -eq 1 ]]; then
             selected=$(echo "$running_vms" | head -1)
         else
-            local theme_file_sel
-            theme_file_sel=$(${pkgs.coreutils}/bin/mktemp /tmp/wofi-launcher-XXXXXX.css)
-            build_theme > "$theme_file_sel"
-
             selected=$(echo "$running_vms" \
                 | ${pkgs.wofi}/bin/wofi --show dmenu \
-                  --style="$theme_file_sel" \
                   $(wofi_args) \
                   --prompt="Select VM" \
                   2>/dev/null) || true
 
-            ${pkgs.coreutils}/bin/rm -f "$theme_file_sel"
             [[ -z "$selected" ]] && return
         fi
-
-        local theme_file
-        theme_file=$(${pkgs.coreutils}/bin/mktemp /tmp/wofi-launcher-XXXXXX.css)
-        build_theme > "$theme_file"
 
         # List VM apps from .desktop entries (host-accessible via /nix/store) --
         # see list_vm_apps for why, not a raw bin/ listing.
@@ -394,7 +367,6 @@ EOF
             app_list=$(list_vm_apps "$vm_system")
             selected_name=$(echo "$app_list" | ${pkgs.coreutils}/bin/cut -f1 \
                 | ${pkgs.wofi}/bin/wofi --show dmenu \
-                  --style="$theme_file" \
                   $(wofi_args) \
                   --prompt="''${selected}" \
                   --insensitive \
@@ -415,28 +387,18 @@ EOF
             ${pkgs.libnotify}/bin/notify-send -t 4000 "VM" \
                 "''${selected}: could not read app list (VM built?)"
         fi
-
-        ${pkgs.coreutils}/bin/rm -f "$theme_file"
     }
 
     # ── Host App Launcher (drun — icon picker) ─────────────────────────────
 
     show_host_launcher() {
-        local theme_file
-        theme_file=$(${pkgs.coreutils}/bin/mktemp /tmp/wofi-launcher-XXXXXX.css)
-        build_theme > "$theme_file"
-        ${pkgs.wofi}/bin/wofi --show drun --style="$theme_file" $(wofi_args) --prompt= 2>/dev/null || true
-        ${pkgs.coreutils}/bin/rm -f "$theme_file"
+        ${pkgs.wofi}/bin/wofi --show drun $(wofi_args) --prompt= 2>/dev/null || true
     }
 
     # ── Host Run Launcher (run — typed commands, like rofi -show run) ──────
 
     show_host_run_launcher() {
-        local theme_file
-        theme_file=$(${pkgs.coreutils}/bin/mktemp /tmp/wofi-launcher-XXXXXX.css)
-        build_theme > "$theme_file"
-        ${pkgs.wofi}/bin/wofi --show run --style="$theme_file" $(wofi_args) --prompt= 2>/dev/null || true
-        ${pkgs.coreutils}/bin/rm -f "$theme_file"
+        ${pkgs.wofi}/bin/wofi --show run $(wofi_args) --prompt= 2>/dev/null || true
     }
 
     # ── Main Entry Point ───────────────────────────────────────────────────
@@ -466,119 +428,23 @@ EOF
 
   # Cross-VM launcher — lists all running display VMs (not workspace-scoped),
   # lets user pick one then pick an app from that VM's sw/bin/.
-  # Uses the identical theme as wofi-launcher (build_theme / wal colors).
+  # Uses the same style.css as wofi-launcher.
   vmLaunch = pkgs.writeShellScriptBin "vm-launch" ''
     set -euo pipefail
 
     readonly VM_REGISTRY="/etc/hydrix/vm-registry.json"
-
-    # ── Color helpers (identical to wofi-launcher) ────────────────────────────
-
-    get_wal_color() {
-        local key="$1"
-        local fallback="$2"
-        local wal_json="$HOME/.cache/wal/colors.json"
-        local wal_sh="$HOME/.cache/wal/colors.sh"
-        local color=""
-
-        if [[ -f "$wal_json" ]]; then
-            color=$(${pkgs.jq}/bin/jq -r "$key // empty" "$wal_json" 2>/dev/null)
-        fi
-        if [[ -z "$color" && -f "$wal_sh" ]]; then
-            local sh_key
-            sh_key=$(echo "$key" | ${pkgs.gnused}/bin/sed 's|.*\.\(color[0-9]*\)|\1|')
-            color=$(${pkgs.gnugrep}/bin/grep -E "^''${sh_key}=" "$wal_sh" \
-                | head -1 \
-                | ${pkgs.gnused}/bin/sed "s/^[^=]*='//;s/'$//")
-        fi
-        echo "''${color:-$fallback}"
-    }
-
-    # ── Theme (identical to wofi-launcher) ────────────────────────────────────
-
-    build_theme() {
-        local corner_radius='${wofiCornerRadius}'
-        local font_size='${wofiSize}'
-        local font_name='${fontFamily}'
-
-        local bg fg accent bg_rgba
-        bg=$(get_wal_color '.colors.color0' '#0e0f17')
-        fg=$(get_wal_color '.colors.color7' '#e4d1ef')
-        accent=$(get_wal_color '.colors.color4' '#f09ea2')
-        bg_rgba="rgba($((16#''${bg:1:2})), $((16#''${bg:3:2})), $((16#''${bg:5:2})), ${wofiOpacity})"
-
-        cat <<EOF
-* {
-    font-family: ''${font_name};
-    font-size: ''${font_size}px;
-    color: ''${fg};
-    transition: none;
-    animation: none;
-}
-
-#window {
-    background-color: ''${bg_rgba};
-    border-radius: ''${corner_radius}px;
-    border: 0px solid transparent;
-}
-
-#outer-box {
-    padding: 8px;
-}
-
-#input {
-    background-color: transparent;
-    border: none;
-    border-bottom: 1px solid ''${accent};
-    border-radius: 0;
-    padding: 4px 8px;
-    margin-bottom: 4px;
-    color: ''${fg};
-}
-
-#scroll { }
-
-#inner-box {
-    padding: 4px;
-}
-
-#entry {
-    padding: 6px 8px;
-    border-radius: ''${corner_radius}px;
-}
-
-#entry:selected {
-    background-color: ''${accent};
-}
-
-#text {
-    color: ''${fg};
-}
-
-#text:selected {
-    color: ''${bg};
-}
-
-#img {
-    margin-right: 6px;
-}
-EOF
-    }
+    readonly WOFI_STYLE="$HOME/.config/wofi/style.css"
 
     wofi_pick() {
         local prompt="$1"
-        local theme_file
-        theme_file=$(${pkgs.coreutils}/bin/mktemp /tmp/vm-launch-XXXXXX.css)
-        build_theme > "$theme_file"
         local result
         result=$(${pkgs.wofi}/bin/wofi --show dmenu \
-            --style="$theme_file" \
+            --style="$WOFI_STYLE" \
             --width=${wofiWidth} \
             --height=${wofiHeight} \
             --prompt="$prompt" \
             --insensitive \
             2>/dev/null) || true
-        ${pkgs.coreutils}/bin/rm -f "$theme_file"
         echo "$result"
     }
 
@@ -692,16 +558,29 @@ EOF
 
     main "$@"
   '';
-
 in {
   config = lib.mkIf (config.hydrix.graphical.enable && config.hydrix.hyprland.enable) {
-    environment.systemPackages = [ wofiLauncher vmLaunch ];
+    environment.systemPackages = [wofiLauncher vmLaunch];
 
-    home-manager.users.${username} = { pkgs, ... }: {
+    home-manager.users.${username} = {pkgs, ...}: {
       programs.wofi = {
         enable = lib.mkDefault true;
         package = lib.mkDefault pkgs.wofi;
       };
+
+      # style.css: structural, rebuild-only, hand-editable in between.
+      # colors.css: only written if absent - hypr-apply-colors owns it from
+      # here on, same split as waybar's colors.css.
+      home.activation.wofiStyle = lib.hm.dag.entryAfter ["writeBoundary"] ''
+                _dir="$HOME/.config/wofi"
+                mkdir -p "$_dir"
+                cat > "$_dir/style.css" <<'WOFI_STYLE_EOF'
+        ${wofiStyleContent}
+        WOFI_STYLE_EOF
+                [ -f "$_dir/colors.css" ] || cat > "$_dir/colors.css" <<'WOFI_COLORS_EOF'
+        ${defaultWofiColorsCss}
+        WOFI_COLORS_EOF
+      '';
     };
   };
 }

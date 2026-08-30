@@ -134,9 +134,9 @@
     fi
 
     # === Dunst ===
-    echo "  Regenerating dunst config..."
-    if command -v generate-dunstrc >/dev/null 2>&1; then
-        generate-dunstrc
+    echo "  Regenerating dunst colors..."
+    if command -v generate-dunstrc-colors >/dev/null 2>&1; then
+        generate-dunstrc-colors
     fi
     # Restart dunst to pick up new colors (kill + let systemd restart, or start manually)
     echo "  Restarting dunst..."
@@ -146,7 +146,7 @@
     if systemctl --user start dunst 2>/dev/null; then
         true
     else
-        ${pkgs.dunst}/bin/dunst &>/dev/null &
+        ${pkgs.dunst}/bin/dunst -config "$HOME/.config/dunst/dunstrc-layout" -config "$HOME/.config/dunst/dunstrc-colors" &>/dev/null &
         disown 2>/dev/null || true
     fi
 
@@ -603,7 +603,7 @@
         if [ "$(find "$WAL_CACHE/colors.json" -mtime -1 2>/dev/null)" ]; then
             echo "Wal cache exists and is recent, generating per-app color files..."
             if command -v generate-gtk-colors >/dev/null 2>&1; then generate-gtk-colors; fi
-            if command -v generate-dunstrc >/dev/null 2>&1; then generate-dunstrc; fi
+            if command -v generate-dunstrc-colors >/dev/null 2>&1; then generate-dunstrc-colors; fi
             if command -v write-alacritty-colors >/dev/null 2>&1; then write-alacritty-colors; fi
             if command -v zathura-reload-colors >/dev/null 2>&1; then zathura-reload-colors; fi
             exit 0
@@ -670,11 +670,11 @@
     mkdir -p "$HOME/.config/alacritty"
     touch "$HOME/.config/alacritty/colors-runtime.toml"
 
-    # Generate dunstrc with wal colors (for dunst to read on start)
+    # Generate dunstrc-colors with wal colors (for dunst to read on start)
     if [ -f "$WAL_CACHE/colors.json" ]; then
-        if command -v generate-dunstrc >/dev/null 2>&1; then
-            echo "Generating dunstrc..."
-            generate-dunstrc
+        if command -v generate-dunstrc-colors >/dev/null 2>&1; then
+            echo "Generating dunstrc-colors..."
+            generate-dunstrc-colors
         fi
     fi
   '';

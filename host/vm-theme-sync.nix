@@ -582,8 +582,8 @@ in {
           fi
 
           # dunst
-          if command -v generate-dunstrc >/dev/null 2>&1; then
-            generate-dunstrc 2>/dev/null || true
+          if command -v generate-dunstrc-colors >/dev/null 2>&1; then
+            generate-dunstrc-colors 2>/dev/null || true
             ${pkgs.procps}/bin/pkill dunst 2>/dev/null || true
           fi
         ''))
