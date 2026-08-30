@@ -76,7 +76,6 @@
     nh
 
     # GUI apps (waypipe forwarded)
-    firefox
     pywal
   ];
 }

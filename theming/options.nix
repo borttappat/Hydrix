@@ -211,6 +211,39 @@ in {
       example = "about:blank";
     };
 
+    firefox.hideFirefoxViewButton = lib.mkOption {
+      type = lib.types.bool;
+      default = false;
+      description = "Hide the Firefox View toolbar button (recently closed tabs, synced tabs, tab pickup).";
+    };
+
+    firefox.hideAllTabsButton = lib.mkOption {
+      type = lib.types.bool;
+      default = false;
+      description = ''Hide the "List all tabs" dropdown button at the end of the tab bar.'';
+    };
+
+    firefox.hideSidebarLauncher = lib.mkOption {
+      type = lib.types.bool;
+      default = false;
+      description = ''
+        Hide the entire sidebar area (history/bookmarks/synced-tabs icon row
+        and the vertical tabs list panel both live inside it as one Shadow
+        DOM component, so there's no way to remove the icon row alone).
+        Tabs still work via Ctrl+Tab and keyboard shortcuts; verticalTabs'
+        own tab list just isn't visible.
+      '';
+    };
+
+    firefox.hideExtensionIcons = lib.mkOption {
+      type = lib.types.bool;
+      default = false;
+      description = ''
+        Hide individual pinned extension icons from the toolbar. Extensions
+        stay reachable via the Extensions (puzzle-piece) button.
+      '';
+    };
+
     zathura.recolor = lib.mkOption {
       type = lib.types.bool;
       default = true;
@@ -725,7 +758,7 @@ in {
       dunstOffset = lib.mkOption {
         type = lib.types.int;
         default = 5;
-        description = "Dunst notification offset from screen edge, added to ui.gaps on both axes";
+        description = "Dunst notification clearance past a tiled window's edge, on both axes";
       };
 
       dunstEnablePopup = lib.mkOption {

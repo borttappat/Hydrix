@@ -311,7 +311,7 @@ let
     fi
 
     # Send command to VM's waypipe-launch service (vsock:14508).
-    # For Firefox: inject HYDRIX_FF_SCALE so firefox-dpi in the VM uses the
+    # For Firefox: inject HYDRIX_FF_SCALE so firefox-hydrix in the VM uses the
     # host monitor's scale (compositor fractional scale, not X11 DPI).
     LAUNCH_CMD="$*"
     if [[ "''${1:-}" == "firefox" ]]; then

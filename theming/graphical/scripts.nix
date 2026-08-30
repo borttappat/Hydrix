@@ -10,7 +10,6 @@
 #   refresh-colors                  Reload all color-aware apps from wal cache
 #   nixwal                          Update nix-specific wal cache files
 #   init-wal-cache                  Initialize pywal cache from colorscheme
-#   firefox-pywal                   Update Firefox via pywalfox
 #
 # LOCKSCREEN COMMANDS
 # -------------------
@@ -680,29 +679,6 @@
     fi
   '';
 
-  # Firefox wrapper that runs pywalfox update after launch
-  firefoxPywalScript = pkgs.writeShellScriptBin "firefox-pywal" ''
-    #!/usr/bin/env bash
-    # Launch Firefox and run pywalfox update once it's ready
-
-    # Start Firefox in background
-    ${pkgs.firefox}/bin/firefox "$@" &
-    FIREFOX_PID=$!
-
-    # Wait for Firefox to initialize (check if native messaging is ready)
-    sleep 3
-
-    # Run pywalfox update if wal cache exists
-    if [ -f "$HOME/.cache/wal/colors.json" ]; then
-        if command -v pywalfox &>/dev/null; then
-            pywalfox update 2>/dev/null || true
-        fi
-    fi
-
-    # Wait for Firefox to exit
-    wait $FIREFOX_PID 2>/dev/null || true
-  '';
-
   # Script to set colorscheme inheritance mode at runtime
   # Modes: full, dynamic, none
   setColorschemeModeScript = pkgs.writeShellScriptBin "set-colorscheme-mode" ''
@@ -1096,7 +1072,6 @@ in {
         wallpaperBlackScript
         refreshColorsScript
         initWalCacheScript
-        firefoxPywalScript
         pomoScript
         writeAlacrittyColorsScript # Generate alacritty colors TOML from wal cache
       ]

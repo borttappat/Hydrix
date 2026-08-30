@@ -79,6 +79,12 @@ in
   hydrix.graphical.firefox.uidensity = lib.mkDefault 1;  # 0=normal, 1=compact, 2=touch
   hydrix.graphical.firefox.search.default = lib.mkDefault "ddg";
 
+  # Toolbar decluttering — each hides one element, independent of the others
+  # hydrix.graphical.firefox.hideFirefoxViewButton = lib.mkDefault true;
+  # hydrix.graphical.firefox.hideAllTabsButton = lib.mkDefault true;
+  # hydrix.graphical.firefox.hideSidebarLauncher = lib.mkDefault true;
+  # hydrix.graphical.firefox.hideExtensionIcons = lib.mkDefault true;
+
   # Startup homepage — set to your preferred URL, or leave null for about:home
   # hydrix.graphical.firefox.homepage = lib.mkDefault "https://example.com";
 

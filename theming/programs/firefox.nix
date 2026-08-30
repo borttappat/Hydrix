@@ -67,13 +67,22 @@ let
   fontSize = fontCfg.overrides.firefox or (builtins.floor (fontCfg.size * (fontCfg.relations.firefox or 1.2)));
   headerFontSize = fontCfg.overrides.firefoxHeader or (builtins.floor (fontCfg.size * 1.9));
 
-  # DPI-aware Firefox launcher - reads scale factor from scaling.json at runtime
-  # Similar to alacritty-dpi, this ensures Firefox uses the host's dynamic DPI
-  # Parameterized so it can wrap any Firefox derivation (needed for HM .override support)
-  mkFirefoxDpi = firefoxPkg: pkgs.writeShellScriptBin "firefox-dpi" ''
+  # Firefox launcher: applies host DPI scale, waits on home-manager, then
+  # runs pywalfox. Parameterized so it can wrap any Firefox derivation
+  # (needed for HM .override support).
+  mkFirefoxHydrix = firefoxPkg: pkgs.writeShellScriptBin "firefox-hydrix" ''
     FF_PROFILE="$HOME/.mozilla/firefox/default"
     FF_USER_JS="$FF_PROFILE/user.js"
     FF_DPI_MARKER="$FF_PROFILE/.dpi-scale"
+
+    # Wait for home-manager to finish activating this user's profile (writes
+    # the Firefox profile prefs and the pywalfox native-messaging manifest)
+    # before launching Firefox. No-op if the unit is already active.
+    hm_unit="home-manager-${username}.service"
+    for _ in $(seq 1 120); do
+      [ "$(${pkgs.systemd}/bin/systemctl is-active "$hm_unit" 2>/dev/null)" = "active" ] && break
+      sleep 1
+    done
 
     # Priority: HYDRIX_FF_SCALE env (set by host when launching in VM) >
     #           HYPRLAND_INSTANCE_SIGNATURE (native Hyprland session)
@@ -123,10 +132,21 @@ let
     ${firefoxPkg}/bin/firefox "$@" &
     FF_PID=$!
 
-    # Wait for Firefox to be ready, then apply pywal colors
+    # Wait for Firefox to be ready, then apply pywal colors.
+    #
+    # `pywalfox update` always exits 0 regardless of whether it reached the
+    # daemon (see pywalfox's send_client_command), and checking for the
+    # socket file's mere existence is not a reliable readiness signal either
+    # -- a stale socket file from a previous Firefox session can still be on
+    # disk for a moment after that session's daemon is gone, before the new
+    # daemon deletes and rebinds it. So instead of trying to detect the exact
+    # ready moment, just call it repeatedly for a bounded window; each call
+    # is cheap and idempotent, and one of them will land after the daemon is
+    # actually up.
     if [ -f "$HOME/.cache/wal/colors.json" ]; then
-      while kill -0 "$FF_PID" 2>/dev/null; do
-        ${pkgs.pywalfox-native}/bin/pywalfox update 2>/dev/null && break
+      for _ in $(seq 1 30); do
+        kill -0 "$FF_PID" 2>/dev/null || break
+        ${pkgs.pywalfox-native}/bin/pywalfox update 2>/dev/null
         sleep 1
       done
     fi
@@ -134,22 +154,24 @@ let
     wait "$FF_PID"
   '';
 
-  firefoxDpi = mkFirefoxDpi pkgs.firefox;
-
-  # Wrapped Firefox with DPI/pywalfox wrapper as the default firefox command
-  # Supports .override for Home Manager compatibility (HM injects policies/PKCS11)
+  # Wrapped Firefox with the DPI/pywalfox launcher as the default firefox
+  # command. Supports .override for Home Manager compatibility (HM injects
+  # policies/PKCS11).
   mkFirefoxWrapped = firefoxPkg: let
-    dpiWrapper = mkFirefoxDpi firefoxPkg;
+    hydrixWrapper = mkFirefoxHydrix firefoxPkg;
     base = pkgs.symlinkJoin {
-      name = "firefox-dpi";
+      name = "firefox-hydrix";
       paths = [ firefoxPkg ];
       postBuild = ''
         rm $out/bin/firefox
-        ln -s ${dpiWrapper}/bin/firefox-dpi $out/bin/firefox
+        ln -s ${hydrixWrapper}/bin/firefox-hydrix $out/bin/firefox
       '';
     };
   in base // {
     override = f: mkFirefoxWrapped (firefoxPkg.override f);
+    # symlinkJoin doesn't carry version/pname; the vanilla nixpkgs firefox
+    # module needs cfg.package.version to build language-pack download URLs.
+    inherit (firefoxPkg) version pname;
   };
 
   firefoxWrapped = mkFirefoxWrapped pkgs.firefox;
@@ -265,9 +287,15 @@ in {
     # System-level Firefox with policies (works better than HM for policies)
     programs.firefox = {
       enable = true;
+      # Without this, the module installs its own plain pkgs.firefox into
+      # environment.systemPackages regardless of anything set below.
+      # firefoxWrapped supports .override, so this module's own
+      # cfg.package.override(...) (native messaging hosts, autoConfig) still
+      # applies on top of it correctly.
+      package = firefoxWrapped;
       languagePacks = [ "en-US" ];
 
-      policies = lib.mkDefault {
+      policies = {
         DisableTelemetry = true;
         DisableFirefoxStudies = true;
         EnableTrackingProtection = {
@@ -284,12 +312,16 @@ in {
         OverridePostUpdatePage = "";
         DontCheckDefaultBrowser = true;
         DisplayBookmarksToolbar = "never";
+        NoDefaultBookmarks = true;
         DisplayMenuBar = "default-off";
         SearchBar = "unified";
 
-        # Force-install extensions based on profile
-        # Extensions defined in allExtensions registry, selected per vmType
-        ExtensionSettings = buildExtensionSettings currentExtensions;
+        # Force-install extensions based on profile. mkDefault is scoped to
+        # just this leaf (not the whole policies attrset) so hydrix-config
+        # can replace it wholesale with its own hash-pinned registry without
+        # an eval conflict, while every sibling key here stays at normal
+        # priority and survives that override intact.
+        ExtensionSettings = lib.mkDefault (buildExtensionSettings currentExtensions);
 
         # Locked preferences
         Preferences = {
@@ -306,6 +338,12 @@ in {
           # Suppress Firefox's own upgrade/welcome dialogs
           "browser.startup.upgradeDialog.enabled" = lock-false;
           "browser.aboutwelcome.enabled" = lock-false;
+          # Hidden pref, defaults true: makes a brand-new profile's very first
+          # launch ignore browser.startup.homepage and show about:welcome/
+          # about:home instead, even with OverrideFirstRunPage set. Only
+          # matters once per profile (subsequent launches aren't "first run"),
+          # but that first launch is exactly what a freshly purged VM hits.
+          "browser.startup.firstrunSkipsHomepage" = lock-false;
           # Prevent extension update notifications
           "extensions.update.notifyUser" = lock-false;
           "browser.topsites.contile.enabled" = lock-false;
@@ -355,7 +393,10 @@ in {
         enable = lib.mkDefault true;
         # Keep legacy path to avoid needing to move existing profiles
         configPath = ".mozilla/firefox";
-        package = lib.mkDefault pkgs.firefox;
+        # Must be firefoxWrapped, not pkgs.firefox: this profile sits earlier
+        # in $PATH than environment.systemPackages, so whatever package is
+        # named here is what "firefox" actually resolves to.
+        package = lib.mkDefault firefoxWrapped;
 
         profiles.default = {
           id = 0;
@@ -385,8 +426,11 @@ in {
             "extensions.activeThemeID" = "firefox-compact-dark@mozilla.org";
             "browser.tabs.inTitlebar" = 1;
 
-            # Ctrl+Tab cycles through tabs in recently used order
-            "browser.ctrlTab.recentlyUsedOrder" = true;
+            # Ctrl+Tab cycles through tabs in recently used order (also
+            # enables the tab preview thumbnails while cycling). Real pref is
+            # sortByRecentlyUsed -- "recentlyUsedOrder" doesn't exist and was
+            # silently doing nothing.
+            "browser.ctrlTab.sortByRecentlyUsed" = true;
 
             # Suppress extension welcome pages and popups
             "extensions.webextensions.restrictedDomains" = "";
@@ -490,6 +534,36 @@ in {
               visibility: collapse !important;
             }
             ''}
+
+            ${lib.optionalString ffCfg.hideFirefoxViewButton ''
+            #firefox-view-button {
+              display: none !important;
+            }
+            ''}
+
+            ${lib.optionalString ffCfg.hideAllTabsButton ''
+            #alltabs-button {
+              display: none !important;
+            }
+            ''}
+
+            ${lib.optionalString ffCfg.hideSidebarLauncher ''
+            /* sidebar-main renders its icon row and the vertical tabs list
+               inside the same Shadow DOM, exposing only an overflow-button
+               ::part() -- no selector can reach the icon row without also
+               hiding the tabs list. Hides the whole light-DOM container
+               instead. */
+            #sidebar-container, #sidebar-launcher-splitter {
+              display: none !important;
+            }
+            ''}
+
+            ${lib.optionalString ffCfg.hideExtensionIcons ''
+            /* Pinned extension icons; the Extensions button itself still lists them */
+            .webextension-browser-action {
+              display: none !important;
+            }
+            ''}
           '';
 
           userContent = ''
@@ -528,10 +602,12 @@ in {
       fi
     '';
 
-    # Add wrapped Firefox with higher priority so it takes precedence
-    # This ensures pywalfox update runs automatically on every Firefox launch
+    # programs.firefox.package above already gets this into
+    # environment.systemPackages via the module's own cfg.package.override.
+    # home-manager's per-user profile sits earlier in $PATH than this one,
+    # so its package= (further up) must independently also be firefoxWrapped
+    # for that to be what "firefox" actually resolves to.
     environment.systemPackages = [
-      (lib.hiPrio firefoxWrapped)
       firefoxExtensionAdd
     ];
   };
