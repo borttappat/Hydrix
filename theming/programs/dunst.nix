@@ -3,7 +3,11 @@
 # Dynamic wal colors support — dunstrc is generated at runtime by the
 # generate-dunstrc script from the wal colors cache (~/.cache/wal/colors.json).
 # Sizing and layout values come from hydrix.graphical.* (Nix config).
-# Notifications appear top-right, inset by gaps + ui.dunstOffset px on both axes.
+# Notifications appear top-right. X offset is gaps + ui.dunstOffset from the screen
+# edge; Y offset is (barHeight - gaps) + ui.dunstOffset, measured from the bar's
+# reserved height rather than gaps, so both axes leave the same ui.dunstOffset
+# clearance from a tiled window's edge (tiled windows sit flush against the bar's
+# exclusive zone on top, but gaps away from the screen edge on the sides).
 #
 # This module:
 # - Disables home-manager's dunst service (we manage it ourselves)
@@ -22,180 +26,180 @@
   fontSize = cfg.font.size;
 
   generateDunstrc = pkgs.writeShellScript "generate-dunstrc" ''
-    #!/usr/bin/env bash
-    # Generate dunstrc with wal colors and dynamic sizing from scaling.json
+        #!/usr/bin/env bash
+        # Generate dunstrc with wal colors and dynamic sizing from scaling.json
 
-    DUNST_DIR="$HOME/.config/dunst"
-    DUNSTRC="$DUNST_DIR/dunstrc"
+        DUNST_DIR="$HOME/.config/dunst"
+        DUNSTRC="$DUNST_DIR/dunstrc"
 
-    ${pkgs.coreutils}/bin/mkdir -p "$DUNST_DIR"
+        ${pkgs.coreutils}/bin/mkdir -p "$DUNST_DIR"
 
-    # Sizing from Nix config — rebuild to change layout/font
-    GAPS=${toString cfg.ui.gaps}
-    BAR_HEIGHT=${toString cfg.ui.barHeight}
-    BORDER=${toString cfg.ui.border}
-    CORNER_RADIUS=${toString cfg.ui.cornerRadius}
-    FONT_NAME="${fontName}"
-    FONT_SIZE=${toString fontSize}
-    OVERLAY_ALPHA="D9"
-    DUNST_WIDTH=${toString cfg.ui.dunstWidth}
-    DUNST_OFFSET=${toString cfg.ui.dunstOffset}
+        # Sizing from Nix config — rebuild to change layout/font
+        GAPS=${toString cfg.ui.gaps}
+        BAR_HEIGHT=${toString cfg.ui.barHeight}
+        BORDER=${toString cfg.ui.border}
+        CORNER_RADIUS=${toString cfg.ui.cornerRadius}
+        FONT_NAME="${fontName}"
+        FONT_SIZE=${toString fontSize}
+        OVERLAY_ALPHA="D9"
+        DUNST_WIDTH=${toString cfg.ui.dunstWidth}
+        DUNST_OFFSET=${toString cfg.ui.dunstOffset}
 
-    # Padding scaled from bar height
-    PADDING=$((BAR_HEIGHT / 4))
-    [ "$PADDING" -lt 4 ] && PADDING=4
-    [ "$PADDING" -gt 8 ] && PADDING=8
-    H_PADDING=$((PADDING + 4))
+        # Padding scaled from bar height
+        PADDING=$((BAR_HEIGHT / 4))
+        [ "$PADDING" -lt 4 ] && PADDING=4
+        [ "$PADDING" -gt 8 ] && PADDING=8
+        H_PADDING=$((PADDING + 4))
 
-    # Pill radius: matches waybar island pills (cornerRadius * pillRadiusScale)
-    PILL_RADIUS=$((CORNER_RADIUS * ${toString (builtins.floor cfg.ui.pillRadiusScale)}))
+        # Pill radius: matches waybar island pills (cornerRadius * pillRadiusScale)
+        PILL_RADIUS=$((CORNER_RADIUS * ${toString (builtins.floor cfg.ui.pillRadiusScale)}))
 
-    # Offset: gaps + dunstOffset on both axes (see module header)
-    # User override: edit the offset line in dunstrc - script preserves non-default values
-    if [ -n "$OFFSET_X" ] && [ -n "$OFFSET_Y" ]; then
-      : # Use env vars from home.activation
-    elif [ -f "$DUNSTRC" ]; then
-      # Read existing offset from dunstrc to preserve user customization
-      _old_offset=$(${pkgs.gnugrep}/bin/grep "^offset = " "$DUNSTRC" 2>/dev/null | ${pkgs.gnused}/bin/sed 's/offset = //' | ${pkgs.gnused}/bin/sed 's/x/ /')
-      if [ -n "$_old_offset" ]; then
-        read -r _old_x _old_y <<< "$_old_offset"
-        # Only preserve if different from current formula
-        if [ "$_old_x" != "$((GAPS + DUNST_OFFSET))" ] || [ "$_old_y" != "$((GAPS + DUNST_OFFSET))" ]; then
-          OFFSET_X=$_old_x
-          OFFSET_Y=$_old_y
+        # Offset (see module header): X = gaps + dunstOffset, Y = (barHeight - gaps) + dunstOffset
+        # User override: edit the offset line in dunstrc - script preserves non-default values
+        if [ -n "$OFFSET_X" ] && [ -n "$OFFSET_Y" ]; then
+          : # Use env vars from home.activation
+        elif [ -f "$DUNSTRC" ]; then
+          # Read existing offset from dunstrc to preserve user customization
+          _old_offset=$(${pkgs.gnugrep}/bin/grep "^offset = " "$DUNSTRC" 2>/dev/null | ${pkgs.gnused}/bin/sed 's/offset = //' | ${pkgs.gnused}/bin/sed 's/x/ /')
+          if [ -n "$_old_offset" ]; then
+            read -r _old_x _old_y <<< "$_old_offset"
+            # Only preserve if different from current formula
+            if [ "$_old_x" != "$((GAPS + DUNST_OFFSET))" ] || [ "$_old_y" != "$((BAR_HEIGHT - GAPS + DUNST_OFFSET))" ]; then
+              OFFSET_X=$_old_x
+              OFFSET_Y=$_old_y
+            else
+              OFFSET_X=$((GAPS + DUNST_OFFSET))
+              OFFSET_Y=$((BAR_HEIGHT - GAPS + DUNST_OFFSET))
+            fi
+          else
+            OFFSET_X=$((GAPS + DUNST_OFFSET))
+            OFFSET_Y=$((BAR_HEIGHT - GAPS + DUNST_OFFSET))
+          fi
         else
           OFFSET_X=$((GAPS + DUNST_OFFSET))
-          OFFSET_Y=$((GAPS + DUNST_OFFSET))
+          OFFSET_Y=$((BAR_HEIGHT - GAPS + DUNST_OFFSET))
         fi
-      else
-        OFFSET_X=$((GAPS + DUNST_OFFSET))
-        OFFSET_Y=$((GAPS + DUNST_OFFSET))
-      fi
-    else
-      OFFSET_X=$((GAPS + DUNST_OFFSET))
-      OFFSET_Y=$((GAPS + DUNST_OFFSET))
-    fi
 
-    # Extract colors from wal cache (host and VMs)
-    WAL_COLORS="$HOME/.cache/wal/colors.json"
-    if [ -f "$WAL_COLORS" ]; then
-      BG_RAW=$(${pkgs.jq}/bin/jq -r '.special.background // .colors.color0' "$WAL_COLORS")
-      FG=$(${pkgs.jq}/bin/jq -r '.special.foreground // .colors.color7' "$WAL_COLORS")
-      PREFIX=$(${pkgs.jq}/bin/jq -r '.colors.color3' "$WAL_COLORS")
-      FRAME=$(${pkgs.jq}/bin/jq -r '.colors.color5' "$WAL_COLORS")
-      FRAME_LOW=$(${pkgs.jq}/bin/jq -r '.colors.color2' "$WAL_COLORS")
-      FRAME_CRIT=$(${pkgs.jq}/bin/jq -r '.colors.color1' "$WAL_COLORS")
-    else
-      BG_RAW="#101116"
-      FG="#c0caf5"
-      PREFIX="#e0af68"
-      FRAME="#bb9af7"
-      FRAME_LOW="#98971a"
-      FRAME_CRIT="#cc241d"
-    fi
-    BG_LOW_RAW="$BG_RAW"
-    BG="''${BG_RAW}''${OVERLAY_ALPHA}"
-    BG_LOW="''${BG_LOW_RAW}''${OVERLAY_ALPHA}"
+        # Extract colors from wal cache (host and VMs)
+        WAL_COLORS="$HOME/.cache/wal/colors.json"
+        if [ -f "$WAL_COLORS" ]; then
+          BG_RAW=$(${pkgs.jq}/bin/jq -r '.special.background // .colors.color0' "$WAL_COLORS")
+          FG=$(${pkgs.jq}/bin/jq -r '.special.foreground // .colors.color7' "$WAL_COLORS")
+          PREFIX=$(${pkgs.jq}/bin/jq -r '.colors.color3' "$WAL_COLORS")
+          FRAME=$(${pkgs.jq}/bin/jq -r '.colors.color5' "$WAL_COLORS")
+          FRAME_LOW=$(${pkgs.jq}/bin/jq -r '.colors.color2' "$WAL_COLORS")
+          FRAME_CRIT=$(${pkgs.jq}/bin/jq -r '.colors.color1' "$WAL_COLORS")
+        else
+          BG_RAW="#101116"
+          FG="#c0caf5"
+          PREFIX="#e0af68"
+          FRAME="#bb9af7"
+          FRAME_LOW="#98971a"
+          FRAME_CRIT="#cc241d"
+        fi
+        BG_LOW_RAW="$BG_RAW"
+        BG="''${BG_RAW}''${OVERLAY_ALPHA}"
+        BG_LOW="''${BG_LOW_RAW}''${OVERLAY_ALPHA}"
 
-    # Generate the full dunstrc
-    ${pkgs.coreutils}/bin/cat > "$DUNSTRC" << DUNSTRC_EOF
-# Generated by Hydrix - DO NOT EDIT
-# Regenerated when colors change (walrgb, randomwalrgb, etc.)
+        # Generate the full dunstrc
+        ${pkgs.coreutils}/bin/cat > "$DUNSTRC" << DUNSTRC_EOF
+    # Generated by Hydrix - DO NOT EDIT
+    # Regenerated when colors change (walrgb, randomwalrgb, etc.)
 
-[global]
-font = $FONT_NAME $FONT_SIZE
+    [global]
+    font = $FONT_NAME $FONT_SIZE
 
-monitor = ${
+    monitor = ${
       if cfg.ui.dunstEnablePopup
       then "0"
       else "-1"
     }
-follow = mouse
+    follow = mouse
 
-width = $DUNST_WIDTH
-height = 300
-origin = top-right
-offset = ''${OFFSET_X}x''${OFFSET_Y}
-scale = 0
+    width = $DUNST_WIDTH
+    height = 300
+    origin = top-right
+    offset = ''${OFFSET_X}x''${OFFSET_Y}
+    scale = 0
 
-progress_bar = true
-progress_bar_height = 10
-progress_bar_frame_width = 1
-progress_bar_min_width = 150
-progress_bar_max_width = 300
+    progress_bar = true
+    progress_bar_height = 10
+    progress_bar_frame_width = 1
+    progress_bar_min_width = 150
+    progress_bar_max_width = 300
 
-notification_limit = 5
-indicate_hidden = true
-transparency = 0
-separator_height = 0
-padding = $PADDING
-horizontal_padding = $H_PADDING
-text_icon_padding = 0
-frame_width = $BORDER
-gap_size = 0
-separator_color = frame
-sort = true
+    notification_limit = 5
+    indicate_hidden = true
+    transparency = 0
+    separator_height = 0
+    padding = $PADDING
+    horizontal_padding = $H_PADDING
+    text_icon_padding = 0
+    frame_width = $BORDER
+    gap_size = 0
+    separator_color = frame
+    sort = true
 
-line_height = 0
-markup = full
-format = "<b><span foreground='$PREFIX'>%s</span></b>\n<span foreground='$FG'>%b</span>"
-alignment = left
-vertical_alignment = center
-show_age_threshold = 60
-ellipsize = middle
-word_wrap = yes
-ignore_newline = false
-stack_duplicates = true
-hide_duplicate_count = false
-show_indicators = true
+    line_height = 0
+    markup = full
+    format = "<b><span foreground='$PREFIX'>%s</span></b>\n<span foreground='$FG'>%b</span>"
+    alignment = left
+    vertical_alignment = center
+    show_age_threshold = 60
+    ellipsize = middle
+    word_wrap = yes
+    ignore_newline = false
+    stack_duplicates = true
+    hide_duplicate_count = false
+    show_indicators = true
 
-enable_recursive_icon_lookup = true
-icon_position = left
-min_icon_size = 32
-max_icon_size = 64
+    enable_recursive_icon_lookup = true
+    icon_position = left
+    min_icon_size = 32
+    max_icon_size = 64
 
-sticky_history = true
-history_length = 20
+    sticky_history = true
+    history_length = 20
 
-browser = ${cfg.ui.dunstBrowser}
-always_run_script = true
-title = Dunst
-class = Dunst
-corner_radius = $PILL_RADIUS
-ignore_dbusclose = false
-sound = ${
+    browser = ${cfg.ui.dunstBrowser}
+    always_run_script = true
+    title = Dunst
+    class = Dunst
+    corner_radius = $PILL_RADIUS
+    ignore_dbusclose = false
+    sound = ${
       if cfg.ui.dunstSound != null && cfg.ui.dunstSound != ""
       then "true"
       else "false"
     }
-sound_command = ${
+    sound_command = ${
       if cfg.ui.dunstSound != null && cfg.ui.dunstSound != ""
       then "canberra-gtk-play -f ${cfg.ui.dunstSound}"
       else ""
     }
 
-mouse_left_click = close_current
-mouse_middle_click = do_action, close_current
-mouse_right_click = close_all
+    mouse_left_click = close_current
+    mouse_middle_click = do_action, close_current
+    mouse_right_click = close_all
 
-[urgency_low]
-background = "$BG_LOW"
-foreground = "$FG"
-frame_color = "$FRAME_LOW"
-timeout = ${toString cfg.ui.dunstUrgencyTimeout.low}
+    [urgency_low]
+    background = "$BG_LOW"
+    foreground = "$FG"
+    frame_color = "$FRAME_LOW"
+    timeout = ${toString cfg.ui.dunstUrgencyTimeout.low}
 
-[urgency_normal]
-background = "$BG"
-foreground = "$FG"
-frame_color = "$FRAME"
-timeout = ${toString cfg.ui.dunstUrgencyTimeout.normal}
+    [urgency_normal]
+    background = "$BG"
+    foreground = "$FG"
+    frame_color = "$FRAME"
+    timeout = ${toString cfg.ui.dunstUrgencyTimeout.normal}
 
-[urgency_critical]
-background = "$BG"
-foreground = "$FG"
-frame_color = "$FRAME_CRIT"
-timeout = ${toString cfg.ui.dunstUrgencyTimeout.critical}
-DUNSTRC_EOF
+    [urgency_critical]
+    background = "$BG"
+    foreground = "$FG"
+    frame_color = "$FRAME_CRIT"
+    timeout = ${toString cfg.ui.dunstUrgencyTimeout.critical}
+    DUNSTRC_EOF
   '';
 in {
   config = lib.mkIf cfg.enable {
@@ -209,7 +213,7 @@ in {
       '')
     ];
 
-    home-manager.users.${username} = { lib, ... }: {
+    home-manager.users.${username} = {lib, ...}: {
       services.dunst.enable = false;
 
       # Write dunstrc via home.activation (like hyprland.conf) - user can edit afterwards
