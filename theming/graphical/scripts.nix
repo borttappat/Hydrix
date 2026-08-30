@@ -453,9 +453,9 @@
   # Random wallpaper theme applicator
   randomWalRgbScript = pkgs.writeShellScriptBin "randomwalrgb" ''
     #!/usr/bin/env bash
-    DEFAULT_WALLPAPER_DIR="$HOME/hydrix-config/wallpapers"
+    DEFAULT_WALLPAPER_DIR="$HOME/wallpapers"
     if [ ! -d "$DEFAULT_WALLPAPER_DIR" ]; then
-      DEFAULT_WALLPAPER_DIR="$HOME/wallpapers"
+      DEFAULT_WALLPAPER_DIR="$HOME/hydrix-config/wallpapers"
     fi
     WALLPAPER_DIR="''${1:-$DEFAULT_WALLPAPER_DIR}"
     WAL_ACTIVE="$HOME/.cache/wal/.active"
