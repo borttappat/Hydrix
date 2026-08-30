@@ -535,9 +535,12 @@ in
       home.activation.hyprlandGenerated = lib.hm.dag.entryAfter ["writeBoundary"] ''
         _dir="$HOME/.config/hypr"
         mkdir -p "$_dir"
-        [ -L "$_dir/hydrix-generated.conf" ] && rm -f "$_dir/hydrix-generated.conf"
         _stamp="$_dir/.hydrix-generated-stamp"
         if [ "$(cat "$_stamp" 2>/dev/null)" != "${hyprlandGeneratedConf}" ]; then
+          # Unconditional, not just the symlink case: a stale root-owned or
+          # read-only regular file here also makes cp fail with EACCES. rm
+          # only needs write permission on $_dir, not on the target itself.
+          rm -f "$_dir/hydrix-generated.conf"
           cp ${hyprlandGeneratedConf} "$_dir/hydrix-generated.conf"
           echo "${hyprlandGeneratedConf}" > "$_stamp"
           touch /tmp/hypr-gen-changed
