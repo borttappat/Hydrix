@@ -4,10 +4,11 @@
 # generate-dunstrc script from the wal colors cache (~/.cache/wal/colors.json).
 # Sizing and layout values come from hydrix.graphical.* (Nix config).
 # Notifications appear top-right. X offset is gaps + ui.dunstOffset from the screen
-# edge; Y offset is (barHeight - gaps) + ui.dunstOffset, measured from the bar's
-# reserved height rather than gaps, so both axes leave the same ui.dunstOffset
-# clearance from a tiled window's edge (tiled windows sit flush against the bar's
-# exclusive zone on top, but gaps away from the screen edge on the sides).
+# edge, mirroring a tiled window's gaps_out on the sides. Y offset is ui.dunstOffset
+# alone: Hyprland's exclusive-zone reservation for the bar already pushes dunst below
+# it the same way gaps_out top=0 already pushes tiled windows below it, so no gaps or
+# barHeight term belongs on this axis. Both axes end up leaving the same ui.dunstOffset
+# clearance from a tiled window's edge.
 #
 # This module:
 # - Disables home-manager's dunst service (we manage it ourselves)
@@ -54,7 +55,7 @@
         # Pill radius: matches waybar island pills (cornerRadius * pillRadiusScale)
         PILL_RADIUS=$((CORNER_RADIUS * ${toString (builtins.floor cfg.ui.pillRadiusScale)}))
 
-        # Offset (see module header): X = gaps + dunstOffset, Y = (barHeight - gaps) + dunstOffset
+        # Offset (see module header): X = gaps + dunstOffset, Y = dunstOffset
         # User override: edit the offset line in dunstrc - script preserves non-default values
         if [ -n "$OFFSET_X" ] && [ -n "$OFFSET_Y" ]; then
           : # Use env vars from home.activation
@@ -64,20 +65,20 @@
           if [ -n "$_old_offset" ]; then
             read -r _old_x _old_y <<< "$_old_offset"
             # Only preserve if different from current formula
-            if [ "$_old_x" != "$((GAPS + DUNST_OFFSET))" ] || [ "$_old_y" != "$((BAR_HEIGHT - GAPS + DUNST_OFFSET))" ]; then
+            if [ "$_old_x" != "$((GAPS + DUNST_OFFSET))" ] || [ "$_old_y" != "$DUNST_OFFSET" ]; then
               OFFSET_X=$_old_x
               OFFSET_Y=$_old_y
             else
               OFFSET_X=$((GAPS + DUNST_OFFSET))
-              OFFSET_Y=$((BAR_HEIGHT - GAPS + DUNST_OFFSET))
+              OFFSET_Y=$DUNST_OFFSET
             fi
           else
             OFFSET_X=$((GAPS + DUNST_OFFSET))
-            OFFSET_Y=$((BAR_HEIGHT - GAPS + DUNST_OFFSET))
+            OFFSET_Y=$DUNST_OFFSET
           fi
         else
           OFFSET_X=$((GAPS + DUNST_OFFSET))
-          OFFSET_Y=$((BAR_HEIGHT - GAPS + DUNST_OFFSET))
+          OFFSET_Y=$DUNST_OFFSET
         fi
 
         # Extract colors from wal cache (host and VMs)
