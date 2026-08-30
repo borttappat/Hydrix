@@ -637,15 +637,15 @@ prompt_clone_or_fresh() {
 # ========== HARDWARE VALIDATION ==========
 
 validate_existing_config() {
-    local config_file="$1"
+    local hw_file="$1"
     local warnings=0
 
     log "Validating existing config against detected hardware..."
 
-    # Extract values from existing config
-    local existing_platform=$(grep -oP 'platform\s*=\s*"\K[^"]+' "$config_file" 2>/dev/null || echo "")
-    local existing_pci=$(grep -oP 'wifiPciAddress\s*=\s*"\K[^"]+' "$config_file" 2>/dev/null || echo "")
-    local existing_isAsus=$(grep -oP 'isAsus\s*=\s*\K(true|false)' "$config_file" 2>/dev/null || echo "")
+    # Extract values from the existing hardware file
+    local existing_platform=$(grep -oP 'platform\s*=\s*"\K[^"]+' "$hw_file" 2>/dev/null || echo "")
+    local existing_pci=$(grep -oP 'wifiPciAddress\s*=\s*"\K[^"]+' "$hw_file" 2>/dev/null || echo "")
+    local existing_isAsus=$(grep -oP 'isAsus\s*=\s*\K(true|false)' "$hw_file" 2>/dev/null || echo "")
 
     # Compare with detected
     if [[ -n "$existing_platform" && "$existing_platform" != "${CONFIG[platform]}" ]]; then
@@ -689,6 +689,46 @@ regenerate_hardware_config() {
 
     # Boot loader is handled by the Hydrix framework (GRUB defaults for non-disko installs)
     # No need to extract from /etc/nixos/configuration.nix
+
+    append_hardware_options "$hw_file"
+}
+
+# Append the hydrix.hardware/hydrix.disko block to an already-written
+# <serial>-hardware.nix, just before its closing brace. Kept out of
+# machines/<serial>.nix so a disk/hardware change doesn't touch unrelated
+# preferences there, and vice versa. disko.enable is always false in setup
+# mode (no partitioning here), but platform/isAsus/vfio still apply.
+append_hardware_options() {
+    local hw_file="$1"
+    local template_file="$SCRIPT_DIR/../templates/user-config/machines/installer-hardware.nix"
+
+    if [[ ! -f "$template_file" ]]; then
+        warn "  Hardware options template not found: $template_file"
+        return
+    fi
+
+    local tmp_out
+    tmp_out=$(mktemp)
+
+    head -n -1 "$hw_file" > "$tmp_out"
+    sed \
+        -e "s|@DISKO_ENABLE@|false|g" \
+        -e "s|@DEVICE@|${CONFIG[device]:-}|g" \
+        -e "s|@SWAP_SIZE@|${CONFIG[swapSize]:-16G}|g" \
+        -e "s|@LAYOUT@|${CONFIG[layout]:-full-disk-plain}|g" \
+        -e "s|@EFI_PARTITION@|${CONFIG[efiPartition]:-}|g" \
+        -e "s|@NIXOS_PARTITION@|${CONFIG[nixosPartition]:-}|g" \
+        -e "s|@PLATFORM@|${CONFIG[platform]}|g" \
+        -e "s|@IS_ASUS@|${CONFIG[isAsus]}|g" \
+        -e "s|@VFIO_ENABLE@|${CONFIG[vfioEnable]}|g" \
+        -e "s|@WIFI_PCI_ID@|${CONFIG[wifiPciId]}|g" \
+        -e "s|@WIFI_PCI_ADDRESS@|${CONFIG[wifiPciAddress]}|g" \
+        -e "s|@GRUB_GFXMODE@|${CONFIG[grubGfxmode]}|g" \
+        -e "s|@EFI_BOOTLOADER_ID@|${CONFIG[efiBootloaderId]:-nixos}|g" \
+        "$template_file" >> "$tmp_out"
+    echo "}" >> "$tmp_out"
+
+    mv "$tmp_out" "$hw_file"
 }
 
 # ========== SYSTEM DETECTION ==========
@@ -837,6 +877,7 @@ copy_hardware_config() {
         log "Copying hardware configuration..."
         cp "${CONFIG[hardwareConfigPath]}" "$dest"
         log "  Copied to: $dest"
+        append_hardware_options "$dest"
     fi
 }
 
@@ -1234,6 +1275,17 @@ generate_machine_nix() {
     [[ -z "$swap_size" || "$swap_size" == "0G" ]] && swap_size="8G"
     grub_gfxmode="1920x1080x32"
 
+    # Stash the detected values for append_hardware_options, called by
+    # copy_hardware_config right after this -- disko.*/hardware.* now live in
+    # the hardware file, not this template, so they can't be sed'd in here.
+    CONFIG[device]="${CONFIG[diskoDevice]}"
+    CONFIG[layout]="$layout"
+    CONFIG[swapSize]="$swap_size"
+    CONFIG[nixosPartition]="${CONFIG[diskoDevice]}"
+    CONFIG[efiPartition]="$efi_part"
+    CONFIG[efiBootloaderId]="nixos"
+    CONFIG[grubGfxmode]="$grub_gfxmode"
+
     # Pipe through a second sed to drop the hashedPassword line: setup mode cannot
     # safely read the existing hash (requires root), and setting "!" locks the account.
     # The user can add their hash manually with: mkpasswd -m sha-512
@@ -1241,22 +1293,9 @@ generate_machine_nix() {
         -e "s|@SERIAL@|${CONFIG[serial]}|g" \
         -e "s|@DATE@|${gen_date}|g" \
         -e "s|@PASSWORD_HASH@|__SETUP_NO_PASSWORD__|g" \
-        -e "s|@DISKO_ENABLE@|false|g" \
-        -e "s|@DEVICE@|${CONFIG[diskoDevice]}|g" \
-        -e "s|@SWAP_SIZE@|${swap_size}|g" \
-        -e "s|@LAYOUT@|${layout}|g" \
-        -e "s|@NIXOS_PARTITION@|${CONFIG[diskoDevice]}|g" \
-        -e "s|@EFI_PARTITION@|${efi_part}|g" \
-        -e "s|@EFI_BOOTLOADER_ID@|nixos|g" \
         -e "s|@ROUTER_TYPE@|${CONFIG[routerType]}|g" \
-        -e "s|@PLATFORM@|${CONFIG[platform]}|g" \
-        -e "s|@IS_ASUS@|${CONFIG[isAsus]}|g" \
-        -e "s|@WIFI_PCI_ID@|${CONFIG[wifiPciId]}|g" \
-        -e "s|@WIFI_PCI_ADDRESS@|${CONFIG[wifiPciAddress]}|g" \
-        -e "s|@VFIO_ENABLE@|${CONFIG[vfioEnable]}|g" \
         -e "s|@WAN_MODE@|${CONFIG[wanMode]}|g" \
         -e "s|@WAN_DEVICE@|${CONFIG[wanDevice]}|g" \
-        -e "s|@GRUB_GFXMODE@|${grub_gfxmode}|g" \
         -e "s|@STATE_VERSION@|${CONFIG[stateVersion]}|g" \
         "$template_file" | \
     sed -e "/__SETUP_NO_PASSWORD__/d" \
@@ -1340,8 +1379,9 @@ generate_machine_only() {
 use_existing_machine() {
     log "Using existing machine config..."
 
-    # Validate the existing config against detected hardware
-    validate_existing_config "$CONFIG_DIR/machines/${CONFIG[serial]}.nix"
+    # Validate the existing config against detected hardware (platform/
+    # wifiPciAddress/isAsus live in the hardware file, not the machine file)
+    validate_existing_config "$CONFIG_DIR/machines/${CONFIG[serial]}-hardware.nix"
 
     # Regenerate hardware config from current system
     regenerate_hardware_config

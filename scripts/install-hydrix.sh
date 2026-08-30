@@ -1054,15 +1054,15 @@ detect_wifi_credentials() {
 # ========== HARDWARE VALIDATION ==========
 
 validate_existing_config() {
-    local config_file="$1"
+    local hw_file="$1"
     local warnings=0
 
     log "Validating existing config against detected hardware..."
 
-    # Extract values from existing config
-    local existing_platform=$(grep -oP 'platform\s*=\s*"\K[^"]+' "$config_file" 2>/dev/null || echo "")
-    local existing_pci=$(grep -oP 'wifiPciAddress\s*=\s*"\K[^"]+' "$config_file" 2>/dev/null || echo "")
-    local existing_isAsus=$(grep -oP 'isAsus\s*=\s*\K(true|false)' "$config_file" 2>/dev/null || echo "")
+    # Extract values from the existing hardware file
+    local existing_platform=$(grep -oP 'platform\s*=\s*"\K[^"]+' "$hw_file" 2>/dev/null || echo "")
+    local existing_pci=$(grep -oP 'wifiPciAddress\s*=\s*"\K[^"]+' "$hw_file" 2>/dev/null || echo "")
+    local existing_isAsus=$(grep -oP 'isAsus\s*=\s*\K(true|false)' "$hw_file" 2>/dev/null || echo "")
 
     # Compare with detected
     if [[ -n "$existing_platform" && "$existing_platform" != "${CONFIG[platform]}" ]]; then
@@ -1091,74 +1091,6 @@ validate_existing_config() {
     fi
 }
 
-patch_disko_config() {
-    # Rewrite the disko block in an existing machine config for reinstall.
-    # Old configs may have enable=false, truncated devices, or commented-out layout.
-    local machine_file="$1"
-    local device="${CONFIG[device]}"
-    local layout="${CONFIG[layout]}"
-    local swap="${CONFIG[swapSize]:-16G}"
-    local efi_id="${CONFIG[efiBootloaderId]:-nixos}"
-    local efi_part="${CONFIG[efiPartition]:-}"
-    local nixos_part="${CONFIG[nixosPartition]:-}"
-
-    log "Patching disko settings for reinstall (device=$device, layout=$layout)..."
-
-    local tmp_block tmp_out
-    tmp_block=$(mktemp)
-    tmp_out=$(mktemp)
-
-    if [[ "$layout" == dual-boot-* ]]; then
-        cat > "$tmp_block" <<BLOCK
-    disko = {
-      enable = true;
-      device = "${device}";
-      swapSize = "${swap}";
-      layout = "${layout}";
-      nixosPartition = "${nixos_part}";
-      efiPartition = "${efi_part}";
-      efiBootloaderId = "${efi_id}";
-    };
-BLOCK
-    else
-        cat > "$tmp_block" <<BLOCK
-    disko = {
-      enable = true;
-      device = "${device}";
-      swapSize = "${swap}";
-      layout = "${layout}";
-      efiBootloaderId = "${efi_id}";
-    };
-BLOCK
-    fi
-
-    awk -v bf="$tmp_block" '
-        BEGIN { in_block=0; replaced=0 }
-        !replaced && /disko[[:space:]]*=[[:space:]]*\{/ {
-            in_block=1
-            while ((getline line < bf) > 0) print line
-            close(bf)
-            replaced=1
-            next
-        }
-        in_block {
-            if (/^[[:space:]]*};/) in_block=0
-            next
-        }
-        { print }
-    ' "$machine_file" > "$tmp_out"
-
-    rm -f "$tmp_block"
-
-    if grep -q 'enable = true' "$tmp_out" && ! cmp -s "$machine_file" "$tmp_out"; then
-        mv "$tmp_out" "$machine_file"
-        log "  Updated: enable=true, device=${device}, layout=${layout}"
-    else
-        rm -f "$tmp_out"
-        warn "Could not patch disko block — update hydrix.disko manually after install"
-    fi
-}
-
 generate_hardware_config() {
     local target_dir="$1"
     local hw_file="$target_dir/machines/${CONFIG[serial]}-hardware.nix"
@@ -1175,6 +1107,7 @@ generate_hardware_config() {
         else
             echo "$raw_config" > "$hw_file"
         fi
+        append_hardware_options "$hw_file"
         log "  Generated: $hw_file"
     else
         warn "  Failed to generate hardware config"
@@ -1182,7 +1115,104 @@ generate_hardware_config() {
     fi
 }
 
+# Append the hydrix.hardware/hydrix.disko block to an already-written
+# <serial>-hardware.nix, just before its closing brace. Kept out of
+# machines/<serial>.nix so a disk/hardware change doesn't touch unrelated
+# preferences there, and vice versa.
+append_hardware_options() {
+    local hw_file="$1"
+    local template_file="$SCRIPT_DIR/../templates/user-config/machines/installer-hardware.nix"
+
+    if [[ ! -f "$template_file" ]]; then
+        warn "  Hardware options template not found: $template_file"
+        return
+    fi
+
+    local tmp_out
+    tmp_out=$(mktemp)
+
+    head -n -1 "$hw_file" > "$tmp_out"
+    sed \
+        -e "s|@DISKO_ENABLE@|true|g" \
+        -e "s|@DEVICE@|${CONFIG[device]}|g" \
+        -e "s|@SWAP_SIZE@|${CONFIG[swapSize]}|g" \
+        -e "s|@LAYOUT@|${CONFIG[layout]}|g" \
+        -e "s|@EFI_PARTITION@|${CONFIG[efiPartition]}|g" \
+        -e "s|@NIXOS_PARTITION@|${CONFIG[nixosPartition]}|g" \
+        -e "s|@PLATFORM@|${CONFIG[platform]}|g" \
+        -e "s|@IS_ASUS@|${CONFIG[isAsus]}|g" \
+        -e "s|@VFIO_ENABLE@|${CONFIG[vfioEnable]}|g" \
+        -e "s|@WIFI_PCI_ID@|${CONFIG[wifiPciId]}|g" \
+        -e "s|@WIFI_PCI_ADDRESS@|${CONFIG[wifiPciAddress]}|g" \
+        -e "s|@GRUB_GFXMODE@|${CONFIG[grubGfxmode]}|g" \
+        -e "s|@EFI_BOOTLOADER_ID@|${CONFIG[efiBootloaderId]}|g" \
+        "$template_file" >> "$tmp_out"
+    echo "}" >> "$tmp_out"
+
+    mv "$tmp_out" "$hw_file"
+}
+
 # ========== DISK OPERATIONS ==========
+
+# In use-existing mode, default disk/layout from the existing hardware file
+# instead of blindly re-prompting: reinstalling onto unchanged hardware needs
+# zero re-entry, and this is what keeps the actual partitioning consistent
+# with the retained config instead of silently disagreeing with it. Returns 1
+# (fall through to the normal select_disk/select_layout prompts) if there's
+# nothing to default from, the layout is dual-boot (partition numbers aren't
+# safe to trust across a reinstall), or the user declines the default.
+confirm_existing_disk_layout() {
+    [[ "$MODE" == "use-existing" ]] || return 1
+    local hw_file="$CLONED_REPO/machines/${CONFIG[serial]}-hardware.nix"
+    [[ -f "$hw_file" ]] || return 1
+
+    local existing_device existing_layout
+    existing_device=$(grep -oP 'device\s*=\s*"\K[^"]+' "$hw_file" 2>/dev/null | head -1)
+    existing_layout=$(grep -oP 'layout\s*=\s*"\K[^"]+' "$hw_file" 2>/dev/null | head -1)
+    [[ -n "$existing_device" && -n "$existing_layout" ]] || return 1
+    [[ "$existing_layout" == dual-boot-* ]] && return 1
+
+    echo ""
+    log "Existing config uses: device=$existing_device, layout=$existing_layout"
+    read -p "Reinstall onto the same disk/layout? [Y/n]: " keep_choice
+    [[ "${keep_choice:-y}" =~ ^[Yy]$ ]] || return 1
+
+    local existing_swap existing_efi_id
+    existing_swap=$(grep -oP 'swapSize\s*=\s*"\K[^"]+' "$hw_file" 2>/dev/null | head -1)
+    existing_efi_id=$(grep -oP 'efiBootloaderId\s*=\s*"\K[^"]+' "$hw_file" 2>/dev/null | head -1)
+
+    CONFIG[device]="$existing_device"
+    CONFIG[layout]="$existing_layout"
+    [[ -n "$existing_swap" ]] && CONFIG[swapSize]="$existing_swap"
+    [[ -n "$existing_efi_id" ]] && CONFIG[efiBootloaderId]="$existing_efi_id"
+    CONFIG[efiPartition]=""
+    CONFIG[nixosPartition]=""
+    log "Reusing: device=${CONFIG[device]}, layout=${CONFIG[layout]}"
+
+    # A reinstall reformats the disk fresh either way, so an encrypted layout
+    # still needs a new LUKS passphrase even when the device/layout is reused.
+    if [[ "${CONFIG[layout]}" == *luks* ]]; then
+        echo ""
+        while true; do
+            read -s -p "Enter disk encryption password: " pass1
+            echo ""
+            read -s -p "Confirm disk encryption password: " pass2
+            echo ""
+
+            if [[ -z "$pass1" ]]; then
+                warn "Password cannot be empty"
+            elif [[ "$pass1" != "$pass2" ]]; then
+                warn "Passwords do not match"
+            else
+                CONFIG[diskPassword]="$pass1"
+                log "Disk encryption password set"
+                break
+            fi
+        done
+    fi
+
+    return 0
+}
 
 select_disk() {
     log "Available disks:"
@@ -1581,28 +1611,12 @@ _finalize_dual_boot_entries() {
 
 # ========== CONFIGURATION GATHERING ==========
 
-gather_user_info() {
-    echo ""
-    log "=== User Configuration ==="
-
-    while true; do
-        read -p "Username [default: user]: " username
-        username="${username:-user}"
-        # Validate username if validation functions are available
-        if type check_username &>/dev/null; then
-            if check_username "$username"; then
-                CONFIG[username]="$username"
-                break
-            fi
-            # check_username returns 1 on failure, loop continues
-        else
-            CONFIG[username]="$username"
-            break
-        fi
-    done
-
+confirm_machine_serial() {
     # Machine serial identification (for config file naming)
     # Visual hostname is always "hydrix"
+    # Runs before select_config_source, since the confirmed serial is what
+    # decides whether an existing machines/<serial>.nix is found in the
+    # cloned repo.
     echo ""
     log "Machine identifier: ${CONFIG[serial]}"
     log "  (Used for config filename - reinstalls on same hardware auto-detect this)"
@@ -1640,8 +1654,47 @@ gather_user_info() {
     # Visual hostname is always "hydrix"
     CONFIG[hostname]="hydrix"
     log "Hostname (visual): ${CONFIG[hostname]}"
+}
 
-    # Password
+# If the cloned repo already has a real username in modules/user.nix, reuse
+# it instead of prompting -- username is one shared identity across every
+# machine in the repo (see modules/user.nix's own header comment), not a
+# per-install question, whether this install is "use-existing" or "add".
+detect_existing_username() {
+    [[ -n "$CLONED_REPO" ]] || return 1
+    local user_file="$CLONED_REPO/modules/user.nix"
+    [[ -f "$user_file" ]] || return 1
+
+    local existing_username
+    existing_username=$(grep -oP 'hydrix\.username\s*=\s*lib\.mkDefault\s*"\K[^"]+' "$user_file" 2>/dev/null || echo "")
+    [[ -n "$existing_username" ]] || return 1
+
+    CONFIG[username]="$existing_username"
+    return 0
+}
+
+gather_username() {
+    echo ""
+    log "=== User Configuration ==="
+
+    while true; do
+        read -p "Username [default: user]: " username
+        username="${username:-user}"
+        # Validate username if validation functions are available
+        if type check_username &>/dev/null; then
+            if check_username "$username"; then
+                CONFIG[username]="$username"
+                break
+            fi
+            # check_username returns 1 on failure, loop continues
+        else
+            CONFIG[username]="$username"
+            break
+        fi
+    done
+}
+
+gather_password() {
     while true; do
         read -s -p "User password: " pass1
         echo ""
@@ -2209,8 +2262,9 @@ generate_config_to_temp() {
         # If the flake uses a local path: for hydrix, redirect it so nix flake lock works
         handle_local_hydrix_path "$TEMP_CONFIG"
 
-        # Validate the existing config
-        validate_existing_config "$TEMP_CONFIG/machines/${CONFIG[serial]}.nix"
+        # Validate the existing config (platform/wifiPciAddress/isAsus live in
+        # the hardware file, not the machine file)
+        validate_existing_config "$TEMP_CONFIG/machines/${CONFIG[serial]}-hardware.nix"
 
         # Always regenerate hardware-configuration.nix
         generate_hardware_config "$TEMP_CONFIG"
@@ -2391,22 +2445,9 @@ generate_machine_nix() {
         -e "s|@SERIAL@|${CONFIG[serial]}|g" \
         -e "s|@DATE@|${gen_date}|g" \
         -e "s|@PASSWORD_HASH@|${password_hash}|g" \
-        -e "s|@DISKO_ENABLE@|true|g" \
-        -e "s|@DEVICE@|${CONFIG[device]}|g" \
-        -e "s|@SWAP_SIZE@|${CONFIG[swapSize]}|g" \
-        -e "s|@LAYOUT@|${CONFIG[layout]}|g" \
-        -e "s|@EFI_PARTITION@|${CONFIG[efiPartition]}|g" \
-        -e "s|@NIXOS_PARTITION@|${CONFIG[nixosPartition]}|g" \
         -e "s|@ROUTER_TYPE@|${CONFIG[routerType]}|g" \
-        -e "s|@PLATFORM@|${CONFIG[platform]}|g" \
-        -e "s|@IS_ASUS@|${CONFIG[isAsus]}|g" \
-        -e "s|@VFIO_ENABLE@|${CONFIG[vfioEnable]}|g" \
-        -e "s|@WIFI_PCI_ID@|${CONFIG[wifiPciId]}|g" \
-        -e "s|@WIFI_PCI_ADDRESS@|${CONFIG[wifiPciAddress]}|g" \
         -e "s|@WAN_MODE@|${CONFIG[wanMode]}|g" \
         -e "s|@WAN_DEVICE@|${CONFIG[wanDevice]}|g" \
-        -e "s|@GRUB_GFXMODE@|${CONFIG[grubGfxmode]}|g" \
-        -e "s|@EFI_BOOTLOADER_ID@|${CONFIG[efiBootloaderId]}|g" \
         -e "s|@STATE_VERSION@|${CONFIG[stateVersion]}|g" \
         "$template_file" > "$config_dir/machines/${CONFIG[serial]}.nix"
 
@@ -3849,11 +3890,29 @@ access-tokens = github.com=$gh_token"
     fi
     detect_hardware_serial
 
-    # User configuration (needed before config source selection)
-    gather_user_info
+    # Confirm the serial before config-source selection, since it decides
+    # whether an existing machines/<serial>.nix is found in the cloned repo
+    confirm_machine_serial
 
-    # Config source selection (fresh or clone)
+    # Config source selection (fresh or clone) -- resolves MODE
     select_config_source
+
+    # Username is one shared identity across every machine in the repo
+    # (see modules/user.nix) -- reuse it if the cloned repo already has one,
+    # regardless of whether this install is "use-existing" or "add".
+    if detect_existing_username; then
+        log "Reusing existing username: ${CONFIG[username]}"
+    else
+        gather_username
+    fi
+
+    # Password is baked into the reused machine file verbatim in use-existing
+    # mode; only "add"/"fresh" need a fresh one for their new machine file.
+    if [[ "$MODE" == "use-existing" ]]; then
+        log "Reusing existing password (machine config already has hashedPassword)"
+    else
+        gather_password
+    fi
 
     # Locale and WiFi come from the cloned config in use-existing mode
     if [[ "$MODE" != "use-existing" ]]; then
@@ -3866,8 +3925,10 @@ access-tokens = github.com=$gh_token"
         select_hydrix_source
     fi
 
-    select_disk
-    select_layout
+    if ! confirm_existing_disk_layout; then
+        select_disk
+        select_layout
+    fi
     select_cpu_throttle
 
     # Show summary

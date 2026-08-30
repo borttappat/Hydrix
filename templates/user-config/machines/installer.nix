@@ -86,16 +86,6 @@
     # Override here to lock to the static per-VM colorscheme instead:
     # vmThemeSync.focusDaemon.mode = "static";  # options: "dynamic" (default) | "static"
 
-    disko = {
-      enable = @DISKO_ENABLE@;
-      device = "@DEVICE@";
-      swapSize = "@SWAP_SIZE@";
-      layout = "@LAYOUT@";
-      nixosPartition = "@NIXOS_PARTITION@";
-      efiPartition = "@EFI_PARTITION@";
-      efiBootloaderId = "@EFI_BOOTLOADER_ID@";
-    };
-
     # ─────────────────────────────────────────────────────────────────────
     # USER ACCOUNT (optional overrides)
     # ─────────────────────────────────────────────────────────────────────
@@ -126,25 +116,6 @@
       # 2. Place downloaded files in ~/hydrix-config/vpn/
       # 3. Edit vpn/mullvad.nix: map bridges to .conf files, set enable = true
       # 4. Rebuild the router: microvm build microvm-router && microvm restart microvm-router
-
-    # ─────────────────────────────────────────────────────────────────────
-    # HARDWARE
-    # ─────────────────────────────────────────────────────────────────────
-    hardware = {
-      platform = "@PLATFORM@";
-      isAsus = @IS_ASUS@;
-      vfio = {
-        enable = @VFIO_ENABLE@;
-        pciIds = [ "@WIFI_PCI_ID@" ];
-        wifiPciAddress = "@WIFI_PCI_ADDRESS@";
-      };
-      
-      # bluetooth.enable = true;     # DEFAULT: true - Bluetooth + Blueman
-      # i2c.enable = true;           # DEFAULT: true - DDC/CI monitor control
-      # touchpad.enable = true;      # DEFAULT: true - libinput touchpad
-      
-      grub.gfxmodeEfi = "@GRUB_GFXMODE@";
-    };
 
     # ─────────────────────────────────────────────────────────────────────
     # WEBCAM PASSTHROUGH (optional)
