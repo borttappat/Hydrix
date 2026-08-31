@@ -180,6 +180,12 @@ secure_cleanup() {
     if [[ -n "${HYDRIX_CLONE_DIR:-}" ]] && [[ -d "${HYDRIX_CLONE_DIR:-}" ]]; then
         rm -rf "$HYDRIX_CLONE_DIR"
     fi
+
+    # Tear down the early zram swap set up by ensure_early_swap
+    if swapon --show=NAME --noheadings 2>/dev/null | grep -q zram; then
+        swapoff /dev/zram0 2>/dev/null || true
+        echo 1 > /sys/block/zram0/reset 2>/dev/null || true
+    fi
 }
 
 # Register cleanup handler for all exit paths
@@ -267,6 +273,30 @@ throttle_prefix() {
 }
 
 command_exists() { command -v "$1" &>/dev/null; }
+
+# Live-ISO safety net: several Phase-1 steps (flake lock fetch, disk-layout
+# validation, hardware eval) run nix commands before any disk is partitioned,
+# so the later /mnt-backed swapfile (see install_nixos) doesn't exist yet to
+# catch an OOM. zram needs no mounted disk, only RAM, so it's the earliest
+# possible mitigation -- called first thing in main(), before any prompts or
+# nix invocations. Non-fatal: an install with no swap at all is still better
+# off knowing that up front than silently OOM-killing mid-flow.
+ensure_early_swap() {
+    # Best-effort: an install with no swap is no worse off than before this
+    # existed, so failures at any step here just fall through silently.
+    swapon --show=NAME --noheadings 2>/dev/null | grep -q zram && return
+    [[ -e /dev/zram0 ]] || modprobe zram num_devices=1 2>/dev/null || true
+    [[ -e /dev/zram0 ]] || return
+
+    local mem_kb zram_bytes
+    mem_kb=$(awk '/MemTotal/ {print $2}' /proc/meminfo)
+    zram_bytes=$(( mem_kb * 1024 * 3 / 2 ))  # zram compresses, oversizing vs RAM is cheap
+
+    echo "$zram_bytes" > /sys/block/zram0/disksize 2>/dev/null \
+        && mkswap /dev/zram0 >/dev/null 2>&1 \
+        && swapon -p 100 /dev/zram0 2>/dev/null \
+        && log "  Early zram swap enabled ($(( zram_bytes / 1024 / 1024 / 1024 ))GB)"
+}
 
 # ========== GIT AUTHENTICATION ==========
 
@@ -2344,48 +2374,35 @@ validate_generated_config() {
         echo ""
     done
 
-    # Disk layout check. For fresh/add installs, generate_machine_nix already wrote
-    # CONFIG[device]/[layout]/[nixosPartition]/[efiPartition] straight into
-    # machines/<serial>.nix, so those values ARE the disko config -- check them
-    # directly in bash instead of evaluating the full host nixosSystem (home-manager
-    # + stylix + full theming + microvm host, see hydrix.lib.mkHost) just to read
-    # config.disko.devices.disk back out. That eval needs ~24-32GB of address space
-    # (see the swapfile note near install_nixos) and runs here in Phase 1, before
-    # any swap has been provisioned -- on constrained live-ISO memory it can OOM
-    # before ever reaching partitioning. It also never actually verified the device
+    # Disk layout check. By this point in main(), CONFIG[device]/[layout]/
+    # [nixosPartition]/[efiPartition] are always populated -- either by
+    # confirm_existing_disk_layout (use-existing reinstall onto the same
+    # disk) or by the select_disk/select_layout fallback it defers to
+    # otherwise -- so those values ARE the disko config in every mode. Check
+    # them directly in bash instead of evaluating the full host nixosSystem
+    # (home-manager + stylix + full theming + microvm host, see
+    # hydrix.lib.mkHost) just to read config.disko.devices.disk back out.
+    # That eval needs ~24-32GB of address space (see the swapfile note near
+    # install_nixos) and would run here in Phase 1, before any /mnt-backed
+    # swap has been provisioned. It also never actually verified the device
     # path exists; Nix has no way to stat /dev/nvme0n1, it only confirms the
     # expression isn't empty, which is guaranteed by construction here anyway.
-    #
-    # use-existing mode reuses a cloned machines/<serial>.nix verbatim (CONFIG does
-    # not reflect its actual disko settings), so it still needs the real eval.
     log "  Checking disk layout..."
-    if [[ "$MODE" == "use-existing" ]]; then
-        local disko_check
-        disko_check=$(nix eval "$TEMP_CONFIG#nixosConfigurations.${CONFIG[serial]}.config.disko.devices.disk" \
-                      --no-write-lock-file 2>&1) || true
-        if [[ "$disko_check" == "{ }" ]] || [[ -z "$disko_check" ]]; then
-            warn "  Disko devices appear empty, fileSystems will not be generated"
-            warn "  Check hydrix.disko.* settings in your machine config"
-        else
-            success "  Disk layout: OK"
-        fi
-    else
-        case "${CONFIG[layout]}" in
-            full-disk-plain|full-disk-luks)
-                [[ -b "${CONFIG[device]}" ]] || error "Disk device not found: ${CONFIG[device]}"
-                ;;
-            dual-boot-luks|dual-boot-plain)
-                [[ -n "${CONFIG[nixosPartition]}" ]] || error "No NixOS partition set for dual-boot layout"
-                [[ -b "${CONFIG[nixosPartition]}" ]] || error "NixOS partition not found: ${CONFIG[nixosPartition]}"
-                [[ -n "${CONFIG[efiPartition]}" ]] || error "No EFI partition set for dual-boot layout"
-                [[ -b "${CONFIG[efiPartition]}" ]] || error "EFI partition not found: ${CONFIG[efiPartition]}"
-                ;;
-            *)
-                error "Unknown disko layout: ${CONFIG[layout]}"
-                ;;
-        esac
-        success "  Disk layout: OK"
-    fi
+    case "${CONFIG[layout]}" in
+        full-disk-plain|full-disk-luks)
+            [[ -b "${CONFIG[device]}" ]] || error "Disk device not found: ${CONFIG[device]}"
+            ;;
+        dual-boot-luks|dual-boot-plain)
+            [[ -n "${CONFIG[nixosPartition]}" ]] || error "No NixOS partition set for dual-boot layout"
+            [[ -b "${CONFIG[nixosPartition]}" ]] || error "NixOS partition not found: ${CONFIG[nixosPartition]}"
+            [[ -n "${CONFIG[efiPartition]}" ]] || error "No EFI partition set for dual-boot layout"
+            [[ -b "${CONFIG[efiPartition]}" ]] || error "EFI partition not found: ${CONFIG[efiPartition]}"
+            ;;
+        *)
+            error "Unknown disko layout: ${CONFIG[layout]}"
+            ;;
+    esac
+    success "  Disk layout: OK"
 
     echo ""
     success "=========================================="
@@ -3853,6 +3870,8 @@ main() {
     if [[ $EUID -ne 0 ]]; then
         error "This installer must be run as root. Use: sudo bash $0"
     fi
+
+    ensure_early_swap
 
     # If /mnt is mounted with a leftover state file, offer to resume without
     # repeating the entire setup flow.
