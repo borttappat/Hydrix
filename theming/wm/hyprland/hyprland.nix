@@ -441,9 +441,29 @@
       _wal_color
     }
     _apply() { ${pkgs.hyprland}/bin/hyprctl keyword general:col.active_border "rgba($1)" 2>/dev/null || true; }
-    _reapply() {
-      local title profile
-      title=$(${pkgs.hyprland}/bin/hyprctl activewindow -j 2>/dev/null | ${pkgs.jq}/bin/jq -r '.title // empty')
+    # Paints the active border with the inactive-border color, so a window left
+    # behind on an unfocused workspace stops looking focused.
+    _apply_neutral() {
+      local inact hex
+      inact=$(${pkgs.hyprland}/bin/hyprctl getoption general:col.inactive_border -j 2>/dev/null \
+        | ${pkgs.jq}/bin/jq -r '.custom // empty')
+      hex="''${inact%% *}"
+      [ -n "$hex" ] && _apply "$hex"
+    }
+    # Hyprland keeps its last real window as "active" when focus moves to an
+    # empty workspace -- no activewindow event fires, so check on every
+    # workspace/monitor-focus event too whether the reported active window is
+    # actually on the now-focused workspace.
+    _recompute() {
+      local aw aw_ws active_ws title profile
+      aw=$(${pkgs.hyprland}/bin/hyprctl activewindow -j 2>/dev/null)
+      aw_ws=$(printf '%s' "$aw" | ${pkgs.jq}/bin/jq -r '.workspace.id // empty' 2>/dev/null)
+      active_ws=$(${pkgs.hyprland}/bin/hyprctl activeworkspace -j 2>/dev/null | ${pkgs.jq}/bin/jq -r '.id // empty')
+      if [ -z "$aw_ws" ] || [ "$aw_ws" != "$active_ws" ]; then
+        _apply_neutral
+        return
+      fi
+      title=$(printf '%s' "$aw" | ${pkgs.jq}/bin/jq -r '.title // empty')
       profile=$(echo "$title" | sed -n 's/^\[\([^]]*\)\].*/\1/p')
       if [ -n "$profile" ]; then _apply "$(_border_for_profile "$profile")"
       else _apply "$(_wal_color)"; fi
@@ -456,20 +476,16 @@
       echo "$sig"
     }
     case "''${1:-}" in
-      reapply) _reapply ;;
+      reapply) _recompute ;;
       *)
         SIG=$(_sig)
         [ -z "$SIG" ] && exit 1
         SOCKET="''${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/hypr/$SIG/.socket2.sock"
         while true; do
           ${pkgs.socat}/bin/socat - "UNIX-CONNECT:$SOCKET" 2>/dev/null \
-            | ${pkgs.gnugrep}/bin/grep --line-buffered '^activewindow>>' \
+            | ${pkgs.gnugrep}/bin/grep --line-buffered -E '^(activewindow|workspace|focusedmon)>>' \
             | while IFS= read -r _line; do
-                _payload="''${_line#activewindow>>}"
-                _title="''${_payload#*,}"
-                _profile=$(printf '%s' "$_title" | sed -n 's/^\[\([^]]*\)\].*/\1/p')
-                if [ -n "$_profile" ]; then _apply "$(_border_for_profile "$_profile")"
-                else _apply "$(_wal_color)"; fi
+                _recompute
               done
           sleep 1
         done ;;
