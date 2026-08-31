@@ -443,7 +443,7 @@
   '';
 
   clockScript = pkgs.writeShellScript "waybar-clock" ''
-    echo "DATE $(${pkgs.coreutils}/bin/date +'%H:%M %d/%m')"
+    echo "DATE $(${pkgs.coreutils}/bin/date +'%H:%M:%S %d/%m')"
   '';
 
   volumeScript = pkgs.writeShellScript "waybar-volume" ''
@@ -694,7 +694,7 @@
     };
     "custom/clock" = {
       exec = "${clockScript}";
-      interval = 60;
+      interval = 1;
       format = "{}";
       tooltip = false;
       escape = false;
@@ -1043,7 +1043,7 @@
     };
     "custom/clock" = {
       exec = "${clockScript}";
-      interval = 60;
+      interval = 1;
       format = "{}";
       tooltip = false;
       escape = false;
