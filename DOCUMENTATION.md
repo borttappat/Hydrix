@@ -3919,9 +3919,14 @@ All scripts are wrapped via Nix and available in PATH after installation.
 
 | Command | Purpose |
 |---------|---------|
-| `wifi-sync poll` | Query router VM for current networks, compare with local config |
-| `wifi-sync pull` | Pull credentials from router, update `modules/wifi.nix` |
-| `wifi-sync status` | Quick sync status check |
+| `wifi-sync` | Show status: current SSID, known networks, router connections not yet saved |
+| `wifi-sync add SSID PASSWORD` | Push network to router NM, save to credential store |
+| `wifi-sync pull` | Merge all router NM connections into credential store |
+| `wifi-sync list` | Show known networks in credential store |
+| `wifi-sync remove SSID` | Remove a network from credential store and router NM |
+
+Credential store is `secrets/wifi.yaml` (sops mode, recommended) if it exists, otherwise
+`modules/wifi.nix` (legacy mode). See [WiFi Credential Management](#wifi-credential-management-wifi-sync).
 
 ### MicroVM
 
