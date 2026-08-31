@@ -263,7 +263,10 @@ in {
     systemd.services.gitsync-vsock = {
       description = "Gitsync vsock server (port 14512)";
       wantedBy = ["multi-user.target"];
-      after = ["network.target" "gitsync-setup.service"];
+      # network-online.target (not just network.target) so a git command never
+      # races DHCP - network.target is satisfied before an address/DNS exist.
+      wants = ["network-online.target"];
+      after = ["network-online.target" "gitsync-setup.service"];
       serviceConfig = {
         Type = "simple";
         Restart = "always";
@@ -275,7 +278,11 @@ in {
     systemd.services.gitsync-status = {
       description = "Gitsync status server (port 14513)";
       wantedBy = ["multi-user.target"];
-      after = ["network.target"];
+      # The host's readiness poll (wait_for_gitsync) treats this service
+      # answering as "safe to send a git command now" - it must not come up
+      # before the guest actually has a DHCP lease and DNS.
+      wants = ["network-online.target"];
+      after = ["network-online.target"];
       serviceConfig = {
         Type = "simple";
         Restart = "always";

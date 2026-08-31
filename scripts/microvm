@@ -253,12 +253,15 @@ host_daemon_running() {
 }
 
 # Wait for gitsync vsock to be ready
-# Pings the status port (14513); accepts BUSY or IDLE as "up" signals.
+# Pings the git port (14512) directly - the same port the real command runs
+# on. Polling the separate status port (14513) instead used to let the host
+# proceed the instant that unrelated service came up, sometimes racing ahead
+# of gitsync-vsock itself and hitting "connection reset by peer".
 wait_for_gitsync() {
     local timeout="${1:-60}"
     local elapsed=0
 
-    while ! echo "PING" | timeout 2 vsock-cmd "${GITSYNC_CID}" "${GITSYNC_STATUS_PORT}" 2>/dev/null | grep -qE "BUSY|IDLE"; do
+    while ! echo "PING" | timeout 2 vsock-cmd "${GITSYNC_CID}" "${GITSYNC_GIT_PORT}" 2>/dev/null | grep -q "PONG"; do
         sleep 1
         elapsed=$((elapsed + 1))
         if [[ $elapsed -ge $timeout ]]; then
