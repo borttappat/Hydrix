@@ -195,6 +195,18 @@ in {
         SSH_KEY="${sshHostKeyPath}"
         AGE_KEY="${ageKeyPath}"
 
+        # /var/lib/sops-nix is 700 root:root, so an unprivileged caller can't
+        # even stat $AGE_KEY -- [ -f ] then silently reads as "missing" and
+        # falls through to the SSH-key branch below, returning a *different*,
+        # equally valid-looking recipient instead of erroring. That produced a
+        # real incident: a secret got encrypted for the wrong key with no
+        # warning. Refuse outright instead of guessing under insufficient
+        # privilege.
+        if [ "$(id -u)" -ne 0 ]; then
+          echo "Error: sops-age-pubkey must be run with sudo (reads root-only /var/lib/sops-nix/)." >&2
+          exit 1
+        fi
+
         if [ -f "$AGE_KEY" ]; then
           if [ -f "$MASTER_KEY" ]; then
             echo "# source: master key (hydrix-sops-setup --unlock)" >&2
