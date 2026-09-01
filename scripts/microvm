@@ -2480,9 +2480,32 @@ gitsync_vsock_cmd() {
         return 1
     fi
 
-    local output
-    local status=0
-    output=$({ echo "$cmd"; sleep 1; } | socat -t60 -T120 - "VSOCK-CONNECT:${GITSYNC_CID}:${GITSYNC_GIT_PORT}" 2>&1) || status=$?
+    # A ready vsock port only proves the guest's own network is up - it says
+    # nothing about the router this VM depends on for DNS/internet, which can
+    # still be reconnecting to WiFi after a cold host boot. Retry network
+    # commands instead of failing on the first attempt; PUSH/PULL/FETCH/SYNC
+    # are all safe to retry. REPOS/STATUS/PING don't touch the network, so a
+    # real failure there won't fix itself with time.
+    local output rc=0
+    case "$cmd" in
+        PUSH*|PULL*|FETCH*|SYNC*)
+            local attempt max_attempts=5 retry_delay=15
+            for ((attempt = 1; attempt <= max_attempts; attempt++)); do
+                rc=0
+                output=$({ echo "$cmd"; sleep 1; } | socat -t60 -T120 - "VSOCK-CONNECT:${GITSYNC_CID}:${GITSYNC_GIT_PORT}" 2>&1) || rc=$?
+                echo "$output" | grep -q "^ERROR" && rc=1
+                [[ $rc -eq 0 ]] && break
+                if [[ $attempt -lt $max_attempts ]]; then
+                    log "Attempt $attempt/$max_attempts failed (network likely still settling) - retrying in ${retry_delay}s..."
+                    sleep "$retry_delay"
+                fi
+            done
+            ;;
+        *)
+            output=$({ echo "$cmd"; sleep 1; } | socat -t60 -T120 - "VSOCK-CONNECT:${GITSYNC_CID}:${GITSYNC_GIT_PORT}" 2>&1) || rc=$?
+            echo "$output" | grep -q "^ERROR" && rc=1
+            ;;
+    esac
 
     while IFS= read -r line; do
         case "$line" in
@@ -2500,11 +2523,6 @@ gitsync_vsock_cmd() {
                 ;;
         esac
     done <<< "$output"
-
-    local rc=0
-    if echo "$output" | grep -q "^ERROR"; then
-        rc=1
-    fi
 
     if [[ "$we_started" == "true" ]]; then
         log "Stopping git-sync VM..."
