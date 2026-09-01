@@ -27,7 +27,7 @@
 
     # ─── Opacity ───────────────────────────────────────────────────────
     # ui.opacity.overlay          = lib.mkDefault 0.85;
-    # ui.opacity.overlayOverrides = lib.mkDefault { alacritty = 0.95; wofi = 0.95; };
+    # ui.opacity.overlayOverrides = lib.mkDefault { alacritty = 0.95; wofi = 0.95; eww = 0.95; };
     # ui.opacity.active           = lib.mkDefault 1.0;
     # ui.opacity.inactive         = lib.mkDefault 1.0;
     # ui.opacity.exclude          = lib.mkDefault [ "Alacritty" "feh" "Feh" "firefox" "Firefox" "mpv" "vlc" ];

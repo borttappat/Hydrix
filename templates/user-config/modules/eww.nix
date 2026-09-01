@@ -35,6 +35,19 @@
   in
     builtins.floor (base * relation);
 
+  # Same "scale pillRadius up so it reads as visibly rounded" formula as
+  # wofi's #window (theming/wm/hyprland/wofi.nix) - the left-panel background
+  # is the same kind of floating rounded surface, not a waybar pill.
+  panelRadius = let
+    pillRadius =
+      if (ui.pillRadius or null) != null
+      then ui.pillRadius
+      else builtins.floor ((ui.cornerRadius or 2) * (ui.pillRadiusScale or 2.0));
+  in
+    toString (pillRadius * 2);
+  panelOpacity = toString (ui.opacity.overlayOverrides.eww or ui.opacity.overlay);
+  panelPadding = toString (ui.padding or 8);
+
   # Polling script: queries router vsock 14515 for wg dump JSON, then
   # cross-references currently-running VMs to filter down to active tunnels.
   # Returns JSON array for eww defpoll. Reads the running-VM list from
@@ -302,6 +315,7 @@
 
     (defwidget left-panel []
       (box
+        :class "left-panel"
         :orientation "v"
         :space-evenly false
         :spacing 10
@@ -480,6 +494,12 @@
       font-size: ${toString fontSize}pt;
       color: $foreground;
       background-color: transparent;
+    }
+
+    .left-panel {
+      background-color: rgba($color0, ${panelOpacity});
+      border-radius: ${panelRadius}px;
+      padding: ${panelPadding}px;
     }
 
     /* router-stats */
