@@ -26,6 +26,11 @@
   ui = config.hydrix.graphical.ui;
   gaps = ui.gaps or 10;
   barType = config.hydrix.graphical.waybar.barType or "monobar";
+  # Bottom gap: dualbar's bottom bar provides it via exclusive zone, monobar needs gaps_out.
+  gapsOutBottom =
+    if barType == "monobar"
+    then gaps
+    else 0;
   borderSize = toString (sc.border or 2);
   rounding = toString (sc.cornerRadius or 0);
   lkRounding = toString (
@@ -74,18 +79,28 @@
     done
   '';
 
-  toggleFloat = pkgs.writeShellScript "toggle-float" ''
+  dockRight = pkgs.writeShellScript "dock-right" ''
     ${pkgs.hyprland}/bin/hyprctl dispatch togglefloating active
     floating=$(${pkgs.hyprland}/bin/hyprctl activewindow -j | ${pkgs.jq}/bin/jq '.floating')
     if [ "$floating" = "true" ]; then
-      # monitors -j reports physical pixels; resizeactive/centerwindow operate in
-      # logical (post-scale) coordinates, so divide by scale before taking 80% -
-      # otherwise on a scaled monitor the target size is too big for the logical
-      # screen and the window ends up hanging off the edges.
-      read -r w h <<< "$(${pkgs.hyprland}/bin/hyprctl monitors -j | ${pkgs.jq}/bin/jq -r \
-        '[.[] | select(.focused)][0] | "\((.width/.scale*0.8)|floor) \((.height/.scale*0.8)|floor)"')"
-      ${pkgs.hyprland}/bin/hyprctl dispatch resizeactive exact $w $h
-      ${pkgs.hyprland}/bin/hyprctl dispatch centerwindow
+      # monitors -j: width/height are physical pixels (divide by scale for logical
+      # coords, matching resizeactive/moveactive); x/y and reserved[] are already
+      # logical. reserved is [left, top, right, bottom] - the layer-shell exclusive
+      # zone waybar reserves. Combined with the same gaps_out margins tiled windows
+      # get (gaps on left/right, gapsOutBottom on bottom, 0 on top since the bar's
+      # exclusive zone already provides that gap), this reproduces the exact usable
+      # tiling area instead of the raw screen edges.
+      read -r mx my w h rl rt rr rb <<< "$(${pkgs.hyprland}/bin/hyprctl monitors -j | ${pkgs.jq}/bin/jq -r \
+        '[.[] | select(.focused)][0] | "\(.x) \(.y) \((.width/.scale)|floor) \((.height/.scale)|floor) \(.reserved[0]) \(.reserved[1]) \(.reserved[2]) \(.reserved[3])"')"
+      left=$((rl + ${toString gaps}))
+      top=$rt
+      right=$((rr + ${toString gaps}))
+      bottom=$((rb + ${toString gapsOutBottom}))
+      usable_w=$((w - left - right))
+      usable_h=$((h - top - bottom))
+      half=$((usable_w / 2))
+      ${pkgs.hyprland}/bin/hyprctl dispatch resizeactive exact "$half" "$usable_h"
+      ${pkgs.hyprland}/bin/hyprctl dispatch moveactive exact "$((mx + w - right - half))" "$((my + top))"
     fi
   '';
 
@@ -162,11 +177,7 @@
       # top=0,right=gaps,bottom=?,left=gaps — comma-separated (Hyprland CSS-like format).
       # Top gap comes from the bar's exclusive zone + pill margin, not gaps_out.
       # Bottom gap: dualbar bottom bar provides it via exclusive zone; monobar needs gaps_out.
-      gaps_out = 0, ${toString gaps}, ${
-      if barType == "monobar"
-      then toString gaps
-      else "0"
-    }, ${toString gaps}
+      gaps_out = 0, ${toString gaps}, ${toString gapsOutBottom}, ${toString gaps}
       border_size  = ${borderSize}
       col.active_border   = $activeBorder
       col.inactive_border = $inactiveBorder
@@ -335,7 +346,7 @@
     bind = $mod,       C,     layoutmsg, preselect d
     bind = $mod,       V,     layoutmsg, preselect r
     bind = $mod,       F,     fullscreen, 0
-    bind = $mod SHIFT, SPACE, exec, ${toggleFloat}
+    bind = $mod SHIFT, SPACE, exec, ${dockRight}
     bind = $mod,       SPACE, cyclenext,
     bind = $mod,       R,     submap, resize
 
