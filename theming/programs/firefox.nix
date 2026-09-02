@@ -559,8 +559,11 @@ in {
             ''}
 
             ${lib.optionalString ffCfg.hideExtensionIcons ''
-            /* Pinned extension icons; the Extensions button itself still lists them */
-            .webextension-browser-action {
+            /* Pinned extension icons; the Extensions button itself still lists them.
+               Scoped to #nav-bar: CustomizableUI reuses the same widget node when an
+               extension isn't pinned, relocating it into the unified-extensions panel,
+               so an unscoped selector would hide it there too and leave dead rows. */
+            #nav-bar .webextension-browser-action {
               display: none !important;
             }
             ''}
