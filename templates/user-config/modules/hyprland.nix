@@ -31,6 +31,9 @@
     if barType == "monobar"
     then gaps
     else 0;
+  # Round rather than floor: plain `gaps / 2` truncates (5 -> 2), visibly
+  # undersizing the inner gap relative to gaps_out for odd values.
+  gapsIn = (gaps + 1) / 2;
   borderSize = toString (sc.border or 2);
   rounding = toString (sc.cornerRadius or 0);
   lkRounding = toString (
@@ -182,7 +185,7 @@
 
     # ── General ────────────────────────────────────────────────────────────────
     general {
-      gaps_in  = ${toString (gaps / 2)}
+      gaps_in  = ${toString gapsIn}
       # top=0,right=gaps,bottom=?,left=gaps — comma-separated (Hyprland CSS-like format).
       # Top gap comes from the bar's exclusive zone + pill margin, not gaps_out.
       # Bottom gap: dualbar bottom bar provides it via exclusive zone; monobar needs gaps_out.
