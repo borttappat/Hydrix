@@ -86,19 +86,28 @@
       # monitors -j: width/height are physical pixels (divide by scale for logical
       # coords, matching resizeactive/moveactive); x/y and reserved[] are already
       # logical. reserved is [left, top, right, bottom] - the layer-shell exclusive
-      # zone waybar reserves. Combined with the same gaps_out margins tiled windows
-      # get (gaps on left/right, gapsOutBottom on bottom, 0 on top since the bar's
-      # exclusive zone already provides that gap), this reproduces the exact usable
-      # tiling area instead of the raw screen edges.
+      # zone waybar reserves.
+      #
+      # gaps_out/gaps_in/border_size are read live rather than from the nix-baked
+      # defaults: hyprland-gaps-adjust persists interactive gap changes straight via
+      # `hyprctl keyword`, bypassing the generated config, so the build-time values
+      # can be stale. A tiled window's actual on-screen box also sits border_size
+      # further in than gaps_out/reserved alone would suggest (the border is drawn
+      # outside the box), and the gap between two adjacent tiles is 2*gaps_in from
+      # each window's own margin plus 2*border_size from their facing borders.
       read -r mx my w h rl rt rr rb <<< "$(${pkgs.hyprland}/bin/hyprctl monitors -j | ${pkgs.jq}/bin/jq -r \
         '[.[] | select(.focused)][0] | "\(.x) \(.y) \((.width/.scale)|floor) \((.height/.scale)|floor) \(.reserved[0]) \(.reserved[1]) \(.reserved[2]) \(.reserved[3])"')"
-      left=$((rl + ${toString gaps}))
-      top=$rt
-      right=$((rr + ${toString gaps}))
-      bottom=$((rb + ${toString gapsOutBottom}))
+      read -r gt gr gb gl <<< "$(${pkgs.hyprland}/bin/hyprctl getoption general:gaps_out -j | ${pkgs.jq}/bin/jq -r '.custom')"
+      gin=$(${pkgs.hyprland}/bin/hyprctl getoption general:gaps_in -j | ${pkgs.jq}/bin/jq -r '.custom' | ${pkgs.gawk}/bin/awk '{print $1}')
+      border=$(${pkgs.hyprland}/bin/hyprctl getoption general:border_size -j | ${pkgs.jq}/bin/jq -r '.int')
+      left=$((rl + gl + border))
+      top=$((rt + border))
+      right=$((rr + gr + border))
+      bottom=$((rb + gb + border))
       usable_w=$((w - left - right))
       usable_h=$((h - top - bottom))
-      half=$((usable_w / 2))
+      mid=$(( gin * 2 + border * 2 ))
+      half=$(( (usable_w - mid) / 2 ))
       ${pkgs.hyprland}/bin/hyprctl dispatch resizeactive exact "$half" "$usable_h"
       ${pkgs.hyprland}/bin/hyprctl dispatch moveactive exact "$((mx + w - right - half))" "$((my + top))"
     fi
