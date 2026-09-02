@@ -101,7 +101,7 @@
     # ── Colors (written at runtime by hypr-apply-colors from wal) ────────────
     # Fallback values used on first boot before colors.conf exists.
     $activeBorder   = rgba(7aa2f7ff)
-    $inactiveBorder = rgba(1a1b26aa)
+    $inactiveBorder = rgba(1a1b26ff)
     source = ~/.config/hypr/colors.conf
 
     # ── Monitor ──────────────────────────────────────────────────────────────
@@ -184,7 +184,7 @@
     fi
 
     mkdir -p "$(dirname "$HYPR_OUT")"
-    printf '$activeBorder = rgba(%sff)\n$inactiveBorder = rgba(%s88)\n' \
+    printf '$activeBorder = rgba(%sff)\n$inactiveBorder = rgba(%sff)\n' \
       "''${color4#\#}" "''${color0#\#}" > "$HYPR_OUT"
 
     mkdir -p "$(dirname "$BAR_OUT")"
