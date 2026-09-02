@@ -237,6 +237,10 @@ in {
       home.activation.writeDunstrc = lib.hm.dag.entryAfter ["writeBoundary"] ''
         ${generateDunstLayout}
         ${generateDunstColors}
+
+        # Restart so placement/sizing changes actually apply. try-restart is a
+        # no-op if dunst isn't running yet (first boot, headless rebuild).
+        ${pkgs.systemd}/bin/systemctl --user try-restart dunst.service 2>/dev/null || true
       '';
 
       systemd.user.services.dunst = {
