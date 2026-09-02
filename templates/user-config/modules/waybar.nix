@@ -1241,6 +1241,7 @@
       border-radius: ${pillRadius}px;
       padding: ${toString pillPaddingV}px ${toString pillPaddingH}px;
       margin: ${toString pillVMargin}px ${toString pillHMargin}px;
+      box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
     }
 
     /* Battery fills on low/charging states — base pill styling comes from the shared rule above */

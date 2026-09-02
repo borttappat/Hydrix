@@ -207,8 +207,9 @@
       }
 
       shadow {
-        enabled = true
-        range   = 10
+        enabled      = true
+        range        = 4
+        render_power = 3
       }
     }
 
