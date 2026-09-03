@@ -110,6 +110,17 @@
       gsettings set org.gnome.desktop.interface gtk-theme 'Adwaita' 2>/dev/null || true
       gsettings set org.gnome.desktop.interface gtk-theme "''${CURRENT_THEME:-adw-gtk3-dark}" 2>/dev/null || true
     fi
+
+    # The gsettings toggle above only reaches GTK apps that are already
+    # running and re-check their theme setting; it does not re-read a
+    # process's own user gtk.css (loaded once at gtk_init, never file-
+    # watched). The file-picker dialog is rendered by xdg-desktop-portal-gtk,
+    # a D-Bus-activated service that outlives any single Firefox window, so
+    # it keeps whatever CSS it first loaded until its process exits. Kill it
+    # (not systemctl --user restart: that depends on a D-Bus/session context
+    # that a root-invoked, non-login caller may not have) so the next dialog
+    # D-Bus-activates a fresh process that reads current gtk-wal.css.
+    ${pkgs.procps}/bin/pkill -u "$(${pkgs.coreutils}/bin/id -u)" -f xdg-desktop-portal-gtk 2>/dev/null || true
   '';
 in {
   config = lib.mkMerge [

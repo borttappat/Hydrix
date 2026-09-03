@@ -196,12 +196,6 @@
         else
             rm -f "$HYDRIX_CONFIG/wal/.active"
         fi
-
-        # Push colors to running VMs via vsock for instant sync (background)
-        if command -v push-colors-to-vms >/dev/null 2>&1; then
-            echo "  Pushing to VMs via vsock..."
-            push-colors-to-vms &
-        fi
     fi
 
     echo "Colors refreshed!"
@@ -440,12 +434,6 @@
       generate-lockscreen "$FILE_PATH" &
     fi
 
-    # Push colors to running VMs via vsock (instant sync)
-    if command -v push-colors-to-vms >/dev/null 2>&1; then
-      echo "Pushing colors to VMs..."
-      push-colors-to-vms &
-    fi
-
     echo "Done! (use restore-colorscheme to revert)"
   '';
 
@@ -521,12 +509,6 @@
       if command -v generate-lockscreen >/dev/null 2>&1; then
         generate-lockscreen "$SELECTED_WALLPAPER" &
       fi
-    fi
-
-    # Push colors to running VMs via vsock (instant sync)
-    if command -v push-colors-to-vms >/dev/null 2>&1; then
-      echo "Pushing colors to VMs..."
-      push-colors-to-vms &
     fi
 
     echo "Done! (use restore-colorscheme to revert)"
@@ -627,12 +609,6 @@
       if command -v refresh-colors >/dev/null 2>&1; then
           echo "Refreshing app colors..."
           refresh-colors 2>/dev/null || true
-      fi
-
-      # Push colors to any VMs that are already running
-      if command -v push-colors-to-vms >/dev/null 2>&1; then
-          echo "Pushing colors to running VMs..."
-          push-colors-to-vms &
       fi
     ''}
 

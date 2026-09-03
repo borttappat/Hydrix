@@ -479,15 +479,36 @@ in {
                 done
               fi
 
-              # Run refresh-colors for pywalfox, dunst, xsetroot (user-level apps)
+              UID_NUM=$(${pkgs.coreutils}/bin/id -u "${username}" 2>/dev/null || echo 1000)
+              LOG="/tmp/vm-colorscheme-refresh.log"
+
+              # GTK file-picker theming: run directly and synchronously. This is
+              # cheap (jq + a file write + pkill), so there's no reason to bury
+              # it in the backgrounded refresh-colors call below where a slow
+              # step ahead of it (pywalfox) can leave it unreached, and no
+              # reason to let a closing vsock connection race it.
+              GEN_GTK="/run/current-system/sw/bin/generate-gtk-colors"
+              if [ -x "$GEN_GTK" ]; then
+                ${pkgs.sudo}/bin/sudo -u "${username}" \
+                  HOME="/home/${username}" \
+                  XDG_RUNTIME_DIR="/run/user/$UID_NUM" \
+                  "$GEN_GTK" >>"$LOG" 2>&1
+                echo "$(${pkgs.coreutils}/bin/date -Iseconds) generate-gtk-colors exit=$?" >>"$LOG"
+              fi
+
+              # Run refresh-colors for the slower, non-critical stuff (pywalfox,
+              # dunst, xsetroot). Backgrounded since these can lag without
+              # anyone noticing; stdout/stderr go to a log file rather than
+              # /dev/null so a future failure here is diagnosable, and rather
+              # than the vsock connection's pipe, which closes once this
+              # handler returns and would SIGPIPE-kill this on its first write.
               REFRESH="/run/current-system/sw/bin/refresh-colors"
               if [ -x "$REFRESH" ]; then
-                UID_NUM=$(${pkgs.coreutils}/bin/id -u "${username}" 2>/dev/null || echo 1000)
                 ${pkgs.sudo}/bin/sudo -u "${username}" \
                   HOME="/home/${username}" \
                   DISPLAY=:100 \
                   XDG_RUNTIME_DIR="/run/user/$UID_NUM" \
-                  "$REFRESH" 2>/dev/null &
+                  "$REFRESH" >>"$LOG" 2>&1 &
               fi
 
               echo "OK: refreshed"
