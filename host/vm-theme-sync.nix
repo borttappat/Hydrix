@@ -288,7 +288,7 @@ in {
                   cid=$(${pkgs.jq}/bin/jq -r --arg k "$key" '.[$k].cid // empty' "$VM_REGISTRY")
                   [[ -z "$vm" || -z "$cid" ]] && continue
                   if systemctl is-active --quiet "microvm@$vm.service" 2>/dev/null; then
-                    result=$(echo "REFRESH" | ${pkgs.socat}/bin/socat -t1 - "VSOCK-CONNECT:$cid:$PORT" 2>/dev/null || echo "FAIL")
+                    result=$(echo "REFRESH" | ${pkgs.socat}/bin/socat -t5 - "VSOCK-CONNECT:$cid:$PORT" 2>/dev/null || echo "FAIL")
                     log "$vm (cid=$cid): $result"
                   fi
                 done < <(${pkgs.jq}/bin/jq -r 'keys[]' "$VM_REGISTRY")

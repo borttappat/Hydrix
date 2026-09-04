@@ -106,9 +106,9 @@
     # Force running GTK3 apps (Firefox, file pickers, etc.) to reload CSS.
     # Briefly switching the theme triggers GTK to re-read all CSS including @import.
     if command -v gsettings >/dev/null 2>&1; then
-      CURRENT_THEME=$(gsettings get org.gnome.desktop.interface gtk-theme 2>/dev/null | tr -d "'")
-      gsettings set org.gnome.desktop.interface gtk-theme 'Adwaita' 2>/dev/null || true
-      gsettings set org.gnome.desktop.interface gtk-theme "''${CURRENT_THEME:-adw-gtk3-dark}" 2>/dev/null || true
+      CURRENT_THEME=$(${pkgs.coreutils}/bin/timeout 2 gsettings get org.gnome.desktop.interface gtk-theme 2>/dev/null | tr -d "'")
+      ${pkgs.coreutils}/bin/timeout 2 gsettings set org.gnome.desktop.interface gtk-theme 'Adwaita' 2>/dev/null || true
+      ${pkgs.coreutils}/bin/timeout 2 gsettings set org.gnome.desktop.interface gtk-theme "''${CURRENT_THEME:-adw-gtk3-dark}" 2>/dev/null || true
     fi
 
     # The gsettings toggle above only reaches GTK apps that are already
