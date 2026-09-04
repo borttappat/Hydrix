@@ -9,10 +9,12 @@
 # - Per-profile extension sets defined in `profileExtensions`
 # - Extensions selected based on hydrix.vmType
 # - Use `firefox-extension-add <slug>` to add new extensions
-
-{ config, lib, pkgs, ... }:
-
-let
+{
+  config,
+  lib,
+  pkgs,
+  ...
+}: let
   username = config.hydrix.username;
   vmType = config.hydrix.vmType;
 
@@ -44,21 +46,26 @@ let
   # correctly signed). fetchurl does zero content modification -- the hash
   # pins the exact untouched upstream bytes, signature intact.
   buildExtensionSettings = extNames:
-    builtins.listToAttrs (map (name:
-      let
-        ext = allExtensions.${name};
-        installUrl =
-          if ext.hash != null
-          then "file://${pkgs.fetchurl { inherit name; url = ext.url; hash = ext.hash; }}"
-          else ext.url;
-      in {
-        name = ext.id;
-        value = {
-          install_url = installUrl;
-          installation_mode = "force_installed";
-        };
-      }
-    ) extNames);
+    builtins.listToAttrs (map (
+        name: let
+          ext = allExtensions.${name};
+          installUrl =
+            if ext.hash != null
+            then "file://${pkgs.fetchurl {
+              inherit name;
+              url = ext.url;
+              hash = ext.hash;
+            }}"
+            else ext.url;
+        in {
+          name = ext.id;
+          value = {
+            install_url = installUrl;
+            installation_mode = "force_installed";
+          };
+        }
+      )
+      extNames);
 
   # Get font configuration from unified options
   fontCfg = config.hydrix.graphical.font;
@@ -70,89 +77,90 @@ let
   # Firefox launcher: applies host DPI scale, waits on home-manager, then
   # runs pywalfox. Parameterized so it can wrap any Firefox derivation
   # (needed for HM .override support).
-  mkFirefoxHydrix = firefoxPkg: pkgs.writeShellScriptBin "firefox-hydrix" ''
-    FF_PROFILE="$HOME/.mozilla/firefox/default"
-    FF_USER_JS="$FF_PROFILE/user.js"
-    FF_DPI_MARKER="$FF_PROFILE/.dpi-scale"
+  mkFirefoxHydrix = firefoxPkg:
+    pkgs.writeShellScriptBin "firefox-hydrix" ''
+      FF_PROFILE="$HOME/.mozilla/firefox/default"
+      FF_USER_JS="$FF_PROFILE/user.js"
+      FF_DPI_MARKER="$FF_PROFILE/.dpi-scale"
 
-    # Wait for home-manager to finish activating this user's profile (writes
-    # the Firefox profile prefs and the pywalfox native-messaging manifest)
-    # before launching Firefox. No-op if the unit is already active.
-    hm_unit="home-manager-${username}.service"
-    for _ in $(seq 1 120); do
-      [ "$(${pkgs.systemd}/bin/systemctl is-active "$hm_unit" 2>/dev/null)" = "active" ] && break
-      sleep 1
-    done
-
-    # Priority: HYDRIX_FF_SCALE env (set by host when launching in VM) >
-    #           HYPRLAND_INSTANCE_SIGNATURE (native Hyprland session)
-    scale_factor=""
-    if [ -n "''${HYDRIX_FF_SCALE:-}" ]; then
-        scale_factor="$HYDRIX_FF_SCALE"
-    elif [ -n "''${HYPRLAND_INSTANCE_SIGNATURE:-}" ]; then
-        # Running directly under Hyprland - read scale from compositor
-        scale_factor=$(${pkgs.hyprland}/bin/hyprctl monitors -j 2>/dev/null \
-            | ${pkgs.jq}/bin/jq -r '[.[] | select(.focused)][0].scale // .[0].scale // 1.0' \
-            2>/dev/null || echo "1.0")
-    fi
-
-    if [ -n "$scale_factor" ] && [ -d "$FF_PROFILE" ]; then
-        # Check if scale factor changed (avoid unnecessary writes)
-        current_scale=""
-        [ -f "$FF_DPI_MARKER" ] && current_scale=$(cat "$FF_DPI_MARKER" 2>/dev/null)
-
-        if [ "$scale_factor" != "$current_scale" ]; then
-            # Handle Home Manager symlink: user.js may be a symlink to read-only Nix store
-            if [ -L "$FF_USER_JS" ]; then
-                # Copy contents and replace symlink with writable file
-                symlink_target=$(readlink "$FF_USER_JS")
-                rm "$FF_USER_JS"
-                if [ -f "$symlink_target" ]; then
-                    cp "$symlink_target" "$FF_USER_JS"
-                    chmod u+w "$FF_USER_JS"
-                else
-                    touch "$FF_USER_JS"
-                fi
-            # Also fix permissions if file exists but is read-only
-            elif [ -f "$FF_USER_JS" ] && [ ! -w "$FF_USER_JS" ]; then
-                chmod u+w "$FF_USER_JS"
-            fi
-
-            # Update user.js with new scale factor
-            # Remove any existing devPixelsPerPx line and append new one
-            if [ -f "$FF_USER_JS" ]; then
-                ${pkgs.gnused}/bin/sed -i '/layout\.css\.devPixelsPerPx/d' "$FF_USER_JS"
-            fi
-            echo "user_pref(\"layout.css.devPixelsPerPx\", \"$scale_factor\");" >> "$FF_USER_JS"
-            echo "$scale_factor" > "$FF_DPI_MARKER"
-        fi
-    fi
-
-    # Launch Firefox in background, then run pywalfox update in parallel
-    ${firefoxPkg}/bin/firefox "$@" &
-    FF_PID=$!
-
-    # Wait for Firefox to be ready, then apply pywal colors.
-    #
-    # `pywalfox update` always exits 0 regardless of whether it reached the
-    # daemon (see pywalfox's send_client_command), and checking for the
-    # socket file's mere existence is not a reliable readiness signal either
-    # -- a stale socket file from a previous Firefox session can still be on
-    # disk for a moment after that session's daemon is gone, before the new
-    # daemon deletes and rebinds it. So instead of trying to detect the exact
-    # ready moment, just call it repeatedly for a bounded window; each call
-    # is cheap and idempotent, and one of them will land after the daemon is
-    # actually up.
-    if [ -f "$HOME/.cache/wal/colors.json" ]; then
-      for _ in $(seq 1 30); do
-        kill -0 "$FF_PID" 2>/dev/null || break
-        ${pkgs.pywalfox-native}/bin/pywalfox update 2>/dev/null
+      # Wait for home-manager to finish activating this user's profile (writes
+      # the Firefox profile prefs and the pywalfox native-messaging manifest)
+      # before launching Firefox. No-op if the unit is already active.
+      hm_unit="home-manager-${username}.service"
+      for _ in $(seq 1 120); do
+        [ "$(${pkgs.systemd}/bin/systemctl is-active "$hm_unit" 2>/dev/null)" = "active" ] && break
         sleep 1
       done
-    fi
 
-    wait "$FF_PID"
-  '';
+      # Priority: HYDRIX_FF_SCALE env (set by host when launching in VM) >
+      #           HYPRLAND_INSTANCE_SIGNATURE (native Hyprland session)
+      scale_factor=""
+      if [ -n "''${HYDRIX_FF_SCALE:-}" ]; then
+          scale_factor="$HYDRIX_FF_SCALE"
+      elif [ -n "''${HYPRLAND_INSTANCE_SIGNATURE:-}" ]; then
+          # Running directly under Hyprland - read scale from compositor
+          scale_factor=$(${pkgs.hyprland}/bin/hyprctl monitors -j 2>/dev/null \
+              | ${pkgs.jq}/bin/jq -r '[.[] | select(.focused)][0].scale // .[0].scale // 1.0' \
+              2>/dev/null || echo "1.0")
+      fi
+
+      if [ -n "$scale_factor" ] && [ -d "$FF_PROFILE" ]; then
+          # Check if scale factor changed (avoid unnecessary writes)
+          current_scale=""
+          [ -f "$FF_DPI_MARKER" ] && current_scale=$(cat "$FF_DPI_MARKER" 2>/dev/null)
+
+          if [ "$scale_factor" != "$current_scale" ]; then
+              # Handle Home Manager symlink: user.js may be a symlink to read-only Nix store
+              if [ -L "$FF_USER_JS" ]; then
+                  # Copy contents and replace symlink with writable file
+                  symlink_target=$(readlink "$FF_USER_JS")
+                  rm "$FF_USER_JS"
+                  if [ -f "$symlink_target" ]; then
+                      cp "$symlink_target" "$FF_USER_JS"
+                      chmod u+w "$FF_USER_JS"
+                  else
+                      touch "$FF_USER_JS"
+                  fi
+              # Also fix permissions if file exists but is read-only
+              elif [ -f "$FF_USER_JS" ] && [ ! -w "$FF_USER_JS" ]; then
+                  chmod u+w "$FF_USER_JS"
+              fi
+
+              # Update user.js with new scale factor
+              # Remove any existing devPixelsPerPx line and append new one
+              if [ -f "$FF_USER_JS" ]; then
+                  ${pkgs.gnused}/bin/sed -i '/layout\.css\.devPixelsPerPx/d' "$FF_USER_JS"
+              fi
+              echo "user_pref(\"layout.css.devPixelsPerPx\", \"$scale_factor\");" >> "$FF_USER_JS"
+              echo "$scale_factor" > "$FF_DPI_MARKER"
+          fi
+      fi
+
+      # Launch Firefox in background, then run pywalfox update in parallel
+      ${firefoxPkg}/bin/firefox "$@" &
+      FF_PID=$!
+
+      # Wait for Firefox to be ready, then apply pywal colors.
+      #
+      # `pywalfox update` always exits 0 regardless of whether it reached the
+      # daemon (see pywalfox's send_client_command), and checking for the
+      # socket file's mere existence is not a reliable readiness signal either
+      # -- a stale socket file from a previous Firefox session can still be on
+      # disk for a moment after that session's daemon is gone, before the new
+      # daemon deletes and rebinds it. So instead of trying to detect the exact
+      # ready moment, just call it repeatedly for a bounded window; each call
+      # is cheap and idempotent, and one of them will land after the daemon is
+      # actually up.
+      if [ -f "$HOME/.cache/wal/colors.json" ]; then
+        for _ in $(seq 1 30); do
+          kill -0 "$FF_PID" 2>/dev/null || break
+          ${pkgs.pywalfox-native}/bin/pywalfox update 2>/dev/null
+          sleep 1
+        done
+      fi
+
+      wait "$FF_PID"
+    '';
 
   # Wrapped Firefox with the DPI/pywalfox launcher as the default firefox
   # command. Supports .override for Home Manager compatibility (HM injects
@@ -161,18 +169,20 @@ let
     hydrixWrapper = mkFirefoxHydrix firefoxPkg;
     base = pkgs.symlinkJoin {
       name = "firefox-hydrix";
-      paths = [ firefoxPkg ];
+      paths = [firefoxPkg];
       postBuild = ''
         rm $out/bin/firefox
         ln -s ${hydrixWrapper}/bin/firefox-hydrix $out/bin/firefox
       '';
     };
-  in base // {
-    override = f: mkFirefoxWrapped (firefoxPkg.override f);
-    # symlinkJoin doesn't carry version/pname; the vanilla nixpkgs firefox
-    # module needs cfg.package.version to build language-pack download URLs.
-    inherit (firefoxPkg) version pname;
-  };
+  in
+    base
+    // {
+      override = f: mkFirefoxWrapped (firefoxPkg.override f);
+      # symlinkJoin doesn't carry version/pname; the vanilla nixpkgs firefox
+      # module needs cfg.package.version to build language-pack download URLs.
+      inherit (firefoxPkg) version pname;
+    };
 
   firefoxWrapped = mkFirefoxWrapped pkgs.firefox;
 
@@ -264,24 +274,27 @@ let
   # Chrome/Edge track: major version, update periodically (current: 136, May 2026)
   # Safari/Firefox track: version + WebKit/Gecko build, update less frequently
   uaPresets = {
-    edge-windows    = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36 Edg/136.0.0.0";
-    chrome-windows  = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36";
-    chrome-mac      = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36";
-    safari-mac      = "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_7_6) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.4 Safari/605.1.15";
+    edge-windows = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36 Edg/136.0.0.0";
+    chrome-windows = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36";
+    chrome-mac = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36";
+    safari-mac = "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_7_6) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.4 Safari/605.1.15";
     firefox-windows = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:138.0) Gecko/20100101 Firefox/138.0";
   };
 
   ffCfg = config.hydrix.graphical.firefox;
 
   uaRaw = ffCfg.userAgent;
-  resolvedUA = if uaRaw == null then null else uaPresets.${uaRaw} or uaRaw;
+  resolvedUA =
+    if uaRaw == null
+    then null
+    else uaPresets.${uaRaw} or uaRaw;
 
   # On hosts, Firefox is only included when hostEnable is true.
   # VMs always get Firefox when graphical is enabled.
   isHost = vmType == "host" || vmType == null;
-  firefoxEnabled = config.hydrix.graphical.enable
+  firefoxEnabled =
+    config.hydrix.graphical.enable
     && (!isHost || ffCfg.hostEnable);
-
 in {
   config = lib.mkIf firefoxEnabled {
     # System-level Firefox with policies (works better than HM for policies)
@@ -293,7 +306,7 @@ in {
       # cfg.package.override(...) (native messaging hosts, autoConfig) still
       # applies on top of it correctly.
       package = firefoxWrapped;
-      languagePacks = [ "en-US" ];
+      languagePacks = ["en-US"];
 
       policies = {
         DisableTelemetry = true;
@@ -324,57 +337,76 @@ in {
         ExtensionSettings = lib.mkDefault (buildExtensionSettings currentExtensions);
 
         # Locked preferences
-        Preferences = {
-          "browser.contentblocking.category" = { Value = "strict"; Status = "locked"; };
-          "extensions.pocket.enabled" = lock-false;
-          "extensions.screenshots.disabled" = lock-true;
-          # Suppress extension popups and welcome pages
-          "extensions.getAddons.showPane" = { Value = false; Status = "default"; };
-          "extensions.htmlaboutaddons.recommendations.enabled" = { Value = false; Status = "default"; };
-          "browser.messaging-system.whatsNewPanel.enabled" = lock-false;
-          "browser.uitour.enabled" = lock-false;
-          "browser.newtabpage.activity-stream.asrouter.userprefs.cfr.addons" = lock-false;
-          "browser.newtabpage.activity-stream.asrouter.userprefs.cfr.features" = lock-false;
-          # Suppress Firefox's own upgrade/welcome dialogs
-          "browser.startup.upgradeDialog.enabled" = lock-false;
-          "browser.aboutwelcome.enabled" = lock-false;
-          # Hidden pref, defaults true: makes a brand-new profile's very first
-          # launch ignore browser.startup.homepage and show about:welcome/
-          # about:home instead, even with OverrideFirstRunPage set. Only
-          # matters once per profile (subsequent launches aren't "first run"),
-          # but that first launch is exactly what a freshly purged VM hits.
-          "browser.startup.firstrunSkipsHomepage" = lock-false;
-          # Prevent extension update notifications
-          "extensions.update.notifyUser" = lock-false;
-          "browser.topsites.contile.enabled" = lock-false;
-          "browser.formfill.enable" = lock-false;
-          "browser.search.suggest.enabled" = lock-false;
-          "browser.search.suggest.enabled.private" = lock-false;
-          "browser.urlbar.suggest.searches" = lock-false;
-          "browser.urlbar.showSearchSuggestionsFirst" = lock-false;
-          "browser.newtabpage.activity-stream.feeds.section.topstories" = lock-false;
-          "browser.newtabpage.activity-stream.feeds.snippets" = lock-false;
-          "browser.newtabpage.activity-stream.section.highlights.includePocket" = lock-false;
-          "browser.newtabpage.activity-stream.section.highlights.includeBookmarks" = lock-false;
-          "browser.newtabpage.activity-stream.section.highlights.includeDownloads" = lock-false;
-          "browser.newtabpage.activity-stream.section.highlights.includeVisited" = lock-false;
-          "browser.newtabpage.activity-stream.showSponsored" = lock-false;
-          "browser.newtabpage.activity-stream.system.showSponsored" = lock-false;
-          "browser.newtabpage.activity-stream.showSponsoredTopSites" = lock-false;
-        } // lib.optionalAttrs (ffCfg.newTab != null) {
-          # Disable activity-stream new tab page when newTab option is set
-          "browser.newtabpage.enabled" = lock-false;
-        } // lib.optionalAttrs ffCfg.verticalTabs {
-          "sidebar.revamp" = lock-true;
-          "sidebar.verticalTabs" = lock-true;
-          "sidebar.visibility" = { Value = "hide-sidebar"; Status = "locked"; };
-          "sidebar.position_start" = lock-true;
-        };
+        Preferences =
+          {
+            "browser.contentblocking.category" = {
+              Value = "strict";
+              Status = "locked";
+            };
+            "extensions.pocket.enabled" = lock-false;
+            "extensions.screenshots.disabled" = lock-true;
+            # Suppress extension popups and welcome pages
+            "extensions.getAddons.showPane" = {
+              Value = false;
+              Status = "default";
+            };
+            "extensions.htmlaboutaddons.recommendations.enabled" = {
+              Value = false;
+              Status = "default";
+            };
+            "browser.messaging-system.whatsNewPanel.enabled" = lock-false;
+            "browser.uitour.enabled" = lock-false;
+            "browser.newtabpage.activity-stream.asrouter.userprefs.cfr.addons" = lock-false;
+            "browser.newtabpage.activity-stream.asrouter.userprefs.cfr.features" = lock-false;
+            # Suppress Firefox's own upgrade/welcome dialogs
+            "browser.startup.upgradeDialog.enabled" = lock-false;
+            "browser.aboutwelcome.enabled" = lock-false;
+            # Hidden pref, defaults true: makes a brand-new profile's very first
+            # launch ignore browser.startup.homepage and show about:welcome/
+            # about:home instead, even with OverrideFirstRunPage set. Only
+            # matters once per profile (subsequent launches aren't "first run"),
+            # but that first launch is exactly what a freshly purged VM hits.
+            "browser.startup.firstrunSkipsHomepage" = lock-false;
+            # Prevent extension update notifications
+            "extensions.update.notifyUser" = lock-false;
+            "browser.topsites.contile.enabled" = lock-false;
+            "browser.formfill.enable" = lock-false;
+            "browser.search.suggest.enabled" = lock-false;
+            "browser.search.suggest.enabled.private" = lock-false;
+            "browser.urlbar.suggest.searches" = lock-false;
+            "browser.urlbar.showSearchSuggestionsFirst" = lock-false;
+            "browser.newtabpage.activity-stream.feeds.section.topstories" = lock-false;
+            "browser.newtabpage.activity-stream.feeds.snippets" = lock-false;
+            "browser.newtabpage.activity-stream.section.highlights.includePocket" = lock-false;
+            "browser.newtabpage.activity-stream.section.highlights.includeBookmarks" = lock-false;
+            "browser.newtabpage.activity-stream.section.highlights.includeDownloads" = lock-false;
+            "browser.newtabpage.activity-stream.section.highlights.includeVisited" = lock-false;
+            "browser.newtabpage.activity-stream.showSponsored" = lock-false;
+            "browser.newtabpage.activity-stream.system.showSponsored" = lock-false;
+            "browser.newtabpage.activity-stream.showSponsoredTopSites" = lock-false;
+          }
+          // lib.optionalAttrs (ffCfg.newTab != null) {
+            # Disable activity-stream new tab page when newTab option is set
+            "browser.newtabpage.enabled" = lock-false;
+          }
+          // lib.optionalAttrs ffCfg.verticalTabs {
+            "sidebar.revamp" = lock-true;
+            "sidebar.verticalTabs" = lock-true;
+            "sidebar.visibility" = {
+              Value = "hide-sidebar";
+              Status = "locked";
+            };
+            "sidebar.position_start" = lock-true;
+          };
       };
     };
 
     # Home Manager Firefox profile configuration
-    home-manager.users.${username} = { pkgs, config, ... }: {
+    home-manager.users.${username} = {
+      pkgs,
+      config,
+      ...
+    }: {
       # Pywalfox native-messaging manifest — declarative so it always points at
       # the current pywalfox-native store path. force = true overwrites any
       # stale manifest left behind by the old imperative systemd installer.
@@ -385,7 +417,7 @@ in {
           description = "Automatically theme your browser using the colors generated by Pywal";
           path = "${pkgs.pywalfox-native}/bin/pywalfox";
           type = "stdio";
-          allowed_extensions = [ "pywalfox@frewacom.org" ];
+          allowed_extensions = ["pywalfox@frewacom.org"];
         };
       };
 
@@ -407,79 +439,87 @@ in {
             default = ffCfg.search.default;
           };
 
-          settings = {
-            # Enable userChrome.css
-            "toolkit.legacyUserProfileCustomizations.stylesheets" = true;
+          settings =
+            {
+              # Enable userChrome.css
+              "toolkit.legacyUserProfileCustomizations.stylesheets" = true;
 
-            # Privacy
-            "privacy.trackingprotection.enabled" = true;
-            "privacy.donottrackheader.enabled" = true;
+              # Privacy
+              "privacy.trackingprotection.enabled" = true;
+              "privacy.donottrackheader.enabled" = true;
 
-            # Disable various telemetry
-            "datareporting.healthreport.uploadEnabled" = false;
-            "toolkit.telemetry.enabled" = false;
-            "toolkit.telemetry.unified" = false;
+              # Disable various telemetry
+              "datareporting.healthreport.uploadEnabled" = false;
+              "toolkit.telemetry.enabled" = false;
+              "toolkit.telemetry.unified" = false;
 
-            # UI customization
-            "browser.uidensity" = ffCfg.uidensity;
-            # Dark base theme so startup flash is dark (pywalfox overrides dynamically)
-            "extensions.activeThemeID" = "firefox-compact-dark@mozilla.org";
-            "browser.tabs.inTitlebar" = 1;
+              # UI customization
+              "browser.uidensity" = ffCfg.uidensity;
+              # Dark base theme so startup flash is dark (pywalfox overrides dynamically)
+              "extensions.activeThemeID" = "firefox-compact-dark@mozilla.org";
+              "browser.startup.blankWindow" = false;
+              "browser.tabs.inTitlebar" = 1;
 
-            # Ctrl+Tab cycles through tabs in recently used order (also
-            # enables the tab preview thumbnails while cycling). Real pref is
-            # sortByRecentlyUsed -- "recentlyUsedOrder" doesn't exist and was
-            # silently doing nothing.
-            "browser.ctrlTab.sortByRecentlyUsed" = true;
+              # Ctrl+Tab cycles through tabs in recently used order (also
+              # enables the tab preview thumbnails while cycling). Real pref is
+              # sortByRecentlyUsed -- "recentlyUsedOrder" doesn't exist and was
+              # silently doing nothing.
+              "browser.ctrlTab.sortByRecentlyUsed" = true;
 
-            # Suppress extension welcome pages and popups
-            "extensions.webextensions.restrictedDomains" = "";
-            "browser.messaging-system.whatsNewPanel.enabled" = false;
-            "browser.uitour.enabled" = false;
-            "browser.newtabpage.activity-stream.asrouter.userprefs.cfr.addons" = false;
-            "browser.newtabpage.activity-stream.asrouter.userprefs.cfr.features" = false;
+              # Suppress extension welcome pages and popups
+              "extensions.webextensions.restrictedDomains" = "";
+              "browser.messaging-system.whatsNewPanel.enabled" = false;
+              "browser.uitour.enabled" = false;
+              "browser.newtabpage.activity-stream.asrouter.userprefs.cfr.addons" = false;
+              "browser.newtabpage.activity-stream.asrouter.userprefs.cfr.features" = false;
 
-            # Use XDG desktop portal for file picker dialogs.
-            # Without this, Firefox falls back to the GTK native file chooser
-            # which queries GVfs for bookmarks and times out in minimal VM environments.
-            # 0 = never, 1 = always, 2 = auto-detect (default); always-on is safe
-            # since the portal works on both host and VMs.
-            "widget.use-xdg-desktop-portal.file-picker" = 1;
+              # Use XDG desktop portal for file picker dialogs.
+              # Without this, Firefox falls back to the GTK native file chooser
+              # which queries GVfs for bookmarks and times out in minimal VM environments.
+              # 0 = never, 1 = always, 2 = auto-detect (default); always-on is safe
+              # since the portal works on both host and VMs.
+              "widget.use-xdg-desktop-portal.file-picker" = 1;
 
-            # Allow web fonts so icon fonts (Font Awesome etc.) render correctly.
-            # System font is set as default via font.name.* below — no need to block web fonts.
-            "browser.display.use_document_fonts" = lib.mkDefault 1;
-            "font.name.monospace.x-western" = lib.mkDefault fontName;
-            "font.name.sans-serif.x-western" = lib.mkDefault fontName;
-            "font.name.serif.x-western" = lib.mkDefault fontName;
-            "font.size.variable.x-western" = lib.mkDefault fontSize;
-            "font.size.monospace.x-western" = lib.mkDefault fontSize;
-          } // lib.optionalAttrs (ffCfg.homepage != null) {
-            "browser.startup.homepage" = ffCfg.homepage;
-            "browser.startup.page" = 1;  # 0=blank, 1=homepage, 3=resume session
-          } // lib.optionalAttrs ffCfg.verticalTabs {
-            # Native Vertical Tabs - start collapsed, expand on hover
-            "sidebar.revamp" = true;
-            "sidebar.verticalTabs" = true;
-            "sidebar.expandOnHover" = true;
-            "sidebar.visibility" = "hide-sidebar";  # Start collapsed
-            "sidebar.position_start" = true;  # Sidebar on left
-          } // lib.optionalAttrs (resolvedUA != null) {
-            # user.js works for hidden prefs; policies.Preferences silently ignores them
-            "general.useragent.override" = resolvedUA;
-            # navigator.platform must match the spoofed UA or sites will still detect Linux
-            "general.platform.override" =
-              if lib.hasInfix "Windows" resolvedUA then "Win32"
-              else if lib.hasInfix "Macintosh" resolvedUA then "MacIntel"
-              else "Linux x86_64";
-          } // lib.optionalAttrs (!isHost) {
-            # No GPU/VA-API in headless microVMs - every codec falls back to
-            # software decode. AV1 (YouTube's preferred codec when available)
-            # is meaningfully more expensive to software-decode than VP9/H264,
-            # so force sites to fall back to the cheaper codecs. Host keeps
-            # AV1 enabled since it has real hardware decode.
-            "media.av1.enabled" = false;
-          };
+              # Allow web fonts so icon fonts (Font Awesome etc.) render correctly.
+              # System font is set as default via font.name.* below — no need to block web fonts.
+              "browser.display.use_document_fonts" = lib.mkDefault 1;
+              "font.name.monospace.x-western" = lib.mkDefault fontName;
+              "font.name.sans-serif.x-western" = lib.mkDefault fontName;
+              "font.name.serif.x-western" = lib.mkDefault fontName;
+              "font.size.variable.x-western" = lib.mkDefault fontSize;
+              "font.size.monospace.x-western" = lib.mkDefault fontSize;
+            }
+            // lib.optionalAttrs (ffCfg.homepage != null) {
+              "browser.startup.homepage" = ffCfg.homepage;
+              "browser.startup.page" = 1; # 0=blank, 1=homepage, 3=resume session
+            }
+            // lib.optionalAttrs ffCfg.verticalTabs {
+              # Native Vertical Tabs - start collapsed, expand on hover
+              "sidebar.revamp" = true;
+              "sidebar.verticalTabs" = true;
+              "sidebar.expandOnHover" = true;
+              "sidebar.visibility" = "hide-sidebar"; # Start collapsed
+              "sidebar.position_start" = true; # Sidebar on left
+            }
+            // lib.optionalAttrs (resolvedUA != null) {
+              # user.js works for hidden prefs; policies.Preferences silently ignores them
+              "general.useragent.override" = resolvedUA;
+              # navigator.platform must match the spoofed UA or sites will still detect Linux
+              "general.platform.override" =
+                if lib.hasInfix "Windows" resolvedUA
+                then "Win32"
+                else if lib.hasInfix "Macintosh" resolvedUA
+                then "MacIntel"
+                else "Linux x86_64";
+            }
+            // lib.optionalAttrs (!isHost) {
+              # No GPU/VA-API in headless microVMs - every codec falls back to
+              # software decode. AV1 (YouTube's preferred codec when available)
+              # is meaningfully more expensive to software-decode than VP9/H264,
+              # so force sites to fall back to the cheaper codecs. Host keeps
+              # AV1 enabled since it has real hardware decode.
+              "media.av1.enabled" = false;
+            };
 
           # Custom CSS for Firefox UI
           userChrome = ''
@@ -529,43 +569,43 @@ in {
             }
 
             ${lib.optionalString ffCfg.verticalTabs ''
-            /* Hide horizontal tab bar — vertical tabs are in the sidebar */
-            #TabsToolbar {
-              visibility: collapse !important;
-            }
+              /* Hide horizontal tab bar — vertical tabs are in the sidebar */
+              #TabsToolbar {
+                visibility: collapse !important;
+              }
             ''}
 
             ${lib.optionalString ffCfg.hideFirefoxViewButton ''
-            #firefox-view-button {
-              display: none !important;
-            }
+              #firefox-view-button {
+                display: none !important;
+              }
             ''}
 
             ${lib.optionalString ffCfg.hideAllTabsButton ''
-            #alltabs-button {
-              display: none !important;
-            }
+              #alltabs-button {
+                display: none !important;
+              }
             ''}
 
             ${lib.optionalString ffCfg.hideSidebarLauncher ''
-            /* sidebar-main renders its icon row and the vertical tabs list
-               inside the same Shadow DOM, exposing only an overflow-button
-               ::part() -- no selector can reach the icon row without also
-               hiding the tabs list. Hides the whole light-DOM container
-               instead. */
-            #sidebar-container, #sidebar-launcher-splitter {
-              display: none !important;
-            }
+              /* sidebar-main renders its icon row and the vertical tabs list
+                 inside the same Shadow DOM, exposing only an overflow-button
+                 ::part() -- no selector can reach the icon row without also
+                 hiding the tabs list. Hides the whole light-DOM container
+                 instead. */
+              #sidebar-container, #sidebar-launcher-splitter {
+                display: none !important;
+              }
             ''}
 
             ${lib.optionalString ffCfg.hideExtensionIcons ''
-            /* Pinned extension icons; the Extensions button itself still lists them.
-               Scoped to #nav-bar: CustomizableUI reuses the same widget node when an
-               extension isn't pinned, relocating it into the unified-extensions panel,
-               so an unscoped selector would hide it there too and leave dead rows. */
-            #nav-bar .webextension-browser-action {
-              display: none !important;
-            }
+              /* Pinned extension icons; the Extensions button itself still lists them.
+                 Scoped to #nav-bar: CustomizableUI reuses the same widget node when an
+                 extension isn't pinned, relocating it into the unified-extensions panel,
+                 so an unscoped selector would hide it there too and leave dead rows. */
+              #nav-bar .webextension-browser-action {
+                display: none !important;
+              }
             ''}
           '';
 
