@@ -1179,6 +1179,7 @@
       background: transparent;
       border-color: transparent;
       color: transparent;
+      box-shadow: none;
       padding: 0;
       margin: 0;
     }
