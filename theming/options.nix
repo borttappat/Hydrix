@@ -761,6 +761,35 @@ in {
         description = "Dunst notification clearance past a tiled window's edge, on both axes";
       };
 
+      dunstOffsetCompensation = lib.mkOption {
+        type = lib.types.submodule {
+          options = {
+            x = lib.mkOption {
+              type = lib.types.int;
+              default = 0;
+              description = "Extra px added to dunst's X offset";
+            };
+            y = lib.mkOption {
+              type = lib.types.int;
+              default = 0;
+              description = "Extra px added to dunst's Y offset";
+            };
+          };
+        };
+        default = {};
+        description = ''
+          Empirical per-machine fudge on top of dunstOffset. gaps/dunstOffset are
+          logical-pixel values; at a fractional display scale the width-derived
+          (X) and height-derived (Y) offsets don't necessarily round to the
+          physical framebuffer the same way, since a non-square resolution has
+          no reason to carry the same rounding remainder on both axes. There is
+          no formula that gets this exact on every resolution/scale combination,
+          it's tuned by eye once per machine: hand-edit the `offset` line in
+          `~/.config/dunst/dunstrc-layout` and restart dunst.service to test,
+          then set the confirmed value here.
+        '';
+      };
+
       dunstEnablePopup = lib.mkOption {
         type = lib.types.bool;
         default = false;
