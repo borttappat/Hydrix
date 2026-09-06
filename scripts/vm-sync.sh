@@ -25,10 +25,14 @@ fi
 readonly PROFILES_DIR="$PROJECT_DIR/profiles"
 readonly STAGING_PORT=14502
 
-# VM types: read from registry if available, otherwise fall back to defaults
+# VM types: profile keys from the registry (i.e. those with a profiles/<key> dir),
+# excluding infra/task VMs which never have packages to sync. Falls back to
+# defaults when the registry doesn't exist yet (pre-activation).
 VM_REGISTRY="/etc/hydrix/vm-registry.json"
 if [[ -f "$VM_REGISTRY" ]]; then
-    readarray -t VM_TYPES < <(jq -r 'keys[]' "$VM_REGISTRY" 2>/dev/null)
+    readarray -t VM_TYPES < <(jq -r 'keys[]' "$VM_REGISTRY" 2>/dev/null | while IFS= read -r k; do
+        [[ -d "$PROFILES_DIR/$k" ]] && echo "$k"
+    done)
 else
     VM_TYPES=("browsing" "pentest" "dev" "comms" "lurking")
 fi

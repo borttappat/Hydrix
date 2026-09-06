@@ -14,14 +14,28 @@ set -euo pipefail
 readonly SCRIPT_NAME="$(basename "$0")"
 readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly SELF_PATH="$(realpath "${BASH_SOURCE[0]}")"
-readonly PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+
+# hydrix-config location, not this script's own (nix store) install path
+if [[ -n "${HYDRIX_FLAKE_DIR:-}" && -f "$HYDRIX_FLAKE_DIR/flake.nix" ]]; then
+    PROJECT_DIR="$HYDRIX_FLAKE_DIR"
+elif [[ -f "$HOME/hydrix-config/flake.nix" ]]; then
+    PROJECT_DIR="$HOME/hydrix-config"
+else
+    echo "Error: No Hydrix config found at ~/hydrix-config" >&2
+    exit 1
+fi
+readonly PROJECT_DIR
 readonly PROFILES_DIR="$PROJECT_DIR/profiles"
 readonly PERSIST_BASE="$HOME/persist"
 readonly VM_REGISTRY="/etc/hydrix/vm-registry.json"
 
-# VM types that support package development — read from registry if available
+# VM types that support package development: profile keys from the registry
+# (i.e. those with a profiles/<key> dir), excluding infra/task VMs. Falls back
+# to defaults when the registry doesn't exist yet (pre-activation).
 if [[ -f "$VM_REGISTRY" ]]; then
-    readarray -t VM_TYPES < <(jq -r 'keys[]' "$VM_REGISTRY" 2>/dev/null)
+    readarray -t VM_TYPES < <(jq -r 'keys[]' "$VM_REGISTRY" 2>/dev/null | while IFS= read -r k; do
+        [[ -d "$PROFILES_DIR/$k" ]] && echo "$k"
+    done)
 else
     VM_TYPES=("browsing" "pentest" "dev" "comms" "lurking")
 fi
