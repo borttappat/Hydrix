@@ -1662,10 +1662,6 @@ resolve_builder_target() {
     local builder_flake="/mnt/hydrix"
 
     case "$target" in
-        # Short profile names → registry-resolved microvm-* names (per-machine)
-        browsing|pentest|dev|comms|lurking)
-            echo "${builder_flake}#nixosConfigurations.$(registry_vm_name "$target").config.microvm.declaredRunner"
-            ;;
         router)
             echo "${builder_flake}#nixosConfigurations.${ROUTER_NAME}.config.microvm.declaredRunner"
             ;;
@@ -1695,6 +1691,12 @@ resolve_builder_target() {
             echo "$target"
             ;;
         *)
+            # Any key declared in vm-registry.json (any profile, current or future)
+            # resolves via the registry rather than needing to be listed here.
+            if [[ -f "$VM_REGISTRY" ]] && jq -e --arg k "$target" 'has($k)' "$VM_REGISTRY" >/dev/null 2>&1; then
+                echo "${builder_flake}#nixosConfigurations.$(registry_vm_name "$target").config.microvm.declaredRunner"
+                return
+            fi
             # Any unrecognized name: prepend microvm- if not already prefixed
             local vm_name="$target"
             [[ "$vm_name" != microvm-* ]] && vm_name="microvm-$vm_name"
@@ -1707,10 +1709,6 @@ resolve_builder_target() {
 get_vm_name_from_target() {
     local target="$1"
     case "$target" in
-        # Short profile names → registry-resolved microvm-* names (per-machine)
-        browsing|pentest|dev|comms|lurking)
-            registry_vm_name "$target"
-            ;;
         router)
             echo "$ROUTER_NAME"
             ;;
@@ -1741,6 +1739,12 @@ get_vm_name_from_target() {
             echo ""
             ;;
         *)
+            # Any key declared in vm-registry.json (any profile, current or future)
+            # resolves via the registry rather than needing to be listed here.
+            if [[ -f "$VM_REGISTRY" ]] && jq -e --arg k "$target" 'has($k)' "$VM_REGISTRY" >/dev/null 2>&1; then
+                registry_vm_name "$target"
+                return
+            fi
             # Try engagement-name lookup (tasks/.engagement-registry) before
             # falling back to prepending microvm-. Lets "microvm start amazon"
             # resolve straight to microvm-pentest-task2, using the registry as

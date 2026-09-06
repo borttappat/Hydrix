@@ -265,6 +265,11 @@ stable interface. Typing the raw `nixosConfigurations` attribute directly (`.#ni
 .microvm-browsing...`) still works if you need it (e.g. scripting, `nix build`), but requires
 knowing the current machine's serial, which the short form exists specifically to avoid.
 
+Resolution works by checking whether the target name is a key present in
+`vm-registry.json`, not by matching against a fixed list of built-in profile names.
+A custom profile scaffolded with `new-profile` resolves exactly the same way as
+`browsing` or `pentest`, with no changes needed anywhere in the `microvm` CLI.
+
 **Why per-machine at all:** each profile VM's `system.stateVersion` (see
 [§ System State Version](#system-state-version)) and any machine-specific
 `hydrix.microvmHost.profileOverrides`/`vms.<name>.encryption` setting must apply to *that
