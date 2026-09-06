@@ -214,6 +214,39 @@ in {
             default = [];
             description = "Extra nftables rules appended to the forward chain.";
           };
+
+          allowedAccessTo = lib.mkOption {
+            type = lib.types.listOf (lib.types.submodule {
+              options = {
+                from = lib.mkOption {
+                  type = lib.types.str;
+                  description = "Source CIDR, e.g. \"192.168.103.0/24\".";
+                };
+                to = lib.mkOption {
+                  type = lib.types.str;
+                  description = "Destination IP, e.g. \"192.168.107.107\".";
+                };
+                ports = lib.mkOption {
+                  type = lib.types.listOf lib.types.port;
+                  description = "Destination ports to allow.";
+                };
+                proto = lib.mkOption {
+                  type = lib.types.enum ["tcp" "udp"];
+                  default = "tcp";
+                  description = "Protocol to allow.";
+                };
+              };
+            });
+            default = [];
+            description = ''
+              Scoped exceptions to VM isolation: allow traffic from a source
+              CIDR to a destination IP on specific ports, bypassing both the
+              isolation drop and the destination's outbound VPN policy
+              routing for return traffic. Plain IP/CIDR based, no name
+              resolution. Set in machine config; re-threaded into the router
+              VM build automatically.
+            '';
+          };
         };
       };
 

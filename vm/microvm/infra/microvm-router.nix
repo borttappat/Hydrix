@@ -823,6 +823,13 @@ in {
                         ip daddr ${s} accept
           '')
           shared}
+            # Allowed access: scoped exceptions to isolation (user-configurable)
+            ${lib.concatMapStrings (
+          a: lib.concatMapStrings (port: ''            ip saddr ${a.from} ip daddr ${a.to} ${a.proto} dport ${toString port} accept
+          '')
+          a.ports
+        )
+        cfg.router.microvm.firewall.allowedAccessTo}
             # Isolated bridges: block inter-bridge traffic (auto-generated from topology)
             ${let
           allSubnets = map (l: "${l.subnet}.0/24") allLans;
@@ -898,6 +905,35 @@ in {
             ''
         )
         allNetworks;
+    };
+
+    # ===== Allowed-Access VPN Bypass =====
+    # Mirrors the LAN-bypass trick each allowedAccessTo destination needs if
+    # it has its own outbound VPN policy-routing table: without this, return
+    # traffic to the allowed source gets pulled into that table's tunnel
+    # interface and dropped instead of going out the destination's own
+    # bridge. Runs after vpn-boot-assign so it always wins regardless of
+    # whether that table exists yet.
+    systemd.services.router-access-bypass = lib.mkIf (cfg.router.microvm.firewall.allowedAccessTo != []) {
+      description = "VPN policy-route bypass for allowedAccessTo pairs";
+      after = ["vpn-boot-assign.service"];
+      wants = ["vpn-boot-assign.service"];
+      wantedBy = ["multi-user.target"];
+      path = [pkgs.iproute2];
+      serviceConfig = {
+        Type = "oneshot";
+        RemainAfterExit = true;
+      };
+      # Bypass needed in both directions: the source subnet's own outbound
+      # policy table (e.g. its Mullvad exit-node table) may have no route to
+      # the destination at all ("Network is unreachable"), and symmetrically
+      # the destination's table may not route back to the source either.
+      script = lib.concatMapStrings (a: ''
+        ip rule del from ${a.to}/32 to ${a.from} lookup main priority 100 2>/dev/null || true
+        ip rule add from ${a.to}/32 to ${a.from} lookup main priority 100
+        ip rule del from ${a.from} to ${a.to}/32 lookup main priority 100 2>/dev/null || true
+        ip rule add from ${a.from} to ${a.to}/32 lookup main priority 100
+      '') cfg.router.microvm.firewall.allowedAccessTo;
     };
 
     # ===== WiFi Sync Service =====

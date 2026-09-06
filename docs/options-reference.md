@@ -423,6 +423,59 @@ Upstream DNS servers used by the router's dnsmasq. Override for custom DNS.
 
 ---
 
+#### `hydrix.router.microvm.firewall.sharedSubnets`
+| | |
+|---|---|
+| Type | `listOf str` |
+| Default | `[]` |
+| Template | ✓ live, with inline comment |
+
+Subnets (CIDR) allowed to cross bridge boundaries and reach every other VM subnet. All other subnets stay fully isolated from each other by default. Coarse - use `allowedAccessTo` instead when only one specific VM-pair/port needs to talk, not a whole subnet opened to everything else.
+
+---
+
+#### `hydrix.router.microvm.firewall.extraRules`
+| | |
+|---|---|
+| Type | `listOf str` |
+| Default | `[]` |
+| Template | — |
+
+Raw nftables rules appended to the end of the router's forward chain, after the isolation-drop block. Mainly useful for accepting WAN-DNAT'd traffic (e.g. a port forwarded from the WiFi network to a VM), since that traffic's source never matches any VM subnet and so is never touched by the isolation drops in the first place.
+
+---
+
+#### `hydrix.router.microvm.firewall.allowedAccessTo`
+| | |
+|---|---|
+| Type | `listOf (submodule { from, to, ports, proto })` |
+| Default | `[]` |
+| Template | ✓ commented example |
+
+Scoped exceptions to VM isolation: allow a source CIDR to reach a specific destination IP on specific ports only, bypassing both the isolation-drop rule and the destination's own outbound VPN policy routing (if it has one) for return traffic. Plain IP/CIDR based, no VM-name resolution - look up each VM's static IP yourself (`<vmSubnet>.<vsockCid>` by convention, e.g. CID 107 on subnet `192.168.107` -> `192.168.107.107`).
+
+Set this from **machine config** (e.g. `machines/<serial>.nix`), not inside `infra/router/default.nix` - it gets re-threaded into that machine's own router build automatically (see `perMachineRouterConfigs` in `flake.nix`), the same way `hydrix.router.persistence` already works. This also means the rule only ever applies to the one machine it's declared on.
+
+```nix
+# machines/my-laptop.nix
+hydrix.router.microvm.firewall.allowedAccessTo = [
+  # Let the "browsing" VM (192.168.103.0/24) reach a media server VM's
+  # Jellyfin port on the "plex" VM (static IP 192.168.107.107) directly,
+  # without routing it out through a WAN port forward.
+  {
+    from = "192.168.103.0/24";
+    to = "192.168.107.107";
+    ports = [8096];
+  }
+];
+```
+
+Unlike `sharedSubnets`, this doesn't open the destination to every other VM, and doesn't open the source subnet to anything beyond the declared `to`/`ports` pair - every other subnet combination stays isolated exactly as before. If the destination VM has its own VPN exit-node table (e.g. a privacy-profile VM routed through Mullvad), traffic in **both** directions needs a bypass for the pair to actually route (not just be firewall-accepted) - this option handles that automatically, no manual `ip rule` needed.
+
+Applying a change here requires an explicit `microvm build router` (updates the running VM's `current` symlink) followed by `microvm restart router` - `rebuild` alone only rebuilds the router's toplevel into the store, it does not restart the running VM or repoint `current`, even though the router is a "coupled" VM.
+
+---
+
 #### `hydrix.router.vpn.mullvad.enable`
 | | |
 |---|---|

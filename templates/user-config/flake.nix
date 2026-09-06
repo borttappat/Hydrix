@@ -479,7 +479,14 @@
         # hydrix.router.persistence set on the host machine config (e.g.
         # machines/<serial>.nix) is re-read from that machine's own evaluated
         # config and re-applied here, same pattern as wifiPciAddress above.
-        modules = routerModules ++ [{hydrix.router.persistence = mc.config.hydrix.router.persistence;}];
+        # hydrix.router.microvm.firewall.allowedAccessTo follows the same
+        # pattern so scoped VM-to-VM access rules live in machine config.
+        modules =
+          routerModules
+          ++ [
+            {hydrix.router.persistence = mc.config.hydrix.router.persistence;}
+            {hydrix.router.microvm.firewall.allowedAccessTo = mc.config.hydrix.router.microvm.firewall.allowedAccessTo;}
+          ];
       };
     }) (builtins.attrNames machineConfigs));
 
