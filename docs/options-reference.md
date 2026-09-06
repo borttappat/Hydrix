@@ -459,13 +459,13 @@ Set this from **machine config** (e.g. `machines/<serial>.nix`), not inside `inf
 ```nix
 # machines/my-laptop.nix
 hydrix.router.microvm.firewall.allowedAccessTo = [
-  # Let the "browsing" VM (192.168.103.0/24) reach a media server VM's
-  # Jellyfin port on the "plex" VM (static IP 192.168.107.107) directly,
-  # without routing it out through a WAN port forward.
+  # Let VM A (192.168.103.0/24) reach a service on VM B (static IP
+  # 192.168.107.10) directly, without routing it out through a WAN port
+  # forward or opening the two subnets to each other entirely.
   {
     from = "192.168.103.0/24";
-    to = "192.168.107.107";
-    ports = [8096];
+    to = "192.168.107.10";
+    ports = [8080];
   }
 ];
 ```
