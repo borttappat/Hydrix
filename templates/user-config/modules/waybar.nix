@@ -349,8 +349,16 @@
   '';
 
   wifiSyncScript = pkgs.writeShellScript "waybar-wifi-sync" ''
-    poll=$(echo "POLL" | ${pkgs.coreutils}/bin/timeout 2 \
-      ${pkgs.socat}/bin/socat -t2 - VSOCK-CONNECT:200:14506 2>/dev/null)
+    ROUTER_ALL_CACHE="/tmp/hydrix-eww-router-all.json"
+    poll=""
+    if [ -f "$ROUTER_ALL_CACHE" ]; then
+      age=$(( $(${pkgs.coreutils}/bin/date +%s) - $(${pkgs.coreutils}/bin/stat -c %Y "$ROUTER_ALL_CACHE" 2>/dev/null || echo 0) ))
+      [ "$age" -lt 15 ] && poll=$(${pkgs.jq}/bin/jq -c '.wifi' "$ROUTER_ALL_CACHE" 2>/dev/null)
+    fi
+    if [ -z "$poll" ]; then
+      poll=$(echo "POLL" | ${pkgs.coreutils}/bin/timeout 2 \
+        ${pkgs.socat}/bin/socat -t2 - VSOCK-CONNECT:200:14506 2>/dev/null)
+    fi
     [ -z "$poll" ] && exit 0
 
     current=$(echo "$poll" | ${pkgs.jq}/bin/jq -r '.current // ""' 2>/dev/null)

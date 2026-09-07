@@ -3334,6 +3334,7 @@ All host-VM communication uses virtio-vsock. No SSH or network access to VMs. Ea
 | 14504 | vm-switch | Host -> VM | Live NixOS config switch (SWITCH/TEST/STATUS/PING) |
 | 14505 | files-agent | Host -> Files VM | File transfer ops (FETCH/DELIVER/STORE/LIST) |
 | 14506 | vm-files-agent | Host -> any VM | Per-VM file ops (ENCRYPT/DECRYPT/SERVE/CLEANUP) |
+| 14506 | router-stats-server | Host -> Router | WiFi/net/WireGuard status + WiFi credential sync (see [Polling Architecture](#polling-architecture) below). Commands: `PING`, `POLL`/`STATUS`, `NET`, `WG`, `ALL`, `ADD`/`REMOVE` |
 | 14505 | pulse-vsock | VM -> Host | PulseAudio/PipeWire audio bridge (VM→host, proxied to TCP:4713) |
 | 14508 | waypipe-launch | Host -> VM | App launch commands (Wayland mode) |
 | 14509 | display-mode | Host -> VM | Display mode selector / readiness gate: `PING`/`waypipe-reconnect`/`STATUS`/`stop` |
@@ -3365,6 +3366,69 @@ echo "STATUS" | vsock-cmd 101 14504
 ```
 
 `vsock-cmd` uses `AF_VSOCK` sockets directly (no socat). It sends one newline-terminated command, then reads until the connection closes, which happens naturally when the per-connection handler exits on the VM side.
+
+### Polling Architecture
+
+Some vsock services answer a command the host asks for repeatedly on a timer (WiFi/net
+status polled every few seconds, package-staging lists polled every couple minutes),
+rather than once per human action. Those services use a different pattern from the rest
+of this table, for a concrete reason: **KVM runs a guest's vCPU as a real host thread**,
+so guest work and host CPU time on that thread are the same event, not two separate
+things. A vsock listener implemented as `socat VSOCK-LISTEN:PORT,fork EXEC:handler`
+forks a new process and execs a shell and execs the actual payload on every single
+connection - and since a VM's entire `/nix/store` is typically mounted read-only over
+virtiofs, each new process can mean a FUSE round trip to the host's virtiofsd for every
+path/library it needs to resolve. On a low-vCPU guest, that fork+exec chain shows up as
+a measurable CPU spike **regardless of how cheap the payload itself is** - reproducible
+by firing a single connection at an otherwise-idle fork-per-connection listener and
+watching CPU spike on that guest's vCPU thread.
+
+**The fix, used by `router-stats-server`/`vm-staging-server`**: a persistent process
+that binds the vsock listener once and holds it open for the service's lifetime,
+answering every connection from already-cached data or direct in-process work - no
+`fork`/`exec` on the connection path at all. Concretely:
+
+1. **Separate sampling from serving.** A background loop (or thread) periodically
+   gathers whatever data the service needs and writes it to a cache (a file, or just an
+   in-memory struct) - this can still shell out to real tools if no syscall-level
+   alternative exists, since it only happens once per interval, not once per connection.
+   The vsock-facing part is a different, always-running process that just reads the
+   cache and responds - instant, no forking, regardless of how often the host asks.
+2. **One command that returns everything.** Alongside per-topic commands, give the
+   server an `ALL`-style command that returns every topic it serves in one response, so
+   a consumer needing multiple pieces of data can do it in a single connection instead
+   of several.
+3. **Route the sampling interval through one option.** A single `mkDefault`-able
+   interval option (rather than a hardcoded value duplicated across scripts) lets
+   machine configs dial down sample frequency on weaker hardware without touching code.
+4. **Merge multiple independent sampler loops into one where they serve the same
+   consumer**, instead of several independently-scheduled `while true; sleep` loops
+   each paying their own fork/exec cost on their own schedule.
+5. **When rewriting a sampler's internals to avoid forking, don't stop at the obvious
+   command.** A single `iw dev`/`wg show` call looks cheap in isolation, but a real tick
+   that also loops over N saved items calling `grep`+`sed` (or similar) per item can add
+   up to dozens of forks in one burst - test the *actual* service tick (e.g. restart it
+   and watch a per-thread CPU sample immediately after), not just its individual
+   commands run once by hand, which can look deceptively cheap due to warm page cache
+   from the very loop you're trying to measure.
+6. **Judge fork/exec elimination against actual risk and frequency, not uniformly.**
+   Rewriting logic that only touches plain data (files, `/proc`, JSON) is low-risk and
+   worth doing wherever a real polling loop exists. Logic touching cryptography or auth
+   flows (encryption, SSH, OAuth device flows) is a bad candidate for a hand-rolled
+   rewrite regardless of how "simple" the surrounding shell script looks - the security
+   cost of a subtle bug outweighs a fork's CPU cost, especially for something only
+   triggered once per explicit human action rather than continuously polled. Similarly,
+   a one-shot handler that's already just a single command dispatch (no per-item loop)
+   usually isn't worth converting at all - the fork-per-connection listener overhead on
+   something triggered a few times a day is not a measurable cost.
+
+A persistent server can still `fork`+`execvp` for genuinely rare/interactive commands
+within the same process (e.g. `ADD`/`REMOVE` WiFi credentials, `get`/`unstage` a staged
+package) - that cost doesn't recur on every poll cycle, so it doesn't need the same
+treatment as the commands actually hit by a timer. When a rare command's payload needs
+to run an external tool with caller-supplied arguments (an SSID, a package name), pass
+them as an `execvp`/`execve` argv array rather than building a shell string - avoids any
+possibility of the argument being reinterpreted as shell syntax.
 
 ---
 

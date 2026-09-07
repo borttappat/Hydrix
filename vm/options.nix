@@ -165,4 +165,29 @@ in {
       example = 10;
     };
   };
+
+  options.hydrix.router.polling = {
+    interval = lib.mkOption {
+      type = lib.types.int;
+      default = 10;
+      description = ''
+        Single canonical interval (seconds) for the router's one background
+        sampling loop, which gathers WiFi/NM state, network throughput, and
+        WireGuard status together each tick. Raise on weaker machines - none
+        of this data needs sub-10s freshness. Set with lib.mkDefault in
+        modules, plain assignment in machine configs to override.
+      '';
+      example = 30;
+    };
+    enableNetStats = lib.mkOption {
+      type = lib.types.bool;
+      default = true;
+      description = "Include network throughput sampling in the router's stats loop.";
+    };
+    enableWgStatus = lib.mkOption {
+      type = lib.types.bool;
+      default = true;
+      description = "Include WireGuard tunnel status sampling in the router's stats loop.";
+    };
+  };
 }

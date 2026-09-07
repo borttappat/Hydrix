@@ -3,9 +3,9 @@
 # Single left-overlay window (center left) with three stacked sections:
 #   - VMS:      running/stopped VM overview (parses `microvm status`)
 #   - EXIT NODES: active WireGuard exit nodes with session totals
-#                 (queries router CID 200 vsock 14515)
+#                 (queries router CID 200 vsock 14506, WG command)
 #   - NETWORK:  connected SSID, unsaved count, WAN + per-VM bandwidth
-#                 (wifi-sync vsock 14506; net-stats vsock 14517)
+#                 (router CID 200 vsock 14506; POLL/NET commands)
 #
 # Panel is gated by :visible so it appears fully-formed once data arrives.
 # Colors sourced from ~/.cache/wal/colors.scss (pywal SCSS output).
@@ -48,23 +48,32 @@
   panelOpacity = toString (ui.opacity.overlayOverrides.eww or ui.opacity.overlay);
   panelPadding = toString (ui.padding or 8);
 
-  # Polling script: queries router vsock 14515 for wg dump JSON, then
-  # cross-references currently-running VMs to filter down to active tunnels.
-  # Returns JSON array for eww defpoll. Reads the running-VM list from
-  # eww-mvm-status's cache file (VM_STATUS_CACHE) instead of independently
-  # re-invoking `microvm status` — both widgets polled the same data every
-  # 10s, and `microvm status` is not cheap (full VM enumeration + per-VM CID
-  # lookup). Falls back to `microvm status` directly if the cache is missing
-  # (e.g. before eww-mvm-status has run once). Deliberately does not depend
-  # on /tmp/hydrix-metrics-* — those files are workspace-focus-driven (only
-  # the currently-focused VM's file gets (re)written) and wiped on every
-  # reboot, so this widget would stay empty until every relevant workspace
-  # had been focused at least once.
+  # Polling script: queries router vsock 14506 (router-stats-server, WG
+  # command) for wg dump JSON, then cross-references currently-running VMs to
+  # filter down to active tunnels. Returns JSON array for eww defpoll. Reads
+  # the running-VM list from eww-mvm-status's cache file (VM_STATUS_CACHE)
+  # instead of independently re-invoking `microvm status` — both widgets
+  # polled the same data every 10s, and `microvm status` is not cheap (full
+  # VM enumeration + per-VM CID lookup). Falls back to `microvm status`
+  # directly if the cache is missing (e.g. before eww-mvm-status has run
+  # once). Deliberately does not depend on /tmp/hydrix-metrics-* — those
+  # files are workspace-focus-driven (only the currently-focused VM's file
+  # gets (re)written) and wiped on every reboot, so this widget would stay
+  # empty until every relevant workspace had been focused at least once.
+  routerAllCache = "/tmp/hydrix-eww-router-all.json";
+
   ewwWgStatus = pkgs.writeShellApplication {
     name = "eww-wg-status";
     runtimeInputs = [pkgs.socat pkgs.jq pkgs.coreutils pkgs.gnused];
     text = ''
-      router_json=$(echo "" | socat -T2 - VSOCK-CONNECT:200:14515 2>/dev/null || true)
+      router_json=""
+      if [ -f "${routerAllCache}" ]; then
+        age=$(( $(date +%s) - $(stat -c %Y "${routerAllCache}" 2>/dev/null || echo 0) ))
+        [ "$age" -lt 15 ] && router_json=$(jq -c '.wg' "${routerAllCache}" 2>/dev/null || true)
+      fi
+      if [ -z "$router_json" ]; then
+        router_json=$(printf 'WG\n' | socat -T2 - VSOCK-CONNECT:200:14506 2>/dev/null || true)
+      fi
       if [ -z "$router_json" ] || [ "$router_json" = "[]" ]; then
         echo "[]"; exit 0
       fi
@@ -193,28 +202,40 @@
     '';
   };
 
-  # Polling script: queries wifi-sync vsock 14506.
+  # Single-shot fetcher: one ALL connection to router-stats-server pulls
+  # wifi+net+wg together and caches the combined result, so ewwWgStatus and
+  # ewwNetStats (below) don't each open their own separate connection for
+  # the same 10s tick - one connection serves all three widgets.
   ewwRouterStats = pkgs.writeShellApplication {
     name = "eww-router-stats";
     runtimeInputs = [pkgs.socat pkgs.jq];
     text = ''
-      result=$(echo "POLL" | socat -T3 - VSOCK-CONNECT:200:14506 2>/dev/null || true)
-      if [ -z "$result" ]; then
+      all=$(printf 'ALL\n' | socat -T3 - VSOCK-CONNECT:200:14506 2>/dev/null || true)
+      if [ -z "$all" ]; then
         echo '{"current":"","connections":[],"pending":0}'
-      else
-        pending=$(wifi-sync count 2>/dev/null || echo 0)
-        echo "$result" | jq --argjson p "$pending" '. + {"pending": $p}'
+        exit 0
       fi
+      printf '%s' "$all" > "${routerAllCache}.tmp" && mv "${routerAllCache}.tmp" "${routerAllCache}"
+      pending=$(wifi-sync count 2>/dev/null || echo 0)
+      echo "$all" | jq --argjson p "$pending" '.wifi + {"pending": $p}'
     '';
   };
 
-  # Polling script: queries net-stats vsock 14517, formats byte rates,
-  # normalises direction to VM perspective (router rx/tx → VM up/down).
+  # Polling script: queries router vsock 14506 (router-stats-server, NET
+  # command), formats byte rates, normalises direction to VM perspective
+  # (router rx/tx → VM up/down).
   ewwNetStats = pkgs.writeShellApplication {
     name = "eww-net-stats";
-    runtimeInputs = [pkgs.socat pkgs.jq];
+    runtimeInputs = [pkgs.socat pkgs.jq pkgs.coreutils];
     text = ''
-      raw=$(echo "" | socat -T4 - VSOCK-CONNECT:200:14517 2>/dev/null || true)
+      raw=""
+      if [ -f "${routerAllCache}" ]; then
+        age=$(( $(date +%s) - $(stat -c %Y "${routerAllCache}" 2>/dev/null || echo 0) ))
+        [ "$age" -lt 15 ] && raw=$(jq -c '.net' "${routerAllCache}" 2>/dev/null || true)
+      fi
+      if [ -z "$raw" ]; then
+        raw=$(printf 'NET\n' | socat -T4 - VSOCK-CONNECT:200:14506 2>/dev/null || true)
+      fi
       [ -z "$raw" ] && { echo '{"wan":{"iface":"","down":"","up":""},"vms":[]}'; exit 0; }
       echo "$raw" | jq '
         def fmt:

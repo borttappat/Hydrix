@@ -29,6 +29,18 @@ let
     gcc -O2 -o $out/bin/vm-metrics-server ${./vm-metrics.c} -lpthread
   '';
 
+  # Compiled staging server: one persistent process instead of a fork-per-
+  # connection socat listener. `list`/`dev` (the commands waybar's periodic
+  # sync poll actually hits) answer directly via opendir/stat, no process
+  # ever forked for those. Source lives alongside this file as
+  # vm-staging-server.c.
+  stagingServerBin = pkgs.runCommand "vm-staging-server" {
+    nativeBuildInputs = [ pkgs.gcc ];
+  } ''
+    mkdir -p $out/bin
+    gcc -O2 -o $out/bin/vm-staging-server ${./vm-staging-server.c}
+  '';
+
 in {
   imports = [
     ../../options.nix
@@ -269,9 +281,12 @@ in {
     };
 
     # ===== VM Staging Server for Host Package Sync =====
-    # Vsock server that allows host to query and pull staged packages
-    # Host queries via: echo "list" | socat - VSOCK-CONNECT:CID:14502
-    # Host pulls via:   echo "get <pkg>" | socat - VSOCK-CONNECT:CID:14502 | tar xf -
+    # Persistent no-fork vsock server (port 14502). Host queries via:
+    #   echo "list" | socat - VSOCK-CONNECT:CID:14502
+    #   echo "get <pkg>" | socat - VSOCK-CONNECT:CID:14502 | tar xf -
+    # See vm-staging-server.c - one process instead of fork-per-connection,
+    # since `list` is hit every 120s by waybar's sync poll across every
+    # running VM (same fork/exec-avoidance rationale as router-stats-server).
     systemd.services.vm-staging = {
       description = "VM staging server for host package sync";
       wantedBy = [ "multi-user.target" ];
@@ -279,96 +294,7 @@ in {
 
       serviceConfig = {
         Type = "simple";
-        ExecStart = let
-          stagingScript = pkgs.writeShellScript "vm-staging-server" ''
-            # Staging server - allows host to query and pull staged packages
-            while true; do
-              ${pkgs.socat}/bin/socat VSOCK-LISTEN:14502,reuseaddr,fork EXEC:"${stagingHandler}"
-            done
-          '';
-          stagingHandler = pkgs.writeShellScript "vm-staging-handler" ''
-            USER_HOME="/home/${config.hydrix.username}"
-            STAGING_DIR="$USER_HOME/staging"
-            DEV_DIR="$USER_HOME/dev/packages"
-            VM_NAME="${vmName}"
-            VM_TYPE="${config.hydrix.vmType}"
-
-            read -r cmd arg
-
-            case "$cmd" in
-              list)
-                # Return JSON with staged packages
-                packages=""
-                if [ -d "$STAGING_DIR" ]; then
-                  for dir in "$STAGING_DIR"/*/; do
-                    [ -d "$dir" ] || continue
-                    if [ -f "''${dir}package.nix" ]; then
-                      name=$(basename "$dir")
-                      [ -n "$packages" ] && packages="$packages,"
-                      packages="$packages\"$name\""
-                    fi
-                  done
-                fi
-                echo "{\"packages\":[$packages],\"vm\":\"$VM_NAME\",\"type\":\"$VM_TYPE\"}"
-                ;;
-              get)
-                # Return tar stream of staged package
-                pkg="$arg"
-                pkg_dir="$STAGING_DIR/$pkg"
-                if [ -d "$pkg_dir" ] && [ -f "$pkg_dir/package.nix" ]; then
-                  # Use tar to stream the package directory
-                  cd "$STAGING_DIR" && ${pkgs.gnutar}/bin/tar cf - "$pkg"
-                else
-                  echo "ERROR: Package '$pkg' not found" >&2
-                  exit 1
-                fi
-                ;;
-              unstage)
-                # Remove package from staging area after host has pulled it
-                pkg="$arg"
-                pkg_dir="$STAGING_DIR/$pkg"
-                if [ -d "$pkg_dir" ]; then
-                  ${pkgs.coreutils}/bin/rm -rf "$pkg_dir"
-                  echo "{\"ok\":true,\"unstaged\":\"$pkg\"}"
-                else
-                  echo "{\"error\":\"not found\"}"
-                fi
-                ;;
-              info)
-                # Return info about a specific package
-                pkg="$arg"
-                pkg_dir="$STAGING_DIR/$pkg"
-                if [ -d "$pkg_dir" ] && [ -f "$pkg_dir/package.nix" ]; then
-                  size=$(${pkgs.coreutils}/bin/du -sb "$pkg_dir" | ${pkgs.gawk}/bin/awk '{print $1}')
-                  echo "{\"name\":\"$pkg\",\"size\":$size,\"vm\":\"$VM_NAME\",\"type\":\"$VM_TYPE\"}"
-                else
-                  echo "{\"error\":\"not found\"}"
-                fi
-                ;;
-              dev)
-                # Return JSON with dev packages (not yet staged)
-                packages=""
-                if [ -d "$DEV_DIR" ]; then
-                  for dir in "$DEV_DIR"/*/; do
-                    [ -d "$dir" ] || continue
-                    if [ -f "''${dir}flake.nix" ]; then
-                      name=$(basename "$dir")
-                      # Check if staged
-                      staged="false"
-                      [ -f "$STAGING_DIR/$name/package.nix" ] && staged="true"
-                      [ -n "$packages" ] && packages="$packages,"
-                      packages="$packages{\"name\":\"$name\",\"staged\":$staged}"
-                    fi
-                  done
-                fi
-                echo "{\"packages\":[$packages],\"vm\":\"$VM_NAME\",\"type\":\"$VM_TYPE\"}"
-                ;;
-              *)
-                echo "{\"error\":\"unknown command\",\"commands\":[\"list\",\"get <pkg>\",\"info <pkg>\",\"dev\"]}"
-                ;;
-            esac
-          '';
-        in stagingScript;
+        ExecStart = "${stagingServerBin}/bin/vm-staging-server /home/${config.hydrix.username}/staging /home/${config.hydrix.username}/dev/packages ${vmName} ${config.hydrix.vmType}";
         Restart = "always";
         RestartSec = 5;
       };

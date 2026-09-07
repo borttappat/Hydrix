@@ -1,7 +1,11 @@
 # Router VM user settings
 # DNS servers, firewall, extra packages, VPN config goes in vpn/mullvad.nix
+#
+# WiFi/net/WireGuard sampling lives in Hydrix's router-stats-poller
+# (vm/microvm/infra/microvm-router.nix) as one merged background loop -
+# see hydrix.router.polling.{interval,enableNetStats,enableWgStatus} to
+# tune the sample rate or disable a piece of it.
 { pkgs, ... }: {
-  imports = [ ./wg-status.nix ./net-stats.nix ];
   hydrix.router.microvm = {
     # Extra packages available inside the router VM
     # extraPackages = [ pkgs.tcpdump pkgs.mtr ];

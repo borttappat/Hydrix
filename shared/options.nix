@@ -227,8 +227,10 @@ in {
           gitsyncGit = 14512;
           gitsyncStatus = 14513;
           vaultAgent = 14514;
-          exitNodes = 14515;
           lanControl = 14516;
+          # Router only: WiFi/net/WireGuard status + credential sync, one
+          # persistent process, commands PING/POLL/STATUS/NET/WG/ALL/ADD/REMOVE.
+          routerStats = 14506;
         };
         description = "vsock port assignments for Hydrix services. Override to avoid collisions with other software.";
       };
