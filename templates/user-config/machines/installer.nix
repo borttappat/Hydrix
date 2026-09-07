@@ -256,6 +256,10 @@
       # ui.barHeight   = 23;          # DEFAULT: 23
       # ui.border      = 2;           # DEFAULT: 2  - window border width
       # ui.cornerRadius = 2;          # DEFAULT: 2  - corner rounding radius
+      # ui.dunstOffsetCompensation.y = -1; # DEFAULT: {} (x=0,y=0) - per-machine fudge on
+      #   top of dunstOffset; fractional display scale can round X/Y offsets differently.
+      #   Tune by eye: hand-edit the offset line in ~/.config/dunst/dunstrc-layout,
+      #   restart dunst.service, then set the confirmed value here.
 
       # ─── Hyprland display scaling ──────────────────────────────────────
       # scaling.hyprInternalScale  = 1.5;       # UI scale (1.5 -> 1280×800, 1.25 -> 1536×960 logical)
