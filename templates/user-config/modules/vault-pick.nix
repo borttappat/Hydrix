@@ -137,13 +137,19 @@ EOF
       fi
 
       # Try LIST directly — handles locked/unreachable inline (avoids pre-flight PING+STATUS)
+      # use_search_box=false drops the GtkSearchEntry icon (plain GtkEntry has none, but
+      # also can't show --prompt as placeholder text); dynamic_lines=true + lines=1 with
+      # empty stdin keeps the window sized to just the input row, no icon, no blank rows.
       unlock_and_list() {
-        password=$(echo | wofi_dmenu \
+        password=$(wofi_dmenu \
           --password \
-          --prompt "Vault password:" \
+          --prompt "Password" \
           --width 380 \
-          --lines 0 \
-          --hide-scroll)
+          --lines 1 \
+          --hide-scroll \
+          --define use_search_box=false \
+          --define dynamic_lines=true \
+          < /dev/null)
         [ -z "$password" ] && exit 0
 
         result=$(printf '%s' "UNLOCK $password" | socat -T15 - "VSOCK-CONNECT:$CID:$PORT" 2>/dev/null)

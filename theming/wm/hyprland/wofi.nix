@@ -260,15 +260,24 @@
         [[ -f "$luks_path" ]] || return 0
         [[ -b "/dev/mapper/''${mapper_name}" ]] && return 0
 
+        # Deliberately not using wofi_args() here: its --height is sized for the
+        # full drun app launcher and would force this single-line prompt to that
+        # same height. dynamic_lines=true + lines=1 + empty stdin sizes the window
+        # to just the input row instead.
         local password
-        password=$(echo | ${pkgs.wofi}/bin/wofi --show dmenu \
-            $(wofi_args) \
+        password=$(${pkgs.wofi}/bin/wofi --show dmenu \
+            --show-icons \
+            --width=${wofiWidth} \
+            --style=$WOFI_STYLE \
+            --define=icon_theme=Papirus \
+            --define=use_search_box=false \
+            --define=no_actions=true \
+            --define=dynamic_lines=true \
             --password \
-            --prompt="Unlock ''${vm_name}:" \
-            --no-search \
-            --lines=0 \
+            --prompt="Unlock ''${vm_name}" \
+            --lines=1 \
             --hide-scroll \
-            2>/dev/null) || true
+            2>/dev/null < /dev/null) || true
 
         if [[ -z "$password" ]]; then
             ${pkgs.libnotify}/bin/notify-send -t 3000 "MicroVM" "Unlock cancelled for ''${vm_name}"
@@ -319,12 +328,24 @@
 
         display_list+="cancel"
 
+        # wofi_args() is skipped here too: its fixed --height is for the full
+        # drun launcher, not this short fixed-length list.
+        local entry_count
+        entry_count=$(echo -n "$display_list" | ${pkgs.gnugrep}/bin/grep -c .)
+
         local selection
         selection=$(echo -n "$display_list" \
             | ${pkgs.wofi}/bin/wofi --show dmenu \
-              $(wofi_args) \
+              --show-icons \
+              --width=${wofiWidth} \
+              --style=$WOFI_STYLE \
+              --define=icon_theme=Papirus \
+              --define=use_search_box=false \
+              --define=no_actions=true \
+              --define=dynamic_lines=true \
               --prompt="Start ''${vm_type} VM" \
-              --no-search \
+              --lines="$entry_count" \
+              --hide-scroll \
               2>/dev/null) || true
 
         [[ -z "$selection" || "$selection" == "cancel" ]] && return
@@ -353,8 +374,16 @@
         else
             selected=$(echo "$running_vms" \
                 | ${pkgs.wofi}/bin/wofi --show dmenu \
-                  $(wofi_args) \
+                  --show-icons \
+                  --width=${wofiWidth} \
+                  --style=$WOFI_STYLE \
+                  --define=icon_theme=Papirus \
+                  --define=use_search_box=false \
+                  --define=no_actions=true \
+                  --define=dynamic_lines=true \
                   --prompt="Select VM" \
+                  --lines="$vm_count" \
+                  --hide-scroll \
                   2>/dev/null) || true
 
             [[ -z "$selected" ]] && return
