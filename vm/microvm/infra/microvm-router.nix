@@ -38,12 +38,13 @@
   # Compiled persistent vsock server, zero fork/exec per connection. Replaces
   # the old fork-per-connection socat listeners for wifi-sync/net-stats/
   # wg-status. Source lives alongside this file as router-stats-server.c.
-  routerStatsServerBin = pkgs.runCommand "router-stats-server" {
-    nativeBuildInputs = [ pkgs.gcc ];
-  } ''
-    mkdir -p $out/bin
-    gcc -O2 -o $out/bin/router-stats-server ${./router-stats-server.c}
-  '';
+  routerStatsServerBin =
+    pkgs.runCommand "router-stats-server" {
+      nativeBuildInputs = [pkgs.gcc];
+    } ''
+      mkdir -p $out/bin
+      gcc -O2 -o $out/bin/router-stats-server ${./router-stats-server.c}
+    '';
 
   routerPollInterval = toString cfg.router.polling.interval;
 
@@ -214,6 +215,9 @@ in {
       vcpu = 1;
       mem = 1024; # 1GB should be plenty
 
+      balloon = true;
+      deflateOnOOM = true;
+
       # No store disk - we'll use virtiofs like other microvms
       storeDiskType = "squashfs";
       writableStoreOverlay = "/nix/.rw-store";
@@ -340,12 +344,14 @@ in {
       # hydrix.router.vpn.mullvad.*) is the source of truth for anything
       # declarative either way; no `microvm purge` needed to clear stale
       # runtime state.
-      volumes = lib.optionals cfg.router.persistence.enable [{
-        image = "/var/lib/microvms/${vmName}/network-manager.qcow2";
-        mountPoint = "/var/lib/NetworkManager";
-        size = cfg.router.persistence.size;
-        autoCreate = true;
-      }];
+      volumes = lib.optionals cfg.router.persistence.enable [
+        {
+          image = "/var/lib/microvms/${vmName}/network-manager.qcow2";
+          mountPoint = "/var/lib/NetworkManager";
+          size = cfg.router.persistence.size;
+          autoCreate = true;
+        }
+      ];
 
       # ===== Vsock =====
       # lib.mkDefault: user can override via infra/router/default.nix (or meta.nix CID)
@@ -571,10 +577,11 @@ in {
 
         # Runtime network map for vpn-assign: name:tableId:subnet
         # Table ID = subnet last octet (e.g. 192.168.102 → 102), same as CID by convention
-        "hydrix-router/network-map".text = lib.concatMapStrings (
-          n: "${n.name}:${lib.last (lib.splitString "." n.subnet)}:${n.subnet}.0/24\n"
-        )
-        allNetworks;
+        "hydrix-router/network-map".text =
+          lib.concatMapStrings (
+            n: "${n.name}:${lib.last (lib.splitString "." n.subnet)}:${n.subnet}.0/24\n"
+          )
+          allNetworks;
 
         # Static interface name map - generated at build time from known TAP names.
         # Consumed by dnsmasq-config; no runtime detection needed since names are
@@ -837,11 +844,12 @@ in {
           shared}
             # Allowed access: scoped exceptions to isolation (user-configurable)
             ${lib.concatMapStrings (
-          a: lib.concatMapStrings (port: ''            ip saddr ${a.from} ip daddr ${a.to} ${a.proto} dport ${toString port} accept
-          '')
-          a.ports
-        )
-        cfg.router.microvm.firewall.allowedAccessTo}
+            a:
+              lib.concatMapStrings (port: ''                ip saddr ${a.from} ip daddr ${a.to} ${a.proto} dport ${toString port} accept
+              '')
+              a.ports
+          )
+          cfg.router.microvm.firewall.allowedAccessTo}
             # Isolated bridges: block inter-bridge traffic (auto-generated from topology)
             ${let
           allSubnets = map (l: "${l.subnet}.0/24") allLans;
@@ -940,12 +948,14 @@ in {
       # policy table (e.g. its Mullvad exit-node table) may have no route to
       # the destination at all ("Network is unreachable"), and symmetrically
       # the destination's table may not route back to the source either.
-      script = lib.concatMapStrings (a: ''
-        ip rule del from ${a.to}/32 to ${a.from} lookup main priority 100 2>/dev/null || true
-        ip rule add from ${a.to}/32 to ${a.from} lookup main priority 100
-        ip rule del from ${a.from} to ${a.to}/32 lookup main priority 100 2>/dev/null || true
-        ip rule add from ${a.from} to ${a.to}/32 lookup main priority 100
-      '') cfg.router.microvm.firewall.allowedAccessTo;
+      script =
+        lib.concatMapStrings (a: ''
+          ip rule del from ${a.to}/32 to ${a.from} lookup main priority 100 2>/dev/null || true
+          ip rule add from ${a.to}/32 to ${a.from} lookup main priority 100
+          ip rule del from ${a.from} to ${a.to}/32 lookup main priority 100 2>/dev/null || true
+          ip rule add from ${a.from} to ${a.to}/32 lookup main priority 100
+        '')
+        cfg.router.microvm.firewall.allowedAccessTo;
     };
 
     # ===== Router Stats Sampling =====
@@ -1030,121 +1040,121 @@ in {
             }
             ${lib.optionalString cfg.router.polling.enableNetStats ''
 
-            # Reads interface -> "rx tx" pairs from /proc/net/dev, no awk fork.
-            # Each line looks like "  eth0: 123 0 0 0 0 0 0 0 456 0 0 0 0 0 0 0" -
-            # read -ra word-splits on whitespace, which also trims the leading
-            # padding spaces, so f[0] is "eth0:" with no separate trim step needed.
-            sample_dev() {
-              local line f iface
-              while IFS= read -r line; do
-                case "$line" in *:*) ;; *) continue ;; esac
-                read -ra f <<< "$line"
-                [ "''${#f[@]}" -ge 10 ] || continue
-                iface="''${f[0]%:}"
-                printf '%s %s %s\n' "$iface" "''${f[1]}" "''${f[9]}"
-              done < /proc/net/dev
-            }
+              # Reads interface -> "rx tx" pairs from /proc/net/dev, no awk fork.
+              # Each line looks like "  eth0: 123 0 0 0 0 0 0 0 456 0 0 0 0 0 0 0" -
+              # read -ra word-splits on whitespace, which also trims the leading
+              # padding spaces, so f[0] is "eth0:" with no separate trim step needed.
+              sample_dev() {
+                local line f iface
+                while IFS= read -r line; do
+                  case "$line" in *:*) ;; *) continue ;; esac
+                  read -ra f <<< "$line"
+                  [ "''${#f[@]}" -ge 10 ] || continue
+                  iface="''${f[0]%:}"
+                  printf '%s %s %s\n' "$iface" "''${f[1]}" "''${f[9]}"
+                done < /proc/net/dev
+              }
 
-            # Default route's interface from /proc/net/route, no ip(8) fork.
-            # Destination "00000000" (hex) marks the default route; header line
-            # never matches since its Destination column reads "Destination".
-            default_iface() {
-              local line f
-              while IFS= read -r line; do
-                read -ra f <<< "$line"
-                if [ "''${f[1]:-}" = "00000000" ]; then
-                  printf '%s' "''${f[0]}"
-                  return
-                fi
-              done < /proc/net/route
-            }
+              # Default route's interface from /proc/net/route, no ip(8) fork.
+              # Destination "00000000" (hex) marks the default route; header line
+              # never matches since its Destination column reads "Destination".
+              default_iface() {
+                local line f
+                while IFS= read -r line; do
+                  read -ra f <<< "$line"
+                  if [ "''${f[1]:-}" = "00000000" ]; then
+                    printf '%s' "''${f[0]}"
+                    return
+                  fi
+                done < /proc/net/route
+              }
 
-            clamp_rate() {
-              local v=$(( ($1 - $2) / SAMPLE_INTERVAL ))
-              [ "$v" -lt 0 ] && echo 0 || echo "$v"
-            }
+              clamp_rate() {
+                local v=$(( ($1 - $2) / SAMPLE_INTERVAL ))
+                [ "$v" -lt 0 ] && echo 0 || echo "$v"
+              }
             ''}
             ${lib.optionalString cfg.router.polling.enableWgStatus ''
 
-            relay_cache="/tmp/wg-mullvad-relays.json"
+              relay_cache="/tmp/wg-mullvad-relays.json"
 
-            refresh_relay_cache() {
-              local now relay_age
-              now=$(date +%s)
-              relay_age=0
-              [ -f "$relay_cache" ] && relay_age=$(( now - $(stat -c %Y "$relay_cache" 2>/dev/null || echo 0) ))
-              if [ ! -f "$relay_cache" ] || [ "$relay_age" -gt 3600 ]; then
-                ${pkgs.curl}/bin/curl -sf --max-time 15 "https://api.mullvad.net/www/relays/all/" 2>/dev/null \
-                  > "$relay_cache.tmp" && mv "$relay_cache.tmp" "$relay_cache" || true
-              fi
-            }
+              refresh_relay_cache() {
+                local now relay_age
+                now=$(date +%s)
+                relay_age=0
+                [ -f "$relay_cache" ] && relay_age=$(( now - $(stat -c %Y "$relay_cache" 2>/dev/null || echo 0) ))
+                if [ ! -f "$relay_cache" ] || [ "$relay_age" -gt 3600 ]; then
+                  ${pkgs.curl}/bin/curl -sf --max-time 15 "https://api.mullvad.net/www/relays/all/" 2>/dev/null \
+                    > "$relay_cache.tmp" && mv "$relay_cache.tmp" "$relay_cache" || true
+                fi
+              }
 
-            lookup_location() {
-              local ip="$1" cache loc city country result
-              cache="/tmp/wg-loc-''${ip}"
-              if [ -f "$cache" ]; then
-                read -r loc < "$cache"
-                printf '%s' "$loc"
-                return
-              fi
-
-              city=""; country=""
-
-              # Try Mullvad relay list first
-              if [ -f "$relay_cache" ]; then
-                city=$(${pkgs.jq}/bin/jq -r --arg ip "$ip" \
-                  '.[] | select(.ipv4_addr_in == $ip) | .city_name // empty' \
-                  "$relay_cache" 2>/dev/null | head -1 || true)
-                country=$(${pkgs.jq}/bin/jq -r --arg ip "$ip" \
-                  '.[] | select(.ipv4_addr_in == $ip) | .country_code // empty' \
-                  "$relay_cache" 2>/dev/null | head -1 | tr '[:lower:]' '[:upper:]' || true)
-              fi
-
-              # Fall back to ipinfo.io
-              if [ -z "$city" ] || [ -z "$country" ]; then
-                result=$(${pkgs.curl}/bin/curl -sf --max-time 10 "https://ipinfo.io/''${ip}/json" 2>/dev/null || true)
-                city=$(echo    "$result" | ${pkgs.jq}/bin/jq -r '.city    // empty' 2>/dev/null || true)
-                country=$(echo "$result" | ${pkgs.jq}/bin/jq -r '.country // empty' 2>/dev/null || true)
-              fi
-
-              if [ -n "$city" ] && [ -n "$country" ]; then
-                loc="''${city}, ''${country}"
-                echo "$loc" > "$cache"
-              else
-                loc="$ip"
-              fi
-              echo "$loc"
-            }
-
-            sample_wg() {
-              local now result sep iface ep_ip hs rx tx age server line
-              now=$(date +%s)
-              result="["; sep=""
-
-              # wg show all dump peer lines (9 fields, tab-separated):
-              #   iface  pubkey  preshared  endpoint  allowed-ips  handshake  rx  tx  keepalive
-              # Interface lines have 5 fields; skip them by checking f6 is non-empty.
-              while IFS=$'\t' read -r f1 _ _ f4 _ f6 f7 f8 _; do
-                [ -n "$f6" ] || continue
-                iface="$f1"; ep_ip="''${f4%%:*}"
-                hs=''${f6:-0}; rx=''${f7:-0}; tx=''${f8:-0}
-                age=$(( hs > 0 ? now - hs : -1 ))
-
-                server="$ep_ip"
-                if [ -f "/etc/wireguard/''${iface}.conf" ]; then
-                  while IFS= read -r line; do
-                    case "$line" in "# Server: "*) server="''${line#\# Server: }"; break ;; esac
-                  done < "/etc/wireguard/''${iface}.conf"
+              lookup_location() {
+                local ip="$1" cache loc city country result
+                cache="/tmp/wg-loc-''${ip}"
+                if [ -f "$cache" ]; then
+                  read -r loc < "$cache"
+                  printf '%s' "$loc"
+                  return
                 fi
 
-                location=$(lookup_location "$ep_ip")
+                city=""; country=""
 
-                result+="''${sep}{\"iface\":\"''${iface}\",\"endpoint\":\"''${ep_ip}\",\"handshake\":''${age},\"rx\":''${rx},\"tx\":''${tx},\"server\":\"''${server}\",\"location\":\"''${location}\"}"
-                sep=","
-              done < <(${pkgs.wireguard-tools}/bin/wg show all dump 2>/dev/null)
+                # Try Mullvad relay list first
+                if [ -f "$relay_cache" ]; then
+                  city=$(${pkgs.jq}/bin/jq -r --arg ip "$ip" \
+                    '.[] | select(.ipv4_addr_in == $ip) | .city_name // empty' \
+                    "$relay_cache" 2>/dev/null | head -1 || true)
+                  country=$(${pkgs.jq}/bin/jq -r --arg ip "$ip" \
+                    '.[] | select(.ipv4_addr_in == $ip) | .country_code // empty' \
+                    "$relay_cache" 2>/dev/null | head -1 | tr '[:lower:]' '[:upper:]' || true)
+                fi
 
-              echo "''${result}]"
-            }
+                # Fall back to ipinfo.io
+                if [ -z "$city" ] || [ -z "$country" ]; then
+                  result=$(${pkgs.curl}/bin/curl -sf --max-time 10 "https://ipinfo.io/''${ip}/json" 2>/dev/null || true)
+                  city=$(echo    "$result" | ${pkgs.jq}/bin/jq -r '.city    // empty' 2>/dev/null || true)
+                  country=$(echo "$result" | ${pkgs.jq}/bin/jq -r '.country // empty' 2>/dev/null || true)
+                fi
+
+                if [ -n "$city" ] && [ -n "$country" ]; then
+                  loc="''${city}, ''${country}"
+                  echo "$loc" > "$cache"
+                else
+                  loc="$ip"
+                fi
+                echo "$loc"
+              }
+
+              sample_wg() {
+                local now result sep iface ep_ip hs rx tx age server line
+                now=$(date +%s)
+                result="["; sep=""
+
+                # wg show all dump peer lines (9 fields, tab-separated):
+                #   iface  pubkey  preshared  endpoint  allowed-ips  handshake  rx  tx  keepalive
+                # Interface lines have 5 fields; skip them by checking f6 is non-empty.
+                while IFS=$'\t' read -r f1 _ _ f4 _ f6 f7 f8 _; do
+                  [ -n "$f6" ] || continue
+                  iface="$f1"; ep_ip="''${f4%%:*}"
+                  hs=''${f6:-0}; rx=''${f7:-0}; tx=''${f8:-0}
+                  age=$(( hs > 0 ? now - hs : -1 ))
+
+                  server="$ep_ip"
+                  if [ -f "/etc/wireguard/''${iface}.conf" ]; then
+                    while IFS= read -r line; do
+                      case "$line" in "# Server: "*) server="''${line#\# Server: }"; break ;; esac
+                    done < "/etc/wireguard/''${iface}.conf"
+                  fi
+
+                  location=$(lookup_location "$ep_ip")
+
+                  result+="''${sep}{\"iface\":\"''${iface}\",\"endpoint\":\"''${ep_ip}\",\"handshake\":''${age},\"rx\":''${rx},\"tx\":''${tx},\"server\":\"''${server}\",\"location\":\"''${location}\"}"
+                  sep=","
+                done < <(${pkgs.wireguard-tools}/bin/wg show all dump 2>/dev/null)
+
+                echo "''${result}]"
+              }
             ''}
 
             SAMPLE_INTERVAL=${routerPollInterval}
@@ -1154,7 +1164,7 @@ in {
               while read -r iface rx tx; do
                 rx1["$iface"]=$rx; tx1["$iface"]=$tx
               done < <(sample_dev)
-              ''}
+            ''}
 
               sample_wifi > /tmp/wifi-sync-status.json.tmp \
                 && mv /tmp/wifi-sync-status.json.tmp /tmp/wifi-sync-status.json
@@ -1163,7 +1173,7 @@ in {
               refresh_relay_cache
               sample_wg > /tmp/wg-status.json.tmp \
                 && mv /tmp/wg-status.json.tmp /tmp/wg-status.json
-              ''}
+            ''}
 
               sleep "$SAMPLE_INTERVAL"
 
@@ -1192,7 +1202,7 @@ in {
                 && mv /tmp/net-stats.json.tmp /tmp/net-stats.json
 
               unset rx1 tx1 rx2 tx2
-              ''}
+            ''}
             done
           '';
         in "${poller}";

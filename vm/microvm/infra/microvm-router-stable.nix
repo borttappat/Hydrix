@@ -171,6 +171,9 @@ in {
       vcpu = 2;
       mem = 1024;
 
+      balloon = true;
+      deflateOnOOM = true;
+
       storeDiskType = "squashfs";
       writableStoreOverlay = "/nix/.rw-store";
       graphics.enable = false;

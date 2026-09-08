@@ -26,6 +26,12 @@ in {
       vcpu = lib.mkDefault 1;
       mem = lib.mkDefault 1024;
 
+      # Attach the virtio-balloon device (profile VMs already get this via
+      # microvm-profile-base.nix; infra VMs never did, so QMP balloon requests
+      # against them silently no-op with no device to target).
+      balloon = lib.mkDefault true;
+      deflateOnOOM = lib.mkDefault true;
+
       graphics.enable = false;
       qemu.extraArgs = [
         "-vga"
