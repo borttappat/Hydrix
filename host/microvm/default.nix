@@ -260,6 +260,18 @@ in {
     })
 
     (lib.mkIf cfg.enable {
+      # KVM busy-polls each vCPU thread for up to halt_poll_ns before parking it on
+      # HLT, betting another interrupt is imminent. That time is charged to the vCPU
+      # thread's host-side utime even though the guest never executes an instruction
+      # during it, so it's invisible to guest-side monitoring entirely. Confirmed via
+      # /sys/kernel/debug/kvm/<pid>-<vmid>/halt_poll_fail_ns showing mostly-wasted
+      # polling; zeroing it dropped one idle 3-vCPU profile VM from 47-87% host CPU
+      # to ~12-14%. Disabling polling entirely trades a sub-ms interrupt-response
+      # latency bump for that CPU back, generally imperceptible for waypipe/audio.
+      boot.extraModprobeConfig = ''
+        options kvm halt_poll_ns=0
+      '';
+
       # DON'T enable systemd-networkd - Hydrix uses NetworkManager
       # Instead, use a udev rule to attach TAP interfaces to bridges
 
@@ -728,6 +740,56 @@ in {
           })
         decoupledAutostartVMs)
       ];
+    })
+
+    # Periodic virtio-balloon trim: free-page-reporting only reports genuinely-free
+    # guest pages, never reclaimable page cache, so network/filesystem-heavy VMs
+    # drift up toward ~100% resident and stay there indefinitely (see balloonTrim
+    # option doc). This calls each running VM's own `microvm-balloon` (QMP balloon
+    # request, from upstream microvm.nix's setBalloonScript) to ask it to shrink to
+    # a percentage of its configured mem. deflate-on-oom means the balloon grows
+    # back automatically the moment the guest actually needs the memory.
+    (lib.mkIf (cfg.enable && cfg.balloonTrim.enable) {
+      systemd.services.hydrix-microvm-balloon-trim = {
+        description = "Request idle microVMs shrink via virtio-balloon";
+        serviceConfig.Type = "oneshot";
+        path = [pkgs.systemd pkgs.gawk pkgs.gnugrep pkgs.coreutils];
+        script = ''
+          for unit in $(systemctl list-units 'microvm@*.service' --state=running --no-legend --plain 2>/dev/null | awk '{print $1}'); do
+            name="''${unit#microvm@}"
+            name="''${name%.service}"
+            balloon_bin="/var/lib/microvms/$name/current/bin/microvm-balloon"
+            [ -x "$balloon_bin" ] || continue
+
+            pid=$(systemctl show "$unit" -p MainPID --value)
+            [ -n "$pid" ] && [ "$pid" != "0" ] || continue
+
+            mem_mb=$(tr '\0' '\n' < "/proc/$pid/cmdline" 2>/dev/null \
+              | awk '/^-m$/{getline; print; exit}' \
+              | sed -E 's/^([0-9]+)M.*/\1/')
+            echo "$mem_mb" | grep -qE '^[0-9]+$' || continue
+
+            target=$(( mem_mb * ${toString cfg.balloonTrim.targetPercent} / 100 ))
+            [ "$target" -lt 128 ] && target=128
+
+            echo "Trimming $name balloon to ''${target}MB (of ''${mem_mb}MB configured)"
+            # microvm-balloon (upstream microvm.nix) hardcodes a relative QMP
+            # socket path, resolved against the real microvm@<name>.service's
+            # WorkingDirectory (/var/lib/microvms/<name>). Match that here.
+            (cd "/var/lib/microvms/$name" && "$balloon_bin" "$target") \
+              || echo "WARN: balloon trim failed for $name"
+          done
+        '';
+      };
+
+      systemd.timers.hydrix-microvm-balloon-trim = {
+        description = "Periodic microVM balloon trim";
+        wantedBy = ["timers.target"];
+        timerConfig = {
+          OnBootSec = "10min";
+          OnUnitActiveSec = "${toString cfg.balloonTrim.intervalMinutes}min";
+        };
+      };
     })
 
     # Periodically refreshes /tmp/hydrix-gc-status (orphaned VM directory count)

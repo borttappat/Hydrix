@@ -730,6 +730,43 @@ in {
         '';
       };
 
+      balloonTrim = {
+        enable = lib.mkOption {
+          type = lib.types.bool;
+          default = false;
+          description = ''
+            Periodically ask running microVMs to shrink via virtio-balloon.
+            free-page-reporting (always on) only reports pages the guest buddy
+            allocator considers genuinely free; it never touches reclaimable
+            page cache, so network- or filesystem-heavy VMs (browsing, router)
+            drift up to ~100% of their configured mem and stay there. This
+            issues the same QMP balloon request `microvm-balloon` exposes,
+            forcing the guest to reclaim cache under pressure. Safe with
+            respect to guest OOM: deflate-on-oom grows the balloon back
+            automatically if the guest genuinely needs the memory. NOT safe
+            with respect to interactive latency: the timer has no concept of
+            "in active use," so it can evict a GUI/browser VM's cache mid-
+            session. Especially bad on high-latency-fetch VMs (e.g. Tor over
+            the lurking profile): an evicted page has to be re-fetched over
+            the VM's own network path instead of served from cache, which
+            reads as a sudden stall. Confirmed causing noticeable interactive
+            slowdown when enabled unconditionally across all VM classes
+            (2026-09-08); default false until it's scoped to non-interactive
+            (infra) VMs only, or made idle-aware.
+          '';
+        };
+        intervalMinutes = lib.mkOption {
+          type = lib.types.int;
+          default = 20;
+          description = "Minutes between balloon-trim passes.";
+        };
+        targetPercent = lib.mkOption {
+          type = lib.types.int;
+          default = 50;
+          description = "Percent of a VM's configured mem to request via virtio-balloon on each trim pass.";
+        };
+      };
+
       vms = lib.mkOption {
         type = lib.types.attrsOf (lib.types.submodule {
           options = {
