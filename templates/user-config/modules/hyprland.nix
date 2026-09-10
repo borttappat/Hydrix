@@ -548,6 +548,16 @@ in
     };
 
     home-manager.users.${username} = {lib, ...}: {
+      # Blue light filter, wlroots-native, works directly with Hyprland.
+      # Override per-machine with plain assignment.
+      services.wlsunset = {
+        enable = lib.mkDefault true;
+        sunrise = lib.mkDefault "07:00";
+        sunset = lib.mkDefault "20:00";
+        temperature.day = lib.mkDefault 6500;
+        temperature.night = lib.mkDefault 3500;
+      };
+
       home.activation.hyprlandKeymap = lib.hm.dag.entryAfter ["writeBoundary"] ''
         _dir="$HOME/.config/hypr"
         mkdir -p "$_dir"

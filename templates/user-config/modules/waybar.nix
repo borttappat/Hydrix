@@ -454,6 +454,14 @@
     echo "DATE $(${pkgs.coreutils}/bin/date +'%H:%M:%S %d/%m')"
   '';
 
+  wlsunsetToggleScript = pkgs.writeShellScript "waybar-wlsunset-toggle" ''
+    if ${pkgs.systemd}/bin/systemctl --user is-active --quiet wlsunset.service; then
+      ${pkgs.systemd}/bin/systemctl --user stop wlsunset.service
+    else
+      ${pkgs.systemd}/bin/systemctl --user start wlsunset.service
+    fi
+  '';
+
   volumeScript = pkgs.writeShellScript "waybar-volume" ''
     vol=$(${pkgs.pulseaudio}/bin/pactl get-sink-volume @DEFAULT_SINK@ 2>/dev/null \
       | ${pkgs.gnugrep}/bin/grep -oP '\d+(?=%)' | head -1)
@@ -706,6 +714,7 @@
       format = "{}";
       tooltip = false;
       escape = false;
+      "on-click" = "${wlsunsetToggleScript}";
     };
   };
 
@@ -1055,6 +1064,7 @@
       format = "{}";
       tooltip = false;
       escape = false;
+      "on-click" = "${wlsunsetToggleScript}";
     };
     "custom/power-profile" = {
       exec = "${powerProfileScript}";
