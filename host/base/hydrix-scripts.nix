@@ -69,6 +69,8 @@
 # ---------
 #   pyenvshell                Activate Python virtual environment
 #   nixbuild                  Alias for rebuild (backwards compat)
+#   hydrix-info                Show keybindings/scripts/quality-of-life reference
+#                             (extracted from DOCUMENTATION.md at build time)
 #
 # VM-ONLY COMMANDS (inside microVMs)
 # ----------------------------------
@@ -81,10 +83,12 @@
 #   wal-sync                  Sync colors from host
 #
 # ============================================================================
-
-{ config, lib, pkgs, ... }:
-
-let
+{
+  config,
+  lib,
+  pkgs,
+  ...
+}: let
   username = config.hydrix.username;
 
   # Package all Hydrix scripts into a derivation
@@ -102,18 +106,19 @@ let
   # Helper to create a script that runs from ~/hydrix-config, with an optional
   # user override: if ~/hydrix-config/scripts/<script> exists it takes priority
   # over the Nix store version.
-  mkHydrixScript = name: script: pkgs.writeShellScriptBin name ''
-    HYDRIX_FLAKE_DIR="$HOME/hydrix-config"
-    export HYDRIX_FLAKE_DIR
-    cd "$HYDRIX_FLAKE_DIR"
+  mkHydrixScript = name: script:
+    pkgs.writeShellScriptBin name ''
+      HYDRIX_FLAKE_DIR="$HOME/hydrix-config"
+      export HYDRIX_FLAKE_DIR
+      cd "$HYDRIX_FLAKE_DIR"
 
-    # User override: scripts placed in ~/hydrix-config/scripts/ take priority
-    if [[ -x "$HYDRIX_FLAKE_DIR/scripts/${script}" ]]; then
-      exec "$HYDRIX_FLAKE_DIR/scripts/${script}" "$@"
-    else
-      exec ${hydrixScriptsPackage}/scripts/${script} "$@"
-    fi
-  '';
+      # User override: scripts placed in ~/hydrix-config/scripts/ take priority
+      if [[ -x "$HYDRIX_FLAKE_DIR/scripts/${script}" ]]; then
+        exec "$HYDRIX_FLAKE_DIR/scripts/${script}" "$@"
+      else
+        exec ${hydrixScriptsPackage}/scripts/${script} "$@"
+      fi
+    '';
 
   # Scripts that need to run from Hydrix directory
   hydrixScripts = {
@@ -156,14 +161,31 @@ let
 
   scriptPackages = lib.mapAttrsToList mkHydrixScript hydrixScripts;
 
+  # Extracted once at build time from DOCUMENTATION.md's own section order
+  # (Keybindings -> Scripts Reference -> Quality of Life are contiguous in
+  # the actual body, ending at Troubleshooting — NOT the order the table of
+  # contents lists them in, which doesn't match) — not read from disk at
+  # runtime, so this works the same whether Hydrix is a local checkout or a
+  # fetched flake input.
+  hydrixInfoDoc = pkgs.runCommand "hydrix-info.md" {} ''
+    ${pkgs.gawk}/bin/awk '/^## Keybindings/{f=1} /^## Troubleshooting/{f=0} f' \
+      ${../../DOCUMENTATION.md} > $out
+  '';
+
+  hydrixInfo = pkgs.writeShellScriptBin "hydrix-info" ''
+    exec ${pkgs.glow}/bin/glow -p -- ${hydrixInfoDoc}
+  '';
 in {
   config = lib.mkIf (config.hydrix.vmType == "host" || config.hydrix.vmType == null) {
-    environment.systemPackages = scriptPackages ++ [
-      pkgs.wpa_supplicant  # provides wpa_passphrase for wifi-sync PSK hashing
-      # Backwards compatibility alias
-      (pkgs.writeShellScriptBin "nixbuild" ''
-        exec rebuild "$@"
-      '')
-    ];
+    environment.systemPackages =
+      scriptPackages
+      ++ [
+        pkgs.wpa_supplicant # provides wpa_passphrase for wifi-sync PSK hashing
+        hydrixInfo
+        # Backwards compatibility alias
+        (pkgs.writeShellScriptBin "nixbuild" ''
+          exec rebuild "$@"
+        '')
+      ];
   };
 }
