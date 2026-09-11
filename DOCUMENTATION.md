@@ -42,8 +42,10 @@ Hydrix is an options-driven NixOS framework that provides complete network isola
 - [Lockscreen](#lockscreen)
 - [Keybindings](#keybindings)
 - [Scripts Reference](#scripts-reference)
-- [Pentesting VM](#pentesting-vm)
+- [Quality of Life](#quality-of-life)
+  - [Monitor Layout](#monitor-layout)
 - [Troubleshooting](#troubleshooting)
+- [Pentesting VM](#pentesting-vm)
 
 ---
 
@@ -3951,6 +3953,7 @@ hydrix.graphical.lockscreen = {
 | `Mod+F1/F2/F3` | Volume down/up/mute |
 | `Mod+F5/F6` | Color temperature down/up |
 | `Mod+F7/F8` | Brightness down/up |
+| `Mod+F9` | Monitor arrangement GUI (`monitor-layout gui`) |
 | `Mod+F12` | Screenshot |
 
 ### Configuration Editing
@@ -4051,6 +4054,37 @@ See [Mullvad VPN](#mullvad-vpn) for full setup instructions.
 | `hydrix-lock` | Activate lockscreen |
 | `vm-status` | Show system status (bridges, VMs, etc.) |
 | `display-setup` | Reconfigure displays/status bar |
+---
+
+## Quality of Life
+
+### Monitor Layout
+
+A newly connected monitor is normally placed by Hyprland's own `auto` heuristic (the
+framework's wildcard `monitor = ,preferred,auto,1` rule), and a manual `hyprctl keyword
+monitor` reposition is pure runtime state - it doesn't survive the next `hyprctl reload`
+(colour changes, VM-registry regen, etc. all trigger one), so it silently resets.
+
+`monitor-layout` remembers a position per physical monitor, matched by its EDID
+`description` rather than its port name (`DP-1`/`HDMI-A-1`), so the same monitor keeps its
+saved position regardless of which port or dock it's plugged into. Saved positions are
+written as explicit `desc:`-matched rules into `~/.config/hypr/monitor-layout.conf`, sourced
+into `hyprland.conf` after the framework's wildcard fallback - so a position is part of the
+actual config Hyprland re-reads, not a one-off runtime change that the next reload wipes out.
+
+| Command | Purpose |
+|---------|---------|
+| `monitor-layout set <pos> [name]` | Position a monitor: `left`/`right`/`top`/`bottom`/`above`/`below`/`auto`/`WxH`. Defaults to the focused monitor if `name` is omitted. |
+| `monitor-layout gui` | Launch `nwg-displays` for drag-and-drop arrangement; layout is captured and saved on exit. Bound to `Mod+F9`. |
+| `monitor-layout apply` | Re-write the config snippet from saved state and force a reload. |
+| `monitor-layout list` | Show saved positions. |
+| `monitor-layout forget <match>` | Drop a saved entry (substring match on description). |
+
+Waybar doesn't reposition itself when monitors change - `monitor-layout set`/`gui` restart
+it directly, and `waybar-monitor-watch` restarts it automatically on any monitor
+plug/unplug (Hyprland re-applies the saved `desc:` rule to a reconnecting monitor on its
+own, since it's already part of the loaded config).
+
 ---
 
 ## Troubleshooting
