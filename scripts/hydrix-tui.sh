@@ -30,6 +30,7 @@ readonly BASE_IMAGE_DIR="/var/lib/libvirt/base-images"
 readonly PERSIST_BASE="$HOME/persist"
 readonly PROFILES_DIR="$FLAKE_DIR/profiles"
 readonly VM_REGISTRY="/etc/hydrix/vm-registry.json"
+readonly HOST_CONFIG="/etc/hydrix/host-config.json"
 
 # Populate VM_TYPES from registry if available; fall back to built-in list
 if [[ -f "$VM_REGISTRY" ]]; then
@@ -37,6 +38,15 @@ if [[ -f "$VM_REGISTRY" ]]; then
 else
     VM_TYPES=("browsing" "pentest" "dev" "comms" "lurking")
 fi
+
+# This machine's serial (e.g. "mb-ux5406sa"), used to tell this machine's profile/task/
+# router VMs apart from another machine's declarations in the same flake. host-config.json
+# is written per-machine at build time; routerVmName is always "microvm-router-<serial>".
+detect_machine_serial() {
+    [[ -f "$HOST_CONFIG" ]] || return
+    jq -r '.routerVmName // empty' "$HOST_CONFIG" 2>/dev/null | sed 's/^microvm-router-//'
+}
+readonly MACHINE_SERIAL="$(detect_machine_serial)"
 
 # Command log file for detailed output
 readonly CMD_LOG="/tmp/hydrix-tui-$$.log"
@@ -179,9 +189,17 @@ get_microvms() {
 
     if [[ -f "$VM_REGISTRY" ]]; then
         # Accept any VM whose profile is in the registry, plus task slots
+        # Registry keys are bare type names (e.g. "browsing", "pentest-task1") — profile
+        # and task VMs are now per-machine nixosConfigurations ("microvm-browsing-<serial>"),
+        # so each alternative needs this machine's own "-<serial>" suffix to still match (and
+        # to exclude other machines' VMs from the same flake). A plain "microvm-" + key exact
+        # match only ever matches machine-less infra VMs; an unscoped wildcard suffix would
+        # pull in every machine's VMs indiscriminately.
         local known_pattern
-        known_pattern=$(jq -r 'keys[] | "microvm-" + .' "$VM_REGISTRY" 2>/dev/null | paste -sd '|')
-        echo "$all_vms" | grep -E "^(${known_pattern}|microvm-pentest-task[0-9]+)$" || true
+        known_pattern=$(jq -r --arg suf "$MACHINE_SERIAL" \
+            'keys[] | "microvm-" + . + (if $suf != "" then "(-" + $suf + ")?" else "(-[A-Za-z0-9_-]+)?" end)' \
+            "$VM_REGISTRY" 2>/dev/null | paste -sd '|')
+        echo "$all_vms" | grep -E "^(${known_pattern})$" || true
     else
         echo "$all_vms" | grep -E '^microvm-(browsing|pentest|dev|comms|lurking)' || true
     fi
@@ -900,9 +918,17 @@ devshells_get_running_vms() {
     all_vms=$(nix eval "$FLAKE_DIR#nixosConfigurations" --apply 'builtins.attrNames' --json 2>/dev/null | jq -r '.[]' | \
         grep '^microvm-' || true)
     if [[ -f "$VM_REGISTRY" ]]; then
+        # Registry keys are bare type names (e.g. "browsing", "pentest-task1") — profile
+        # and task VMs are now per-machine nixosConfigurations ("microvm-browsing-<serial>"),
+        # so each alternative needs this machine's own "-<serial>" suffix to still match (and
+        # to exclude other machines' VMs from the same flake). A plain "microvm-" + key exact
+        # match only ever matches machine-less infra VMs; an unscoped wildcard suffix would
+        # pull in every machine's VMs indiscriminately.
         local known_pattern
-        known_pattern=$(jq -r 'keys[] | "microvm-" + .' "$VM_REGISTRY" 2>/dev/null | paste -sd '|')
-        declared=$(echo "$all_vms" | grep -E "^(${known_pattern}|microvm-pentest-task[0-9]+)$" || true)
+        known_pattern=$(jq -r --arg suf "$MACHINE_SERIAL" \
+            'keys[] | "microvm-" + . + (if $suf != "" then "(-" + $suf + ")?" else "(-[A-Za-z0-9_-]+)?" end)' \
+            "$VM_REGISTRY" 2>/dev/null | paste -sd '|')
+        declared=$(echo "$all_vms" | grep -E "^(${known_pattern})$" || true)
     else
         declared=$(echo "$all_vms" | grep -E '^microvm-(browsing|pentest|dev|comms|lurking)' || true)
     fi
