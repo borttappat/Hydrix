@@ -2905,6 +2905,13 @@ shrink_partition() {
 
 # ========== INSTALLATION ==========
 
+_log_disk_state() {
+    local label="$1" dev="$2"
+    log "Disk state ($label):"
+    sgdisk -p "$dev" 2>&1 | sed 's/^/    /' || true
+    lsblk -o NAME,SIZE,TYPE,FSTYPE,PARTTYPENAME,UUID,PARTUUID,MOUNTPOINT "$dev" 2>&1 | sed 's/^/    /' || true
+}
+
 partition_and_mount() {
     log "Partitioning disk with disko..."
 
@@ -2932,6 +2939,11 @@ partition_and_mount() {
 
     if [[ "$layout" == dual-boot-* ]]; then
         disko_args+=(--arg nixosPartition "\"${CONFIG[nixosPartition]}\"")
+
+        log "Dual-boot target: nixosPartition=${CONFIG[nixosPartition]} efiPartition=${CONFIG[efiPartition]}"
+        _log_disk_state "before disko" "${CONFIG[device]}"
+        blkid "${CONFIG[nixosPartition]}" 2>&1 | sed 's/^/    /' || log "    (blkid: no signature on nixosPartition)"
+        blkid "${CONFIG[efiPartition]}" 2>&1 | sed 's/^/    /' || log "    (blkid: no signature on efiPartition)"
 
         # Stop udisks2 automounter so it can't re-mount the EFI partition
         # between our unmount and disko's mount step
@@ -2975,11 +2987,17 @@ partition_and_mount() {
     sleep 1
 
     # Run disko (formats and mounts the NixOS partition only)
+    local disko_attempt=0
     while true; do
-        log "Running disko..."
-        if nix run github:nix-community/disko -- --mode disko "${disko_args[@]}" "$disko_file"; then
-            break
+        disko_attempt=$((disko_attempt + 1))
+        log "Running disko (attempt $disko_attempt): nix run github:nix-community/disko -- --mode disko ${disko_args[*]} $disko_file"
+        local disko_exit=0
+        nix run github:nix-community/disko -- --mode disko "${disko_args[@]}" "$disko_file" || disko_exit=$?
+        log "disko exited with status $disko_exit"
+        if [[ "$layout" == dual-boot-* ]]; then
+            _log_disk_state "after disko attempt $disko_attempt" "${CONFIG[device]}"
         fi
+        [[ "$disko_exit" -eq 0 ]] && break
         echo "" >&2
         echo "  Disko failed — disk may be partially formatted." >&2
         echo "  It is safe to retry (disko will reformat from scratch)." >&2
@@ -3005,7 +3023,10 @@ partition_and_mount() {
         # Disko does not manage it to avoid automount conflicts during install.
         log "Mounting EFI partition at /mnt/boot..."
         mkdir -p /mnt/boot
-        mount -t vfat -o defaults,umask=0077 "${CONFIG[efiPartition]}" /mnt/boot
+        if ! mount -t vfat -o defaults,umask=0077 "${CONFIG[efiPartition]}" /mnt/boot; then
+            error "EFI mount failed: ${CONFIG[efiPartition]} -> /mnt/boot"
+        fi
+        log "EFI mount: $(findmnt -no SOURCE,FSTYPE,OPTIONS /mnt/boot 2>&1)"
         systemctl start udisks2.service 2>/dev/null || true
     fi
 
