@@ -12,7 +12,8 @@
  *   ./vm-metrics --serve [interval]  — write snapshot + serve vsock:14501
  *
  * Snapshot format (key=value, one per line):
- *   cpu=<percent>   ram=<percent>   fs=<percent>   uptime=<XH YM>
+ *   cpu=<percent>   ram=<percent>   rammb=<used MB, current balloon-adjusted total>
+ *   fs=<percent>    uptime=<XH YM>
  *   top=<comm pct>  topmem=<comm MB>
  *   syncdev=<n>     syncstg=<n>     tun=<iface|none>
  *
@@ -89,9 +90,9 @@ static int cpu_percent(const CpuStat *a, const CpuStat *b) {
 
 /* ── RAM ───────────────────────────────────────────────────────────────── */
 
-static int ram_percent(void) {
+static int ram_percent(long long *used_mb) {
     FILE *f = fopen("/proc/meminfo", "r");
-    if (!f) return 0;
+    if (!f) { *used_mb = 0; return 0; }
     long long total = 0, available = 0;
     char key[64]; long long val;
     while (fscanf(f, "%63s %lld kB\n", key, &val) == 2) {
@@ -99,7 +100,8 @@ static int ram_percent(void) {
         else if (!strcmp(key, "MemAvailable:")) available = val;
     }
     fclose(f);
-    if (total <= 0) return 0;
+    if (total <= 0) { *used_mb = 0; return 0; }
+    *used_mb = (total - available) / 1024;
     int pct = (int)((total - available) * 100 / total);
     return pct < 0 ? 0 : pct > 100 ? 100 : pct;
 }
@@ -289,16 +291,16 @@ static int pkg_count(const char *base, const char *sub, const char *fname) {
 
 /* ── Snapshot write ────────────────────────────────────────────────────── */
 
-static void write_snapshot(int cpu, int ram, int fs, const char *up,
+static void write_snapshot(int cpu, int ram, long long ram_mb, int fs, const char *up,
                             const char *top_cpu, const char *top_mem,
                             int dev, int stg, const char *tun) {
     char tmp[300];
     snprintf(tmp, sizeof(tmp), "%s%s", snap_path, SNAP_TMP_SUFFIX);
     FILE *f = fopen(tmp, "w");
     if (!f) return;
-    fprintf(f, "cpu=%d\nram=%d\nfs=%d\nuptime=%s\ntop=%s\ntopmem=%s\n"
+    fprintf(f, "cpu=%d\nram=%d\nrammb=%lld\nfs=%d\nuptime=%s\ntop=%s\ntopmem=%s\n"
                "syncdev=%d\nsyncstg=%d\ntun=%s\n",
-            cpu, ram, fs, up, top_cpu, top_mem, dev, stg, tun);
+            cpu, ram, ram_mb, fs, up, top_cpu, top_mem, dev, stg, tun);
     fclose(f);
     rename(tmp, snap_path);
 }
@@ -329,7 +331,7 @@ static int snap_get(const char *key, char *out, size_t out_len) {
 
 /* ── Vsock server ──────────────────────────────────────────────────────── */
 
-#define FALLBACK "cpu=0\nram=0\nfs=0\nuptime=0H 0M\ntop=- 0\ntopmem=- 0\n" \
+#define FALLBACK "cpu=0\nram=0\nrammb=0\nfs=0\nuptime=0H 0M\ntop=- 0\ntopmem=- 0\n" \
                  "syncdev=0\nsyncstg=0\ntun=none\n"
 
 static void handle_conn(int cfd) {
@@ -470,15 +472,16 @@ int main(int argc, char *argv[]) {
 
         int dev = pkg_count(home, "dev/packages", "flake.nix");
         int stg = pkg_count(home, "staging",      "package.nix");
-        int ram = ram_percent();
+        long long ram_mb = 0;
+        int ram = ram_percent(&ram_mb);
         int fs  = fs_percent();
 
         if (serve) {
-            write_snapshot(cpu, ram, fs, up, top_cpu, top_mem, dev, stg, tun);
+            write_snapshot(cpu, ram, ram_mb, fs, up, top_cpu, top_mem, dev, stg, tun);
         } else {
-            printf("cpu=%d\nram=%d\nfs=%d\nuptime=%s\ntop=%s\ntopmem=%s\n"
+            printf("cpu=%d\nram=%d\nrammb=%lld\nfs=%d\nuptime=%s\ntop=%s\ntopmem=%s\n"
                    "syncdev=%d\nsyncstg=%d\ntun=%s\n\n",
-                   cpu, ram, fs, up, top_cpu, top_mem, dev, stg, tun);
+                   cpu, ram, ram_mb, fs, up, top_cpu, top_mem, dev, stg, tun);
             fflush(stdout);
         }
     }
