@@ -11,7 +11,7 @@
     audio.enable = lib.mkOption {
       type = lib.types.bool;
       default = true;
-      description = "Enable PulseAudio-over-vsock forwarding to host PipeWire in waypipe mode. Disable for privacy-sensitive VMs (pentest, lurking).";
+      description = "Enable audio: PipeWire/WirePlumber/rtkit in the guest plus PulseAudio-over-vsock forwarding to host PipeWire in waypipe mode. Disabling turns off the guest audio daemons entirely, not just the forwarding. Disable for privacy-sensitive VMs (pentest, lurking).";
     };
 
     vcpu = lib.mkOption {

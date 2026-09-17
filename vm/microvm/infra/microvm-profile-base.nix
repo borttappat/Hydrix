@@ -105,6 +105,17 @@ in {
       services.dunst.enable = lib.mkForce false;
     };
 
+    # ===== Audio stack follows hydrix.microvm.audio.enable =====
+    # shared/core/audio.nix enables the full pipewire/wireplumber/rtkit stack
+    # by default (mkDefault true) for every system. When this VM forwards no
+    # audio at all, there's no hardware and nothing to forward to, so tie the
+    # daemons themselves to the same option instead of leaving them running.
+    services.pipewire.enable = lib.mkForce config.hydrix.microvm.audio.enable;
+    services.pipewire.wireplumber.enable = lib.mkForce config.hydrix.microvm.audio.enable;
+    services.pipewire.alsa.enable = lib.mkForce config.hydrix.microvm.audio.enable;
+    services.pipewire.pulse.enable = lib.mkForce config.hydrix.microvm.audio.enable;
+    security.rtkit.enable = lib.mkForce config.hydrix.microvm.audio.enable;
+
     # ===== MicroVM Configuration =====
     microvm = {
       # QEMU hypervisor - most feature-complete (vsock, graphics, virtiofs)
