@@ -1,8 +1,8 @@
 # Waybar Configuration — Island style
 #
 # Top LEFT:  workspaces  workspace-desc  focus
-# Top RIGHT: pomo  sync  git  mvms  vms  volume  temp  ram  cpu  fs  uptime  clock
-# Bot LEFT:  power-profile  battery  battery-time  rproc  cproc
+# Top RIGHT: pomo  sync  git  mvms  vms  volume  temp  cpu  ram  fs  uptime  clock
+# Bot LEFT:  power-profile  battery  rproc  cproc
 # Bot RIGHT: rproc-bottom  cproc-bottom  vm-ram  vm-cpu  vm-sync-dev  vm-sync-stg  vm-fs  wifi-sync  vm-tun  vm-up
 #
 # Colors: ~/.config/waybar/colors.css  (written by hypr-apply-colors from wal)
@@ -395,11 +395,27 @@
       '{"text":$t,"tooltip":$tt,"class":$c}'
   '';
 
-  batteryTimeScript = pkgs.writeShellScript "waybar-battery-time" ''
-    status=$(cat /sys/class/power_supply/BAT*/status 2>/dev/null | head -1)
-    [ "$status" != "Discharging" ] && exit 0
-    mins=$(cat /sys/class/power_supply/BAT*/time_to_empty_now 2>/dev/null | head -1)
-    [ -n "$mins" ] && [ "$mins" -gt 0 ] && printf '%dh%02dm\n' "$((mins/60))" "$((mins%60))"
+  # Appends " HH:MM" to $time_suffix when a charge/discharge rate is available.
+  # Reads $status (already set by the caller). Sourced into batteryScript and
+  # monoBatteryScript so the estimate shares the BAT/CHR pill instead of its own.
+  _batteryTimeSuffix = ''
+    time_suffix=""
+    power=$(cat /sys/class/power_supply/BAT*/power_now 2>/dev/null | head -1)
+    if [ -n "$power" ] && [ "$power" -gt 0 ]; then
+      energy_now=$(cat /sys/class/power_supply/BAT*/energy_now 2>/dev/null | head -1)
+      remaining=""
+      case "$status" in
+        Discharging) remaining=$energy_now ;;
+        Charging)
+          energy_full=$(cat /sys/class/power_supply/BAT*/energy_full 2>/dev/null | head -1)
+          remaining=$((energy_full - energy_now))
+          ;;
+      esac
+      if [ -n "$remaining" ]; then
+        mins=$((remaining * 60 / power))
+        [ "$mins" -gt 0 ] && time_suffix=" - $(printf '%02d:%02d' $((mins/60)) $((mins%60)))"
+      fi
+    fi
   '';
 
   powerProfileScript = pkgs.writeShellScript "waybar-power-profile" ''
@@ -495,7 +511,8 @@
         else class=""
         fi ;;
     esac
-    ${pkgs.jq}/bin/jq -cn --arg t "$lbl $cap%" --arg c "$class" '{"text":$t,"class":$c}'
+    ${_batteryTimeSuffix}
+    ${pkgs.jq}/bin/jq -cn --arg t "$lbl $cap$time_suffix" --arg c "$class" '{"text":$t,"class":$c}'
   '';
 
   # ── Monobar conditional variants ─────────────────────────────────────────
@@ -545,7 +562,8 @@
         else class=""
         fi ;;
     esac
-    ${pkgs.jq}/bin/jq -cn --arg t "$lbl $cap%" --arg c "$class" '{"text":$t,"class":$c}'
+    ${_batteryTimeSuffix}
+    ${pkgs.jq}/bin/jq -cn --arg t "$lbl $cap$time_suffix" --arg c "$class" '{"text":$t,"class":$c}'
   '';
 
   # ── Bar layouts ────────────────────────────────────────────────────────────
@@ -581,8 +599,8 @@
       "custom/sep"
       "custom/temp"
       "custom/sep"
-      "custom/memory"
       "custom/cpu"
+      "custom/memory"
       "custom/sep"
       "custom/disk"
       "custom/uptime"
@@ -732,7 +750,6 @@
     "modules-left" = [
       "custom/power-profile"
       "custom/battery"
-      "custom/battery-time"
       "custom/sep"
       "custom/rproc"
       "custom/cproc"
@@ -766,13 +783,6 @@
     "custom/power-profile" = {
       exec = "${powerProfileScript}";
       interval = 10;
-      format = "{}";
-      tooltip = false;
-      escape = false;
-    };
-    "custom/battery-time" = {
-      exec = "${batteryTimeScript}";
-      interval = 60;
       format = "{}";
       tooltip = false;
       escape = false;
@@ -910,15 +920,11 @@
       "custom/bluetooth"
       "custom/sep"
       "custom/temp"
-      "custom/memory"
       "custom/cpu"
+      "custom/memory"
       "custom/sep"
       "custom/disk"
       "custom/uptime"
-      "custom/sep"
-      "custom/power-profile"
-      "custom/battery"
-      "custom/battery-time"
       "custom/sep"
       "custom/vm-cpu"
       "custom/vm-ram"
@@ -929,6 +935,9 @@
       "custom/sep"
       "custom/wifi-sync"
       "custom/gc-status"
+      "custom/sep"
+      "custom/power-profile"
+      "custom/battery"
       "custom/sep"
       "custom/clock"
     ];
@@ -1080,13 +1089,6 @@
       tooltip = false;
       escape = false;
       "return-type" = "json";
-    };
-    "custom/battery-time" = {
-      exec = "${batteryTimeScript}";
-      interval = 60;
-      format = "{}";
-      tooltip = false;
-      escape = false;
     };
     "custom/vm-cpu" = {
       exec = "${vmCpuScript}";
@@ -1240,7 +1242,6 @@
     #custom-bluetooth,
     #custom-power-profile,
     #custom-battery,
-    #custom-battery-time,
     #custom-rproc,
     #custom-cproc,
     #custom-rproc-bottom,
@@ -1323,7 +1324,6 @@
     #custom-bluetooth:hover,
     #custom-power-profile:hover,
     #custom-battery:hover,
-    #custom-battery-time:hover,
     #custom-rproc:hover,
     #custom-cproc:hover,
     #custom-rproc-bottom:hover,
