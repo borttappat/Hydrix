@@ -15,23 +15,35 @@
 #   HOST: waypipe --vsock --socket CID:14507 client  (connects host→VM, forwards to Hyprland)
 #   No socat needed - waypipe speaks vsock natively.
 #
-{ config, pkgs, lib, ... }:
-
-let
+{
+  config,
+  pkgs,
+  lib,
+  ...
+}: let
   VM_REGISTRY = "/etc/hydrix/vm-registry.json";
   username = config.hydrix.username;
 
   # Nix-computed defaults for vm-select theming (mirrors vault-pick / wofi-launcher)
   vmSelectFontFamily = config.hydrix.graphical.font.family;
-  vmSelectWofiSize   = let
-    base     = config.hydrix.graphical.font.size;
+  vmSelectWofiSize = let
+    base = config.hydrix.graphical.font.size;
     relation = config.hydrix.graphical.font.relations.wofi or 1.0;
-    raw      = builtins.floor (base * relation);
-  in toString (if raw < 11 then 11 else raw);
-  vmSelectCornerRadius = let ui = config.hydrix.graphical.ui;
-    in toString (if (ui.pillRadius or null) != null
-                 then ui.pillRadius
-                 else builtins.floor ((ui.cornerRadius or 2) * (ui.pillRadiusScale or 2.0)));
+    raw = builtins.floor (base * relation);
+  in
+    toString (
+      if raw < 11
+      then 11
+      else raw
+    );
+  vmSelectCornerRadius = let
+    ui = config.hydrix.graphical.ui;
+  in
+    toString (
+      if (ui.pillRadius or null) != null
+      then ui.pillRadius
+      else builtins.floor ((ui.cornerRadius or 2) * (ui.pillRadiusScale or 2.0))
+    );
   vmSelectWidth = toString config.hydrix.graphical.ui.rofiWidth;
 
   # ── waypipe-connect ────────────────────────────────────────────────────────
@@ -94,7 +106,12 @@ let
 
     # Loop: maintain the host-side waypipe listener.
     # Correct ordering: start listening FIRST, then tell VM to connect.
+    _cycle=0
     while true; do
+      _cycle=$((_cycle + 1))
+      _t_cycle_start=$(date +%s.%N)
+      echo "[timing] cycle $_cycle start: $(date +%H:%M:%S.%N)"
+
       # 1. Start host waypipe listener in the background.
       ${pkgs.waypipe}/bin/waypipe --vsock --socket "$PORT" --compress none --threads 4 --video h264,sw client &
       WAYPIPE_PID=$!
@@ -109,6 +126,8 @@ let
         fi
         sleep 0.1
       done
+      _t_host_ready=$(date +%s.%N)
+      echo "[timing] cycle $_cycle: host listener ready after $(echo "$_t_host_ready - $_t_cycle_start" | ${pkgs.bc}/bin/bc)s"
       if [[ "$_host_ready" -eq 0 ]]; then
         echo "Host vsock listener on port $PORT did not open (5s); retrying..." >&2
         kill "$WAYPIPE_PID" 2>/dev/null || true
@@ -124,6 +143,8 @@ let
         [[ "$RESP" == "waypipe" ]] && break
         sleep 2
       done
+      _t_reconnect=$(date +%s.%N)
+      echo "[timing] cycle $_cycle: waypipe-reconnect ack after $(echo "$_t_reconnect - $_t_host_ready" | ${pkgs.bc}/bin/bc)s ($_i/30 attempts, resp=$RESP)"
 
       # 4. Poll STATUS until tunnel is confirmed live (VM reports stable connection).
       _tunnel_ok=0
@@ -136,6 +157,9 @@ let
         fi
         sleep 1
       done
+      _t_status=$(date +%s.%N)
+      echo "[timing] cycle $_cycle: STATUS confirm after $(echo "$_t_status - $_t_reconnect" | ${pkgs.bc}/bin/bc)s ($_k/15 attempts, ok=$_tunnel_ok)"
+      echo "[timing] cycle $_cycle: TOTAL $(echo "$_t_status - $_t_cycle_start" | ${pkgs.bc}/bin/bc)s"
 
       if [[ "$_tunnel_ok" -eq 1 ]]; then
         echo "Tunnel live: $VM (CID $CID, port $PORT)"
@@ -149,7 +173,7 @@ let
       wait "$WAYPIPE_PID" 2>/dev/null || true
       WAYPIPE_PID=""
 
-      echo "waypipe disconnected from $VM, reconnecting..."
+      echo "[timing] cycle $_cycle: waypipe process exited after $(echo "$(date +%s.%N) - $_t_status" | ${pkgs.bc}/bin/bc)s of being live - reconnecting..."
       sleep 1
     done
   '';
@@ -335,179 +359,179 @@ let
   #   Bind to e.g. $mod+shift+p in hyprland.nix
   #
   vmSelect = pkgs.writeShellScriptBin "vm-select" ''
-    set -euo pipefail
+        set -euo pipefail
 
-    readonly VM_REGISTRY="${VM_REGISTRY}"
-    readonly ACTIVE_VMS_FILE="$HOME/.cache/hydrix/active-vms.json"
+        readonly VM_REGISTRY="${VM_REGISTRY}"
+        readonly ACTIVE_VMS_FILE="$HOME/.cache/hydrix/active-vms.json"
 
-    notify() { ${pkgs.libnotify}/bin/notify-send -u normal "vm-select" "$*"; }
+        notify() { ${pkgs.libnotify}/bin/notify-send -u normal "vm-select" "$*"; }
 
-    # ── Theming (mirrors wofi-launcher / vault-pick) ──────────────────────
-    get_wal_color() {
-      local key="$1" fallback="$2" color=""
-      local wal_json="$HOME/.cache/wal/colors.json"
-      if [[ -f "$wal_json" ]]; then
-        color=$(${pkgs.jq}/bin/jq -r "$key // empty" "$wal_json" 2>/dev/null)
-      fi
-      echo "''${color:-$fallback}"
+        # ── Theming (mirrors wofi-launcher / vault-pick) ──────────────────────
+        get_wal_color() {
+          local key="$1" fallback="$2" color=""
+          local wal_json="$HOME/.cache/wal/colors.json"
+          if [[ -f "$wal_json" ]]; then
+            color=$(${pkgs.jq}/bin/jq -r "$key // empty" "$wal_json" 2>/dev/null)
+          fi
+          echo "''${color:-$fallback}"
+        }
+
+        build_theme() {
+          local corner_radius='${vmSelectCornerRadius}'
+          local font_size='${vmSelectWofiSize}'
+          local font_name='${vmSelectFontFamily}'
+          local bg fg accent
+          bg=$(get_wal_color '.colors.color0' '#0e0f17')
+          fg=$(get_wal_color '.colors.color7' '#e4d1ef')
+          accent=$(get_wal_color '.colors.color4' '#f09ea2')
+          cat <<EOF
+    * {
+        font-family: ''${font_name};
+        font-size: ''${font_size}px;
+        color: ''${fg};
     }
 
-    build_theme() {
-      local corner_radius='${vmSelectCornerRadius}'
-      local font_size='${vmSelectWofiSize}'
-      local font_name='${vmSelectFontFamily}'
-      local bg fg accent
-      bg=$(get_wal_color '.colors.color0' '#0e0f17')
-      fg=$(get_wal_color '.colors.color7' '#e4d1ef')
-      accent=$(get_wal_color '.colors.color4' '#f09ea2')
-      cat <<EOF
-* {
-    font-family: ''${font_name};
-    font-size: ''${font_size}px;
-    color: ''${fg};
-}
-
-#window {
-    background-color: ''${bg};
-    border-radius: ''${corner_radius}px;
-    border: 0px solid transparent;
-}
-
-#outer-box {
-    padding: 8px;
-}
-
-#input {
-    background-color: transparent;
-    border: none;
-    border-bottom: 1px solid ''${accent};
-    border-radius: 0;
-    padding: 4px 8px;
-    margin-bottom: 4px;
-    color: ''${fg};
-}
-
-#scroll { }
-
-#inner-box {
-    padding: 4px;
-}
-
-#entry {
-    padding: 6px 8px;
-    border-radius: ''${corner_radius}px;
-}
-
-#entry:selected {
-    background-color: ''${accent};
-}
-
-#text {
-    color: ''${fg};
-}
-
-#text:selected {
-    color: ''${bg};
-}
-
-#img {
-    margin-right: 6px;
-}
-EOF
+    #window {
+        background-color: ''${bg};
+        border-radius: ''${corner_radius}px;
+        border: 0px solid transparent;
     }
 
-    # ── Get current workspace ──────────────────────────────────────────────
-    WS=$(${pkgs.hyprland}/bin/hyprctl activeworkspace -j 2>/dev/null \
-      | ${pkgs.jq}/bin/jq -r '.id' || echo "1")
+    #outer-box {
+        padding: 8px;
+    }
 
-    if [[ ! -f "$VM_REGISTRY" ]]; then
-      notify "No VM registry found"
-      exit 0
-    fi
+    #input {
+        background-color: transparent;
+        border: none;
+        border-bottom: 1px solid ''${accent};
+        border-radius: 0;
+        padding: 4px 8px;
+        margin-bottom: 4px;
+        color: ''${fg};
+    }
 
-    # ── All VM names declared for this workspace ───────────────────────────
-    WS_VMS=$(${pkgs.jq}/bin/jq -r --argjson w "$WS" \
-      'to_entries[] | select(.value.workspace == $w) | .value.vmName' \
-      "$VM_REGISTRY" 2>/dev/null)
+    #scroll { }
 
-    if [[ -z "$WS_VMS" ]]; then
-      notify "No VMs declared for workspace $WS"
-      exit 0
-    fi
+    #inner-box {
+        padding: 4px;
+    }
 
-    # ── Filter to running ones ─────────────────────────────────────────────
-    RUNNING=""
-    while IFS= read -r vm; do
-      [[ -z "$vm" ]] && continue
-      systemctl is-active --quiet "microvm@''${vm}.service" 2>/dev/null \
-        && RUNNING+="$vm"$'\n' || true
-    done <<< "$WS_VMS"
-    RUNNING=$(echo "$RUNNING" | ${pkgs.gnugrep}/bin/grep -v '^$' || true)
+    #entry {
+        padding: 6px 8px;
+        border-radius: ''${corner_radius}px;
+    }
 
-    if [[ -z "$RUNNING" ]]; then
-      notify "No VMs running on workspace $WS"
-      exit 0
-    fi
+    #entry:selected {
+        background-color: ''${accent};
+    }
 
-    # ── Get the base type key for active-vms.json ──────────────────────────
-    # The base type is the shortest registry key for this workspace
-    # (e.g. "pentest" rather than "pentest-task1").
-    WS_TYPE=$(${pkgs.jq}/bin/jq -r --argjson w "$WS" \
-      '[to_entries[] | select(.value.workspace == $w) | .key] | sort_by(length) | first // empty' \
-      "$VM_REGISTRY" 2>/dev/null || true)
+    #text {
+        color: ''${fg};
+    }
 
-    # ── Get current active VM ──────────────────────────────────────────────
-    mkdir -p "$(dirname "$ACTIVE_VMS_FILE")"
-    [[ ! -f "$ACTIVE_VMS_FILE" ]] && echo '{}' > "$ACTIVE_VMS_FILE"
-    CURRENT=$(${pkgs.jq}/bin/jq -r \
-      --argjson vms "$(echo "$RUNNING" | ${pkgs.jq}/bin/jq -Rn '[inputs]')" \
-      'to_entries[] | select((.value | type == "string") and (.value as $v | $vms | index($v) != null)) | .value' \
-      "$ACTIVE_VMS_FILE" 2>/dev/null | head -1 || true)
+    #text:selected {
+        color: ''${bg};
+    }
 
-    # ── Build display list (★ for active) ─────────────────────────────────
-    DISPLAY_LIST=""
-    while IFS= read -r vm; do
-      [[ -z "$vm" ]] && continue
-      if [[ "$vm" == "$CURRENT" ]]; then
-        DISPLAY_LIST+="★ $vm"$'\n'
-      else
-        DISPLAY_LIST+="  $vm"$'\n'
-      fi
-    done <<< "$RUNNING"
+    #img {
+        margin-right: 6px;
+    }
+    EOF
+        }
 
-    # ── Show wofi picker ───────────────────────────────────────────────────
-    THEME=$(${pkgs.coreutils}/bin/mktemp /tmp/vm-select-XXXXXX.css)
-    build_theme > "$THEME"
-    VM_COUNT=$(echo "$RUNNING" | ${pkgs.gnugrep}/bin/grep -c '.' || echo 1)
-    SELECTED=$(echo -n "$DISPLAY_LIST" \
-      | ${pkgs.wofi}/bin/wofi --show dmenu \
-          --style="$THEME" \
-          --prompt="WS$WS vm" \
-          --lines="$VM_COUNT" \
-          --width=${vmSelectWidth} \
-          --no-actions \
-          2>/dev/null || true)
-    ${pkgs.coreutils}/bin/rm -f "$THEME"
+        # ── Get current workspace ──────────────────────────────────────────────
+        WS=$(${pkgs.hyprland}/bin/hyprctl activeworkspace -j 2>/dev/null \
+          | ${pkgs.jq}/bin/jq -r '.id' || echo "1")
 
-    [[ -z "$SELECTED" ]] && exit 0
+        if [[ ! -f "$VM_REGISTRY" ]]; then
+          notify "No VM registry found"
+          exit 0
+        fi
 
-    # Strip marker prefix
-    SELECTED=$(echo "$SELECTED" | ${pkgs.gnused}/bin/sed 's/^★ //; s/^  //')
+        # ── All VM names declared for this workspace ───────────────────────────
+        WS_VMS=$(${pkgs.jq}/bin/jq -r --argjson w "$WS" \
+          'to_entries[] | select(.value.workspace == $w) | .value.vmName' \
+          "$VM_REGISTRY" 2>/dev/null)
 
-    # ── Update active-vms.json ─────────────────────────────────────────────
-    TMP=$(${pkgs.coreutils}/bin/mktemp)
-    ${pkgs.jq}/bin/jq --arg type "$WS_TYPE" --arg vm "$SELECTED" \
-      '.[$type] = $vm' "$ACTIVE_VMS_FILE" > "$TMP" \
-      && mv "$TMP" "$ACTIVE_VMS_FILE"
+        if [[ -z "$WS_VMS" ]]; then
+          notify "No VMs declared for workspace $WS"
+          exit 0
+        fi
 
-    # ── Ensure waypipe-connect is running for the selected VM ─────────────
-    if ! pgrep -f "waypipe-connect ''${SELECTED}$" >/dev/null 2>&1; then
-      setsid ${waypipeConnect}/bin/waypipe-connect "$SELECTED" \
-        </dev/null >"/tmp/waypipe-connect-''${SELECTED}.log" 2>&1 &
-      notify "Switched to $SELECTED - connecting waypipe..."
-    else
-      notify "Switched to $SELECTED"
-    fi
+        # ── Filter to running ones ─────────────────────────────────────────────
+        RUNNING=""
+        while IFS= read -r vm; do
+          [[ -z "$vm" ]] && continue
+          systemctl is-active --quiet "microvm@''${vm}.service" 2>/dev/null \
+            && RUNNING+="$vm"$'\n' || true
+        done <<< "$WS_VMS"
+        RUNNING=$(echo "$RUNNING" | ${pkgs.gnugrep}/bin/grep -v '^$' || true)
+
+        if [[ -z "$RUNNING" ]]; then
+          notify "No VMs running on workspace $WS"
+          exit 0
+        fi
+
+        # ── Get the base type key for active-vms.json ──────────────────────────
+        # The base type is the shortest registry key for this workspace
+        # (e.g. "pentest" rather than "pentest-task1").
+        WS_TYPE=$(${pkgs.jq}/bin/jq -r --argjson w "$WS" \
+          '[to_entries[] | select(.value.workspace == $w) | .key] | sort_by(length) | first // empty' \
+          "$VM_REGISTRY" 2>/dev/null || true)
+
+        # ── Get current active VM ──────────────────────────────────────────────
+        mkdir -p "$(dirname "$ACTIVE_VMS_FILE")"
+        [[ ! -f "$ACTIVE_VMS_FILE" ]] && echo '{}' > "$ACTIVE_VMS_FILE"
+        CURRENT=$(${pkgs.jq}/bin/jq -r \
+          --argjson vms "$(echo "$RUNNING" | ${pkgs.jq}/bin/jq -Rn '[inputs]')" \
+          'to_entries[] | select((.value | type == "string") and (.value as $v | $vms | index($v) != null)) | .value' \
+          "$ACTIVE_VMS_FILE" 2>/dev/null | head -1 || true)
+
+        # ── Build display list (★ for active) ─────────────────────────────────
+        DISPLAY_LIST=""
+        while IFS= read -r vm; do
+          [[ -z "$vm" ]] && continue
+          if [[ "$vm" == "$CURRENT" ]]; then
+            DISPLAY_LIST+="★ $vm"$'\n'
+          else
+            DISPLAY_LIST+="  $vm"$'\n'
+          fi
+        done <<< "$RUNNING"
+
+        # ── Show wofi picker ───────────────────────────────────────────────────
+        THEME=$(${pkgs.coreutils}/bin/mktemp /tmp/vm-select-XXXXXX.css)
+        build_theme > "$THEME"
+        VM_COUNT=$(echo "$RUNNING" | ${pkgs.gnugrep}/bin/grep -c '.' || echo 1)
+        SELECTED=$(echo -n "$DISPLAY_LIST" \
+          | ${pkgs.wofi}/bin/wofi --show dmenu \
+              --style="$THEME" \
+              --prompt="WS$WS vm" \
+              --lines="$VM_COUNT" \
+              --width=${vmSelectWidth} \
+              --no-actions \
+              2>/dev/null || true)
+        ${pkgs.coreutils}/bin/rm -f "$THEME"
+
+        [[ -z "$SELECTED" ]] && exit 0
+
+        # Strip marker prefix
+        SELECTED=$(echo "$SELECTED" | ${pkgs.gnused}/bin/sed 's/^★ //; s/^  //')
+
+        # ── Update active-vms.json ─────────────────────────────────────────────
+        TMP=$(${pkgs.coreutils}/bin/mktemp)
+        ${pkgs.jq}/bin/jq --arg type "$WS_TYPE" --arg vm "$SELECTED" \
+          '.[$type] = $vm' "$ACTIVE_VMS_FILE" > "$TMP" \
+          && mv "$TMP" "$ACTIVE_VMS_FILE"
+
+        # ── Ensure waypipe-connect is running for the selected VM ─────────────
+        if ! pgrep -f "waypipe-connect ''${SELECTED}$" >/dev/null 2>&1; then
+          setsid ${waypipeConnect}/bin/waypipe-connect "$SELECTED" \
+            </dev/null >"/tmp/waypipe-connect-''${SELECTED}.log" 2>&1 &
+          notify "Switched to $SELECTED - connecting waypipe..."
+        else
+          notify "Switched to $SELECTED"
+        fi
   '';
 
   # ── vm-push-display-mode ──────────────────────────────────────────────────
@@ -628,40 +652,80 @@ EOF
     fi
   '';
 
-in lib.mkIf config.hydrix.hyprland.enable {
-  environment.systemPackages = [
-    waypipeConnect waypipeConnectAll hyprWsApp vmSelect vmPushDisplayMode exitWayland
-    pkgs.waypipe pkgs.socat pkgs.cliphist pkgs.wl-clipboard
-  ];
+  # dunst's format string only renders %s/%b, never %a, so the app-name field
+  # is invisible regardless of what -a is set to. Tag the summary itself
+  # instead, matching waypipe's own "[vm] " window-title prefix convention.
+  notifyForwardScript = pkgs.writeShellScript "vm-notify-forward" ''
+    read -r line
+    vm=$(printf '%s' "$line" | ${pkgs.jq}/bin/jq -r '.vm // "vm"')
+    app=$(printf '%s' "$line" | ${pkgs.jq}/bin/jq -r '.app_name // "notify"')
+    summary=$(printf '%s' "$line" | ${pkgs.jq}/bin/jq -r '.summary // ""')
+    body=$(printf '%s' "$line" | ${pkgs.jq}/bin/jq -r '.body // ""')
+    urgency=$(printf '%s' "$line" | ${pkgs.jq}/bin/jq -r '.urgency // "normal"')
+    ${pkgs.libnotify}/bin/notify-send -u "$urgency" -a "$app" "[$vm] $summary" "$body"
+  '';
+in
+  lib.mkIf config.hydrix.hyprland.enable {
+    environment.systemPackages = [
+      waypipeConnect
+      waypipeConnectAll
+      hyprWsApp
+      vmSelect
+      vmPushDisplayMode
+      exitWayland
+      pkgs.waypipe
+      pkgs.socat
+      pkgs.cliphist
+      pkgs.wl-clipboard
+    ];
 
-  # ── Audio forwarding for waypipe VMs ─────────────────────────────────────
-  # waypipe carries Wayland display only; audio travels over a parallel vsock
-  # channel (port 14505). VMs connect to host CID 2 on vsock:14505 and get
-  # proxied directly to the PipeWire PulseAudio Unix socket.
-  #
-  # Anonymous auth on the Unix socket: VM clients won't have the host PA cookie,
-  # and without auth.anonymous PipeWire silently degrades them to an isolated
-  # null-sink session. Safe on a single-user machine - the cookie is only
-  # meaningful separation between different Unix users, not same-UID processes.
+    # ── Audio forwarding for waypipe VMs ─────────────────────────────────────
+    # waypipe carries Wayland display only; audio travels over a parallel vsock
+    # channel (port 14505). VMs connect to host CID 2 on vsock:14505 and get
+    # proxied directly to the PipeWire PulseAudio Unix socket.
+    #
+    # Anonymous auth on the Unix socket: VM clients won't have the host PA cookie,
+    # and without auth.anonymous PipeWire silently degrades them to an isolated
+    # null-sink session. Safe on a single-user machine - the cookie is only
+    # meaningful separation between different Unix users, not same-UID processes.
 
-  # PipeWire: accept anonymous connections on the PA Unix socket
-  services.pipewire.extraConfig.pipewire-pulse."10-vm-audio" = {
-    "pulse.properties" = {
-      "server.address" = [
-        { "address" = "unix:native"; "auth.anonymous" = true; }
-      ];
+    # PipeWire: accept anonymous connections on the PA Unix socket
+    services.pipewire.extraConfig.pipewire-pulse."10-vm-audio" = {
+      "pulse.properties" = {
+        "server.address" = [
+          {
+            "address" = "unix:native";
+            "auth.anonymous" = true;
+          }
+        ];
+      };
     };
-  };
 
-  # Bridge vsock:14505 → PipeWire PA Unix socket
-  systemd.user.services.pulse-vsock = {
-    description = "PulseAudio vsock bridge for waypipe VMs (port 14505)";
-    wantedBy = [ "default.target" ];
-    after = [ "pipewire-pulse.service" ];
-    serviceConfig = {
-      ExecStart = "${pkgs.socat}/bin/socat VSOCK-LISTEN:14505,reuseaddr,fork UNIX-CLIENT:/run/user/1000/pulse/native";
-      Restart = "always";
-      RestartSec = "3s";
+    # Bridge vsock:14505 → PipeWire PA Unix socket
+    systemd.user.services.pulse-vsock = {
+      description = "PulseAudio vsock bridge for waypipe VMs (port 14505)";
+      wantedBy = ["default.target"];
+      after = ["pipewire-pulse.service"];
+      serviceConfig = {
+        ExecStart = "${pkgs.socat}/bin/socat VSOCK-LISTEN:14505,reuseaddr,fork UNIX-CLIENT:/run/user/1000/pulse/native";
+        Restart = "always";
+        RestartSec = "3s";
+      };
     };
-  };
-}
+
+    # ── Notification forwarding for waypipe VMs ───────────────────────────────
+    # VMs opt in via hydrix.microvm.notifyForward.enable (default false, see
+    # vm/microvm/infra/microvm-profile-options.nix). Listens here unconditionally
+    # regardless of which VMs have it on — same reasoning as pulse-vsock above:
+    # an idle vsock listener costs nothing, so there's no need to gate the host
+    # side per-VM.
+    systemd.user.services.vm-notify-relay = {
+      description = "VM notification relay listener (vsock:14518)";
+      wantedBy = ["default.target"];
+      serviceConfig = {
+        ExecStart = "${pkgs.socat}/bin/socat VSOCK-LISTEN:14518,reuseaddr,fork EXEC:${notifyForwardScript}";
+        Restart = "always";
+        RestartSec = "3s";
+      };
+    };
+  }
