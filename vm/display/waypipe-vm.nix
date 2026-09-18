@@ -22,6 +22,8 @@
 }: let
   username = config.hydrix.username;
   audioEnabled = config.hydrix.microvm.audio.enable or false;
+  notifyForwardEnabled = config.hydrix.microvm.notifyForward.enable or false;
+  notifyForwardPort = 14518;
   # Derive title prefix from vmType (e.g. "browsing"), not storeName/hostname:
   # vmType is set directly by each profile's own default.nix, independent of the
   # per-machine-suffixed flake-attribute name (storeName) or any custom hostname
@@ -34,6 +36,97 @@
   # Avoids collision when multiple VMs are connected simultaneously.
   # Falls back to 0 (port 14500) in non-microVM contexts (waypipe unused there).
   waypipePort = toString (14600 + (config.hydrix.microvm.vsockCid or 0) - 100);
+
+  notifyPython = pkgs.python3.withPackages (ps: [ps.dbus-python ps.pygobject3]);
+  notifyRelayScript = pkgs.writeTextFile {
+    name = "notify-relay.py";
+    text = ''
+      import json
+      import socket
+      import dbus
+      import dbus.service
+      import dbus.mainloop.glib
+      from gi.repository import GLib
+
+      VM_NAME = "${titlePrefix}"
+      HOST_CID = 2
+      HOST_PORT = ${toString notifyForwardPort}
+      URGENCY_NAMES = {0: "low", 1: "normal", 2: "critical"}
+
+
+      class NotificationRelay(dbus.service.Object):
+          def __init__(self, bus):
+              super().__init__(bus, "/org/freedesktop/Notifications")
+              self._next_id = 1
+
+          @dbus.service.method(
+              "org.freedesktop.Notifications",
+              in_signature="susssasa{sv}i",
+              out_signature="u",
+          )
+          def Notify(self, app_name, replaces_id, app_icon, summary, body, actions, hints, expire_timeout):
+              nid = replaces_id or self._next_id
+              self._next_id += 1
+
+              urgency = URGENCY_NAMES.get(int(hints.get("urgency", 1)), "normal")
+              payload = json.dumps(
+                  {
+                      "vm": VM_NAME,
+                      "app_name": str(app_name),
+                      "summary": str(summary),
+                      "body": str(body),
+                      "urgency": urgency,
+                  }
+              )
+              try:
+                  with socket.socket(socket.AF_VSOCK, socket.SOCK_STREAM) as s:
+                      s.settimeout(3)
+                      s.connect((HOST_CID, HOST_PORT))
+                      s.sendall((payload + "\n").encode())
+              except OSError:
+                  pass  # host relay unreachable — nothing else to fall back to
+
+              return nid
+
+          @dbus.service.method("org.freedesktop.Notifications", out_signature="as")
+          def GetCapabilities(self):
+              return ["body"]
+
+          @dbus.service.method("org.freedesktop.Notifications", in_signature="u")
+          def CloseNotification(self, nid):
+              pass
+
+          @dbus.service.method("org.freedesktop.Notifications", out_signature="ssss")
+          def GetServerInformation(self):
+              return ("notify-relay", "hydrix", "1.0", "1.2")
+
+          # GDBus-based clients (GLib's GDBusProxy) call Properties.GetAll while
+          # constructing a proxy, before ever calling Notify() — without a
+          # handler here that fails with UnknownMethod and the proxy never gets
+          # created. The Notifications interface has no real properties, so an
+          # empty dict is the spec-correct answer.
+          @dbus.service.method("org.freedesktop.DBus.Properties", in_signature="ss", out_signature="v")
+          def Get(self, interface_name, property_name):
+              raise dbus.exceptions.DBusException(
+                  "No such property", name="org.freedesktop.DBus.Error.UnknownProperty"
+              )
+
+          @dbus.service.method("org.freedesktop.DBus.Properties", in_signature="s", out_signature="a{sv}")
+          def GetAll(self, interface_name):
+              return dbus.Dictionary({}, signature="sv")
+
+          @dbus.service.method("org.freedesktop.DBus.Properties", in_signature="ssv")
+          def Set(self, interface_name, property_name, new_value):
+              pass
+
+
+      dbus.mainloop.glib.DBusGMainLoop(set_as_default=True)
+      bus = dbus.SessionBus()
+      name = dbus.service.BusName("org.freedesktop.Notifications", bus)
+      NotificationRelay(bus)
+      GLib.MainLoop().run()
+    '';
+  };
 
   displayModeHandler = pkgs.writeShellScript "display-mode-handler" ''
     set -euo pipefail
@@ -274,6 +367,22 @@ in {
       };
     })
   ];
+
+  # ── notify-relay — claims org.freedesktop.Notifications, forwards to host ──
+  # The VM has no notification daemon otherwise (notify-send fails with
+  # NameHasNoOwner). Forwards each Notify() call to the host over vsock
+  # instead of rendering anything locally. Host side listens unconditionally
+  # (see theming/wm/hyprland/waypipe.nix) — this option only controls whether
+  # the VM sends.
+  systemd.user.services.notify-relay = lib.mkIf notifyForwardEnabled {
+    description = "Notification relay to host (vsock:${toString notifyForwardPort})";
+    wantedBy = ["default.target"];
+    serviceConfig = {
+      ExecStart = "${notifyPython}/bin/python3 ${notifyRelayScript}";
+      Restart = "always";
+      RestartSec = "3s";
+    };
+  };
 
   # ── waypipe-launch (14508) — on-demand, started by display-mode ──────────
   # Receives app launch commands from host, runs them with waypipe display.

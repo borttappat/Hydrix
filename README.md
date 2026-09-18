@@ -77,6 +77,7 @@ Some more visual/graphical features:
 
 - **Hyprland** - the only supported compositor. VM apps forwarded as native windows via waypipe over vsock. Set `hydrix.hyprland.enable = true` in your machine config.
 - **VM metrics polling** - status bar pulls live CPU, RAM, disk, uptime from each running VM via vsock
+- **Notification forwarding** - VM desktop notifications shown as tagged host popups over vsock, opt-in per VM via `hydrix.microvm.notifyForward.enable`
 - **Pywal colorscheme system** - three independent color layers per VM: declarative base scheme, live host wal-cache sync via virtiofs, and per-VM focus border color on the host
 
 ---

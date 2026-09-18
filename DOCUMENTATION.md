@@ -3342,6 +3342,7 @@ All host-VM communication uses virtio-vsock. No SSH or network access to VMs. Ea
 | 14509 | display-mode | Host -> VM | Display mode selector / readiness gate: `PING`/`waypipe-reconnect`/`STATUS`/`stop` |
 | 14510 | builder-build | Host -> Builder | Send build commands |
 | 14511 | builder-status | Host -> Builder | Query builder status |
+| 14518 | vm-notify-relay | VM -> Host | Forwards `org.freedesktop.Notifications` calls to a host popup. Opt-in per VM via `hydrix.microvm.notifyForward.enable` (default false) |
 | 146xx | waypipe per-VM | VM -> Host | Wayland tunnel, one port per VM: `14600 + CID - 100` |
 
 > **waypipe per-VM ports**: browsing (CID 103) -> 14603, pentest (CID 102) -> 14602, lurking (CID 106) -> 14606, etc. This avoids collision when multiple VMs are tunnelled simultaneously.
@@ -4468,6 +4469,64 @@ VM app
 | `display-mode` receives `stop` | Stops `pulse-vsock` alongside all display services |
 
 No configuration required \- audio works automatically for all profile VMs as soon as they are started in waypipe mode.
+
+### Notification Forwarding (waypipe mode)
+
+VMs have no local notification daemon \- calling `notify-send` (or any app hitting
+`org.freedesktop.Notifications`) fails with `NameHasNoOwner` unless this is enabled. Opt-in
+per VM via `hydrix.microvm.notifyForward.enable` (default `false`). When on, the VM claims
+the `org.freedesktop.Notifications` D-Bus name itself and forwards each `Notify()` call to
+the host over vsock instead of rendering anything locally \- the VM never draws a popup.
+
+**Architecture:**
+
+```
+VM app calls notify-send / Notification API
+  └─ org.freedesktop.Notifications (session D-Bus)
+       └─ notify-relay.py (python3-dbus, claims the bus name)
+            └─ AF_VSOCK connect to host CID 2, port 14518
+                                                    │
+                                          vsock port 14518
+                                                    │
+                                    Host vm-notify-relay user service
+                                      socat VSOCK-LISTEN:14518 → notify-send (host dunst)
+```
+
+**Host side (`theming/wm/hyprland/waypipe.nix`):**
+
+- `vm-notify-relay` user service: `socat VSOCK-LISTEN:14518,fork` piped into a script that
+  parses the JSON payload (`vm`, `app_name`, `summary`, `body`, `urgency`) and calls
+  `notify-send`, tagging the summary as `[vm] summary` \- dunst's format string only renders
+  `%s`/`%b`, never `%a`, so the app-name field set via `-a` is invisible regardless; tagging
+  the summary text itself is what actually shows up, matching waypipe's own `[vm] ` window-title
+  prefix convention.
+- Always listening whenever `hydrix.hyprland.enable`, regardless of which VMs have the option
+  on \- same reasoning as `pulse-vsock`: an idle vsock listener costs nothing, so there's no
+  need to gate the host side per-VM.
+
+**VM side (`vm/display/waypipe-vm.nix`):**
+
+- `notify-relay` user service, gated by `hydrix.microvm.notifyForward.enable`: a small Python
+  D-Bus service (`python3-dbus` + PyGObject) that registers itself as
+  `org.freedesktop.Notifications` on the session bus and implements `Notify`,
+  `GetCapabilities`, `CloseNotification`, `GetServerInformation`.
+- Also implements `org.freedesktop.DBus.Properties` (`Get`/`GetAll`/`Set`, all effectively
+  no-ops). GDBus-based clients (`GDBusProxy`, used internally by `libnotify` as linked into
+  apps like Firefox) call `Properties.GetAll` while constructing a proxy, before ever calling
+  `Notify()` \- without a handler here that call fails with `UnknownMethod` and the whole
+  proxy construction fails, so the app never gets as far as sending a notification at all.
+- On `Notify()`, opens a short-lived `AF_VSOCK` connection to the host (CID 2, port 14518),
+  ships the payload as one JSON line, and closes it. No persistent VM→host connection, no
+  polling on either side \- purely event-driven (D-Bus bus-ownership on the VM side, blocking
+  `accept()` on the host side).
+
+**Known limitation:** verified working end-to-end for `notify-send` and GTK apps (`zenity`),
+including the exact `Gio.DBusProxy` mechanism real apps use internally. Firefox specifically
+does not display notifications when running inside a waypipe VM with this enabled, even
+though the identical Firefox build works normally when run directly on the host. Root cause
+narrowed down to something inside Firefox's own notification code path (not the relay, not
+D-Bus, not `libnotify`'s library path, not desktop-environment detection \- all individually
+ruled out) but not yet fully diagnosed. Everything else works normally.
 
 ### Status Bar Notes
 

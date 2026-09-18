@@ -1062,6 +1062,34 @@ TAP interface name (max 15 chars). Convention: `mv-<bridge-suffix>` (e.g. `mv-pe
 
 ---
 
+#### `hydrix.microvm.audio.enable`
+| | |
+|---|---|
+| Type | `bool` |
+| Default | `true` |
+| Template | ✓ set per-profile (`false` for pentest, lurking) |
+
+Enable audio: PipeWire/WirePlumber/rtkit in the guest plus PulseAudio-over-vsock
+forwarding to host PipeWire in waypipe mode. Disabling turns off the guest audio
+daemons entirely, not just the forwarding. Disable for privacy-sensitive VMs.
+
+---
+
+#### `hydrix.microvm.notifyForward.enable`
+| | |
+|---|---|
+| Type | `bool` |
+| Default | `false` |
+| Template | ✓ set per-profile (`true` for browsing/comms/dev/pentest) |
+
+Forward VM desktop notifications (`org.freedesktop.Notifications`) to the host over
+vsock instead of rendering them locally. The VM has no notification daemon otherwise,
+so `notify-send` and app notifications silently fail unless this is on. See
+[Notification Forwarding](../DOCUMENTATION.md#notification-forwarding-waypipe-mode)
+for the full architecture and a known Firefox-specific limitation.
+
+---
+
 #### `hydrix.microvm.persistence.enable`
 | | |
 |---|---|

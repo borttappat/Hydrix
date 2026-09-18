@@ -56,6 +56,9 @@ in {
   hydrix.microvm = {
     vcpu = 3;
     mem = 3072; # 3GB
+    # Forward VM notifications to a host popup, tagged with the VM name.
+    # To disable: notifyForward.enable = false;
+    notifyForward.enable = true;
     inherit (meta) vsockCid bridge tapId;
     persistence = {
       enable = true;

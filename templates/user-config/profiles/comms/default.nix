@@ -54,6 +54,9 @@ in {
   hydrix.microvm = {
     vcpu = 2;
     mem = 2304; # 2.25GB (avoid QEMU 2GB-exact hang bug)
+    # Forward VM notifications to a host popup, tagged with the VM name.
+    # To disable: notifyForward.enable = false;
+    notifyForward.enable = true;
     inherit (meta) vsockCid bridge tapId;
     persistence = {
       enable = true;

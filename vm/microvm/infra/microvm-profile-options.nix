@@ -4,14 +4,22 @@
 # via lib.mkDefault/lib.mkForce) without pulling in the full microVM
 # implementation (vsock, virtiofs, TAP networking, etc.) that doesn't apply
 # to a plain disk image.
-{ config, lib, ... }:
-
 {
+  config,
+  lib,
+  ...
+}: {
   options.hydrix.microvm = {
     audio.enable = lib.mkOption {
       type = lib.types.bool;
       default = true;
       description = "Enable audio: PipeWire/WirePlumber/rtkit in the guest plus PulseAudio-over-vsock forwarding to host PipeWire in waypipe mode. Disabling turns off the guest audio daemons entirely, not just the forwarding. Disable for privacy-sensitive VMs (pentest, lurking).";
+    };
+
+    notifyForward.enable = lib.mkOption {
+      type = lib.types.bool;
+      default = false;
+      description = "Forward VM desktop notifications (org.freedesktop.Notifications) to the host over vsock instead of rendering them locally. The VM has no notification daemon otherwise, so notify-send and app notifications silently fail unless this is on.";
     };
 
     vcpu = lib.mkOption {
@@ -22,7 +30,7 @@
 
     mem = lib.mkOption {
       type = lib.types.int;
-      default = 2304;  # Avoid QEMU hang at exactly 2GB (microvm-nix#171)
+      default = 2304; # Avoid QEMU hang at exactly 2GB (microvm-nix#171)
       description = "Memory in MB (balloon reclaims idle memory from guest)";
     };
 
@@ -52,7 +60,7 @@
 
     shareStore = lib.mkOption {
       type = lib.types.bool;
-      default = true;  # Share host /nix/store for instant startup (no squashfs build)
+      default = true; # Share host /nix/store for instant startup (no squashfs build)
       description = "Share host /nix/store via virtiofs (faster rebuilds, instant startup)";
     };
 
@@ -101,9 +109,7 @@
         default = 20480;
         description = "Size in MB for persistent store overlay (for in-VM rebuilds). Thin-provisioned.";
       };
-
     };
-
 
     # Encryption options for persistent volumes
     encryption = {
