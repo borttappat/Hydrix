@@ -466,7 +466,7 @@ cmd_start() {
     log "Waiting for VM display service..."
     local dm_start
     dm_start=$(timer_start)
-    local dm_timeout=30
+    local dm_timeout=45
     local dm_elapsed=0
     local dm_ready=0
     while [[ $dm_elapsed -lt $((dm_timeout * 2)) ]]; do
