@@ -72,6 +72,28 @@ else
 fi
 declare -a USED_CIDS=() USED_WORKSPACES=()
 
+# Elastic CPU/RAM ceiling/floor suggestions: most common already-deployed
+# value for each field across the live registry, so a new profile starts
+# consistent with the rest of the fleet rather than an arbitrary guess.
+# Falls back to a sane universal default (matching the framework profiles)
+# when the registry doesn't exist yet or has no entries with that field.
+registry_mode() {
+    local field="$1" fallback="$2"
+    if [[ -f "$VM_REGISTRY" ]]; then
+        local v
+        v=$(jq -r "[.[].${field}] | map(select(. != null)) | group_by(.) | max_by(length) | .[0] // empty" "$VM_REGISTRY" 2>/dev/null)
+        [[ -n "$v" && "$v" != "null" ]] && { echo "$v"; return; }
+    fi
+    echo "$fallback"
+}
+
+SUGGESTED_MEM=$(registry_mode memCeilingMb 2304)
+SUGGESTED_VCPU=$(registry_mode vcpuCeiling 2)
+SUGGESTED_MEM_LOW_FLOOR=$(registry_mode memLowFloorMb 2048)
+SUGGESTED_MEM_FLOOR=$(registry_mode memFloorMb 1536)
+SUGGESTED_CPU_LOW_FLOOR=$(registry_mode cpuLowFloorPct 60)
+SUGGESTED_CPU_FLOOR=$(registry_mode cpuFloorPct 20)
+
 for meta in "$PROFILES_DIR"/*/meta.nix; do
     [[ -f "$meta" ]] || continue
     cid=$(nix_attr "$meta" vsockCid)
@@ -144,6 +166,12 @@ ROUTER_TAP=$(ask  routerTap   "$SUGGESTED_ROUTER_TAP"   "max 15 chars")
 LABEL=$(ask       label       "$SUGGESTED_LABEL"        "display name")
 COLORSCHEME=$(ask colorscheme "$SUGGESTED_COLORSCHEME"  "hydrix colorscheme name")
 FOCUS_COLOR=$(ask  focusBorder "orange"                 "red, orange, yellow, green, cyan, blue, purple, pink, magenta")
+MEM=$(ask             mem            "$SUGGESTED_MEM"            "MB, ceiling - balloon reclaims idle memory")
+VCPU=$(ask            vcpu           "$SUGGESTED_VCPU"           "ceiling")
+MEM_LOW_FLOOR=$(ask   memLowFloorMb  "$SUGGESTED_MEM_LOW_FLOOR"  "MB - elastic daemon resting point, window open but idle")
+MEM_FLOOR=$(ask       memFloorMb     "$SUGGESTED_MEM_FLOOR"      "MB - elastic daemon absolute floor, no windows open")
+CPU_LOW_FLOOR=$(ask   cpuLowFloorPct "$SUGGESTED_CPU_LOW_FLOOR"  "% - elastic daemon CPU floor while RAM still deflating")
+CPU_FLOOR=$(ask       cpuFloorPct    "$SUGGESTED_CPU_FLOOR"      "% - elastic daemon true CPU floor once RAM settled")
 
 # Validate interface name lengths
 for iface in "$BRIDGE" "$TAP_ID" "$ROUTER_TAP"; do
@@ -182,6 +210,12 @@ find "$PROFILE_DIR" -type f | while read -r f; do
         -e "s/__LABEL__/${LABEL}/g"             \
         -e "s/__COLORSCHEME__/${COLORSCHEME}/g"  \
         -e "s/__FOCUS_COLOR__/${FOCUS_COLOR}/g" \
+        -e "s/__MEM__/${MEM}/g"                 \
+        -e "s/__VCPU__/${VCPU}/g"               \
+        -e "s/__MEM_LOW_FLOOR__/${MEM_LOW_FLOOR}/g" \
+        -e "s/__MEM_FLOOR__/${MEM_FLOOR}/g"     \
+        -e "s/__CPU_LOW_FLOOR__/${CPU_LOW_FLOOR}/g" \
+        -e "s/__CPU_FLOOR__/${CPU_FLOOR}/g"     \
         "$f"
 done
 
@@ -198,6 +232,7 @@ info "Bridge:     $BRIDGE"
 info "Subnet:     ${SUBNET}.0/24"
 info "Workspace:  $WORKSPACE"
 info "Label:      $LABEL"
+info "Mem/vCPU:   ${MEM}MB / ${VCPU} (floors: ${MEM_LOW_FLOOR}/${MEM_FLOOR}MB, ${CPU_LOW_FLOOR}/${CPU_FLOOR}%)"
 echo ""
 echo "Next: edit $PROFILE_DIR/default.nix (resources, colorscheme)"
 echo "      edit $PROFILE_DIR/packages.nix (profile packages)"

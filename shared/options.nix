@@ -338,6 +338,36 @@ in {
               default = null;
               description = "Focus border color for this VM's windows in Hyprland. Named color (red, yellow, ...) or hex RRGGBBAA. Set in meta.nix, read by Hyprland window rules via vm-registry.json.";
             };
+            memCeilingMb = lib.mkOption {
+              type = lib.types.nullOr lib.types.int;
+              default = null;
+              description = "Elastic CPU/RAM daemon: memory ceiling in MB, from this profile's meta.nix. Null for VMs not managed by hydrix.vmElastic.";
+            };
+            vcpuCeiling = lib.mkOption {
+              type = lib.types.nullOr lib.types.int;
+              default = null;
+              description = "Elastic CPU/RAM daemon: vCPU ceiling, from this profile's meta.nix.";
+            };
+            memLowFloorMb = lib.mkOption {
+              type = lib.types.nullOr lib.types.int;
+              default = null;
+              description = "Elastic CPU/RAM daemon: resting point when usage is low but a window is open.";
+            };
+            memFloorMb = lib.mkOption {
+              type = lib.types.nullOr lib.types.int;
+              default = null;
+              description = "Elastic CPU/RAM daemon: absolute floor when no windows are open at all.";
+            };
+            cpuLowFloorPct = lib.mkOption {
+              type = lib.types.nullOr lib.types.int;
+              default = null;
+              description = "Elastic CPU/RAM daemon: CPU floor (percent of one core) while RAM is still deflating.";
+            };
+            cpuFloorPct = lib.mkOption {
+              type = lib.types.nullOr lib.types.int;
+              default = null;
+              description = "Elastic CPU/RAM daemon: true CPU floor (percent of one core) once RAM has settled.";
+            };
           };
         });
         default = {};

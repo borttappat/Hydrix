@@ -37,11 +37,16 @@ let meta = import ./meta.nix; in
   # Presets: "edge-windows" | "chrome-windows" | "chrome-mac" | "safari-mac" | "firefox-windows"
   # hydrix.graphical.firefox.userAgent = "edge-windows";
 
-  # MicroVM resources
+  # MicroVM resources. mem/vcpu are ceilings; the elastic CPU/RAM daemon
+  # (hydrix.vmElastic, auto-enabled per profile from these meta.nix values)
+  # deflates down to memLowFloorMb/cpuLowFloorPct while a window is open but
+  # idle, and further to memFloorMb/cpuFloorPct once no windows are open at
+  # all. To override any of these for just one machine, plain-assign the
+  # field on hydrix.vmElastic.vms.__NAME__ in machines/<serial>.nix instead
+  # of editing this profile, e.g.:
+  #   hydrix.vmElastic.vms.__NAME__.memFloorMb = 2048;
   hydrix.microvm = {
-    vcpu = 2;
-    mem = 2304;  # 2.25GB (avoid QEMU 2GB-exact hang bug)
-    inherit (meta) vsockCid bridge tapId;
+    inherit (meta) vsockCid bridge tapId mem vcpu memLowFloorMb memFloorMb cpuLowFloorPct cpuFloorPct;
     persistence = {
       enable = true;
       homeSize = 10240;  # 10GB — adjust as needed

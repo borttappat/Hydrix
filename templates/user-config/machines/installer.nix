@@ -315,4 +315,15 @@
   # Uncomment to enable libvirt/QEMU/virt-manager (pentest VMs, Windows VMs, etc.)
   # hydrix.libvirt.enable = true;
   # hydrix.libvirt.grabKey = "65507,65513";  # Left Ctrl+Alt - find keysyms with `xev`
+
+  # ─── Elastic CPU/RAM per-machine overrides ──────────────────────────────
+  # Every profile VM gets hydrix.vmElastic.vms.<profile> enabled automatically,
+  # with mem/vcpu ceilings and floor values read straight from that profile's
+  # own profiles/<name>/meta.nix - no boilerplate needed here by default.
+  # Override any single field for just this machine with a plain assignment:
+  # hydrix.vmElastic.vms.lurking.memFloorMb = 2048;    # absolute floor, no windows open
+  # hydrix.vmElastic.vms.lurking.memLowFloorMb = 3072; # resting point, window open but idle
+  # hydrix.vmElastic.vms.lurking.cpuFloorPct = 20;     # true CPU floor once RAM has settled
+  # hydrix.vmElastic.vms.lurking.cpuLowFloorPct = 60;  # CPU floor while RAM is still deflating
+  # hydrix.vmElastic.vms.lurking.enable = false;       # opt this VM out of elastic management entirely
 }

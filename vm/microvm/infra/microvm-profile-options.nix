@@ -31,7 +31,36 @@
     mem = lib.mkOption {
       type = lib.types.int;
       default = 2304; # Avoid QEMU hang at exactly 2GB (microvm-nix#171)
-      description = "Memory in MB (balloon reclaims idle memory from guest)";
+      description = "Memory ceiling in MB (balloon reclaims idle memory from guest). Read by the host to auto-populate hydrix.vmElastic.vms.<name>.memCeilingMb - see memLowFloorMb/memFloorMb below for the rest of that daemon's tuning.";
+    };
+
+    # ===== Elastic CPU/RAM floors =====
+    # memCeilingMb/cpuCeilingPct always derive from mem/vcpu above - only the
+    # floors need declaring. Read by the host (flake.nix) to auto-populate
+    # hydrix.vmElastic.vms.<name> per machine; a machine config can still
+    # override any specific field with a plain assignment there.
+    memLowFloorMb = lib.mkOption {
+      type = lib.types.int;
+      default = 2048;
+      description = "Elastic CPU/RAM daemon: resting point when usage is low but a window is open.";
+    };
+
+    memFloorMb = lib.mkOption {
+      type = lib.types.int;
+      default = 1536;
+      description = "Elastic CPU/RAM daemon: absolute floor when no windows are open at all.";
+    };
+
+    cpuLowFloorPct = lib.mkOption {
+      type = lib.types.int;
+      default = 60;
+      description = "Elastic CPU/RAM daemon: CPU floor (percent of one core) while RAM is still deflating.";
+    };
+
+    cpuFloorPct = lib.mkOption {
+      type = lib.types.int;
+      default = 20;
+      description = "Elastic CPU/RAM daemon: true CPU floor (percent of one core) once RAM has settled.";
     };
 
     vsockCid = lib.mkOption {

@@ -11,5 +11,11 @@
   subnet    = "__SUBNET__";      # /24 prefix — matches CID last octet
   workspace = __WORKSPACE__;
   label     = "__LABEL__";
-  icon      = "";
+
+  mem  = __MEM__;                       # ceiling, MB - balloon reclaims idle memory
+  vcpu = __VCPU__;                      # ceiling
+  memLowFloorMb   = __MEM_LOW_FLOOR__;  # elastic daemon: resting point, window open but idle
+  memFloorMb      = __MEM_FLOOR__;      # elastic daemon: absolute floor, no windows open
+  cpuLowFloorPct  = __CPU_LOW_FLOOR__;  # elastic daemon: CPU floor while RAM still deflating
+  cpuFloorPct     = __CPU_FLOOR__;      # elastic daemon: true CPU floor once RAM settled
 }

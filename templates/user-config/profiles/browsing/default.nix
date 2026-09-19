@@ -54,12 +54,10 @@ in {
   # the virtiofsd thread pool to reduce idle host threads (default = host CPU count):
   # microvm.virtiofsd.threadPoolSize = lib.mkForce 1;
   hydrix.microvm = {
-    vcpu = 3;
-    mem = 3072; # 3GB
     # Forward VM notifications to a host popup, tagged with the VM name.
     # To disable: notifyForward.enable = false;
     notifyForward.enable = true;
-    inherit (meta) vsockCid bridge tapId;
+    inherit (meta) vsockCid bridge tapId mem vcpu memLowFloorMb memFloorMb cpuLowFloorPct cpuFloorPct;
     persistence = {
       enable = true;
       homeSize = 10240; # 10GB
