@@ -62,13 +62,6 @@
     };
   };
 
-  # Zram swap
-  zramSwap = {
-    enable = lib.mkDefault true;
-    algorithm = lib.mkDefault "zstd";
-    memoryPercent = lib.mkDefault 50;
-  };
-
   # Earlyoom prevents freezes under memory pressure
   services.earlyoom = {
     enable = lib.mkDefault true;

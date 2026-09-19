@@ -165,7 +165,10 @@ in {
     # ===== MicroVM Configuration =====
     microvm = {
       hypervisor = "qemu";
-      qemu.machine = "q35";
+      # Verified working with real VFIO WiFi passthrough before promoting
+      # here (see qemu.serialConsole below for the console-collision fix
+      # that was needed alongside it).
+      qemu.machine = "microvm";
       qemu.package = qemuNoSeccomp;
 
       vcpu = 2;
@@ -183,6 +186,12 @@ in {
       # bridge attachment). microvm.interfaces is empty to avoid any tap-up
       # script that could race with QEMU's TUNSETIFF call.
       interfaces = [];
+
+      # microvm.nix's own qemu.serialConsole (default true) unconditionally
+      # adds its own "-serial chardev:stdio" on top of the console.sock one
+      # below - two legacy serial ports, only q35 tolerates that cleanly.
+      # Only ever needed the one console.sock port to begin with.
+      qemu.serialConsole = false;
 
       qemu.extraArgs =
         [

@@ -1,9 +1,12 @@
 # Host-Only System Defaults
 # Settings that apply to the physical host but not to VMs.
 # Imported by mkHost in lib/default.nix.
-{ config, lib, pkgs, ... }:
-
 {
+  config,
+  lib,
+  pkgs,
+  ...
+}: {
   # Boot menu / os-release branding
   system.nixos.distroName = lib.mkDefault "Hydrix";
 
@@ -16,4 +19,11 @@
 
   # nftables for the host (VMs keep iptables — files-agent uses extraCommands)
   networking.nftables.enable = true;
+
+  # Zram swap - host-only, sized against the host's own physical RAM.
+  zramSwap = {
+    enable = lib.mkDefault true;
+    algorithm = lib.mkDefault "zstd";
+    memoryPercent = lib.mkDefault 50;
+  };
 }

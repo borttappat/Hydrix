@@ -204,7 +204,15 @@ in {
     # ===== MicroVM Configuration =====
     microvm = {
       hypervisor = "qemu";
-      qemu.machine = "q35"; # Q35 chipset - better PCIe/VFIO support (matches libvirt router)
+      # Verified working with real VFIO WiFi passthrough on router-stable
+      # (identical pcie-root-port + vfio-pci wiring below) before promoting
+      # here.
+      qemu.machine = "microvm";
+      # microvm.nix's own qemu.serialConsole (default true) unconditionally
+      # adds its own "-serial chardev:stdio" on top of the console.sock one
+      # below - two legacy serial ports, only q35 tolerated that cleanly.
+      # Only ever needed the one console.sock port to begin with.
+      qemu.serialConsole = false;
       # Only disable seccomp when VFIO passthrough is in use (seccomp blocks /dev/vfio access)
       qemu.package =
         if usePciPassthrough

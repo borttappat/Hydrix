@@ -22,7 +22,9 @@ in {
 
     microvm = {
       hypervisor = "qemu";
-      qemu.machine = "pc";
+      # Verified working (gitsync) after fixing the qemu.serialConsole
+      # collision below.
+      qemu.machine = "microvm";
       vcpu = lib.mkDefault 1;
       mem = lib.mkDefault 1024;
 
@@ -33,6 +35,15 @@ in {
       deflateOnOOM = lib.mkDefault true;
 
       graphics.enable = false;
+
+      # microvm.nix's own qemu.serialConsole (default true) unconditionally
+      # adds its own "-serial chardev:stdio" on top of the console.sock one
+      # below - two legacy serial ports total. "pc"/"q35" can host both, so
+      # this went unnoticed, but "microvm" only supports one legacy serial
+      # UART by design, and whichever port ttyS0 actually lands on stopped
+      # being guaranteed to be the console.sock-backed one. Only ever needed
+      # the one console.sock port to begin with.
+      qemu.serialConsole = false;
       qemu.extraArgs = [
         "-vga"
         "none"

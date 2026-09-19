@@ -13,34 +13,39 @@
 # (mod key adjusted, xsession adapted for VMs).
 # Graphical is enabled by default (opt-out with hydrix.graphical.enable = false).
 #
-{ config, lib, pkgs, modulesPath, ... }:
-
-let
+{
+  config,
+  lib,
+  pkgs,
+  modulesPath,
+  ...
+}: let
   vmName = config.hydrix.vm.storeName;
   vmCollectInterval = config.hydrix.vmMetrics.vmCollectInterval;
 
   # Compiled metrics server, zero shell/binary execs at runtime.
   # Reads /proc directly; serves snapshot over vsock:14501.
   # Source lives alongside this file as vm-metrics.c.
-  metricsServerBin = pkgs.runCommand "vm-metrics-server" {
-    nativeBuildInputs = [ pkgs.gcc ];
-  } ''
-    mkdir -p $out/bin
-    gcc -O2 -o $out/bin/vm-metrics-server ${./vm-metrics.c} -lpthread
-  '';
+  metricsServerBin =
+    pkgs.runCommand "vm-metrics-server" {
+      nativeBuildInputs = [pkgs.gcc];
+    } ''
+      mkdir -p $out/bin
+      gcc -O2 -o $out/bin/vm-metrics-server ${./vm-metrics.c} -lpthread
+    '';
 
   # Compiled staging server: one persistent process instead of a fork-per-
   # connection socat listener. `list`/`dev` (the commands waybar's periodic
   # sync poll actually hits) answer directly via opendir/stat, no process
   # ever forked for those. Source lives alongside this file as
   # vm-staging-server.c.
-  stagingServerBin = pkgs.runCommand "vm-staging-server" {
-    nativeBuildInputs = [ pkgs.gcc ];
-  } ''
-    mkdir -p $out/bin
-    gcc -O2 -o $out/bin/vm-staging-server ${./vm-staging-server.c}
-  '';
-
+  stagingServerBin =
+    pkgs.runCommand "vm-staging-server" {
+      nativeBuildInputs = [pkgs.gcc];
+    } ''
+      mkdir -p $out/bin
+      gcc -O2 -o $out/bin/vm-staging-server ${./vm-staging-server.c}
+    '';
 in {
   imports = [
     ../../options.nix
@@ -121,10 +126,8 @@ in {
       # QEMU hypervisor - most feature-complete (vsock, graphics, virtiofs)
       hypervisor = "qemu";
 
-      # Use standard PC machine type for full PCI support
-      # The default "microvm" machine type has a simplified PCI controller
-      # that the kernel doesn't recognize ("No config space access function found")
-      qemu.machine = "pc";
+      # Lighter than "pc" - verified booting clean on a stock kernel.
+      qemu.machine = lib.mkDefault "microvm";
 
       # Use squashfs for store disk when not sharing host store
       # When shareStore is enabled, this is ignored (no store disk built)
@@ -141,7 +144,7 @@ in {
       # ===== Memory ballooning =====
       # Allows host to reclaim unused guest memory dynamically
       balloon = true;
-      deflateOnOOM = true;  # Give memory back to guest if it's running low
+      deflateOnOOM = true; # Give memory back to guest if it's running low
 
       # ===== Virtiofs tuning =====
       # Default spawns `nproc` threads per share, wasteful when idle
@@ -150,97 +153,113 @@ in {
       # mutable shares (wal colors, hydrix-config) coherent with the host.
       # /nix/store files have stable mtimes so they stay cached indefinitely,
       # no regression vs "always" for immutable data.
-      virtiofsd.extraArgs = [ "--cache" "auto" ];
+      virtiofsd.extraArgs = ["--cache" "auto"];
 
       # Disable graphics for headless operation (serial console only)
       graphics.enable = false;
 
       # Force headless mode - override any VGA/display settings
       qemu.extraArgs = [
-        "-vga" "none"
-        "-display" "none"
+        "-vga"
+        "none"
+        "-display"
+        "none"
       ];
 
       # ===== Shared Filesystems =====
-      shares = [
-        # VM config directory (required by microvm, can be empty)
-        {
-          tag = "vm-config";
-          source = config.hydrix.microvm.configPath;
-          mountPoint = "/mnt/vm-config";
-          proto = "9p";
-        }
-        # Host config directory (for scaling.json - dynamic DPI, read-only)
-        {
-          tag = "hydrix-config";
-          source = "/home/${config.hydrix.username}/.config/hydrix";
-          mountPoint = "/mnt/hydrix-config";
-          proto = "virtiofs";
-          readOnly = true;
-        }
-      ] ++ lib.optionals config.hydrix.microvm.shareStore [
-        # Share host /nix/store via virtiofs (read-only base)
-        # Mounted at .ro-store, then overlaid at /nix/store for writes
-        {
-          tag = "nix-store";
-          source = "/nix/store";
-          mountPoint = "/nix/.ro-store";
-          proto = "virtiofs";
-          readOnly = true;
-        }
-      ] ++ [
-        # Host secrets directory, always mounted; host pre-creates for all enabled VMs.
-        # Empty when no secrets are provisioned (vms.<name>.secrets = [] in machine config).
-        # VM-side provisioning service checks for file existence before copying.
-        {
-          tag = "vm-secrets";
-          source = "/run/hydrix-secrets/${vmName}";
-          mountPoint = "/mnt/vm-secrets";
-          proto = "virtiofs";
-          readOnly = true;
-        }
-      ];
+      shares =
+        [
+          # VM config directory (required by microvm, can be empty)
+          {
+            tag = "vm-config";
+            source = config.hydrix.microvm.configPath;
+            mountPoint = "/mnt/vm-config";
+            proto = "9p";
+          }
+          # Host config directory (for scaling.json - dynamic DPI, read-only)
+          {
+            tag = "hydrix-config";
+            source = "/home/${config.hydrix.username}/.config/hydrix";
+            mountPoint = "/mnt/hydrix-config";
+            proto = "virtiofs";
+            readOnly = true;
+          }
+        ]
+        ++ lib.optionals config.hydrix.microvm.shareStore [
+          # Share host /nix/store via virtiofs (read-only base)
+          # Mounted at .ro-store, then overlaid at /nix/store for writes
+          {
+            tag = "nix-store";
+            source = "/nix/store";
+            mountPoint = "/nix/.ro-store";
+            proto = "virtiofs";
+            readOnly = true;
+          }
+        ]
+        ++ [
+          # Host secrets directory, always mounted; host pre-creates for all enabled VMs.
+          # Empty when no secrets are provisioned (vms.<name>.secrets = [] in machine config).
+          # VM-side provisioning service checks for file existence before copying.
+          {
+            tag = "vm-secrets";
+            source = "/run/hydrix-secrets/${vmName}";
+            mountPoint = "/mnt/vm-secrets";
+            proto = "virtiofs";
+            readOnly = true;
+          }
+        ];
 
       # ===== Persistent Volumes =====
       # Home directory persistence (optional)
       # Store overlay for nix builds (always when shareStore enabled)
-      volumes = lib.optionals config.hydrix.microvm.persistence.enable (
-      let
-        encEnabled = config.hydrix.microvm.encryption.enable;
-        homeVolume = if encEnabled then {
-          image = "/dev/mapper/vm-${vmName}-home";
-          mountPoint = "/home";
-          size = config.hydrix.microvm.persistence.homeSize;
-          autoCreate = false;
-        } else {
-          image = config.hydrix.microvm.persistence.volumePath;
-          mountPoint = "/home";
-          size = config.hydrix.microvm.persistence.homeSize;
-          autoCreate = true;
-        };
-      in [ homeVolume ]
-      ++ map (vol: {
-        image = "/var/lib/microvms/${config.hydrix.vm.storeName}/${vol.name}.qcow2";
-        mountPoint = vol.mountPoint;
-        size = vol.size;
-        autoCreate = true;
-      }) config.hydrix.microvm.persistence.extraVolumes)
-      # Persistent store overlay for nix builds (thin-provisioned, starts near 0)
-      ++ lib.optionals config.hydrix.microvm.shareStore [{
-        image = "/var/lib/microvms/${config.hydrix.vm.storeName}/nix-overlay.qcow2";
-        mountPoint = "/nix/.rw-store";
-        size = config.hydrix.microvm.persistence.storeOverlaySize;
-        autoCreate = true;
-      }];
+      volumes =
+        lib.optionals config.hydrix.microvm.persistence.enable (
+          let
+            encEnabled = config.hydrix.microvm.encryption.enable;
+            homeVolume =
+              if encEnabled
+              then {
+                image = "/dev/mapper/vm-${vmName}-home";
+                mountPoint = "/home";
+                size = config.hydrix.microvm.persistence.homeSize;
+                autoCreate = false;
+              }
+              else {
+                image = config.hydrix.microvm.persistence.volumePath;
+                mountPoint = "/home";
+                size = config.hydrix.microvm.persistence.homeSize;
+                autoCreate = true;
+              };
+          in
+            [homeVolume]
+            ++ map (vol: {
+              image = "/var/lib/microvms/${config.hydrix.vm.storeName}/${vol.name}.qcow2";
+              mountPoint = vol.mountPoint;
+              size = vol.size;
+              autoCreate = true;
+            })
+            config.hydrix.microvm.persistence.extraVolumes
+        )
+        # Persistent store overlay for nix builds (thin-provisioned, starts near 0)
+        ++ lib.optionals config.hydrix.microvm.shareStore [
+          {
+            image = "/var/lib/microvms/${config.hydrix.vm.storeName}/nix-overlay.qcow2";
+            mountPoint = "/nix/.rw-store";
+            size = config.hydrix.microvm.persistence.storeOverlaySize;
+            autoCreate = true;
+          }
+        ];
 
       # ===== Network Interface =====
       # TAP interface for bridge attachment (max 15 chars on Linux)
-      interfaces = [{
-        type = "tap";
-        id = config.hydrix.microvm.tapId;
-        # MAC generated from hostname for consistency
-        mac = "02:00:00:00:00:${lib.substring 0 2 (builtins.hashString "md5" vmName)}";
-      }];
+      interfaces = [
+        {
+          type = "tap";
+          id = config.hydrix.microvm.tapId;
+          # MAC generated from hostname for consistency
+          mac = "02:00:00:00:00:${lib.substring 0 2 (builtins.hashString "md5" vmName)}";
+        }
+      ];
 
       # ===== Vsock for waypipe/host communication =====
       vsock = {
@@ -279,13 +298,13 @@ in {
     # Host reads snapshot via: echo "all" | socat - VSOCK-CONNECT:CID:14501
     systemd.services.vm-metrics = {
       description = "VM metrics server for host waybar";
-      wantedBy = [ "multi-user.target" ];
-      after = [ "network.target" ];
+      wantedBy = ["multi-user.target"];
+      after = ["network.target"];
 
       serviceConfig = {
         Type = "simple";
         ExecStart = "${metricsServerBin}/bin/vm-metrics-server --serve ${toString vmCollectInterval}";
-        Environment = [ "HOME=/home/${config.hydrix.username}" ];
+        Environment = ["HOME=/home/${config.hydrix.username}"];
         Restart = "always";
         RestartSec = 5;
       };
@@ -300,8 +319,8 @@ in {
     # running VM (same fork/exec-avoidance rationale as router-stats-server).
     systemd.services.vm-staging = {
       description = "VM staging server for host package sync";
-      wantedBy = [ "multi-user.target" ];
-      after = [ "network.target" ];
+      wantedBy = ["multi-user.target"];
+      after = ["network.target"];
 
       serviceConfig = {
         Type = "simple";
@@ -317,8 +336,8 @@ in {
     # import file colors-runtime.toml. Same format as write-alacritty-colors.
     systemd.services.vm-colorscheme = {
       description = "VM background color server (vsock)";
-      wantedBy = [ "multi-user.target" ];
-      after = [ "network.target" ];
+      wantedBy = ["multi-user.target"];
+      after = ["network.target"];
 
       serviceConfig = {
         Type = "simple";
@@ -392,14 +411,12 @@ in {
 
             echo "OK: bg=$BG_HEX"
           '';
-        in server;
+        in
+          server;
         Restart = "always";
         RestartSec = 5;
       };
     };
-
-    # ===== Entropy generation =====
-    services.haveged.enable = true;
 
     # ===== Kernel modules =====
     # Force virtio modules into initrd (required for store disk)
@@ -415,7 +432,7 @@ in {
       "virtio_blk"
       "virtio_pci"
       "virtio_rng"
-      "vmw_vsock_virtio_transport"  # vsock for waypipe/host communication
+      "vmw_vsock_virtio_transport" # vsock for waypipe/host communication
     ];
 
     # Entropy settings
@@ -431,8 +448,12 @@ in {
     # ".10", means VMs that intentionally share one subnet (pentest + its task slots)
     # each get a distinct address instead of colliding on the same static IP.
     hydrix.microvm.staticIp = lib.mkDefault (
-      let subnet = config.hydrix.networking.vmSubnet;
-      in if subnet != "" then "${subnet}.${toString config.hydrix.microvm.vsockCid}" else null
+      let
+        subnet = config.hydrix.networking.vmSubnet;
+      in
+        if subnet != ""
+        then "${subnet}.${toString config.hydrix.microvm.vsockCid}"
+        else null
     );
 
     networking.useDHCP = lib.mkDefault (config.hydrix.microvm.staticIp == null);
@@ -446,9 +467,9 @@ in {
       enable = true;
       networks."10-primary" = {
         matchConfig.MACAddress = (lib.head config.microvm.interfaces).mac;
-        address = [ "${ip}/24" ];
-        gateway = [ gw ];
-        dns = [ gw ];
+        address = ["${ip}/24"];
+        gateway = [gw];
+        dns = [gw];
         linkConfig.RequiredForOnline = "routable";
       };
     });
@@ -458,7 +479,6 @@ in {
     # When shareStore is enabled, virtiofs mounts at /nix/.ro-store
     # microvm.nix detects this and automatically creates an overlay at /nix/store
     # using writableStoreOverlay for the upper layer. No manual config needed.
-
 
     # ===== Host store as binary cache =====
     # Disabled for initial testing - VM uses its own /nix/store from closure
@@ -471,8 +491,8 @@ in {
     # When using persistent home, Home Manager must wait for /home to be mounted
     # Otherwise configs are written to tmpfs and lost when the qcow2 volume mounts
     systemd.services."home-manager-${config.hydrix.username}" = lib.mkIf config.hydrix.microvm.persistence.enable {
-      after = [ "home.mount" ];
-      requires = [ "home.mount" ];
+      after = ["home.mount"];
+      requires = ["home.mount"];
 
       # CRITICAL: Don't restart/stop during switch-to-configuration
       # HM activation isn't idempotent - re-running on an already-activated home fails
@@ -484,13 +504,13 @@ in {
     # ===== Scaling config symlink =====
     systemd.services.hydrix-config-link = {
       description = "Create Hydrix config symlink for dynamic scaling";
-      wantedBy = [ "multi-user.target" ];
-      after = [ "local-fs.target" ] ++ lib.optionals config.hydrix.microvm.persistence.enable [ "home.mount" ];
+      wantedBy = ["multi-user.target"];
+      after = ["local-fs.target"] ++ lib.optionals config.hydrix.microvm.persistence.enable ["home.mount"];
       serviceConfig = {
         Type = "oneshot";
         RemainAfterExit = true;
       };
-      path = [ pkgs.util-linux pkgs.coreutils ];
+      path = [pkgs.util-linux pkgs.coreutils];
       script = ''
         USER_HOME="/home/${config.hydrix.username}"
         CONFIG_DIR="$USER_HOME/.config/hydrix"
@@ -525,59 +545,59 @@ in {
     # Also creates legacy ~/dev/flake.nix for backward compatibility
     systemd.services.hydrix-dev-init = lib.mkIf config.hydrix.microvm.persistence.enable {
       description = "Initialize dev environment directories";
-      wantedBy = [ "multi-user.target" ];
-      after = [ "home.mount" ];
+      wantedBy = ["multi-user.target"];
+      after = ["home.mount"];
       serviceConfig = {
         Type = "oneshot";
         RemainAfterExit = true;
         User = config.hydrix.username;
       };
       script = ''
-        # Create dev and staging directories
-        mkdir -p "$HOME/dev/packages"
-        mkdir -p "$HOME/staging"
+                # Create dev and staging directories
+                mkdir -p "$HOME/dev/packages"
+                mkdir -p "$HOME/staging"
 
-        # Legacy flake for backward compatibility
-        DEV_DIR="$HOME/dev"
+                # Legacy flake for backward compatibility
+                DEV_DIR="$HOME/dev"
 
-        # Only create legacy flake if not exists
-        if [ ! -f "$DEV_DIR/flake.nix" ]; then
-          cat > "$DEV_DIR/flake.nix" << 'EOF'
-{
-  description = "VM dev environment - test packages here";
+                # Only create legacy flake if not exists
+                if [ ! -f "$DEV_DIR/flake.nix" ]; then
+                  cat > "$DEV_DIR/flake.nix" << 'EOF'
+        {
+          description = "VM dev environment - test packages here";
 
-  inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+          inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
 
-  outputs = { self, nixpkgs }:
-    let
-      system = "x86_64-linux";
-      pkgs = nixpkgs.legacyPackages.''${system};
-    in {
-      # Individual packages - run with: nix run .#<name>
-      packages.''${system} = {
-        # === ADD PACKAGES TO TEST BELOW ===
-        # zellij = pkgs.zellij;
-      };
+          outputs = { self, nixpkgs }:
+            let
+              system = "x86_64-linux";
+              pkgs = nixpkgs.legacyPackages.''${system};
+            in {
+              # Individual packages - run with: nix run .#<name>
+              packages.''${system} = {
+                # === ADD PACKAGES TO TEST BELOW ===
+                # zellij = pkgs.zellij;
+              };
 
-      # Dev shell - enter with: nix develop
-      devShells.''${system}.default = pkgs.mkShell {
-        packages = builtins.attrValues self.packages.''${system};
-        shellHook = '''
-          echo "Dev environment loaded"
-          echo "Packages available in this shell"
-        ''';
-      };
-    };
-}
-EOF
+              # Dev shell - enter with: nix develop
+              devShells.''${system}.default = pkgs.mkShell {
+                packages = builtins.attrValues self.packages.''${system};
+                shellHook = '''
+                  echo "Dev environment loaded"
+                  echo "Packages available in this shell"
+                ''';
+              };
+            };
+        }
+        EOF
 
-          # Initialize lock file
-          cd "$DEV_DIR" && ${pkgs.nix}/bin/nix flake update 2>/dev/null || true
+                  # Initialize lock file
+                  cd "$DEV_DIR" && ${pkgs.nix}/bin/nix flake update 2>/dev/null || true
 
-          echo "Created $DEV_DIR/flake.nix"
-        fi
+                  echo "Created $DEV_DIR/flake.nix"
+                fi
 
-        echo "Dev directories initialized: ~/dev/packages/ ~/staging/"
+                echo "Dev directories initialized: ~/dev/packages/ ~/staging/"
       '';
     };
 
@@ -586,13 +606,13 @@ EOF
     # Keys are only present when vms.<name>.secrets includes "github" in machine config.
     systemd.services.hydrix-secrets-provision = {
       description = "Provision GitHub SSH key from host secrets";
-      wantedBy = [ "multi-user.target" ];
-      after = [ "local-fs.target" ] ++ lib.optionals config.hydrix.microvm.persistence.enable [ "home.mount" ];
+      wantedBy = ["multi-user.target"];
+      after = ["local-fs.target"] ++ lib.optionals config.hydrix.microvm.persistence.enable ["home.mount"];
       serviceConfig = {
         Type = "oneshot";
         RemainAfterExit = true;
       };
-      path = [ pkgs.coreutils pkgs.openssh ];
+      path = [pkgs.coreutils pkgs.openssh];
       script = ''
         USER_HOME="/home/${config.hydrix.username}"
         SSH_DIR="$USER_HOME/.ssh"

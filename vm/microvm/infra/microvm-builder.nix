@@ -62,7 +62,13 @@ in {
     # ===== MicroVM Configuration =====
     microvm = {
       hypervisor = "qemu";
-      qemu.machine = "pc"; # Standard PC for full PCI support
+      # Verified working on gitsync/router-stable before promoting here.
+      qemu.machine = "microvm";
+      # microvm.nix's own qemu.serialConsole (default true) unconditionally
+      # adds its own "-serial chardev:stdio" on top of the console.sock one
+      # below - two legacy serial ports, only "pc" tolerated that cleanly.
+      # Only ever needed the one console.sock port to begin with.
+      qemu.serialConsole = false;
 
       # High resources for builds - override in infra/builder/default.nix
       vcpu = lib.mkDefault 8;
@@ -93,32 +99,31 @@ in {
       # ===== Shared Filesystems =====
       # CRITICAL: These are R/W mounts to host's actual nix store
       # Host nix-daemon MUST be stopped while builder is running
-      shares =
-        [
-          # Host /nix/store - R/W access for building
-          {
-            tag = "host-nix-store";
-            source = "/nix/store";
-            mountPoint = "/nix/store";
-            proto = "virtiofs";
-          }
-          # Host /nix/var/nix - R/W access for nix database
-          {
-            tag = "host-nix-var";
-            source = "/nix/var/nix";
-            mountPoint = "/nix/var/nix";
-            proto = "virtiofs";
-          }
-          # User's hydrix-config - READ-ONLY for security
-          # Builder can evaluate flakes but cannot modify source code
-          # Uses hostUsername passed from mkMicrovmBuilder
-          {
-            tag = "hydrix-config";
-            source = "/home/${hostUsername}/hydrix-config";
-            mountPoint = "/mnt/hydrix";
-            proto = "virtiofs";
-          }
-        ];
+      shares = [
+        # Host /nix/store - R/W access for building
+        {
+          tag = "host-nix-store";
+          source = "/nix/store";
+          mountPoint = "/nix/store";
+          proto = "virtiofs";
+        }
+        # Host /nix/var/nix - R/W access for nix database
+        {
+          tag = "host-nix-var";
+          source = "/nix/var/nix";
+          mountPoint = "/nix/var/nix";
+          proto = "virtiofs";
+        }
+        # User's hydrix-config - READ-ONLY for security
+        # Builder can evaluate flakes but cannot modify source code
+        # Uses hostUsername passed from mkMicrovmBuilder
+        {
+          tag = "hydrix-config";
+          source = "/home/${hostUsername}/hydrix-config";
+          mountPoint = "/mnt/hydrix";
+          proto = "virtiofs";
+        }
+      ];
 
       # ===== EXCEPTION: intentional persistent volume =====
       # Everything else about this VM is ephemeral (tmpfs root; host /nix/store
@@ -277,11 +282,10 @@ in {
 
     # ===== Git Configuration =====
     # Trust the mounted repos despite different ownership (virtiofs UID mapping)
-    environment.etc."gitconfig".text =
-      ''
-        [safe]
-          directory = /mnt/hydrix
-      '';
+    environment.etc."gitconfig".text = ''
+      [safe]
+        directory = /mnt/hydrix
+    '';
 
     # ===== Read-Only Mounts for Security =====
     # Builder can evaluate flakes but cannot modify source code
