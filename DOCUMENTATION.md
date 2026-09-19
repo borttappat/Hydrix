@@ -249,6 +249,12 @@ resolves at runtime, and it's the only field here that varies by machine.
 
 Each entry drives: compositor border rules, workspace-desc label, `hypr-ws-app`/`vm-select` workspace -> VM routing, focus menu, `vm-sync` profile targeting, and file transfer IP resolution.
 
+Profile entries also carry `memCeilingMb`/`vcpuCeiling`/`memLowFloorMb`/`memFloorMb`/
+`cpuLowFloorPct`/`cpuFloorPct` (null for VMs without these fields in their `meta.nix`) -
+see [§ Elastic CPU/RAM](#elastic-cpuram-hydrixvmelastic). `new-profile` reads these back
+out of the live registry to suggest ceiling/floor values consistent with the rest of the
+fleet when scaffolding a new profile.
+
 ### VM Naming and Machine Identity
 
 Every profile VM (browsing, pentest, dev, comms, lurking, and any custom profile) and every
@@ -1279,6 +1285,169 @@ hydrix.microvmHost.vms."microvm-dev-<serial>".coupled = true;
 # A per-VM `coupled` override above still wins over this either way.
 hydrix.microvmHost.coupleProfiles = true;
 ```
+
+### Elastic CPU/RAM (`hydrix.vmElastic`)
+
+A host-side daemon per profile VM that ballons memory (QMP `balloon`) and throttles CPU
+(cgroup `CPUQuota` on the VM's own systemd unit) down while idle, and restores both to
+their ceiling immediately under real load or while the VM is still booting. Mechanism:
+
+- **RAM**: microvm.nix's `microvm-balloon` script (QMP `balloon`, requires `microvm.balloon
+  = true`, already on for all profile VMs). Tracks headroom (`cur_mem - real usage`, from
+  vm-metrics' `rammb` field) rather than a percentage - a percentage-of-current-allocation
+  ratio necessarily drifts toward 100% as the balloon squeezes `cur_mem` down near a VM's
+  real baseline usage, causing false "distress" reactions that have nothing to do with
+  actual memory pressure.
+- **CPU**: `systemctl set-property --runtime <unit> CPUQuota=<pct>%` - no vCPU hotplug
+  exists under the `"microvm"` qemu machine type (no ACPI), and a cgroup quota is fluid
+  rather than a hard allocation anyway, the guest never sees its vCPU count change.
+- **Workspace-hold**: the VM's assigned Hyprland workspace being the active one holds
+  ceiling unconditionally, same priority as real load - see below for why this exists.
+- **Idle-absolute**: zero Hyprland clients matching the VM's waypipe `[name]` title prefix
+  -> immediate step-down toward the floor, no debounce.
+- Otherwise: guest CPU/RAM headroom below the low threshold for `lowDebounceTicks`
+  consecutive polls -> gradual step down toward the low floor. Headroom below the high
+  threshold (real distress) -> immediate step up to ceiling. Between the two: hold.
+
+Every profile VM is enabled automatically, with `memCeilingMb`/`cpuCeilingPct` and the
+four floor values all derived from that profile's own `meta.nix` (`mem`, `vcpu`,
+`memLowFloorMb`, `memFloorMb`, `cpuLowFloorPct`, `cpuFloorPct`) - a profile author sets
+these once, no per-machine boilerplate required. To override a specific field for just one
+machine, plain-assign it directly - it wins over the profile's `meta.nix`-derived default:
+
+```nix
+# machines/<serial>.nix
+hydrix.vmElastic.vms.lurking.memFloorMb = 2048;
+hydrix.vmElastic.vms.lurking.cpuLowFloorPct = 100;
+hydrix.vmElastic.vms.lurking.memAvailableMinMb = 768;  # see § availmb below
+hydrix.vmElastic.vms.dev.enable = false;  # opt this VM out of elastic management entirely
+```
+
+`unitName`/`cid`/`titlePrefix`/`workspace` are structural (derived from the profile name,
+machine serial, and the profile's own `meta.nix`) and are not meant to be overridden.
+Deliberately separate from `hydrix.microvmHost.balloonTrim`: that's a coarse periodic
+timer (fixed percentage of declared ceiling, no window-awareness, no CPU management)
+meant as a lightweight safety net for VMs that don't opt into this daemon - both
+manipulate the same balloon device, so don't enable both for the same VM.
+
+`cpuLowFloorPct` is a raw percent-of-one-core value, not a percent of the VM's own
+ceiling - a flat `60` across every profile meant very different things depending on vCPU
+count (30% of ceiling on a 2-vCPU VM, 15% on a 4-vCPU one), leaving high-vCPU profiles
+with a much deeper hole to climb out of on a fresh app launch. Set it per profile as
+roughly half of `cpuCeilingPct` (`vcpu * 100 / 2`) instead of copying a fixed number
+across profiles with different vCPU counts.
+
+#### Workspace-hold: why reactive usage-based scaling isn't enough on its own
+
+The daemon's high/low-band logic only reacts to *measured* CPU/RAM usage - which means it
+only notices a fresh app launch once that app is already running and already consuming
+resources under a throttled quota. Measured live: a browser cold-started on a fully
+deflated VM spent its first several seconds capped at the low floor before the daemon's
+own poll caught up and restored ceiling, even at a fast poll interval - a real, repeatable
+"first launch is slow" experience, not a one-off.
+
+Switching to a VM's assigned Hyprland workspace is a far earlier and cheaper signal of
+intent to use it than any usage measurement can be - it happens *before* an app is even
+launched. `hydrix.vmElastic.vms.<name>.workspace` (populated automatically from that
+profile's `meta.nix`) is checked every poll: while it's the currently active workspace,
+resources are held at ceiling unconditionally, regardless of window count or measured
+usage. Stepping away from the workspace releases it back to the normal idle-absolute/
+low-band behavior immediately - there is no extra debounce for leaving, only for
+entering.
+
+This is why "the VM shows high CPU/RAM while I'm actively looking at its workspace" is
+expected, not a bug - that's the ceiling being held on purpose for exactly as long as
+you're there.
+
+#### The `set_cpu` stale-quota bug (fixed, worth understanding if this class of bug resurfaces)
+
+`systemctl set-property --runtime` persists across the *daemon's own* restarts, not just
+VM restarts - the cgroup's `CPUQuota` is a property of the VM's systemd unit, entirely
+independent of the daemon process's lifecycle. The daemon's own `cur_cpu` tracking
+variable, however, starts from an assumption (the declared ceiling) on every fresh daemon
+start, never a real read of the actual unit's current `CPUQuota`.
+
+Combined with an optimization that only issued the `systemctl set-property` call when
+`target != cur_cpu`, this produced a real, confirmed bug: if a previous daemon
+incarnation left the real quota throttled, a fresh daemon's very first `set_cpu ceiling`
+call (during the boot-hold phase) would silently no-op against its own stale internal
+assumption - the real quota never got corrected until some *other* target value happened
+to differ from that assumption, which could go an entire session without happening.
+Confirmed live: `cur_cpu` tracked "200" (ceiling) from daemon startup while the real
+`CPUQuota` stayed at a leftover throttled value through dozens of poll ticks, including
+several where measured guest CPU crossed 90%+ and should have forced ceiling.
+
+Fixed by always re-issuing the `systemctl set-property` call unconditionally - the same
+approach `set_mem` already used for the equivalent problem on the RAM side (see its own
+code comment: re-issuing is "the only way to detect drift"). The call is cheap; the
+correctness cost of skipping it isn't worth the savings.
+
+#### Poll interval and reaction latency
+
+`pollIntervalSec` (default `2`, was `10`) directly bounds how long a fresh spike in
+usage can run under a throttled quota before the daemon notices and restores ceiling -
+there's no debounce on the way up, only on the way down. `lowDebounceTicks` (default
+`15`, was `3`) scales inversely so the real-world *descent* debounce stays the same
+(`15 * 2s = 30s`, matching the original `3 * 10s`) - only the high-usage reaction time
+got faster, idle-descent behavior is unchanged. Combined with workspace-hold above, this
+means a fresh app launch is now backstopped two ways: ceiling is already held if you just
+switched to the workspace, and even without that, any real spike is caught within ~2s
+instead of ~10s.
+
+#### `rammb`: what it measures, and why it reads lower than htop
+
+`vm-metrics.c`'s `rammb` field - the number both the elastic daemon and waybar's VRAM
+widget read - is `Active(anon) + Inactive(anon) + Shmem` from `/proc/meminfo`: process
+heap/stack and shared memory pages. It deliberately excludes page cache and buffers.
+
+This choice is load-bearing, not cosmetic. `MemTotal` is fixed for the life of the guest;
+`virtio_balloon` only ever removes pages, which lowers `MemAvailable`. Any metric of the
+form `MemTotal - MemAvailable` therefore rises every time the balloon deflates, with no
+change in real usage - the denominator is constant while the numerator mechanically
+tracks physical memory pressure the daemon itself is causing. Feeding that into a
+ceiling/floor controller creates a closed loop: shrink -> metric rises -> controller
+relieves back to ceiling -> shrink again.
+
+`Active(anon) + Inactive(anon) + Shmem` has no such coupling: these pages are pinned
+(would need to be swapped or killed to reclaim), so their size doesn't move just because
+the balloon changed how much total memory exists. This is what makes `rammb` usable as
+the daemon's headroom signal (`cur_mem - rammb`).
+
+Because it excludes cache/buffers, `rammb` will consistently read lower than `htop`'s
+"used" line - virtiofs/Nix-store reads and journal data don't count toward it. This is
+the intended definition: "how much memory can safely be reclaimed right now," not "how
+much memory has this VM touched." waybar and the elastic daemon both use this definition
+on purpose.
+
+The legacy `ram=` percentage field (`(MemTotal - MemAvailable) * 100 / MemTotal`) is
+still emitted for display compatibility but has the same denominator problem described
+above - `vm-elastic` never uses it for a decision, only `rammb`.
+
+#### `availmb`: the hard safety floor `rammb` can't provide
+
+`rammb` (`Active(anon) + Inactive(anon) + Shmem`) excludes anything that isn't pinned
+anonymous or shared memory - which also means it excludes kernel slab and actively-mapped
+binaries/libraries (`Active(file)`). A guest can be genuinely low on usable memory from
+those categories while `rammb` reports no change at all.
+
+`vm-metrics.c` also emits `availmb`, raw `MemAvailable` from `/proc/meminfo` in MB - the
+kernel's own reclaim-aware estimate of how much memory a new allocation could get without
+swapping. `vm-elastic` checks this as a second, independent condition alongside the
+existing `kswapd`-in-`top` check: if `availmb` drops below `memAvailableMinMb` (default
+512), the daemon immediately relieves to ceiling, the same response as a `kswapd`
+sighting.
+
+This check is deliberately *not* used as the primary descent signal the way `rammb` is.
+`MemAvailable` has the same mechanical coupling to the balloon that made `MemTotal -
+MemAvailable` unusable as a continuous signal (it necessarily drops on every deflation,
+independent of real usage) - using it continuously would reintroduce the original
+sawtooth. Restricting it to a one-shot hard floor, checked the same way `kswapd` already
+is, gets the benefit (catching real pressure `rammb` structurally can't see) without the
+downside (no continuous feedback loop to destabilize).
+
+VMs running a `vm-metrics` build from before this field existed simply don't have this
+check: `availmb_now` comes back empty, the condition is skipped, and the rest of the
+daemon's logic runs unaffected.
 
 ### Graphical Configuration
 
