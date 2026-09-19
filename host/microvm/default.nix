@@ -221,6 +221,8 @@ in {
   # Note: microvm.nixosModules.host is imported by mkHost in lib/default.nix
   # Options for hydrix.microvmHost are declared in modules/options.nix
 
+  imports = [./vm-elastic.nix];
+
   config = lib.mkMerge [
     # Always available — fallback mode and fresh installs need these to manage VMs
     {
