@@ -12,7 +12,9 @@
  *   ./vm-metrics --serve [interval]  — write snapshot + serve vsock:14501
  *
  * Snapshot format (key=value, one per line):
- *   cpu=<percent>   ram=<percent>   rammb=<used MB, current balloon-adjusted total>
+ *   cpu=<percent>   ram=<percent>   rammb=<used MB, Active(anon)+Inactive(anon)+Shmem>
+ *   availmb=<MemAvailable in MB, real kernel headroom estimate - hard-floor safety
+ *            signal, not the primary descent signal (see rammb)>
  *   fs=<percent>    uptime=<XH YM>
  *   top=<comm pct>  topmem=<comm MB>
  *   syncdev=<n>     syncstg=<n>     tun=<iface|none>
@@ -90,18 +92,47 @@ static int cpu_percent(const CpuStat *a, const CpuStat *b) {
 
 /* ── RAM ───────────────────────────────────────────────────────────────── */
 
-static int ram_percent(long long *used_mb) {
+static int ram_percent(long long *used_mb, long long *avail_mb) {
     FILE *f = fopen("/proc/meminfo", "r");
-    if (!f) { *used_mb = 0; return 0; }
+    if (!f) { *used_mb = 0; *avail_mb = 0; return 0; }
     long long total = 0, available = 0;
+    long long active_anon = 0, inactive_anon = 0, shmem = 0;
     char key[64]; long long val;
     while (fscanf(f, "%63s %lld kB\n", key, &val) == 2) {
-        if (!strcmp(key, "MemTotal:"))         total     = val;
-        else if (!strcmp(key, "MemAvailable:")) available = val;
+        if (!strcmp(key, "MemTotal:"))          total         = val;
+        else if (!strcmp(key, "MemAvailable:")) available     = val;
+        else if (!strcmp(key, "Active(anon):"))  active_anon   = val;
+        else if (!strcmp(key, "Inactive(anon):")) inactive_anon = val;
+        else if (!strcmp(key, "Shmem:"))         shmem         = val;
     }
     fclose(f);
+    /* MemAvailable is a real, reclaim-aware kernel estimate (unlike MemTotal,
+     * it's meant to track current physical backing) - a hard safety floor on
+     * it catches a tightening margin from non-anon pinned memory (kernel
+     * slab, actively-mapped binaries/libraries) that rammb's anon+shmem
+     * total doesn't see, before the guest is forced into active reclaim.
+     * Deliberately not the primary descent signal though (see rammb below) -
+     * it mechanically drops on every balloon deflation same as MemTotal-
+     * MemAvailable did, which is exactly the coupling that caused the
+     * original sawtooth.
+     */
+    *avail_mb = available / 1024;
     if (total <= 0) { *used_mb = 0; return 0; }
-    *used_mb = (total - available) / 1024;
+    /* MemTotal - MemAvailable looked like real usage but isn't: virtio_balloon
+     * never shrinks MemTotal, only MemAvailable (which legitimately drops the
+     * instant the balloon actually removes physical pages) - so that formula
+     * spikes upward on every balloon deflation with zero real usage change,
+     * a self-inflicted feedback loop (the elastic daemon shrinks memory ->
+     * this metric falsely reports "distress" -> daemon panics back to
+     * ceiling -> repeat). Active(anon)+Inactive(anon)+Shmem is genuinely
+     * balloon-invariant: it's actual anonymous/shared memory pages processes
+     * are using, not page cache/buffers that mechanically track however much
+     * physical memory currently happens to exist. Still used for the ram=
+     * percentage (against the fixed MemTotal, kept for backward-compat
+     * display only - vm-elastic itself now uses rammb via headroom, not this
+     * percentage, for exactly this reason).
+     */
+    *used_mb = (active_anon + inactive_anon + shmem) / 1024;
     int pct = (int)((total - available) * 100 / total);
     return pct < 0 ? 0 : pct > 100 ? 100 : pct;
 }
@@ -291,16 +322,16 @@ static int pkg_count(const char *base, const char *sub, const char *fname) {
 
 /* ── Snapshot write ────────────────────────────────────────────────────── */
 
-static void write_snapshot(int cpu, int ram, long long ram_mb, int fs, const char *up,
-                            const char *top_cpu, const char *top_mem,
+static void write_snapshot(int cpu, int ram, long long ram_mb, long long avail_mb, int fs,
+                            const char *up, const char *top_cpu, const char *top_mem,
                             int dev, int stg, const char *tun) {
     char tmp[300];
     snprintf(tmp, sizeof(tmp), "%s%s", snap_path, SNAP_TMP_SUFFIX);
     FILE *f = fopen(tmp, "w");
     if (!f) return;
-    fprintf(f, "cpu=%d\nram=%d\nrammb=%lld\nfs=%d\nuptime=%s\ntop=%s\ntopmem=%s\n"
+    fprintf(f, "cpu=%d\nram=%d\nrammb=%lld\navailmb=%lld\nfs=%d\nuptime=%s\ntop=%s\ntopmem=%s\n"
                "syncdev=%d\nsyncstg=%d\ntun=%s\n",
-            cpu, ram, ram_mb, fs, up, top_cpu, top_mem, dev, stg, tun);
+            cpu, ram, ram_mb, avail_mb, fs, up, top_cpu, top_mem, dev, stg, tun);
     fclose(f);
     rename(tmp, snap_path);
 }
@@ -331,7 +362,7 @@ static int snap_get(const char *key, char *out, size_t out_len) {
 
 /* ── Vsock server ──────────────────────────────────────────────────────── */
 
-#define FALLBACK "cpu=0\nram=0\nrammb=0\nfs=0\nuptime=0H 0M\ntop=- 0\ntopmem=- 0\n" \
+#define FALLBACK "cpu=0\nram=0\nrammb=0\navailmb=0\nfs=0\nuptime=0H 0M\ntop=- 0\ntopmem=- 0\n" \
                  "syncdev=0\nsyncstg=0\ntun=none\n"
 
 static void handle_conn(int cfd) {
@@ -472,16 +503,16 @@ int main(int argc, char *argv[]) {
 
         int dev = pkg_count(home, "dev/packages", "flake.nix");
         int stg = pkg_count(home, "staging",      "package.nix");
-        long long ram_mb = 0;
-        int ram = ram_percent(&ram_mb);
+        long long ram_mb = 0, avail_mb = 0;
+        int ram = ram_percent(&ram_mb, &avail_mb);
         int fs  = fs_percent();
 
         if (serve) {
-            write_snapshot(cpu, ram, ram_mb, fs, up, top_cpu, top_mem, dev, stg, tun);
+            write_snapshot(cpu, ram, ram_mb, avail_mb, fs, up, top_cpu, top_mem, dev, stg, tun);
         } else {
-            printf("cpu=%d\nram=%d\nrammb=%lld\nfs=%d\nuptime=%s\ntop=%s\ntopmem=%s\n"
+            printf("cpu=%d\nram=%d\nrammb=%lld\navailmb=%lld\nfs=%d\nuptime=%s\ntop=%s\ntopmem=%s\n"
                    "syncdev=%d\nsyncstg=%d\ntun=%s\n\n",
-                   cpu, ram, ram_mb, fs, up, top_cpu, top_mem, dev, stg, tun);
+                   cpu, ram, ram_mb, avail_mb, fs, up, top_cpu, top_mem, dev, stg, tun);
             fflush(stdout);
         }
     }
