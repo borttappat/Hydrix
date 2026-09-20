@@ -11,9 +11,9 @@
   focusBorder = "cyan";
 
   mem  = 8192;             # ceiling, MB - balloon reclaims idle memory
-  vcpu = 4;                # ceiling
+  vcpu = 8;                # ceiling - generous headroom, balloons down properly when idle
   memLowFloorMb   = 2048;  # elastic daemon: resting point, window open but idle
   memFloorMb      = 1536;  # elastic daemon: absolute floor, no windows open
-  cpuLowFloorPct  = 60;    # elastic daemon: CPU floor while RAM still deflating
+  cpuLowFloorPct  = 400;   # elastic daemon: CPU floor while RAM still deflating (50% of ceiling)
   cpuFloorPct     = 20;    # elastic daemon: true CPU floor once RAM settled
 }

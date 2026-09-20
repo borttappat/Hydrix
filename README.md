@@ -207,11 +207,19 @@ Profile VMs each have a directory in `hydrix-config/profiles/` with three files:
 
 ```
 profiles/browsing/
-├── meta.nix       # CID, bridge, subnet, workspace, label, focusBorder
-├── default.nix    # NixOS config: colorscheme, RAM, vCPUs, extra packages, hosts
+├── meta.nix       # CID, bridge, subnet, workspace, label, focusBorder,
+│                  # mem/vcpu ceilings + elastic CPU/RAM floor values
+├── default.nix    # NixOS config: colorscheme, extra packages, hosts
+│                  # (mem/vcpu/floors are inherited from meta.nix, not set here)
 └── packages/
     └── default.nix   # managed by vm-sync, do not edit manually
 ```
+
+Every profile VM is managed by the elastic CPU/RAM daemon automatically - `mem`/`vcpu`
+are the *ceiling* the daemon deflates from while idle, not a fixed allocation, so prefer
+setting them generously rather than conservatively (an idle vCPU/unused balloon headroom
+costs essentially nothing on the host). See
+[DOCUMENTATION.md § Elastic CPU/RAM](DOCUMENTATION.md#elastic-cpuram-hydrixvmelastic).
 
 Built-in profiles and their defaults:
 
