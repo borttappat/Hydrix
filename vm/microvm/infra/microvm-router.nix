@@ -46,6 +46,22 @@
       gcc -O2 -o $out/bin/router-stats-server ${./router-stats-server.c}
     '';
 
+  # Queries nl80211 (WiFi SSID) and WireGuard genl (peer stats) directly via
+  # libmnl, with no exec of `iw`/`wg` - a new process on this VM's single
+  # vCPU means resolving an ELF binary and its shared libraries over a
+  # virtiofs-backed /nix/store, a real CPU cost the netlink call itself
+  # doesn't pay. Source lives alongside this file as router-netlink-poller.c.
+  # Writes /tmp/wifi-sync-status.json and /tmp/wg-status.json, the same
+  # cache files router-stats-server reads to answer host queries.
+  routerNetlinkPollerBin =
+    pkgs.runCommand "router-netlink-poller" {
+      nativeBuildInputs = [pkgs.gcc];
+      buildInputs = [pkgs.libmnl];
+    } ''
+      mkdir -p $out/bin
+      gcc -O2 -o $out/bin/router-netlink-poller ${./router-netlink-poller.c} -lmnl
+    '';
+
   routerPollInterval = toString cfg.router.polling.interval;
 
   # Router user from options
@@ -967,225 +983,66 @@ in {
     };
 
     # ===== Router Stats Sampling =====
-    # Single background loop gathering everything router-stats-server (below)
-    # serves: WiFi/NM state (always), network throughput and WireGuard status
-    # (each independently toggleable). One process, one sleep, one tick -
-    # every sample writes its own /tmp/*.json file for the server to read.
-    #
-    # All parsing here is plain bash (read + word-splitting/parameter
-    # expansion) instead of awk/grep/sed/ip: each forked external process
-    # costs a real, measurable amount of the router's single vCPU (fork,
-    # execve, resolving the binary and its shared libraries) - a tick that
-    # used to fork two dozen small processes back-to-back showed up as an
-    # 80-100%+ single-core spike even though each command alone is cheap.
-    # `iw dev`, `wg show`, and `curl` remain real exec calls - no bash-only
-    # substitute exists for netlink WiFi/WireGuard queries or HTTP requests.
-    systemd.services.router-stats-poller = {
-      description = "Router stats background poller (WiFi/net/WireGuard)";
+    # Samples network throughput from /proc/net/dev and /proc/net/route for
+    # router-stats-server (below) to serve. WiFi/NM state and WireGuard peer
+    # status are sampled separately by router-netlink-poller
+    # (router-netlink-poller.c); geo-lookup runs in router-geo-refresh.
+    # Parsing here uses plain bash (read + word-splitting/parameter
+    # expansion) rather than awk/ip: each forked external process on this
+    # VM's single vCPU costs a real, measurable amount of CPU (fork, execve,
+    # resolving the binary and its shared libraries against a
+    # virtiofs-backed /nix/store).
+    systemd.services.router-stats-poller = lib.mkIf cfg.router.polling.enableNetStats {
+      description = "Router net-stats background poller";
       wantedBy = ["multi-user.target"];
       after = ["NetworkManager.service" "network.target"];
       serviceConfig = {
         Type = "simple";
         ExecStart = let
           poller = pkgs.writeShellScript "router-stats-poller" ''
-            json_esc() {
-              local s="$1"
-              s="''${s//\\/\\\\}"
-              s="''${s//\"/\\\"}"
-              printf '%s' "$s"
-            }
-
-            # Read active SSID from kernel via iw - no D-Bus. Matches on any
-            # line containing a tab then "ssid " (not anchored to the start,
-            # same substring search grep used to do), strips the same way.
-            get_current() {
-              local line ssid=""
+            # Reads interface -> "rx tx" pairs from /proc/net/dev, no awk fork.
+            # Each line looks like "  eth0: 123 0 0 0 0 0 0 0 456 0 0 0 0 0 0 0" -
+            # read -ra word-splits on whitespace, which also trims the leading
+            # padding spaces, so f[0] is "eth0:" with no separate trim step needed.
+            sample_dev() {
+              local line f iface
               while IFS= read -r line; do
-                case "$line" in
-                  *$'\t'"ssid "*)
-                    ssid="''${line#*ssid }"
-                    break
-                    ;;
-                esac
-              done < <(${pkgs.iw}/bin/iw dev 2>/dev/null)
-              printf '%s' "$ssid"
+                case "$line" in *:*) ;; *) continue ;; esac
+                read -ra f <<< "$line"
+                [ "''${#f[@]}" -ge 10 ] || continue
+                iface="''${f[0]%:}"
+                printf '%s %s %s\n' "$iface" "''${f[1]}" "''${f[9]}"
+              done < /proc/net/dev
             }
 
-            # Flat list of all wifi connections from both NM dirs.
-            # /run/ = declared (from wifi.nix build); /var/lib/ = runtime-added (pending).
-            # Dedup by SSID - /run/ takes precedence (listed first). Reads each
-            # keyfile once, pulling ssid=/psk= via parameter expansion instead
-            # of two grep calls per file.
-            get_connections() {
-              local first=true seen="" ssid psk line f
-              printf '['
-              shopt -s nullglob
-              for f in /run/NetworkManager/system-connections/*.nmconnection \
-                       /var/lib/NetworkManager/system-connections/*.nmconnection; do
-                [[ -f "$f" ]] || continue
-                ssid=""; psk=""
-                while IFS= read -r line; do
-                  case "$line" in
-                    ssid=*) ssid="''${line#ssid=}" ;;
-                    psk=*)  psk="''${line#psk=}" ;;
-                  esac
-                done < "$f"
-                [[ -n "$ssid" && -n "$psk" ]] || continue
-                case "$seen" in *"|''${ssid}|"*) continue ;; esac
-                seen="''${seen}|''${ssid}|"
-                [[ "$first" == true ]] || printf ','
-                first=false
-                printf '{"ssid":"%s","psk":"%s"}' "$(json_esc "$ssid")" "$(json_esc "$psk")"
-              done
-              shopt -u nullglob
-              printf ']'
-            }
-
-            sample_wifi() {
-              printf '{"current":"%s","connections":' "$(json_esc "$(get_current)")"
-              get_connections
-              printf '}'
-            }
-            ${lib.optionalString cfg.router.polling.enableNetStats ''
-
-              # Reads interface -> "rx tx" pairs from /proc/net/dev, no awk fork.
-              # Each line looks like "  eth0: 123 0 0 0 0 0 0 0 456 0 0 0 0 0 0 0" -
-              # read -ra word-splits on whitespace, which also trims the leading
-              # padding spaces, so f[0] is "eth0:" with no separate trim step needed.
-              sample_dev() {
-                local line f iface
-                while IFS= read -r line; do
-                  case "$line" in *:*) ;; *) continue ;; esac
-                  read -ra f <<< "$line"
-                  [ "''${#f[@]}" -ge 10 ] || continue
-                  iface="''${f[0]%:}"
-                  printf '%s %s %s\n' "$iface" "''${f[1]}" "''${f[9]}"
-                done < /proc/net/dev
-              }
-
-              # Default route's interface from /proc/net/route, no ip(8) fork.
-              # Destination "00000000" (hex) marks the default route; header line
-              # never matches since its Destination column reads "Destination".
-              default_iface() {
-                local line f
-                while IFS= read -r line; do
-                  read -ra f <<< "$line"
-                  if [ "''${f[1]:-}" = "00000000" ]; then
-                    printf '%s' "''${f[0]}"
-                    return
-                  fi
-                done < /proc/net/route
-              }
-
-              clamp_rate() {
-                local v=$(( ($1 - $2) / SAMPLE_INTERVAL ))
-                [ "$v" -lt 0 ] && echo 0 || echo "$v"
-              }
-            ''}
-            ${lib.optionalString cfg.router.polling.enableWgStatus ''
-
-              relay_cache="/tmp/wg-mullvad-relays.json"
-
-              refresh_relay_cache() {
-                local now relay_age
-                now=$(date +%s)
-                relay_age=0
-                [ -f "$relay_cache" ] && relay_age=$(( now - $(stat -c %Y "$relay_cache" 2>/dev/null || echo 0) ))
-                if [ ! -f "$relay_cache" ] || [ "$relay_age" -gt 3600 ]; then
-                  ${pkgs.curl}/bin/curl -sf --max-time 15 "https://api.mullvad.net/www/relays/all/" 2>/dev/null \
-                    > "$relay_cache.tmp" && mv "$relay_cache.tmp" "$relay_cache" || true
-                fi
-              }
-
-              lookup_location() {
-                local ip="$1" cache loc city country result
-                cache="/tmp/wg-loc-''${ip}"
-                if [ -f "$cache" ]; then
-                  read -r loc < "$cache"
-                  printf '%s' "$loc"
+            # Default route's interface from /proc/net/route, no ip(8) fork.
+            # Destination "00000000" (hex) marks the default route; header line
+            # never matches since its Destination column reads "Destination".
+            default_iface() {
+              local line f
+              while IFS= read -r line; do
+                read -ra f <<< "$line"
+                if [ "''${f[1]:-}" = "00000000" ]; then
+                  printf '%s' "''${f[0]}"
                   return
                 fi
+              done < /proc/net/route
+            }
 
-                city=""; country=""
-
-                # Try Mullvad relay list first
-                if [ -f "$relay_cache" ]; then
-                  city=$(${pkgs.jq}/bin/jq -r --arg ip "$ip" \
-                    '.[] | select(.ipv4_addr_in == $ip) | .city_name // empty' \
-                    "$relay_cache" 2>/dev/null | head -1 || true)
-                  country=$(${pkgs.jq}/bin/jq -r --arg ip "$ip" \
-                    '.[] | select(.ipv4_addr_in == $ip) | .country_code // empty' \
-                    "$relay_cache" 2>/dev/null | head -1 | tr '[:lower:]' '[:upper:]' || true)
-                fi
-
-                # Fall back to ipinfo.io
-                if [ -z "$city" ] || [ -z "$country" ]; then
-                  result=$(${pkgs.curl}/bin/curl -sf --max-time 10 "https://ipinfo.io/''${ip}/json" 2>/dev/null || true)
-                  city=$(echo    "$result" | ${pkgs.jq}/bin/jq -r '.city    // empty' 2>/dev/null || true)
-                  country=$(echo "$result" | ${pkgs.jq}/bin/jq -r '.country // empty' 2>/dev/null || true)
-                fi
-
-                if [ -n "$city" ] && [ -n "$country" ]; then
-                  loc="''${city}, ''${country}"
-                  echo "$loc" > "$cache"
-                else
-                  loc="$ip"
-                fi
-                echo "$loc"
-              }
-
-              sample_wg() {
-                local now result sep iface ep_ip hs rx tx age server line
-                now=$(date +%s)
-                result="["; sep=""
-
-                # wg show all dump peer lines (9 fields, tab-separated):
-                #   iface  pubkey  preshared  endpoint  allowed-ips  handshake  rx  tx  keepalive
-                # Interface lines have 5 fields; skip them by checking f6 is non-empty.
-                while IFS=$'\t' read -r f1 _ _ f4 _ f6 f7 f8 _; do
-                  [ -n "$f6" ] || continue
-                  iface="$f1"; ep_ip="''${f4%%:*}"
-                  hs=''${f6:-0}; rx=''${f7:-0}; tx=''${f8:-0}
-                  age=$(( hs > 0 ? now - hs : -1 ))
-
-                  server="$ep_ip"
-                  if [ -f "/etc/wireguard/''${iface}.conf" ]; then
-                    while IFS= read -r line; do
-                      case "$line" in "# Server: "*) server="''${line#\# Server: }"; break ;; esac
-                    done < "/etc/wireguard/''${iface}.conf"
-                  fi
-
-                  location=$(lookup_location "$ep_ip")
-
-                  result+="''${sep}{\"iface\":\"''${iface}\",\"endpoint\":\"''${ep_ip}\",\"handshake\":''${age},\"rx\":''${rx},\"tx\":''${tx},\"server\":\"''${server}\",\"location\":\"''${location}\"}"
-                  sep=","
-                done < <(${pkgs.wireguard-tools}/bin/wg show all dump 2>/dev/null)
-
-                echo "''${result}]"
-              }
-            ''}
+            clamp_rate() {
+              local v=$(( ($1 - $2) / SAMPLE_INTERVAL ))
+              [ "$v" -lt 0 ] && echo 0 || echo "$v"
+            }
 
             SAMPLE_INTERVAL=${routerPollInterval}
             while true; do
-              ${lib.optionalString cfg.router.polling.enableNetStats ''
               declare -A rx1 tx1
               while read -r iface rx tx; do
                 rx1["$iface"]=$rx; tx1["$iface"]=$tx
               done < <(sample_dev)
-            ''}
-
-              sample_wifi > /tmp/wifi-sync-status.json.tmp \
-                && mv /tmp/wifi-sync-status.json.tmp /tmp/wifi-sync-status.json
-
-              ${lib.optionalString cfg.router.polling.enableWgStatus ''
-              refresh_relay_cache
-              sample_wg > /tmp/wg-status.json.tmp \
-                && mv /tmp/wg-status.json.tmp /tmp/wg-status.json
-            ''}
 
               sleep "$SAMPLE_INTERVAL"
 
-              ${lib.optionalString cfg.router.polling.enableNetStats ''
               declare -A rx2 tx2
               while read -r iface rx tx; do
                 rx2["$iface"]=$rx; tx2["$iface"]=$tx
@@ -1210,10 +1067,106 @@ in {
                 && mv /tmp/net-stats.json.tmp /tmp/net-stats.json
 
               unset rx1 tx1 rx2 tx2
-            ''}
             done
           '';
         in "${poller}";
+        Restart = "always";
+        RestartSec = 5;
+      };
+    };
+
+    # See routerNetlinkPollerBin's comment above and router-netlink-poller.c
+    # for what this queries and writes.
+    systemd.services.router-netlink-poller = {
+      description = "Router WiFi/WireGuard native-netlink poller";
+      wantedBy = ["multi-user.target"];
+      after = ["NetworkManager.service" "network.target"];
+      serviceConfig = {
+        Type = "simple";
+        ExecStart = "${routerNetlinkPollerBin}/bin/router-netlink-poller ${routerPollInterval} ${
+          if cfg.router.polling.enableWgStatus
+          then "1"
+          else "0"
+        }";
+        Restart = "always";
+        RestartSec = 5;
+      };
+    };
+
+    # Resolves WireGuard peer endpoint IPs to city/country via the Mullvad
+    # relay list, falling back to ipinfo.io, and caches each result at
+    # /tmp/wg-loc-<ip>. Reads endpoint IPs from wg-status.json
+    # (router-netlink-poller writes that file and only ever reads this
+    # cache, never populates it). The 300s interval is fine since a peer's
+    # location only changes if its endpoint IP does, and lookup_location
+    # skips any IP already cached.
+    systemd.services.router-geo-refresh = lib.mkIf cfg.router.polling.enableWgStatus {
+      description = "WireGuard peer geo-location cache refresh";
+      wantedBy = ["multi-user.target"];
+      after = ["router-netlink-poller.service"];
+      serviceConfig = {
+        Type = "simple";
+        ExecStart = let
+          refresher = pkgs.writeShellScript "router-geo-refresh" ''
+            relay_cache="/tmp/wg-mullvad-relays.json"
+
+            refresh_relay_cache() {
+              local now relay_age
+              now=$(date +%s)
+              relay_age=0
+              [ -f "$relay_cache" ] && relay_age=$(( now - $(stat -c %Y "$relay_cache" 2>/dev/null || echo 0) ))
+              if [ ! -f "$relay_cache" ] || [ "$relay_age" -gt 3600 ]; then
+                ${pkgs.curl}/bin/curl -sf --max-time 15 "https://api.mullvad.net/www/relays/all/" 2>/dev/null \
+                  > "$relay_cache.tmp" && mv "$relay_cache.tmp" "$relay_cache" || true
+              fi
+            }
+
+            lookup_location() {
+              local ip="$1" cache loc city country result
+              cache="/tmp/wg-loc-''${ip}"
+              if [ -f "$cache" ]; then
+                return
+              fi
+
+              city=""; country=""
+
+              # Try Mullvad relay list first
+              if [ -f "$relay_cache" ]; then
+                city=$(${pkgs.jq}/bin/jq -r --arg ip "$ip" \
+                  '.[] | select(.ipv4_addr_in == $ip) | .city_name // empty' \
+                  "$relay_cache" 2>/dev/null | head -1 || true)
+                country=$(${pkgs.jq}/bin/jq -r --arg ip "$ip" \
+                  '.[] | select(.ipv4_addr_in == $ip) | .country_code // empty' \
+                  "$relay_cache" 2>/dev/null | head -1 | tr '[:lower:]' '[:upper:]' || true)
+              fi
+
+              # Fall back to ipinfo.io
+              if [ -z "$city" ] || [ -z "$country" ]; then
+                result=$(${pkgs.curl}/bin/curl -sf --max-time 10 "https://ipinfo.io/''${ip}/json" 2>/dev/null || true)
+                city=$(echo    "$result" | ${pkgs.jq}/bin/jq -r '.city    // empty' 2>/dev/null || true)
+                country=$(echo "$result" | ${pkgs.jq}/bin/jq -r '.country // empty' 2>/dev/null || true)
+              fi
+
+              if [ -n "$city" ] && [ -n "$country" ]; then
+                loc="''${city}, ''${country}"
+              else
+                loc="$ip"
+              fi
+              echo "$loc" > "$cache"
+            }
+
+            while true; do
+              refresh_relay_cache
+              if [ -f /tmp/wg-status.json ]; then
+                while IFS= read -r ip; do
+                  [ -n "$ip" ] || continue
+                  lookup_location "$ip"
+                done < <(${pkgs.jq}/bin/jq -r '.[].endpoint' /tmp/wg-status.json 2>/dev/null | sort -u)
+              fi
+              sleep 300
+            done
+          '';
+        in "${refresher}";
         Restart = "always";
         RestartSec = 5;
       };
@@ -1226,7 +1179,7 @@ in {
     systemd.services.router-stats-server = {
       description = "Router stats vsock server (port 14506)";
       wantedBy = ["multi-user.target"];
-      after = ["router-stats-poller.service"];
+      after = ["router-netlink-poller.service"];
       serviceConfig = {
         Type = "simple";
         ExecStart = "${routerStatsServerBin}/bin/router-stats-server";

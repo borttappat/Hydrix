@@ -1337,6 +1337,31 @@ with a much deeper hole to climb out of on a fresh app launch. Set it per profil
 roughly half of `cpuCeilingPct` (`vcpu * 100 / 2`) instead of copying a fixed number
 across profiles with different vCPU counts.
 
+#### Set ceilings generously - an idle VM doesn't pay for headroom it isn't using
+
+`mem`/`vcpu` are the ceiling this daemon deflates *from*, not a resource pool the guest
+occupies just by having it declared. It's tempting to set them conservatively to "save
+resources," but that reasoning doesn't hold once a VM is under real elastic management:
+
+- An unused vCPU costs essentially nothing on the host - KVM's `KVM_RUN` loop for a vCPU
+  thread with no guest work simply blocks, it doesn't spin or consume cycles. Declaring
+  `vcpu = 8` instead of `vcpu = 2` doesn't mean the VM now uses 4x the CPU at rest; the
+  elastic daemon still throttles it down to `cpuFloorPct` once idle regardless of how high
+  the ceiling is, and a genuinely idle vCPU above that floor just sits parked.
+- `CPUQuota` is a ceiling, not a reservation - raising it doesn't take cycles away from
+  anything else on the host unless the VM is actually, simultaneously using them. Verified
+  live: doubling a profile's `vcpu` (2 -> 4) measurably improved how quickly real
+  workloads (e.g. a browser cold-starting) felt responsive once ceiling was granted, with
+  no change to idle-time host CPU.
+- The same logic applies to `mem` - a higher ceiling only matters once the balloon
+  actually needs to grant more, and the daemon's own floor values are what determines how
+  aggressively it deflates when idle, not the ceiling.
+
+In short: a generous ceiling only costs something once the VM is genuinely working hard
+enough to use it - which is exactly when you want it available. Prefer erring high on
+`vcpu` (and `mem`, within what the host physically has) over trying to guess a "just
+enough" number per profile.
+
 #### Workspace-hold: why reactive usage-based scaling isn't enough on its own
 
 The daemon's high/low-band logic only reacts to *measured* CPU/RAM usage - which means it
@@ -3577,12 +3602,12 @@ answering every connection from already-cached data or direct in-process work - 
    consumer**, instead of several independently-scheduled `while true; sleep` loops
    each paying their own fork/exec cost on their own schedule.
 5. **When rewriting a sampler's internals to avoid forking, don't stop at the obvious
-   command.** A single `iw dev`/`wg show` call looks cheap in isolation, but a real tick
-   that also loops over N saved items calling `grep`+`sed` (or similar) per item can add
-   up to dozens of forks in one burst - test the *actual* service tick (e.g. restart it
-   and watch a per-thread CPU sample immediately after), not just its individual
-   commands run once by hand, which can look deceptively cheap due to warm page cache
-   from the very loop you're trying to measure.
+   command.** A single command call looks cheap in isolation, but a real tick that also
+   loops over N saved items calling `grep`+`sed` (or similar) per item can add up to
+   dozens of forks in one burst - test the *actual* service tick (e.g. restart it and
+   watch a per-thread CPU sample immediately after), not just its individual commands run
+   once by hand, which can look deceptively cheap due to warm page cache from the very
+   loop you're trying to measure.
 6. **Judge fork/exec elimination against actual risk and frequency, not uniformly.**
    Rewriting logic that only touches plain data (files, `/proc`, JSON) is low-risk and
    worth doing wherever a real polling loop exists. Logic touching cryptography or auth
@@ -3593,6 +3618,17 @@ answering every connection from already-cached data or direct in-process work - 
    a one-shot handler that's already just a single command dispatch (no per-item loop)
    usually isn't worth converting at all - the fork-per-connection listener overhead on
    something triggered a few times a day is not a measurable cost.
+7. **A command that looks irreducible (a real CLI tool wrapping a kernel API) can often
+   still be eliminated** if that kernel API is exposed over a stable protocol. `iw`/`wg`
+   both wrap netlink (`nl80211`, WireGuard's generic-netlink family): querying the same
+   attributes directly over a netlink socket, from an already-running process, removes
+   the fork+exec entirely (see `router-netlink-poller.c`). Watch for two pitfalls
+   specific to netlink dumps when doing this: `MNL_SOCKET_BUFFER_SIZE`/similar library
+   defaults can be too small for a real, attribute-heavy response and netlink truncates
+   silently rather than erroring; and any receive loop that stops reading as soon as it
+   finds what it wants, without draining to the dump's terminator message, leaves
+   unread data in the socket's receive queue that corrupts every later read on that
+   socket if it's reused across ticks.
 
 A persistent server can still `fork`+`execvp` for genuinely rare/interactive commands
 within the same process (e.g. `ADD`/`REMOVE` WiFi credentials, `get`/`unstage` a staged
