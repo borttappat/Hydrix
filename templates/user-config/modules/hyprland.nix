@@ -456,7 +456,10 @@
 
     # System monitors
     bind = $mod SHIFT, U, exec, hypr-ws-app alacritty -e htop
-    bind = $mod SHIFT, B, exec, alacritty -e btm
+
+    # Bluetooth TUI / router console (floating)
+    bind = $mod SHIFT, B, exec, alacritty --class hypr-float -e bluetui
+    bind = $mod SHIFT, R, exec, alacritty --class hypr-float -e shard -c router
 
     # File manager / file finder (via VM)
     bind = $mod SHIFT, F, exec, hypr-ws-app alacritty -e joshuto

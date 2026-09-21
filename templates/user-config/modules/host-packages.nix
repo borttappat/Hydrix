@@ -20,6 +20,9 @@ in {
     vim
     nano
 
+    # Bluetooth
+    bluetui
+
     # Compilers/Languages (basic)
     python3
 
