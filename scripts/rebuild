@@ -700,7 +700,7 @@ main() {
         # Check if builder VM is running (it stops nix-daemon, blocking host builds)
         if systemctl is-active --quiet microvm@microvm-builder.service 2>/dev/null; then
             err "Builder VM is running — host nix-daemon is stopped"
-            err "Stop it first: microvm stop microvm-builder"
+            err "Stop it first: shard stop microvm-builder"
             exit 1
         fi
 

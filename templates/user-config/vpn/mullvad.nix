@@ -13,7 +13,7 @@
 #   4. Uncomment the bridges below, mapping each to its .conf file
 #   5. Set enable = true
 #   6. Rebuild the router:
-#        microvm build microvm-router && microvm restart microvm-router
+#        shard build microvm-router && shard restart microvm-router
 #
 # Each bridge can use a DIFFERENT exit node (different country/server per VM).
 # Download one .conf per VM from Mullvad — they can share the same key pair.

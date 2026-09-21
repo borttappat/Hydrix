@@ -267,7 +267,7 @@
     fi
     echo ""
     echo "After editing, rebuild the affected VMs:"
-    echo "  microvm build microvm-<profile>"
+    echo "  shard build microvm-<profile>"
   '';
 
   # User-agent presets — named shortcuts to realistic UA strings

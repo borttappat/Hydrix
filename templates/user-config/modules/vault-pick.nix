@@ -9,226 +9,238 @@
 #
 # Keybind: Mod+Shift+P → vault-pick
 # Hyprland rule: float + fixed size for class vault-pick
-{ config, lib, pkgs, ... }:
-let
-  cfg        = config.hydrix.vault;
+{
+  config,
+  lib,
+  pkgs,
+  ...
+}: let
+  cfg = config.hydrix.vault;
   fontFamily = config.hydrix.graphical.font.family;
-  wofiSize   = let
-    base     = config.hydrix.graphical.font.size;
+  wofiSize = let
+    base = config.hydrix.graphical.font.size;
     relation = config.hydrix.graphical.font.relations.wofi or 1.0;
-    raw      = builtins.floor (base * relation);
-  in toString (if raw < 11 then 11 else raw);
-  wofiCornerRadius = let ui = config.hydrix.graphical.ui;
-    in toString (if (ui.pillRadius or null) != null
-                 then ui.pillRadius
-                 else builtins.floor ((ui.cornerRadius or 2) * (ui.pillRadiusScale or 2.0)));
+    raw = builtins.floor (base * relation);
+  in
+    toString (
+      if raw < 11
+      then 11
+      else raw
+    );
+  wofiCornerRadius = let
+    ui = config.hydrix.graphical.ui;
+  in
+    toString (
+      if (ui.pillRadius or null) != null
+      then ui.pillRadius
+      else builtins.floor ((ui.cornerRadius or 2) * (ui.pillRadiusScale or 2.0))
+    );
   wofiWidth = toString config.hydrix.graphical.ui.rofiWidth;
 
   vaultPickTui = pkgs.writeShellApplication {
     name = "vault-pick-tui";
-    runtimeInputs = with pkgs; [ socat wofi wl-clipboard libnotify coreutils gnugrep gnused jq ];
+    runtimeInputs = with pkgs; [socat wofi wl-clipboard libnotify coreutils gnugrep gnused jq];
     text = ''
-      CID="${toString cfg.vsockCid}"
-      PORT="${toString cfg.vsockPort}"
-      CLEAR_DELAY=30
-      WAL_JSON="$HOME/.cache/wal/colors.json"
+            CID="${toString cfg.vsockCid}"
+            PORT="${toString cfg.vsockPort}"
+            CLEAR_DELAY=30
+            WAL_JSON="$HOME/.cache/wal/colors.json"
 
-      vsend() {
-        echo "$1" | socat -T10 - "VSOCK-CONNECT:$CID:$PORT" 2>/dev/null
+            vsend() {
+              echo "$1" | socat -T10 - "VSOCK-CONNECT:$CID:$PORT" 2>/dev/null
+            }
+
+            notify() {
+              notify-send "Vault" "$1" -u "''${2:-normal}" -t "''${3:-3000}" 2>/dev/null || true
+            }
+
+            wal_color() {
+              local key="$1" fallback="$2"
+              if [ -f "$WAL_JSON" ]; then
+                val=$(jq -r "$key // empty" "$WAL_JSON" 2>/dev/null)
+                echo "''${val:-$fallback}"
+              else
+                echo "$fallback"
+              fi
+            }
+
+            build_theme() {
+              local corner_radius='${wofiCornerRadius}'
+              local font_size='${wofiSize}'
+              local font_name='${fontFamily}'
+              local bg fg accent
+              bg=$(wal_color '.colors.color0' '#0e0f17')
+              fg=$(wal_color '.colors.color7' '#e4d1ef')
+              accent=$(wal_color '.colors.color4' '#f09ea2')
+              cat <<EOF
+      * {
+          font-family: ''${font_name};
+          font-size: ''${font_size}px;
+          color: ''${fg};
+          transition: none;
+          animation: none;
       }
 
-      notify() {
-        notify-send "Vault" "$1" -u "''${2:-normal}" -t "''${3:-3000}" 2>/dev/null || true
+      #window {
+          background-color: ''${bg};
+          border-radius: ''${corner_radius}px;
+          border: 0px solid transparent;
       }
 
-      wal_color() {
-        local key="$1" fallback="$2"
-        if [ -f "$WAL_JSON" ]; then
-          val=$(jq -r "$key // empty" "$WAL_JSON" 2>/dev/null)
-          echo "''${val:-$fallback}"
-        else
-          echo "$fallback"
-        fi
+      #outer-box {
+          padding: 8px;
       }
 
-      build_theme() {
-        local corner_radius='${wofiCornerRadius}'
-        local font_size='${wofiSize}'
-        local font_name='${fontFamily}'
-        local bg fg accent
-        bg=$(wal_color '.colors.color0' '#0e0f17')
-        fg=$(wal_color '.colors.color7' '#e4d1ef')
-        accent=$(wal_color '.colors.color4' '#f09ea2')
-        cat <<EOF
-* {
-    font-family: ''${font_name};
-    font-size: ''${font_size}px;
-    color: ''${fg};
-    transition: none;
-    animation: none;
-}
-
-#window {
-    background-color: ''${bg};
-    border-radius: ''${corner_radius}px;
-    border: 0px solid transparent;
-}
-
-#outer-box {
-    padding: 8px;
-}
-
-#input {
-    background-color: transparent;
-    border: none;
-    border-bottom: 1px solid ''${accent};
-    border-radius: 0;
-    padding: 4px 8px;
-    margin-bottom: 4px;
-    color: ''${fg};
-}
-
-#scroll { }
-
-#inner-box {
-    padding: 4px;
-}
-
-#entry {
-    padding: 6px 8px;
-    border-radius: ''${corner_radius}px;
-}
-
-#entry:selected {
-    background-color: ''${accent};
-}
-
-#text {
-    color: ''${fg};
-}
-
-#text:selected {
-    color: ''${bg};
-}
-
-#img {
-    margin-right: 6px;
-}
-EOF
+      #input {
+          background-color: transparent;
+          border: none;
+          border-bottom: 1px solid ''${accent};
+          border-radius: 0;
+          padding: 4px 8px;
+          margin-bottom: 4px;
+          color: ''${fg};
       }
 
-      THEME=$(mktemp /tmp/vault-pick-XXXXXX.css)
-      trap 'rm -f "$THEME"' EXIT
-      build_theme > "$THEME"
+      #scroll { }
 
-      # Width is fixed to prevent horizontal resize on open.
-      # Height is intentionally omitted — all content is pre-loaded so wofi sizes
-      # to fit naturally without a collapse animation.
-      wofi_dmenu() {
-        wofi --show dmenu --style="$THEME" \
-          --width=${wofiWidth} \
-          "$@" 2>/dev/null || true
+      #inner-box {
+          padding: 4px;
       }
 
-      # Quick reachability check before showing any UI
-      if ! echo "PING" | socat -T5 - "VSOCK-CONNECT:$CID:$PORT" 2>/dev/null | grep -q "PONG"; then
-        notify "Vault not configured — run: microvm start vault" critical 5000
-        exit 1
-      fi
-
-      # Try LIST directly — handles locked/unreachable inline (avoids pre-flight PING+STATUS)
-      # use_search_box=false drops the GtkSearchEntry icon (plain GtkEntry has none, but
-      # also can't show --prompt as placeholder text); dynamic_lines=true + lines=1 with
-      # empty stdin keeps the window sized to just the input row, no icon, no blank rows.
-      unlock_and_list() {
-        password=$(wofi_dmenu \
-          --password \
-          --prompt "Password" \
-          --width 380 \
-          --lines 1 \
-          --hide-scroll \
-          --define use_search_box=false \
-          --define dynamic_lines=true \
-          < /dev/null)
-        [ -z "$password" ] && exit 0
-
-        result=$(printf '%s' "UNLOCK $password" | socat -T15 - "VSOCK-CONNECT:$CID:$PORT" 2>/dev/null)
-        case "$result" in
-          OK)     notify "Vault unlocked" low 2000 ;;
-          ERROR*) notify "''${result#ERROR }" critical 4000; exit 1 ;;
-          *)      notify "Vault VM unreachable" critical 4000; exit 1 ;;
-        esac
-        vsend "LIST"
+      #entry {
+          padding: 6px 8px;
+          border-radius: ''${corner_radius}px;
       }
 
-      raw=$(vsend "LIST")
-      first=$(echo "$raw" | head -1)
-      case "$first" in
-        OK) ;;
-        "ERROR vault is locked")
-          raw=$(unlock_and_list)
-          first=$(echo "$raw" | head -1)
-          [ "$first" != "OK" ] && { notify "''${raw#ERROR }" normal 3000; exit 1; }
-          ;;
-        "")
-          notify "Vault VM unreachable" critical 4000; exit 1 ;;
-        *)
-          notify "''${raw#ERROR }" normal 3000; exit 1 ;;
-      esac
-      entries=$(echo "$raw" | tail -n +2 | grep -v '^$')
-      if [ -z "$entries" ]; then
-        notify "Vault is empty" normal 3000; exit 1
-      fi
+      #entry:selected {
+          background-color: ''${accent};
+      }
 
-      # Pick entry via wofi — width overrides default; height sizes to content
-      entry_count=$(echo "$entries" | wc -l)
-      selected=$(echo "$entries" | wofi_dmenu --prompt "Entry:" --insensitive \
-        --width 500 --lines "$entry_count")
-      [ -z "$selected" ] && exit 0
+      #text {
+          color: ''${fg};
+      }
 
-      # Pick action
-      action=$(printf 'Copy Password\nCopy Username\nCopy URL\nCopy Notes' \
-        | wofi_dmenu --prompt "$selected:" --width 300 --lines 4)
-      [ -z "$action" ] && exit 0
+      #text:selected {
+          color: ''${bg};
+      }
 
-      case "$action" in
-        "Copy Password") field="password" ;;
-        "Copy Username") field="username" ;;
-        "Copy URL")      field="url"      ;;
-        "Copy Notes")    field="notes"    ;;
-        *) exit 0 ;;
-      esac
+      #img {
+          margin-right: 6px;
+      }
+      EOF
+            }
 
-      result=$(vsend "GET $selected $field")
-      case "$result" in
-        "OK "*) val="''${result#OK }" ;;
-        OK)     notify "Field is empty" normal 2000; exit 0 ;;
-        ERROR*) notify "''${result#ERROR }" normal 3000; exit 1 ;;
-        *)      notify "Unexpected response" normal 3000; exit 1 ;;
-      esac
+            THEME=$(mktemp /tmp/vault-pick-XXXXXX.css)
+            trap 'rm -f "$THEME"' EXIT
+            build_theme > "$THEME"
 
-      # Copy to Wayland clipboard — host side only, never touches VM clipboard
-      printf '%s' "$val" | wl-copy
-      notify "Copied to clipboard (clears in ${toString 30}s)" low 2000
+            # Width is fixed to prevent horizontal resize on open.
+            # Height is intentionally omitted — all content is pre-loaded so wofi sizes
+            # to fit naturally without a collapse animation.
+            wofi_dmenu() {
+              wofi --show dmenu --style="$THEME" \
+                --width=${wofiWidth} \
+                "$@" 2>/dev/null || true
+            }
 
-      # Auto-clear in background after 30 seconds
-      (
-        sleep "$CLEAR_DELAY"
-        current=$(wl-paste 2>/dev/null || true)
-        if [ "$current" = "$val" ]; then
-          wl-copy --clear 2>/dev/null || true
-        fi
-      ) &
-      disown
+            # Quick reachability check before showing any UI
+            if ! echo "PING" | socat -T5 - "VSOCK-CONNECT:$CID:$PORT" 2>/dev/null | grep -q "PONG"; then
+              notify "Vault not configured — run: shard start vault" critical 5000
+              exit 1
+            fi
+
+            # Try LIST directly — handles locked/unreachable inline (avoids pre-flight PING+STATUS)
+            # use_search_box=false drops the GtkSearchEntry icon (plain GtkEntry has none, but
+            # also can't show --prompt as placeholder text); dynamic_lines=true + lines=1 with
+            # empty stdin keeps the window sized to just the input row, no icon, no blank rows.
+            unlock_and_list() {
+              password=$(wofi_dmenu \
+                --password \
+                --prompt "Password" \
+                --width 380 \
+                --lines 1 \
+                --hide-scroll \
+                --define use_search_box=false \
+                --define dynamic_lines=true \
+                < /dev/null)
+              [ -z "$password" ] && exit 0
+
+              result=$(printf '%s' "UNLOCK $password" | socat -T15 - "VSOCK-CONNECT:$CID:$PORT" 2>/dev/null)
+              case "$result" in
+                OK)     notify "Vault unlocked" low 2000 ;;
+                ERROR*) notify "''${result#ERROR }" critical 4000; exit 1 ;;
+                *)      notify "Vault VM unreachable" critical 4000; exit 1 ;;
+              esac
+              vsend "LIST"
+            }
+
+            raw=$(vsend "LIST")
+            first=$(echo "$raw" | head -1)
+            case "$first" in
+              OK) ;;
+              "ERROR vault is locked")
+                raw=$(unlock_and_list)
+                first=$(echo "$raw" | head -1)
+                [ "$first" != "OK" ] && { notify "''${raw#ERROR }" normal 3000; exit 1; }
+                ;;
+              "")
+                notify "Vault VM unreachable" critical 4000; exit 1 ;;
+              *)
+                notify "''${raw#ERROR }" normal 3000; exit 1 ;;
+            esac
+            entries=$(echo "$raw" | tail -n +2 | grep -v '^$')
+            if [ -z "$entries" ]; then
+              notify "Vault is empty" normal 3000; exit 1
+            fi
+
+            # Pick entry via wofi — width overrides default; height sizes to content
+            entry_count=$(echo "$entries" | wc -l)
+            selected=$(echo "$entries" | wofi_dmenu --prompt "Entry:" --insensitive \
+              --width 500 --lines "$entry_count")
+            [ -z "$selected" ] && exit 0
+
+            # Pick action
+            action=$(printf 'Copy Password\nCopy Username\nCopy URL\nCopy Notes' \
+              | wofi_dmenu --prompt "$selected:" --width 300 --lines 4)
+            [ -z "$action" ] && exit 0
+
+            case "$action" in
+              "Copy Password") field="password" ;;
+              "Copy Username") field="username" ;;
+              "Copy URL")      field="url"      ;;
+              "Copy Notes")    field="notes"    ;;
+              *) exit 0 ;;
+            esac
+
+            result=$(vsend "GET $selected $field")
+            case "$result" in
+              "OK "*) val="''${result#OK }" ;;
+              OK)     notify "Field is empty" normal 2000; exit 0 ;;
+              ERROR*) notify "''${result#ERROR }" normal 3000; exit 1 ;;
+              *)      notify "Unexpected response" normal 3000; exit 1 ;;
+            esac
+
+            # Copy to Wayland clipboard — host side only, never touches VM clipboard
+            printf '%s' "$val" | wl-copy
+            notify "Copied to clipboard (clears in ${toString 30}s)" low 2000
+
+            # Auto-clear in background after 30 seconds
+            (
+              sleep "$CLEAR_DELAY"
+              current=$(wl-paste 2>/dev/null || true)
+              if [ "$current" = "$val" ]; then
+                wl-copy --clear 2>/dev/null || true
+              fi
+            ) &
+            disown
     '';
   };
 
   vaultPick = pkgs.writeShellScriptBin "vault-pick" ''
     exec vault-pick-tui
   '';
-
 in {
   config = lib.mkIf cfg.enable {
-    environment.systemPackages = [ vaultPick vaultPickTui pkgs.wl-clipboard ];
+    environment.systemPackages = [vaultPick vaultPickTui pkgs.wl-clipboard];
   };
 }

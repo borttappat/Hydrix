@@ -33,7 +33,7 @@
 #
 # 4. Rebuild and restart the VM:
 #    $ rebuild administrative
-#    $ microvm restart <vm-name>
+#    $ shard restart <vm-name>
 #
 # 5. Verify in the VM:
 #    $ lsusb
@@ -66,13 +66,14 @@
 # | Atheros AR9271            | 0cf3      | 9271       |
 # | MediaTek MT7921AU         | 0e8d      | 7961       |
 #
-{ config, lib, pkgs, ... }:
-
-let
-  cfg = config.hydrix.hardware.usbWifiPassthrough;
-in
-
 {
+  config,
+  lib,
+  pkgs,
+  ...
+}: let
+  cfg = config.hydrix.hardware.usbWifiPassthrough;
+in {
   options.hydrix.hardware = {
     usbWifiPassthrough = {
       enable = lib.mkEnableOption "USB WiFi passthrough to microVMs";
@@ -108,9 +109,9 @@ in
     # Systemd service to unbind host driver before VM starts
     systemd.services.prepare-usb-wifi = {
       description = "Prepare USB WiFi for passthrough to microVM";
-      after = [ "systemd-udevd.service" ];
-      before = [ "microvm@" ];  # Runs before any microVM starts
-      wantedBy = [ "microvm@" ];
+      after = ["systemd-udevd.service"];
+      before = ["microvm@"]; # Runs before any microVM starts
+      wantedBy = ["microvm@"];
       serviceConfig = {
         Type = "oneshot";
         RemainAfterExit = true;

@@ -77,7 +77,7 @@ in {
                     echo -e "\033[33m::\033[0m Lockdown mode — routing through git-sync VM."
                     read -P "Use git-sync VM for $argv[1] $repo_name? [Y/n] " confirm
                     if test -z "$confirm" -o "$confirm" = Y -o "$confirm" = y
-                      microvm git $argv[1] $repo_name
+                      shard git $argv[1] $repo_name
                       return $status
                     else
                       echo "Cancelled."
@@ -91,33 +91,35 @@ in {
           ''}
         '';
 
-        functions = {
-          # Save current directory on PWD change (used by directory memory)
-          __save_last_dir = {
-            body = "echo $PWD > /tmp/last_fish_dir";
-            onVariable = "PWD";
-          };
+        functions =
+          {
+            # Save current directory on PWD change (used by directory memory)
+            __save_last_dir = {
+              body = "echo $PWD > /tmp/last_fish_dir";
+              onVariable = "PWD";
+            };
 
-          # Used by double-Escape bind in user config
-          sudo_last_command = "commandline -r \"sudo $history[1]\"";
-        } // lib.optionalAttrs (!isVM) {
-          # Router console shortcut (host-only infrastructure)
-          rc = ''
-            set _router_vm (jq -r '.routerVmName // "microvm-router"' /etc/hydrix/host-config.json 2>/dev/null; or echo "microvm-router")
-            set _stable_vm (jq -r '.stableRouterVmName // "microvm-router-stable"' /etc/hydrix/host-config.json 2>/dev/null; or echo "microvm-router-stable")
-            if systemctl is-active --quiet microvm@$_router_vm.service
-              echo "Connecting to $_router_vm (Ctrl+] to disconnect)..."
-              sudo socat -,rawer,escape=0x1d unix-connect:/var/lib/microvms/$_router_vm/console.sock
-            else if systemctl is-active --quiet microvm@$_stable_vm.service
-              echo "$_router_vm not running, falling back to $_stable_vm"
-              echo "Connecting to $_stable_vm (Ctrl+] to disconnect)..."
-              sudo socat -,rawer,escape=0x1d unix-connect:/var/lib/microvms/$_stable_vm/console.sock
-            else
-              echo "No router running. Start with:"
-              echo "  sudo systemctl start microvm@$_router_vm"
-            end
-          '';
-        };
+            # Used by double-Escape bind in user config
+            sudo_last_command = "commandline -r \"sudo $history[1]\"";
+          }
+          // lib.optionalAttrs (!isVM) {
+            # Router console shortcut (host-only infrastructure)
+            rc = ''
+              set _router_vm (jq -r '.routerVmName // "microvm-router"' /etc/hydrix/host-config.json 2>/dev/null; or echo "microvm-router")
+              set _stable_vm (jq -r '.stableRouterVmName // "microvm-router-stable"' /etc/hydrix/host-config.json 2>/dev/null; or echo "microvm-router-stable")
+              if systemctl is-active --quiet microvm@$_router_vm.service
+                echo "Connecting to $_router_vm (Ctrl+] to disconnect)..."
+                sudo socat -,rawer,escape=0x1d unix-connect:/var/lib/microvms/$_router_vm/console.sock
+              else if systemctl is-active --quiet microvm@$_stable_vm.service
+                echo "$_router_vm not running, falling back to $_stable_vm"
+                echo "Connecting to $_stable_vm (Ctrl+] to disconnect)..."
+                sudo socat -,rawer,escape=0x1d unix-connect:/var/lib/microvms/$_stable_vm/console.sock
+              else
+                echo "No router running. Start with:"
+                echo "  sudo systemctl start microvm@$_router_vm"
+              end
+            '';
+          };
       };
 
       # Zoxide (smart cd)

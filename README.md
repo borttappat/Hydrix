@@ -34,19 +34,19 @@ Things being actively worked on or not yet verified. Checked off once resolved a
 - [ ] **Router VM in VM installations**: works on real laptop hardware; breaks when Hydrix is running inside a VM (for testing purposes)
 - [ ] **Desktop / USB WiFi**: designed for laptops with native WiFi cards; desktops without one are untested; USB WiFi card behaviour unknown
 - [ ] **AMD hardware**: currently Intel/ASUS-specific (VFIO, ASUS driver, ZenBook audio); needs AMD parity and hardware testing
-- [x] **LUKS encryption for profile VMs**: verified working for pentest and comms; the `encryption = true` flag in machine config is wired generically in `flake.nix`, so it extends to any profile without code changes. `microvm purge` deletes the LUKS container (`*.luks`) but leaves `encryption = true` in machine config; `microvm start` detects the built runner expects `/dev/mapper/vm-<name>-home` and the container is missing, and fails fast with a pointer to `microvm encrypt-setup <name>`.
-- [x] **Encrypted VM launch via wofi**: `mod+d` on a stopped encrypted VM now detects the LUKS volume and prompts for the passphrase via `wofi --password` (same masked-input pattern as `vault-pick.nix`), unlocking before `microvm start` runs. No terminal needed.
-- [x] **Builder build progress**: `microvm builder build X` now streams live status (`Building...` / `OK building ...` / `DONE`/`ERROR`) instead of going silent; errors are visible without socat'ing into the builder. Still coarse-grained: not the full per-derivation live stream `microvm build X` shows in administrative mode.
+- [x] **LUKS encryption for profile VMs**: verified working for pentest and comms; the `encryption = true` flag in machine config is wired generically in `flake.nix`, so it extends to any profile without code changes. `shard purge` deletes the LUKS container (`*.luks`) but leaves `encryption = true` in machine config; `shard start` detects the built runner expects `/dev/mapper/vm-<name>-home` and the container is missing, and fails fast with a pointer to `shard encrypt-setup <name>`.
+- [x] **Encrypted VM launch via wofi**: `mod+d` on a stopped encrypted VM now detects the LUKS volume and prompts for the passphrase via `wofi --password` (same masked-input pattern as `vault-pick.nix`), unlocking before `shard start` runs. No terminal needed.
+- [x] **Builder build progress**: `shard builder build X` now streams live status (`Building...` / `OK building ...` / `DONE`/`ERROR`) instead of going silent; errors are visible without socat'ing into the builder. Still coarse-grained: not the full per-derivation live stream `shard build X` shows in administrative mode.
 - [ ] **Setup script** (`setup-hydrix.sh`): not fully end-to-end tested
 - [ ] **Installer post-reboot, gh auth**: persistence is implemented but untested; git config is not yet declarative (requires manual `git config` after reboot)
-- [x] **Infra VM ephemerality**: router/router-stable/files/gitsync/hostsync/usb-sandbox/vault now wipe state on every restart, matching the lurking-profile pattern; `microvm purge` is no longer required after WiFi credential changes. See [DOCUMENTATION.md § Infra VM Persistence Model](#infra-vm-persistence-model).
+- [x] **Infra VM ephemerality**: router/router-stable/files/gitsync/hostsync/usb-sandbox/vault now wipe state on every restart, matching the lurking-profile pattern; `shard purge` is no longer required after WiFi credential changes. See [DOCUMENTATION.md § Infra VM Persistence Model](#infra-vm-persistence-model).
 - [x] **Clipboard isolation**: handled by the `hypr-clip-guard` Hyprland plugin - hooks all Wayland clipboard protocols to enforce per-VM isolation. See [DOCUMENTATION.md § Clipboard Isolation](#clipboard-isolation-hypr-clip-guard).
 
 **Polish / lower priority**
 
-- [ ] **Socat terminal output**: raw-mode attach/detach (`microvm console <name>`) verified working. Removed the `screen` fallback: it was broken since `console.sock` is a UNIX socket rather than a character device, so screen tried to exec the socket path as a command instead of connecting to it. Remaining known limitation: the console renders in a small, fixed geometry, inherent to qemu's serial-over-socket transport having no window-size negotiation with the guest, not fixable via socat or screen alone.
+- [ ] **Socat terminal output**: raw-mode attach/detach (`shard console <name>`) verified working. Removed the `screen` fallback: it was broken since `console.sock` is a UNIX socket rather than a character device, so screen tried to exec the socket path as a command instead of connecting to it. Remaining known limitation: the console renders in a small, fixed geometry, inherent to qemu's serial-over-socket transport having no window-size negotiation with the guest, not fixable via socat or screen alone.
 - [x] **Phase out xpra**: xpra, i3, and sway have been fully removed from the framework. Hyprland + waypipe is the only supported desktop stack.
-- [x] **Live-switch edge cases** (`microvm update`): fixed two silent-failure paths: the host-side nix-store DB registration step now surfaces errors instead of swallowing them, and `vm-switch` no longer mislabels hard failures (e.g. exit 100, incompatible init requiring reboot) as "OK, some units failed". Other edge cases may still surface; report if found.
+- [x] **Live-switch edge cases** (`shard switch`): fixed two silent-failure paths: the host-side nix-store DB registration step now surfaces errors instead of swallowing them, and `vm-switch` no longer mislabels hard failures (e.g. exit 100, incompatible init requiring reboot) as "OK, some units failed". Other edge cases may still surface; report if found.
 
 ---
 
@@ -128,12 +128,12 @@ The script detects your current system (user, locale, WiFi), creates `~/hydrix-c
 
 # Start a profile VM (display tunnel starts automatically)
 ```bash
-microvm start browsing
+shard -s browsing
 ```
 
 # Build and start all profile VMs at once
 ```bash
-mvm rebuild browsing pentest dev comms lurking
+shard rebuild browsing pentest dev comms lurking
 ```
 
 ### Router-only (no desktop, hand-written flake)
@@ -177,9 +177,9 @@ hostname and it's buildable and reachable through the router with no
 (`dev` and `pentest` are not zero-config defaults — `pentest` especially is meant to be
 individually tweaked per engagement; use `setup-hydrix`/hand-write your own profile for
 either.) Each is usable from a plain terminal with no window manager at all:
-`microvm app <name> <cmd>` (e.g. `microvm app microvm-browsing firefox`) launches an app
+`shard app <name> <cmd>` (e.g. `shard app microvm-browsing firefox`) launches an app
 inside it and forwards its window via waypipe to *any* running Wayland compositor — it
-has no Hyprland dependency. `microvm console <name>` gives a real serial-console login
+has no Hyprland dependency. `shard console <name>` gives a real serial-console login
 with no compositor required at all.
 
 ---
@@ -244,58 +244,60 @@ Custom profiles start at CID 107+. Scaffold one with:
 ```bash
 new-profile myvm   # auto-assigns next free CID and workspace
 rebuild            # creates bridge, updates tap wiring and vm-registry.json
-mvm rebuild router files   # pick up new bridge (router + files VM)
-microvm build myvm
-microvm start myvm
+shard rebuild router files   # pick up new bridge (router + files VM)
+shard -bs myvm
 ```
 
 ---
 
 ## Building and Rebuilding VMs
 
+Every lifecycle command below works as either a word or a same-letter flag;
+flags combine and run in the order given, e.g. `shard -bs browsing` builds
+then starts.
 
 Build a VM image (evaluates config, writes runner to nix store)
 ```bash
-microvm build browsing
+shard -b browsing
 ```
 
 Start a VM (polls readiness, then connects display tunnel)
 ```bash
-microvm start browsing
+shard -s browsing
 ```
 
 Stop a VM
 ```bash
-microvm stop browsing
+shard -S browsing
 ```
 
 Restart (required for kernel, initrd, or runner changes)
 ```bash
-microvm restart browsing
+shard -R browsing
 ```
 
 Live switch (applies config changes without restart - no kernel/runner changes)
 ```bash
-microvm update browsing
+shard switch browsing
 ```
 
 Check running vs built state
 ```bash
-microvm switch-status browsing
+shard switch-status browsing
 ```
 
 Operate on multiple VMs at once
 ```bash
-mvm rebuild browsing pentest dev
-mvm stop files pentest browsing router builder gitsync
-mvm build files pentest browsing
+shard rebuild browsing pentest dev
+shard stop files pentest browsing router builder gitsync
+shard build files pentest browsing
 ```
 
 In lockdown mode (no host internet), use the builder VM to fetch and build:
 
 ```bash
-microvm builder build browsing    # fetches deps via router VM, writes to host store
-microvm builder switch            # build + switch host config
+shard builder build browsing    # fetches deps via router VM, writes to host store
+shard builder switch            # build + switch host config
 ```
 
 ---
@@ -409,8 +411,7 @@ vm-sync push --name repo
 
 # On the host
 vm-sync pull repo --target pentest
-microvm build pentest
-microvm restart pentest
+shard -bR pentest
 ```
 
 ---

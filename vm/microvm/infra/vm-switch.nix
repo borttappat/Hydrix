@@ -1,10 +1,10 @@
 # vm-switch — live NixOS switch via vsock (port 14504)
 #
 # Listens for SWITCH/TEST/STATUS/PING commands from the host.
-# Enables `microvm update <name>`: build once on host, apply live without restart.
+# Enables `shard switch <name>`: build once on host, apply live without restart.
 #
 # Imported by all VM base modules so every VM supports live rebuild.
-{ pkgs, ... }: {
+{pkgs, ...}: {
   # Ensure switch-to-configuration is generated — required for live switching.
   # Infra VMs with nix.enable = false would otherwise have it disabled.
   system.switch.enable = true;
@@ -13,8 +13,8 @@
   # while handling a SWITCH command, or it kills the handler mid-flight.
   systemd.services.vm-switch = {
     description = "Live NixOS switch via vsock";
-    wantedBy = [ "multi-user.target" ];
-    after = [ "network.target" ];
+    wantedBy = ["multi-user.target"];
+    after = ["network.target"];
     restartIfChanged = false;
     serviceConfig = {
       Type = "simple";
@@ -116,7 +116,8 @@
             ${pkgs.socat}/bin/socat VSOCK-LISTEN:14504,reuseaddr,fork EXEC:"${switchHandler}",nofork
           done
         '';
-      in switchScript;
+      in
+        switchScript;
       Restart = "always";
       RestartSec = 5;
     };

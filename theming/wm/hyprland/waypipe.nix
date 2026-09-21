@@ -276,12 +276,12 @@
 
     # Guard: if the VM is not running, notify only - do not launch locally
     if ! systemctl is-active --quiet "microvm@''${VM_NAME}.service" 2>/dev/null; then
-      notify "$VM_NAME is not running - use 'microvm start $VM_NAME' to start it"
+      notify "$VM_NAME is not running - use 'shard start $VM_NAME' to start it"
       exit 0
     fi
 
-    # Poll STATUS - waypipe-connect is expected to be running (started by microvm start).
-    # Do not auto-start it here; that is microvm start's responsibility.
+    # Poll STATUS - waypipe-connect is expected to be running (started by shard start).
+    # Do not auto-start it here; that is shard start's responsibility.
     log "Waiting for waypipe to become ready in $VM_NAME..."
     READY=0
     for i in $(seq 1 20); do
@@ -294,7 +294,7 @@
       sleep 0.5
     done
     if [[ "$READY" -eq 0 ]]; then
-      err "waypipe not ready in $VM_NAME - is waypipe-connect running? (microvm start $VM_NAME)"
+      err "waypipe not ready in $VM_NAME - is waypipe-connect running? (shard start $VM_NAME)"
     fi
 
     log "WS$WS → $VM_NAME (CID $CID): $*"

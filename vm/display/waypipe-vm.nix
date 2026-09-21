@@ -7,7 +7,7 @@
 #   waypipe-launch(14508)  — receives app launch commands from host
 #
 # Flow:
-#   microvm start <vm>  → host pushes "waypipe" → vsock:14509
+#   shard start <vm>  → host pushes "waypipe" → vsock:14509
 #   VM display-mode     → starts waypipe-vsock+waypipe-launch
 #
 #   waypipe client (VM): connects to host server on vsock:14507

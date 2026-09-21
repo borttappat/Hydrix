@@ -8,7 +8,7 @@
 #   1. Enable in user's machine config:
 #      hydrix.microvmHost.vms.microvm-builder.enable = true;
 #   2. Rebuild host: hydrix-switch
-#   3. Build the builder VM: microvm build microvm-builder
+#   3. Build the builder VM: shard build microvm-builder
 #   4. Use the builder: builder start && builder build <flake> && builder stop
 #
 # Architecture:
@@ -37,7 +37,7 @@ in {
     ../../options.nix
     # QEMU Guest profile for virtio modules
     (modulesPath + "/profiles/qemu-guest.nix")
-    # Live NixOS switch via vsock:14504 (microvm update / microvm switch)
+    # Live NixOS switch via vsock:14504 (shard switch)
     ./vm-switch.nix
   ];
 
@@ -89,7 +89,7 @@ in {
         "-display"
         "none"
         # Serial console via unix socket for interactive access
-        # Connect with: microvm console microvm-builder
+        # Connect with: shard console microvm-builder
         "-chardev"
         "socket,id=console,path=/var/lib/microvms/microvm-builder/console.sock,server=on,wait=off"
         "-serial"

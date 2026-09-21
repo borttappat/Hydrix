@@ -115,7 +115,7 @@
       # 1. mullvad.net -> Account -> WireGuard config -> select server -> download .conf
       # 2. Place downloaded files in ~/hydrix-config/vpn/
       # 3. Edit vpn/mullvad.nix: map bridges to .conf files, set enable = true
-      # 4. Rebuild the router: microvm build microvm-router && microvm restart microvm-router
+      # 4. Rebuild the router: shard build microvm-router && shard restart microvm-router
 
     # ─────────────────────────────────────────────────────────────────────
     # WEBCAM PASSTHROUGH (optional)
@@ -194,9 +194,9 @@
         # Per-VM options (combine freely): enable, autostart, secrets, encryption, coupled
         #
         # secrets: provision named secrets into the VM (e.g. GitHub SSH key from secrets/github.yaml)
-        # encryption: enable LUKS-encrypted home volume — run 'microvm encrypt-setup <name>' once after enabling
+        # encryption: enable LUKS-encrypted home volume — run 'shard encrypt-setup <name>' once after enabling
         # coupled: profile/task VMs are excluded from the host build by default (built and
-        #   managed only via `microvm build/start/update <name>`, not `rebuild`) so host
+        #   managed only via `shard build/start <name>`, not `rebuild`) so host
         #   rebuilds stay fast regardless of how many heavy desktop VMs are declared. Infra
         #   VMs stay coupled (always built with the host) by default. Override either way here.
         #

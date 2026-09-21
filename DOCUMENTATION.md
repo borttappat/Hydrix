@@ -196,12 +196,12 @@ A second router VM is always declared alongside the main router. It is a manual 
 
 ```
 Main router broken (bad config, crash, etc.)
-  -> manually start stable: microvm start router-stable
+  -> manually start stable: shard start router-stable
   -> Conflicts= stops the main router if still running (VFIO can't be shared)
 
 Done with stable, back to main router:
-  -> microvm stop router-stable
-  -> microvm start router
+  -> shard stop router-stable
+  -> shard start router
 ```
 
 **TAP naming:** the stable router uses a separate `mv-rts-*` TAP prefix so both VMs can coexist in config without conflicting. Both sets of TAPs attach to the **same bridges** the bridges are shared infrastructure, only the router connected to them changes during failover.
@@ -216,10 +216,10 @@ Any interface not in the LAN set (i.e., the WiFi or VPN interface) is masquerade
 
 **Manual control:**
 ```bash
-microvm build router-stable      # build the golden image
-microvm start router-stable      # start manually (stops main router via Conflicts=)
-microvm stop router-stable       # stop (main router can then be started)
-microvm console router-stable    # serial console access
+shard build router-stable      # build the golden image
+shard start router-stable      # start manually (stops main router via Conflicts=)
+shard stop router-stable       # stop (main router can then be started)
+shard console router-stable    # serial console access
 ```
 
 Short names accepted: `router-stable`, `stable-router`, `stable`.
@@ -264,9 +264,9 @@ task VM (task1-3) is its own **per-machine** `nixosConfiguration` - `microvm-<pr
 independent nixosConfigurations under the hood, not one shared across every machine declared
 in your flake.
 
-**You never need to know or type `<serial>`.** The `microvm` CLI (and `microvm builder`)
+**You never need to know or type `<serial>`.** The `shard` CLI (and `shard builder`)
 resolve short names - `browsing`, `pentest`, `task1`, ... - dynamically against
-`/etc/hydrix/vm-registry.json`'s `vmName` field for *this* machine, every time. `microvm start
+`/etc/hydrix/vm-registry.json`'s `vmName` field for *this* machine, every time. `shard start
 browsing` on one machine and the same command on a different machine each correctly resolve
 to that machine's own VM - the short form is not a shortcut for a fixed name, it's the actual
 stable interface. Typing the raw `nixosConfigurations` attribute directly (`.#nixosConfigurations
@@ -276,7 +276,7 @@ knowing the current machine's serial, which the short form exists specifically t
 Resolution works by checking whether the target name is a key present in
 `vm-registry.json`, not by matching against a fixed list of built-in profile names.
 A custom profile scaffolded with `new-profile` resolves exactly the same way as
-`browsing` or `pentest`, with no changes needed anywhere in the `microvm` CLI.
+`browsing` or `pentest`, with no changes needed anywhere in the `shard` CLI.
 
 **Why per-machine at all:** each profile VM's `system.stateVersion` (see
 [§ System State Version](#system-state-version)) and any machine-specific
@@ -391,9 +391,9 @@ rebuild fallback                # Requires reboot (kernel params change)
 6. Host builds instant (all deps cached in store)
 
 ```bash
-microvm builder build browsing   # Fetch/build in builder VM
-microvm builder build host       # Build host config
-microvm builder status           # Check builder state
+shard builder build browsing   # Fetch/build in builder VM
+shard builder build host       # Build host config
+shard builder status           # Check builder state
 ```
 
 ### Builder VM (Lockdown Mode Builds)
@@ -424,24 +424,24 @@ The Builder VM (`microvm-builder`, CID 210) is automatically declared by the fra
 
 ```bash
 # Full workflow (build target, then switch to host)
-microvm builder build browsing      # Build microVM in builder
-microvm builder build host          # Build host config
+shard builder build browsing      # Build microVM in builder
+shard builder build host          # Build host config
 
 # Build AND apply host config (preserves current specialisation)
-microvm builder switch
-microvm builder switch administrative  # Switch to specific specialisation
+shard builder switch
+shard builder switch administrative  # Switch to specific specialisation
 
 # Prefetch only (keep builder running for batch operations)
-microvm builder fetch browsing
-microvm builder fetch pentest
-microvm builder fetch host
-microvm builder stop               # Stop when done
+shard builder fetch browsing
+shard builder fetch pentest
+shard builder fetch host
+shard builder stop               # Stop when done
 
 # Manual control
-microvm builder start       # Start builder (stops host nix-daemon)
-microvm builder shell       # Attach to builder console
-microvm builder status      # Check builder state
-microvm builder stop        # Stop builder (restarts host nix-daemon)
+shard builder start       # Start builder (stops host nix-daemon)
+shard builder shell       # Attach to builder console
+shard builder status      # Check builder state
+shard builder stop        # Stop builder (restarts host nix-daemon)
 ```
 
 **Named targets:**
@@ -475,7 +475,7 @@ targets resolve it automatically. See
 **Builder shell access:**
 
 ```bash
-microvm builder shell
+shard builder shell
 
 # Inside builder shell:
 nix flake metadata                        # Check flake inputs
@@ -486,7 +486,7 @@ exit                                       # Return to host
 **Builder status:**
 
 ```bash
-microvm builder status
+shard builder status
 
 # Output:
 # Builder state: running
@@ -499,7 +499,7 @@ microvm builder status
 
 ```bash
 # Manual recovery if builder is stuck
-microvm stop microvm-builder  # This also restores host nix-daemon
+shard stop microvm-builder  # This also restores host nix-daemon
 
 # If store is still rw after builder crash
 sudo mount -o remount,ro /nix/store
@@ -519,7 +519,7 @@ than inside the VM at all.
 
 | VM | Persistent state | Why |
 |---|---|---|
-| router / router-stable | None - `/var/lib` is fully ephemeral | NetworkManager connections, dnsmasq leases, and VPN pin state all reset to declared config on every restart. This also means `microvm purge` is no longer required after WiFi credential changes - a plain restart now gives the same clean state. |
+| router / router-stable | None - `/var/lib` is fully ephemeral | NetworkManager connections, dnsmasq leases, and VPN pin state all reset to declared config on every restart. This also means `shard purge` is no longer required after WiFi credential changes - a plain restart now gives the same clean state. |
 | builder | `/root/.cache/nix` (8GB, eval cache) | The only intentional exception. The builder doesn't keep its own nix store at all - it mounts the host's real `/nix/store` R/W via virtiofs and writes straight into it, so nothing built here is ever at risk of being lost. This one volume is pure performance (avoids 2+ min cold eval per builder start) with zero security/secrets sensitivity. |
 | files | `/storage` (opt-in, off by default) | `hydrix.files.persistence.enable` (default `false`). In-flight transfer payloads are ephemeral by design - FETCH/DELIVER/STORE are meant to be re-triggered on demand, not treated as durable storage. Set the option to `true` if you want transfers to survive a files-VM restart. |
 | gitsync | None by default | SSH keys re-derive fresh from host secrets every boot (no need to persist) - push/pull works with no persistent state at all. `hydrix.gitsync.gh.enable` (default `false`) opts into the `gh` CLI plus a small `/var/lib/gitsync/gh-config` volume for its OAuth token, for users who'd rather authenticate with gh than manage an SSH deploy key. |
@@ -653,8 +653,8 @@ The installer will:
 Profile VMs (browsing, pentest, dev, comms, lurking) are **not** built during install. Build them on demand after first boot:
 
 ```bash
-microvm build browsing
-microvm build pentest
+shard build browsing
+shard build pentest
 # etc.
 ```
 
@@ -1042,15 +1042,15 @@ This sets a udev rule granting `kvm` group ownership of the device node and inje
 **The passthrough is exclusive.** The webcam is unavailable on the host while the VM is running. To temporarily restore host access:
 
 ```bash
-microvm stop comms   # host reclaims webcam
-microvm start comms  # webcam returns to VM
+shard stop comms   # host reclaims webcam
+shard start comms  # webcam returns to VM
 ```
 
 After enabling, rebuild the host (applies udev rule), then rebuild the VM:
 
 ```bash
 rebuild
-mvm rebuild comms
+shard rebuild comms
 ```
 
 ### Router
@@ -1155,10 +1155,10 @@ In legacy mode, credentials live in `modules/wifi.nix` as WPA PSK hashes and are
 ```bash
 wifi-sync add "NetworkName" "password"   # saves hash to wifi.nix
 rebuild
-microvm restart router
+shard restart router
 ```
 
-The router's `/var/lib` is ephemeral, so a plain restart is enough - no `microvm purge` needed.
+The router's `/var/lib` is ephemeral, so a plain restart is enough - no `shard purge` needed.
 
 To migrate from legacy to sops mode:
 
@@ -1191,7 +1191,7 @@ Then apply:
 
 ```bash
 rebuild
-microvm purge router --force && mvm rebuild router
+shard purge router --force && shard rebuild router
 ```
 
 After this the router VM receives credentials at boot via virtiofs - they are never baked into the Nix store and survive purges cleanly.
@@ -1259,7 +1259,7 @@ Advanced networking options (rarely needed):
 wiring the flake sets for you - it's how the router's per-machine name gets threaded into
 the host module, not a user customization surface. There's no equivalent for profile/task
 VM names: those are always `microvm-<profile>-<serial>` and are never user-renameable, since
-that fixed pattern is exactly what lets the short-form CLI (`microvm start browsing`) resolve
+that fixed pattern is exactly what lets the short-form CLI (`shard start browsing`) resolve
 them.
 
 #### Coupled vs Decoupled VMs
@@ -1269,7 +1269,7 @@ VMs (router, router-stable, builder, files, gitsync, hostsync, usb-sandbox, vaul
 **coupled**: they're placed in `config.microvm.vms`, so a host rebuild builds their full
 `nixosSystem` toplevel and restarts the running VM whenever its config changes. Profile
 VMs and task VMs are **decoupled** by default: excluded from `config.microvm.vms`, built
-and managed only via `microvm build/start/update/restart <name>`. This keeps host rebuild
+and managed only via `shard build/start/restart <name>`. This keeps host rebuild
 time independent of how many heavy desktop profile VMs are declared, since only the
 lightweight infra VMs are ever built as part of the host closure.
 
@@ -2422,8 +2422,8 @@ VMs use their own `alacritty.toml` directly - no wrapper overrides:
 
 | Action | Host | VMs |
 |--------|------|-----|
-| Change `font.family` | `rebuild` | `rebuild` + `microvm update <vm>` |
-| Change `font.size` | `rebuild` | `rebuild` + `microvm update <vm>` |
+| Change `font.family` | `rebuild` | `rebuild` + `shard switch <vm>` |
+| Change `font.size` | `rebuild` | `rebuild` + `shard switch <vm>` |
 | DPI change (new monitor) | Automatic via Hyprland's per-monitor scale | N/A (waypipe forwards the rendered window) |
 
 Font packages must be included in the VM's closure. Add them to `vmPackages` in your font config:
@@ -2450,9 +2450,9 @@ Font profiles live in `~/hydrix-config/fonts/`. Each profile sets per-app sizes,
 
 The profile activates automatically, no other wiring needed.
 
-### Live Switch (microvm update)
+### Live Switch (shard switch)
 
-`microvm update` performs a live config switch that includes home-manager activation. This means font changes in `alacritty.toml` are applied without VM restart. The host dumps nix store registration info to the VM before switching so home-manager can realise new store paths.
+`shard switch` performs a live config switch that includes home-manager activation. This means font changes in `alacritty.toml` are applied without VM restart. The host dumps nix store registration info to the VM before switching so home-manager can realise new store paths.
 
 New terminal windows pick up the updated font. Already-running terminals keep their current font (alacritty inotify doesn't detect nix store symlink changes).
 
@@ -2462,45 +2462,52 @@ New terminal windows pick up the updated font. Already-running terminals keep th
 
 ### Commands
 
+The `shard` CLI. Lifecycle operations work as either a word or a same-letter
+flag; flags combine and run in the order given (`shard -bs browsing` builds
+then starts). Every other command is word-only.
+
 ```bash
-# Lifecycle
-microvm build <name>       # Build/rebuild VM image
-microvm start <name>       # Start VM (polls PING→OK, then starts the waypipe tunnel)
-microvm stop <name>        # Stop VM
-microvm restart <name>     # Restart VM
+# Lifecycle (flag | word, both always work)
+shard -b <name>            | shard build <name>       # Build/rebuild VM image
+shard -s <name>            | shard start <name>        # Start VM (polls PING→OK, then starts the waypipe tunnel)
+shard -S <name>            | shard stop <name>         # Stop VM
+shard -R <name>            | shard restart <name>      # Restart VM
+shard -r <name>            | shard rebuild <name>      # Build + live switch (no restart)
+shard -w <name> [path]     | shard switch <name> [path] # Live switch to (already-)built config
+shard -W <name>            | shard switch-status <name> # Show live vs built configuration paths
 
 # Applications (just press Super+Return on the VM workspace)
-microvm app <name> <cmd>   # Launch app in VM via waypipe
-microvm console <name>     # Serial console (headless VMs)
+shard -a <name> <cmd>      | shard app <name> <cmd>    # Launch app in VM via waypipe
+shard -c <name>            | shard console <name>      # Serial console (headless VMs)
 
 # Status
-microvm status [name]      # Show status
-microvm list               # List all VMs
-microvm logs <name>        # View logs
+shard -i [name]            | shard status [name]       # Show status
+shard list                                             # List all VMs
+shard -l <name>            | shard logs <name>         # View logs
 
 # Data Management
-microvm snapshot create <name> <snap>  # Create snapshot
-microvm snapshot list <name>           # List snapshots
-microvm snapshot revert <name> <snap>  # Revert to snapshot
-microvm purge <name>                   # Delete all data (fresh start)
-microvm gc                             # List/delete orphaned VM directories (see below)
+shard snapshot create <name> <snap>  # Create snapshot
+shard snapshot list <name>           # List snapshots
+shard snapshot revert <name> <snap>  # Revert to snapshot
+shard -p <name>            | shard purge <name>        # Delete all data (fresh start)
+shard gc                                               # List/delete orphaned VM directories (see below)
 
 # Encrypted home volume
-microvm encrypt-setup <name>           # First-time setup (run once, VM must be stopped)
-microvm start <name>                   # Prompts for passphrase, then starts normally
-microvm stop <name>                    # Stops VM and locks volume automatically
+shard encrypt-setup <name>           # Manual pre-provision (build auto-sets this up if enabled)
+shard -s <name>            | shard start <name>        # Prompts for passphrase, then starts normally
+shard -S <name>            | shard stop <name>         # Stops VM and locks volume automatically
 ```
 
-### Cleaning Up Orphaned VM Directories (`microvm gc`)
+### Cleaning Up Orphaned VM Directories (`shard gc`)
 
 `/var/lib/microvms/<name>/` directories are never deleted automatically - renaming a
 profile, removing one from `hydrix-config/profiles/`, or one-off test VMs all leave
-behind a directory with no corresponding `nixosConfiguration` anymore. `microvm gc`
+behind a directory with no corresponding `nixosConfiguration` anymore. `shard gc`
 finds and (with confirmation) removes them:
 
 ```bash
-microvm gc          # Dry-run: lists orphaned directories with size + last-modified date
-microvm gc --force  # Skip the confirmation prompt
+shard gc          # Dry-run: lists orphaned directories with size + last-modified date
+shard gc --force  # Skip the confirmation prompt
 ```
 
 **How it decides what's orphaned:** it evaluates `nix eval .#nixosConfigurations
@@ -2509,47 +2516,47 @@ diffs that against `ls /var/lib/microvms/`. Any directory whose name isn't a cur
 declared VM is flagged. This means removing a profile's directory under
 `hydrix-config/profiles/<name>/` and rebuilding is enough - its old
 `/var/lib/microvms/microvm-<name>-<serial>/` state is automatically caught on the next
-`microvm gc` run, with no manual bookkeeping needed.
+`shard gc` run, with no manual bookkeeping needed.
 
 Deliberately **on-demand only** - no timer, not part of `rebuild` - the same reasoning
-`microvm purge` already follows: VM data shouldn't disappear without a human explicitly
+`shard purge` already follows: VM data shouldn't disappear without a human explicitly
 asking. It will stop a matching VM first if one happens to still be running under an
 orphaned name before removing its directory.
 
 ### Encrypted Home Volumes
 
-Persistent home volumes can be LUKS-encrypted so data is locked at rest whenever the VM is not running. The passphrase is prompted as part of `microvm start`, no separate unlock step needed.
+Persistent home volumes can be LUKS-encrypted so data is locked at rest whenever the VM is not running. The passphrase is prompted as part of `shard start`, no separate unlock step needed.
 
 **How it works:**
 
-- `microvm encrypt-setup` creates a raw LUKS2 container (`home.luks`) in `/var/lib/microvms/<name>/`
-- `microvm start` runs `cryptsetup luksOpen` before QEMU starts, presenting `/dev/mapper/vm-<name>-home` to the VM
-- `microvm stop` runs `cryptsetup luksClose` after the VM halts - data is locked immediately
+- `shard encrypt-setup` creates a raw LUKS2 container (`home.luks`) in `/var/lib/microvms/<name>/`
+- `shard start` runs `cryptsetup luksOpen` before QEMU starts, presenting `/dev/mapper/vm-<name>-home` to the VM
+- `shard stop` runs `cryptsetup luksClose` after the VM halts - data is locked immediately
 - If the host is powered off mid-session, the container is locked automatically on reboot (the mapper device never persists across boots)
 
 **Enabling encryption for a VM:**
 
 ```bash
 # 1. Stop the VM if running
-microvm stop pentest
+shard stop pentest
 
 # 2. Create the LUKS container (prompts for passphrase, formats ext4 inside)
-microvm encrypt-setup pentest
+shard encrypt-setup pentest
 
 # 3. Enable in your VM profile (hydrix-config/profiles/pentest/default.nix):
 #    hydrix.microvm.encryption.enable = true;
 
 # 4. Rebuild to point the VM at the encrypted volume
-microvm build pentest
+shard build pentest
 
 # 5. Start - passphrase prompt appears before QEMU launches
-microvm start pentest
+shard start pentest
 ```
 
 **Notes:**
 
 - Any existing `home.qcow2` is **not** migrated - it remains on disk and can be mounted manually for data recovery (see below), then deleted once you've confirmed the encrypted volume is working
-- Snapshots (`microvm snapshot`) do not apply to encrypted volumes - use a filesystem-level backup of `home.luks` while the mapper is closed instead
+- Snapshots (`shard snapshot`) do not apply to encrypted volumes - use a filesystem-level backup of `home.luks` while the mapper is closed instead
 - On **btrfs** hosts: disable copy-on-write on the container file to prevent fragmentation: `sudo chattr +C /var/lib/microvms/<name>/home.luks` (must be set before first write)
 
 **Recovering data from the old qcow2:**
@@ -2626,9 +2633,9 @@ hydrix.router.vpn.mullvad.bridges.myprofile = ./mullvad-myprofile.conf;
 4. Rebuild in order - router and files VM have their TAP interfaces baked into the QEMU runner at build time, so they need a full restart to pick up the new bridge:
 ```bash
 rebuild                       # host: creates br-myprofile, updates tapLookupScript + vm-registry
-mvm rebuild router files      # router picks up new subnet TAP; files VM picks up new bridge leg
-microvm build myprofile
-microvm start myprofile
+shard rebuild router files      # router picks up new subnet TAP; files VM picks up new bridge leg
+shard build myprofile
+shard start myprofile
 ```
 
 **What is auto-wired after `rebuild`** (no manual action needed):
@@ -2723,9 +2730,9 @@ hydrix.microvmHost.vms."microvm-myinfra" = { enable = true; };
 4. Rebuild and start:
 ```bash
 rebuild                              # creates bridge, configures TAP wiring, writes registry
-mvm rebuild router                   # only needed if routerTap was declared
-microvm build microvm-myinfra
-microvm start microvm-myinfra
+shard rebuild router                   # only needed if routerTap was declared
+shard build microvm-myinfra
+shard start microvm-myinfra
 ```
 
 If `routerTap` is set, the flake feeds it into `extraNetworks`, which automatically wires a router TAP and routes that subnet - no changes to router config required. If omitted, the VM is isolated and only reachable from other VMs sharing its bridge (like usb-sandbox).
@@ -2746,7 +2753,7 @@ For work that benefits from isolation per target or engagement, Hydrix supports 
 **How it works:**
 - Three task slots (`task1`/`task2`/`task3`, CIDs 115–117) are declared permanently in the host config via `hydrix-config/tasks/task*.nix`. Like every other profile/task VM, each is actually a per-machine `microvm-pentest-task<N>-<serial>` nixosConfiguration (see [§ VM Naming and Machine Identity](#vm-naming-and-machine-identity)) - use the short form below, it always resolves correctly regardless of machine.
 - Service units, TAP interfaces, and bridges are created once during the initial rebuild
-- `microvm pentest create <name>` assigns an engagement to a free slot and builds its closure - no rebuild needed
+- `shard pentest create <name>` assigns an engagement to a free slot and builds its closure - no rebuild needed
 
 **One-time setup** (done during any normal rebuild window):
 
@@ -2760,29 +2767,29 @@ rebuild    # Registers the slot service units permanently
 
 ```bash
 # Start a new engagement
-microvm pentest create google           # Assign 'google' to a free slot
-microvm start task1                     # Service unit already exists
-microvm snapshot create task1 google-clean  # Baseline
-microvm app task1 alacritty
+shard pentest create google           # Assign 'google' to a free slot
+shard start task1                     # Service unit already exists
+shard snapshot create task1 google-clean  # Baseline
+shard app task1 alacritty
 
 # Between sessions (revert to known-good state)
-microvm stop task1
-microvm snapshot revert task1 google-clean
-microvm start task1
+shard stop task1
+shard snapshot revert task1 google-clean
+shard start task1
 
 # Close engagement (volume and snapshots preserved, slot freed)
-microvm pentest close google
+shard pentest close google
 
 # Reopen from snapshot
-microvm pentest create google --slot 1
-microvm snapshot revert task1 google-clean
-microvm start task1
+shard pentest create google --slot 1
+shard snapshot revert task1 google-clean
+shard start task1
 
 # Purge all data for an engagement
-microvm pentest purge google
+shard pentest purge google
 
 # View all slots and their status
-microvm pentest list
+shard pentest list
 ```
 
 **Task slot table:**
@@ -2793,7 +2800,7 @@ microvm pentest list
 | `task2` | `microvm-pentest-task2-<serial>` | 116 | `mv-task-2` | `br-pentest` |
 | `task3` | `microvm-pentest-task3-<serial>` | 117 | `mv-task-3` | `br-pentest` |
 
-**Adding more slots:** Create `tasks/task4.nix` with CID 118 and `tapId = "mv-task-4"`, then rebuild once. The `microvm pentest` command will discover it automatically.
+**Adding more slots:** Create `tasks/task4.nix` with CID 118 and `tapId = "mv-task-4"`, then rebuild once. The `shard pentest` command will discover it automatically.
 
 **Engagement registry:** `hydrix-config/tasks/.engagement-registry` is a JSON file mapping slot names to engagement names. Commit it to track which slot held which engagement.
 
@@ -2816,7 +2823,7 @@ The files VM (`microvm-files`, CID 212, fixed infra) is an encrypted jump host f
 - The files VM receives only ciphertext during transfer operations (it sees plaintext only during `store`, where it decrypts into its own `/storage`)
 - Port 8888 on each VM only accepts connections from the files VM's IP (`.2` on that bridge), enforced by iptables on each VM
 
-**Transfer flow** (`microvm files transfer pentest/projects/report comms/pentest/`):
+**Transfer flow** (`shard files transfer pentest/projects/report comms/pentest/`):
 
 ```
 1. Host generates PASSPHRASE (openssl rand -base64 32), stays in host memory
@@ -2849,7 +2856,7 @@ The files VM (`microvm-files`, CID 212, fixed infra) is an encrypted jump host f
    Host discards passphrase from memory
 ```
 
-**Store flow** (`microvm files store pentest/projects/report`):
+**Store flow** (`shard files store pentest/projects/report`):
 
 Steps 1–4 are identical. After the files VM has the ciphertext, the host sends the passphrase via vsock and the files VM decrypts in-place into `/storage/pentest/`. Ciphertext is deleted after successful decryption.
 
@@ -2874,15 +2881,15 @@ hydrix.microvmFiles.enable = true;
 
 ```bash
 # Move files between VMs (source files untouched)
-microvm files transfer pentest/projects/report comms/pentest/
-microvm files transfer dev/src/tool pentest/tools/
+shard files transfer pentest/projects/report comms/pentest/
+shard files transfer dev/src/tool pentest/tools/
 
 # Archive to files VM /storage/ (encrypted, then decrypted in-place)
-microvm files store pentest/projects/report
+shard files store pentest/projects/report
 
 # List stored files
-microvm files list
-microvm files list pentest
+shard files list
+shard files list pentest
 ```
 
 **Network layout:**
@@ -2946,7 +2953,7 @@ Traffic between the files VM and profile VMs never touches the router. The files
 - Files arrive at hostsync already encrypted; the passphrase is released via vsock only after three-way SHA-256 verification passes
 - Port 8888 accepts connections only from the files VM (`192.168.214.2`), enforced by nftables
 
-**VM → Host** (`microvm files transfer browsing/wallpapers/Sunset.png hostsync/wallpapers`):
+**VM → Host** (`shard files transfer browsing/wallpapers/Sunset.png hostsync/wallpapers`):
 
 ```
 browsing VM  →  [encrypted, br-browse]  →  files VM  →  [encrypted, br-hostsync]  →  hostsync VM
@@ -2956,13 +2963,13 @@ browsing VM  →  [encrypted, br-browse]  →  files VM  →  [encrypted, br-hos
                                                                                     ~/vm-inbox/wallpapers/
 ```
 
-The standard `microvm files transfer` protocol is used unmodified. hostsync's vsock agent (port 14506) is compatible with the same `RECEIVE_PREPARE` / `DECRYPT` / `CLEANUP` commands sent to any destination VM.
+The standard `shard files transfer` protocol is used unmodified. hostsync's vsock agent (port 14506) is compatible with the same `RECEIVE_PREPARE` / `DECRYPT` / `CLEANUP` commands sent to any destination VM.
 
 **Host -> VM** (drop a file into `~/vm-inbox/`, then transfer out):
 
 ```bash
 cp ~/somefile.txt ~/vm-inbox/
-microvm files transfer hostsync/somefile.txt pentest/
+shard files transfer hostsync/somefile.txt pentest/
 ```
 
 hostsync's agent also implements `ENCRYPT` and `SERVE`, so it can act as a transfer source.
@@ -2971,11 +2978,11 @@ hostsync's agent also implements `ENCRYPT` and `SERVE`, so it can act as a trans
 
 ```bash
 # VM -> Host
-microvm files transfer <src-vm>/<path> hostsync/            # extract to ~/vm-inbox/
-microvm files transfer <src-vm>/<path> hostsync/<subdir>    # extract to ~/vm-inbox/<subdir>/
+shard files transfer <src-vm>/<path> hostsync/            # extract to ~/vm-inbox/
+shard files transfer <src-vm>/<path> hostsync/<subdir>    # extract to ~/vm-inbox/<subdir>/
 
 # Host -> VM (drop file into ~/vm-inbox/ first)
-microvm files transfer hostsync/<filename> <dst-vm>/<path>
+shard files transfer hostsync/<filename> <dst-vm>/<path>
 ```
 
 **Enable in your machine config** (included in the default template):
@@ -3050,7 +3057,7 @@ Then rebuild and start:
 
 ```bash
 rebuild
-microvm start microvm-usb-sandbox
+shard start microvm-usb-sandbox
 ```
 
 **Host-side USB device pass-through:**
@@ -3097,10 +3104,10 @@ lsblk
 
 ```bash
 # Archive from USB to files VM (encrypted)
-microvm files store usb-sandbox/usb/vdb1/<path>
+shard files store usb-sandbox/usb/vdb1/<path>
 
 # Transfer to another VM
-microvm files transfer usb-sandbox/usb/vdb1/<path> dev/<dest>
+shard files transfer usb-sandbox/usb/vdb1/<path> dev/<dest>
 ```
 
 Paths are relative to `/home/sandbox/` inside the VM. USB drives mount at `/home/sandbox/usb/`.
@@ -3316,8 +3323,8 @@ bind = $mod, P, exec, vault-pick              # Hyprland
 
 ```bash
 rebuild
-mvm rebuild vault && microvm start vault
-microvm console microvm-vault
+shard rebuild vault && shard start vault
+shard console microvm-vault
 # Inside VM:
 keepassxc-cli db-create /var/lib/vault/Passwords.kdbx --set-password
 exit
@@ -3355,7 +3362,7 @@ nix shell nixpkgs#keepassxc -c keepassxc ~/vault/Passwords.kdbx
 Via vault VM console:
 
 ```bash
-microvm console microvm-vault
+shard console microvm-vault
 keepassxc-cli add /var/lib/vault/Passwords.kdbx "GitHub" --username myuser -p
 exit
 ```
@@ -3378,11 +3385,11 @@ sudo chown $USER:users ~/vault/Passwords.kdbx && chmod 644 ~/vault/Passwords.kdb
 
 **vault-cli ping returns nothing** \- vault VM not running:
 ```bash
-microvm status microvm-vault
-microvm start vault
+shard status microvm-vault
+shard start vault
 ```
 
-**microvm start vault hangs / virtiofsd error `/home/user/vault does not exist`** \- missing username fix in `infraVMConfigs` in `flake.nix`. Ensure the block passes `{ hydrix.username = hostUsername; }`:
+**shard start vault hangs / virtiofsd error `/home/user/vault does not exist`** \- missing username fix in `infraVMConfigs` in `flake.nix`. Ensure the block passes `{ hydrix.username = hostUsername; }`:
 ```nix
 modules = [
   { hydrix.username = hostUsername; }
@@ -3392,7 +3399,7 @@ modules = [
 
 **Clipboard shows `PROTECTED`** \- vault VM runner is stale, rebuild it:
 ```bash
-mvm rebuild vault
+shard rebuild vault
 ```
 
 ---
@@ -3413,7 +3420,7 @@ vm-sync push --name repo                      # Stage for host integration
 vm-sync list                                  # List staged packages from running VMs
 vm-sync pull repo --target pentest            # Pull to profiles/pentest/packages/
 vm-sync status                                # Show packages per profile
-microvm build microhack                       # Rebuild VM with new package
+shard build microhack                       # Rebuild VM with new package
 ```
 
 **Package locations:**
@@ -3426,9 +3433,9 @@ The `vm-sync pull` command automatically:
 2. Regenerates `packages/default.nix`
 3. Stages for git tracking
 
-### Live Switch (microvm update)
+### Live Switch (shard switch)
 
-`microvm update` builds a new VM config and applies it without restart. 
+`shard switch` builds a new VM config and applies it without restart. 
 
 **How it works:**
 
@@ -3485,7 +3492,7 @@ Each VM bridge can route through a separate Mullvad WireGuard exit node. The rou
 
 4. **Rebuild the router:**
    ```bash
-   microvm build router && microvm restart router
+   shard build router && shard restart router
    ```
 
 ### How It Works
@@ -3512,7 +3519,7 @@ vpn-assign list-mullvad                     # List configured exit nodes
 
 1. Download a `.conf` file for the new VM: `vpn/mullvad-myvm.conf`
 2. Add `myvm = ./mullvad-myvm.conf;` to the `bridges` map in `vpn/mullvad.nix`
-3. Rebuild the router: `microvm build router && microvm restart router`
+3. Rebuild the router: `shard build router && shard restart router`
 
 ---
 
@@ -3670,7 +3677,7 @@ VM /nix/.rw-store (qcow2) ──┘
 
 ### Nix DB Registration
 
-Paths exist in the VM's `/nix/store` via virtiofs but the VM's local nix database (`/nix/var/nix/db/db.sqlite`) doesn't know about them. This matters during `microvm update` \- home-manager's `nix-store --realise` queries the local DB. The host dumps registration info before switching, and the VM loads it with `nix-store --load-db`.
+Paths exist in the VM's `/nix/store` via virtiofs but the VM's local nix database (`/nix/var/nix/db/db.sqlite`) doesn't know about them. This matters during `shard switch` \- home-manager's `nix-store --realise` queries the local DB. The host dumps registration info before switching, and the VM loads it with `nix-store --load-db`.
 
 ---
 
@@ -3705,26 +3712,26 @@ The builder VM enables nix builds in lockdown mode when the host has no internet
 
 ```bash
 # Build a single target
-microvm builder build browsing
-microvm builder build host
+shard builder build browsing
+shard builder build host
 
 # Build multiple targets in one session (eval cache stays warm)
-microvm builder build browsing pentest dev
+shard builder build browsing pentest dev
 
 # Build and immediately switch host config
-microvm builder switch                 # Switches to current specialisation
-microvm builder switch administrative  # Switch to specific specialisation
+shard builder switch                 # Switches to current specialisation
+shard builder switch administrative  # Switch to specific specialisation
 
 # Prefetch only (keep builder running for batch operations)
-microvm builder fetch browsing
-microvm builder fetch pentest
-microvm builder stop                  # Stop when done
+shard builder fetch browsing
+shard builder fetch pentest
+shard builder stop                  # Stop when done
 
 # Manual control
-microvm builder start                 # Start builder (stops host nix-daemon)
-microvm builder shell                 # Attach to builder console
-microvm builder status                # Check builder state
-microvm builder stop                  # Stop builder (restarts host nix-daemon)
+shard builder start                 # Start builder (stops host nix-daemon)
+shard builder shell                 # Attach to builder console
+shard builder status                # Check builder state
+shard builder stop                  # Stop builder (restarts host nix-daemon)
 ```
 
 **Named targets:**
@@ -3744,7 +3751,7 @@ microvm builder stop                  # Stop builder (restarts host nix-daemon)
 **Operational flow:**
 
 ```
-microvm builder build browsing
+shard builder build browsing
 
 1. Host nix-daemon stops, /nix/store remounted R/W
 2. Builder VM starts with virtiofs /nix/store access
@@ -3759,7 +3766,7 @@ microvm builder build browsing
 **Builder shell access:**
 
 ```bash
-microvm builder shell
+shard builder shell
 
 # Inside builder:
 nix flake metadata                        # Check flake inputs
@@ -3770,7 +3777,7 @@ exit                                       # Return to host, builder stops
 **Status checking:**
 
 ```bash
-microvm builder status
+shard builder status
 
 # Output:
 # Builder state: running
@@ -3783,7 +3790,7 @@ microvm builder status
 
 ```bash
 # If builder is stuck
-microvm stop microvm-builder  # This also restores host nix-daemon
+shard stop microvm-builder  # This also restores host nix-daemon
 
 # If store is still rw after crash
 sudo mount -o remount,ro /nix/store
@@ -3796,8 +3803,8 @@ The builder maintains an 8GB persistent volume (`builder-cache.img` at `/root/.c
 
 To reset:
 ```bash
-microvm builder purge          # Remove builder-cache.img
-microvm builder start          # Rebuild clean cache
+shard builder purge          # Remove builder-cache.img
+shard builder start          # Rebuild clean cache
 ```
 
 ### Libvirt VMs
@@ -3826,7 +3833,7 @@ The Hydrix framework provides several shell abbreviations for common commands:
 
 | Abbreviation | Expands to | Purpose |
 |--------------|------------|---------|
-| `mvm` | `microvm` | Multi-VM command runner |
+| `s` | `shard` | MicroVM lifecycle CLI |
 | `za` | `zenaudio` | Audio device switcher (ASUS ZenBook) |
 | `zas` | `zenaudio speakers` | Enable internal speakers |
 | `zah` | `zenaudio headphones` | Enable headphones |
@@ -3834,20 +3841,22 @@ The Hydrix framework provides several shell abbreviations for common commands:
 | `za` | `zenaudio toggle` | Toggle speakers/headphones |
 | `rvm` | `rebuildvms` | Rebuild multiple VMs at once |
 
-**Multi-VM commands** - `mvm` expands to `microvm mvm`, allowing you to run commands on multiple VMs:
+**Multi-VM commands** - every word and flag form of `shard` already accepts
+multiple VM names directly, so no separate multi-VM subcommand is needed:
 
 ```fish
 # Build multiple VMs at once
-mvm build files pentest browsing
+shard build files pentest browsing
 
 # Restart multiple VMs
-mvm restart files pentest browsing dev
+shard restart files pentest browsing dev
 
-# Rebuild (build + restart) multiple VMs
-mvm rebuild vault files pentest browsing
+# Rebuild (build + switch) multiple VMs
+shard rebuild vault files pentest browsing
 
-# Same as: microvm mvm build files pentest browsing
-# The 'microvm mvm' subcommand also works for non-fish shells
+# Flag form combines actions too, run in the order given, flag-major across
+# every listed VM (build both, then start both):
+s -bs pentest browsing
 ```
 
 ### Babelfish
@@ -3935,7 +3944,7 @@ Super+Return
   -> hypr-ws-app alacritty
   -> detect focused workspace
   -> query vm-registry for workspace->VM mapping
-  -> if VM not running: notify "use microvm start <vm>", exec host terminal
+  -> if VM not running: notify "use shard start <vm>", exec host terminal
   -> if waypipe-connect not running: start it (setsid, background), wait 1s
   -> poll vsock:14509 STATUS every 1s until "waypipe" (up to 20s)
   -> send "alacritty" to vsock:14508 (waypipe-launch)
@@ -3962,7 +3971,7 @@ The VM's waypipe server connects *out* to the host (VM→HOST vsock works becaus
 
 | Event | What happens |
 |-------|-------------|
-| `microvm start <vm>` | Polls `PING` on vsock:14509 until VM responds `OK`, then starts `waypipe-connect <vm>` in background + sends notification |
+| `shard start <vm>` | Polls `PING` on vsock:14509 until VM responds `OK`, then starts `waypipe-connect <vm>` in background + sends notification |
 | `waypipe-connect` starts | Starts host-side `waypipe client` listener, sends `waypipe-reconnect` to VM via vsock:14509 |
 | VM receives `waypipe-reconnect` | Restarts `waypipe-vsock`; VM's waypipe server connects out to host vsock port |
 | Compositor starts (VMs already running) | `waypipe-connect-all` spawns one poller per running VM; each polls `PING->OK` then starts `waypipe-connect` immediately |
@@ -4072,8 +4081,8 @@ The script scans existing profiles for the next free CID (starts at 107), prompt
 4. Rebuild in order (router and files VM have TAPs baked into their QEMU runner):
 ```bash
 rebuild                       # creates bridge, updates tapLookupScript + vm-registry
-mvm rebuild router files      # picks up new subnet TAP + new bridge leg
-microvm build myprofile && microvm start myprofile
+shard rebuild router files      # picks up new subnet TAP + new bridge leg
+shard build myprofile && shard start myprofile
 ```
 
 **What auto-adapts after rebuild** (no manual wiring needed):
@@ -4210,11 +4219,11 @@ Credential store is `secrets/wifi.yaml` (sops mode, recommended) if it exists, o
 
 | Command | Purpose |
 |---------|---------|
-| `microvm <cmd>` | MicroVM management CLI |
-| `microvm build <name>` | Build/rebuild VM |
-| `microvm start <name>` | Start VM (polls PING->OK, starts display tunnel) |
-| `microvm app <name> <cmd>` | Launch app in VM |
-| `microvm stop <name>` | Stop VM |
+| `shard <cmd>` | MicroVM management CLI |
+| `shard build <name>` | Build/rebuild VM |
+| `shard start <name>` | Start VM (polls PING->OK, starts display tunnel) |
+| `shard app <name> <cmd>` | Launch app in VM |
+| `shard stop <name>` | Stop VM |
 
 ### Package Sync (vm-dev workflow)
 
@@ -4311,7 +4320,7 @@ bridge link show | grep mv-files   # Verify
 If that doesn't fix it, the lookup script may not know about the profile yet (host not rebuilt after adding the profile). Run `rebuild` first, then restart the repair service.
 
 **Check 2 - Profile VM has correct static IP:**
-From the files VM console (`microvm console microvm-files`), ping the target VM:
+From the files VM console (`shard console microvm-files`), ping the target VM:
 ```bash
 ping 192.168.102.10   # Replace with target subnet
 ```
@@ -4329,10 +4338,10 @@ Port 8888 on each profile VM only accepts connections from the files VM's `.2` a
 
 ```bash
 # Check logs
-microvm logs <name>
+shard logs <name>
 
 # Verify vsock CID is unique
-microvm list
+shard list
 
 # Ensure host modules are loaded
 lsmod | grep vhost_vsock
@@ -4367,7 +4376,7 @@ waypipe-connect <vm-name>   # foreground - Ctrl+C when done
 |---------|-------|-----|
 | `waypipe-connect` log empty after one entry | `set -e` killed script on VM disconnect | Ensure `waypipe client \|\| true` in restart loop |
 | STATUS returns `"waypipe"` but apps don't appear | Stale socket file, service actually dead | STATUS now checks `systemctl is-active waypipe-vsock` too |
-| STATUS returns `"none"` indefinitely | `display-mode` not receiving push, or VM not booted | Check `pgrep -af waypipe-connect`; restart `microvm start` |
+| STATUS returns `"none"` indefinitely | `display-mode` not receiving push, or VM not booted | Check `pgrep -af waypipe-connect`; restart `shard start` |
 
 ### Waypipe: hypr-ws-app Errors "waypipe not ready after 20s"
 
@@ -4393,7 +4402,7 @@ ss -lnx | grep vsock   # or: socat /dev/null VSOCK-LISTEN:<PORT>,reuseaddr & sle
 lspci -nnk | grep -A3 Wireless
 
 # Check router console
-microvm console router
+shard console router
 
 # Verify NetworkManager
 nmcli device status
@@ -4406,9 +4415,9 @@ Rebuilding and restarting the router VM is not enough when you add or remove a n
 Fix: purge the router VM so it starts with a clean NM state:
 
 ```bash
-microvm purge router --force
-microvm build router
-microvm start router
+shard purge router --force
+shard build router
+shard start router
 ```
 
 After a purge, only the connections declared in `wifi.nix` (written to `/run/` at boot) exist, and NM connects normally.
@@ -4418,7 +4427,7 @@ After a purge, only the connections declared in `wifi.nix` (written to `/run/` a
 This is the intended behavior. Use the builder VM:
 
 ```bash
-microvm builder build <target>
+shard builder build <target>
 ```
 
 Or switch to administrative mode:
@@ -4503,7 +4512,7 @@ hyprland-session   # cleans up waypipe + env on exit
 The host connects to each VM's `display-mode` service (vsock:14509) to switch display services. `waypipe-connect` sends `waypipe-reconnect` directly to the VM, bypassing `vm-push-display-mode`. The VM unconditionally restarts `waypipe-vsock` and connects to the host listener.
 
 ```
-microvm start <vm>
+shard start <vm>
   → polls PING→OK on vsock:14509
   → starts waypipe-connect (sends waypipe-reconnect internally)
 ```
