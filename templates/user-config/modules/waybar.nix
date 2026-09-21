@@ -1,7 +1,7 @@
 # Waybar Configuration — Island style
 #
 # Top LEFT:  workspaces  workspace-desc  focus
-# Top RIGHT: pomo  sync  git  mvms  vms  volume  temp  cpu  ram  fs  uptime  clock
+# Top RIGHT: pomo  sync  git  shards  vms  volume  temp  cpu  ram  fs  uptime  clock
 # Bot LEFT:  power-profile  battery  rproc  cproc
 # Bot RIGHT: rproc-bottom  cproc-bottom  vm-ram  vm-cpu  vm-sync-dev  vm-sync-stg  vm-fs  wifi-sync  vm-tun  vm-up
 #
@@ -152,11 +152,11 @@
     ${pkgs.jq}/bin/jq -cn --arg t "GIT $count" --arg c "$class" '{"text":$t,"class":$c}'
   '';
 
-  mvmsScript = pkgs.writeShellScript "waybar-mvms" ''
+  shardsScript = pkgs.writeShellScript "waybar-shards" ''
     count=$(systemctl list-units --type=service --state=running 2>/dev/null \
       | grep -c "microvm@") || count=0
     [ "$count" -eq 0 ] && exit 0
-    echo "MVMS $count"
+    echo "SHARDS $count"
   '';
 
   vmsScript = pkgs.writeShellScript "waybar-vms" ''
@@ -592,7 +592,7 @@
       "custom/sync"
       "custom/sep"
       "custom/git"
-      "custom/mvms"
+      "custom/shards"
       "custom/vms"
       "custom/sep"
       "custom/volume"
@@ -658,8 +658,8 @@
       escape = false;
       "return-type" = "json";
     };
-    "custom/mvms" = {
-      exec = "${mvmsScript}";
+    "custom/shards" = {
+      exec = "${shardsScript}";
       interval = 5;
       format = "{}";
       tooltip = false;
@@ -913,7 +913,7 @@
       "custom/sync"
       "custom/sep"
       "custom/git"
-      "custom/mvms"
+      "custom/shards"
       "custom/vms"
       "custom/sep"
       "custom/volume"
@@ -992,8 +992,8 @@
       escape = false;
       "return-type" = "json";
     };
-    "custom/mvms" = {
-      exec = "${mvmsScript}";
+    "custom/shards" = {
+      exec = "${shardsScript}";
       interval = 5;
       format = "{}";
       tooltip = false;
@@ -1237,7 +1237,7 @@
     #custom-pomo,
     #custom-sync,
     #custom-git,
-    #custom-mvms,
+    #custom-shards,
     #custom-vms,
     #custom-bluetooth,
     #custom-power-profile,
@@ -1319,7 +1319,7 @@
     #custom-pomo:hover,
     #custom-sync:hover,
     #custom-git:hover,
-    #custom-mvms:hover,
+    #custom-shards:hover,
     #custom-vms:hover,
     #custom-bluetooth:hover,
     #custom-power-profile:hover,
