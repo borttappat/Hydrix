@@ -237,7 +237,7 @@ do_build_via_builder() {
 
     log "Lockdown mode detected - using builder VM"
 
-    # The microvm script handles everything: start builder, build, stop, switch
+    # shard handles everything: start builder, build, stop, switch
     local builder_args=("builder" "switch")
 
     # Pass specialisation if specified
@@ -246,11 +246,11 @@ do_build_via_builder() {
     fi
 
     if $VERBOSE; then
-        echo "+ microvm ${builder_args[*]}"
+        echo "+ shard ${builder_args[*]}"
     fi
 
     # Run the builder switch which does build + apply
-    if "$SCRIPT_DIR/microvm" "${builder_args[@]}"; then
+    if shard "${builder_args[@]}"; then
         return 0
     else
         err "Builder switch failed"

@@ -8,20 +8,22 @@
 # imported via flake.nix (hydrix.microvm.filesAgent = true in meta.nix) —
 # same agent every profile VM uses, no separate copy here.
 #
-#   microvm files transfer <src-vm>/<path> usb-sandbox/shared/
-#   microvm files transfer usb-sandbox/shared/<path> <dst-vm>/<dest>
+#   shard files transfer <src-vm>/<path> usb-sandbox/shared/
+#   shard files transfer usb-sandbox/shared/<path> <dst-vm>/<dest>
 #
 # Paths are relative to /home/sandbox/ inside the VM.
 # Mount USB drives at /home/sandbox/usb/ for convenient access.
-{ config, lib, pkgs, ... }:
-
-let
+{
+  config,
+  lib,
+  pkgs,
+  ...
+}: let
   meta = import ./meta.nix;
 
   sandboxUser = "sandbox";
   sandboxHome = "/home/${sandboxUser}";
-  vmName      = "microvm-usb-sandbox";
-
+  vmName = "microvm-usb-sandbox";
 in {
   # The shared files-agent.nix (imported externally via flake.nix) expects
   # config.hydrix.username to match this VM's actual user/home directory —
@@ -38,13 +40,15 @@ in {
     # Ephemeral rootfs is tmpfs, sized ~50% of this by microvm-nix — needs real
     # headroom since transient transfer blobs (~/shared/xfer.enc) land there
     # before extraction. 4096 gives ~2GB of usable space for that.
-    mem  = 4096;
+    mem = 4096;
 
-    interfaces = [{
-      type = "tap";
-      id   = meta.tapId;
-      mac  = meta.tapMac;
-    }];
+    interfaces = [
+      {
+        type = "tap";
+        id = meta.tapId;
+        mac = meta.tapMac;
+      }
+    ];
 
     vsock.cid = meta.vsockCid;
 
@@ -54,9 +58,12 @@ in {
     # -sandbox off: microvm.nix sets -sandbox on by default, which blocks openat()
     # for new devices after init — needed for drive_add hotplug to work.
     qemu.extraArgs = [
-      "-sandbox"  "off"
-      "-chardev" "socket,id=monitor,path=/var/lib/microvms/${vmName}/monitor.sock,server=on,wait=off"
-      "-mon"     "chardev=monitor,mode=readline"
+      "-sandbox"
+      "off"
+      "-chardev"
+      "socket,id=monitor,path=/var/lib/microvms/${vmName}/monitor.sock,server=on,wait=off"
+      "-mon"
+      "chardev=monitor,mode=readline"
     ];
   };
 
@@ -72,8 +79,8 @@ in {
     networks."10-usb-sandbox" = {
       matchConfig.MACAddress = meta.tapMac;
       # Own CID as last octet, matching get_vm_ip's subnet.cid derivation in
-      # scripts/microvm (same convention every profile VM uses).
-      address = [ "${meta.subnet}.${toString meta.vsockCid}/24" ];
+      # scripts/shard.nix (same convention every profile VM uses).
+      address = ["${meta.subnet}.${toString meta.vsockCid}/24"];
       # No gateway - isolated bridge, files VM only, no internet
       linkConfig.RequiredForOnline = "no";
     };
@@ -97,10 +104,10 @@ in {
   users.groups.sandbox = {};
   users.users.sandbox = {
     isNormalUser = true;
-    group        = "sandbox";
-    extraGroups  = [ "wheel" "disk" ];
-    password     = "sandbox";
-    shell        = pkgs.bash;
+    group = "sandbox";
+    extraGroups = ["wheel" "disk"];
+    password = "sandbox";
+    shell = pkgs.bash;
   };
   services.getty.autologinUser = sandboxUser;
 
@@ -124,9 +131,9 @@ in {
       lsblk                       — block device tree
 
     FILE TRANSFER (from host, via the files VM)
-      microvm files transfer <src-vm>/<path> usb-sandbox/shared/
+      shard files transfer <src-vm>/<path> usb-sandbox/shared/
         → lands at ~/shared/<name> here; 'cp' it into ~/usb/vdbX/ once mounted read-write
-      microvm files transfer usb-sandbox/shared/<path> <dst-vm>/<dest>
+      shard files transfer usb-sandbox/shared/<path> <dst-vm>/<dest>
         → send a file back out the same way
 
     Ctrl+] to detach console (VM keeps running)
@@ -138,11 +145,20 @@ in {
   # =========================================================================
   environment.systemPackages = with pkgs; [
     # USB & filesystem inspection
-    usbutils exfatprogs ntfs3g
+    usbutils
+    exfatprogs
+    ntfs3g
     # Partitioning/formatting
-    dosfstools util-linux
+    dosfstools
+    util-linux
     # Utilities
-    gawk gnugrep gnused unzip p7zip iproute2 file
+    gawk
+    gnugrep
+    gnused
+    unzip
+    p7zip
+    iproute2
+    file
     # USB helper
     (writeShellScriptBin "usb" ''
       set -uo pipefail
@@ -160,8 +176,8 @@ in {
         echo "  umount /dev/vdbX        unmount"
         echo ""
         echo "File transfer (run on the host, not in here):"
-        echo "  microvm files transfer <src-vm>/<path> usb-sandbox/shared/"
-        echo "  microvm files transfer usb-sandbox/shared/<path> <dst-vm>/<dest>"
+        echo "  shard files transfer <src-vm>/<path> usb-sandbox/shared/"
+        echo "  shard files transfer usb-sandbox/shared/<path> <dst-vm>/<dest>"
       }
 
       case "''${1:-}" in
@@ -209,5 +225,4 @@ in {
       esac
     '')
   ];
-
 }

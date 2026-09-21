@@ -8,10 +8,7 @@
 #       modules = [ ./machine.nix ];
 #     };
 #   };
-
-{ inputs }:
-
-let
+{inputs}: let
   inherit (inputs) home-manager microvm;
 
   # Unstable overlay
@@ -24,10 +21,12 @@ let
 
   overlay-lkl-memory = final: prev: {
     lkl = prev.lkl.overrideAttrs (old: {
-      postPatch = (old.postPatch or "") + ''
-        substituteInPlace tools/lkl/cptofs.c \
-          --replace-fail 'lkl_start_kernel("mem=100M")' 'lkl_start_kernel("mem=1024M")'
-      '';
+      postPatch =
+        (old.postPatch or "")
+        + ''
+          substituteInPlace tools/lkl/cptofs.c \
+            --replace-fail 'lkl_start_kernel("mem=100M")' 'lkl_start_kernel("mem=1024M")'
+        '';
     });
   };
 
@@ -38,18 +37,20 @@ let
     ../theming/options.nix
   ];
 
-  commonModules = [
-    { nixpkgs.config.allowUnfree = true; }
-    { nixpkgs.overlays = [ overlay-unstable overlay-lkl-memory ]; }
-  ] ++ optionsModules ++ [
-    ../shared/core
-    home-manager.nixosModules.home-manager
-    {
-      home-manager.useGlobalPkgs = true;
-      home-manager.useUserPackages = true;
-    }
-  ];
-
+  commonModules =
+    [
+      {nixpkgs.config.allowUnfree = true;}
+      {nixpkgs.overlays = [overlay-unstable overlay-lkl-memory];}
+    ]
+    ++ optionsModules
+    ++ [
+      ../shared/core
+      home-manager.nixosModules.home-manager
+      {
+        home-manager.useGlobalPkgs = true;
+        home-manager.useUserPackages = true;
+      }
+    ];
 in rec {
   # =========================================================================
   # OVERLAYS - Exported for use in user flakes and packages outputs
@@ -63,54 +64,61 @@ in rec {
     specialArgs ? {},
     extraInputs ? {},
     userColorschemesDir ? null,
-  }:
-  let
+  }: let
     allInputs = inputs // extraInputs;
     nixpkgs' = inputs.nixpkgs;
-  in nixpkgs'.lib.nixosSystem {
-    inherit system;
-    specialArgs = specialArgs // { inputs = allInputs; hasStylix = allInputs ? stylix; };
-    modules = commonModules
-      ++ nixpkgs'.lib.optional (allInputs ? nix-index-database)
-           allInputs.nix-index-database.nixosModules.nix-index
-      ++ nixpkgs'.lib.optional (allInputs ? disko)
-           allInputs.disko.nixosModules.disko
-      ++ nixpkgs'.lib.optional (allInputs ? stylix)
-           allInputs.stylix.nixosModules.stylix
-      ++ [
-        { hydrix.userColorschemesDir = userColorschemesDir; }
-        # Host-only defaults (GTK dark theme, etc.)
-        ../host/base/host-base.nix
-        # Base system modules (services, virtualization)
-        ../host/base/services.nix
-        ../host/libvirt/virt.nix
-        ../host/base/sops.nix
+  in
+    nixpkgs'.lib.nixosSystem {
+      inherit system;
+      specialArgs =
+        specialArgs
+        // {
+          inputs = allInputs;
+          hasStylix = allInputs ? stylix;
+        };
+      modules =
+        commonModules
+        ++ nixpkgs'.lib.optional (allInputs ? nix-index-database)
+        allInputs.nix-index-database.nixosModules.nix-index
+        ++ nixpkgs'.lib.optional (allInputs ? disko)
+        allInputs.disko.nixosModules.disko
+        ++ nixpkgs'.lib.optional (allInputs ? stylix)
+        allInputs.stylix.nixosModules.stylix
+        ++ [
+          {hydrix.userColorschemesDir = userColorschemesDir;}
+          # Host-only defaults (GTK dark theme, etc.)
+          ../host/base/host-base.nix
+          # Base system modules (services, virtualization)
+          ../host/base/services.nix
+          ../host/libvirt/virt.nix
+          ../host/base/sops.nix
 
-        # Host scripts (rebuild, microvm CLI, hydrix-tui, etc.)
-        ../host/base/hydrix-scripts.nix
+          # Host scripts (rebuild, shard CLI, hydrix-tui, etc.)
+          ../host/base/hydrix-scripts.nix
 
-        # MicroVM host management (virtiofsd, TAP interfaces)
-        ../host/microvm
+          # MicroVM host management (virtiofsd, TAP interfaces)
+          ../host/microvm
 
-        # Builder VM host integration
-        ../host/vm-integration/builder-host.nix
+          # Builder VM host integration
+          ../host/vm-integration/builder-host.nix
 
-        # Git-sync VM host integration
-        ../host/vm-integration/gitsync-host.nix
+          # Git-sync VM host integration
+          ../host/vm-integration/gitsync-host.nix
 
-        # Host-specific modules (networking, VFIO, specialisations, hardware)
-        ../host
+          # Host-specific modules (networking, VFIO, specialisations, hardware)
+          ../host
 
-        # MicroVM host support
-        microvm.nixosModules.host
+          # MicroVM host support
+          microvm.nixosModules.host
 
-        # Graphical environment (waypipe VM forwarding lives in theming/wm/hyprland/waypipe.nix)
-        ../theming
+          # Graphical environment (waypipe VM forwarding lives in theming/wm/hyprland/waypipe.nix)
+          ../theming
 
-        # Set vmType to host
-        { hydrix.vmType = "host"; }
-      ] ++ modules;
-  };
+          # Set vmType to host
+          {hydrix.vmType = "host";}
+        ]
+        ++ modules;
+    };
 
   # =========================================================================
   # mkMicroVM - Create a MicroVM configuration
@@ -130,35 +138,42 @@ in rec {
     userProfiles ? null,
     hostConfig ? {},
     userColorschemesDir ? null,
-  }:
-  let
+  }: let
     allInputs = inputs // extraInputs;
     nixpkgs' = inputs.nixpkgs;
-  in nixpkgs'.lib.nixosSystem {
-    inherit system;
-    specialArgs = { inputs = allInputs; hasStylix = allInputs ? stylix; };
-    modules = commonModules
-      ++ nixpkgs'.lib.optional (allInputs ? nix-index-database)
-           allInputs.nix-index-database.nixosModules.nix-index
-      ++ nixpkgs'.lib.optional (allInputs ? stylix)
-           allInputs.stylix.nixosModules.stylix
-      ++ [
-      { hydrix.userColorschemesDir = userColorschemesDir; }
-      microvm.nixosModules.microvm
-      ../vm/microvm/infra/microvm-profile-base.nix
-    ] ++ nixpkgs'.lib.optionals (builtins.pathExists ../vm/profiles/${profile}) [
-      ../vm/profiles/${profile}
-    ] ++ [
-      {
-        hydrix.vm.storeName = nixpkgs'.lib.mkForce hostname;
-        hydrix.vm.hostname = nixpkgs'.lib.mkDefault hostname;
-      }
-    ] ++ modules
-    ++ nixpkgs'.lib.optional (hostConfig != {}) hostConfig
-    ++ nixpkgs'.lib.optionals (userProfiles != null && builtins.pathExists (userProfiles + "/${profile}")) [
-      (userProfiles + "/${profile}")
-    ];
-  };
+  in
+    nixpkgs'.lib.nixosSystem {
+      inherit system;
+      specialArgs = {
+        inputs = allInputs;
+        hasStylix = allInputs ? stylix;
+      };
+      modules =
+        commonModules
+        ++ nixpkgs'.lib.optional (allInputs ? nix-index-database)
+        allInputs.nix-index-database.nixosModules.nix-index
+        ++ nixpkgs'.lib.optional (allInputs ? stylix)
+        allInputs.stylix.nixosModules.stylix
+        ++ [
+          {hydrix.userColorschemesDir = userColorschemesDir;}
+          microvm.nixosModules.microvm
+          ../vm/microvm/infra/microvm-profile-base.nix
+        ]
+        ++ nixpkgs'.lib.optionals (builtins.pathExists ../vm/profiles/${profile}) [
+          ../vm/profiles/${profile}
+        ]
+        ++ [
+          {
+            hydrix.vm.storeName = nixpkgs'.lib.mkForce hostname;
+            hydrix.vm.hostname = nixpkgs'.lib.mkDefault hostname;
+          }
+        ]
+        ++ modules
+        ++ nixpkgs'.lib.optional (hostConfig != {}) hostConfig
+        ++ nixpkgs'.lib.optionals (userProfiles != null && builtins.pathExists (userProfiles + "/${profile}")) [
+          (userProfiles + "/${profile}")
+        ];
+    };
 
   # =========================================================================
   # mkMicrovmRouter - Create the MicroVM router
@@ -174,47 +189,59 @@ in rec {
     profileNetworks ? [],
     modules ? [],
     extraInputs ? {},
-  }:
-  let
+  }: let
     allInputs = inputs // extraInputs;
     nixpkgs' = inputs.nixpkgs;
-  in nixpkgs'.lib.nixosSystem {
-    inherit system;
-    modules = [
-      { nixpkgs.config.allowUnfree = true; }
-      { nixpkgs.overlays = [ overlay-unstable overlay-lkl-memory ]; }
-    ] ++ optionsModules
-      ++ nixpkgs'.lib.optional (allInputs ? stylix) allInputs.stylix.nixosModules.stylix
-      ++ [
-      home-manager.nixosModules.home-manager
-      { home-manager.useGlobalPkgs = true; home-manager.useUserPackages = true; }
-      microvm.nixosModules.microvm
-      ../vm/microvm/infra/microvm-router.nix
-      { networking.hostName = hostname; }
-    ] ++ nixpkgs'.lib.optional (wifiPciAddress != "") {
-      hydrix.hardware.vfio.wifiPciAddress = wifiPciAddress;
-    } ++ nixpkgs'.lib.optional (extraNetworks != []) {
-      hydrix.networking.extraNetworks = extraNetworks;
-    } ++ nixpkgs'.lib.optional (profileNetworks != []) {
-      hydrix.networking.profileNetworks = profileNetworks;
-    } ++ modules;
-  };
+  in
+    nixpkgs'.lib.nixosSystem {
+      inherit system;
+      modules =
+        [
+          {nixpkgs.config.allowUnfree = true;}
+          {nixpkgs.overlays = [overlay-unstable overlay-lkl-memory];}
+        ]
+        ++ optionsModules
+        ++ nixpkgs'.lib.optional (allInputs ? stylix) allInputs.stylix.nixosModules.stylix
+        ++ [
+          home-manager.nixosModules.home-manager
+          {
+            home-manager.useGlobalPkgs = true;
+            home-manager.useUserPackages = true;
+          }
+          microvm.nixosModules.microvm
+          ../vm/microvm/infra/microvm-router.nix
+          {networking.hostName = hostname;}
+        ]
+        ++ nixpkgs'.lib.optional (wifiPciAddress != "") {
+          hydrix.hardware.vfio.wifiPciAddress = wifiPciAddress;
+        }
+        ++ nixpkgs'.lib.optional (extraNetworks != []) {
+          hydrix.networking.extraNetworks = extraNetworks;
+        }
+        ++ nixpkgs'.lib.optional (profileNetworks != []) {
+          hydrix.networking.profileNetworks = profileNetworks;
+        }
+        ++ modules;
+    };
 
   # =========================================================================
   # mkMicrovmRouterUser - User-configured router variant
   # =========================================================================
   # Identical to mkMicrovmRouter but uses hostname "microvm-router-user".
   # Only one router can run at a time (same WiFi card, same CID, same TAPs).
-  mkMicrovmRouterUser = args:
-  let
+  mkMicrovmRouterUser = args: let
     allInputs = inputs // (args.extraInputs or {});
     nixpkgs' = inputs.nixpkgs;
-  in mkMicrovmRouter (args // {
-    extraInputs = args.extraInputs or {};
-    modules = (args.modules or []) ++ [
-      { networking.hostName = nixpkgs'.lib.mkForce "microvm-router-user"; }
-    ];
-  });
+  in
+    mkMicrovmRouter (args
+      // {
+        extraInputs = args.extraInputs or {};
+        modules =
+          (args.modules or [])
+          ++ [
+            {networking.hostName = nixpkgs'.lib.mkForce "microvm-router-user";}
+          ];
+      });
 
   # =========================================================================
   # mkMicrovmRouterStable - Create the immutable fallback router VM
@@ -231,31 +258,40 @@ in rec {
     profileNetworks ? [],
     modules ? [],
     extraInputs ? {},
-  }:
-  let
+  }: let
     allInputs = inputs // extraInputs;
     nixpkgs' = inputs.nixpkgs;
-  in nixpkgs'.lib.nixosSystem {
-    inherit system;
-    modules = [
-      { nixpkgs.config.allowUnfree = true; }
-      { nixpkgs.overlays = [ overlay-unstable overlay-lkl-memory ]; }
-    ] ++ optionsModules
-      ++ nixpkgs'.lib.optional (allInputs ? stylix) allInputs.stylix.nixosModules.stylix
-      ++ [
-      home-manager.nixosModules.home-manager
-      { home-manager.useGlobalPkgs = true; home-manager.useUserPackages = true; }
-      microvm.nixosModules.microvm
-      ../vm/microvm/infra/microvm-router-stable.nix
-      { networking.hostName = hostname; }
-    ] ++ nixpkgs'.lib.optional (wifiPciAddress != "") {
-      hydrix.hardware.vfio.wifiPciAddress = wifiPciAddress;
-    } ++ nixpkgs'.lib.optional (extraNetworks != []) {
-      hydrix.networking.extraNetworks = extraNetworks;
-    } ++ nixpkgs'.lib.optional (profileNetworks != []) {
-      hydrix.networking.profileNetworks = profileNetworks;
-    } ++ modules;
-  };
+  in
+    nixpkgs'.lib.nixosSystem {
+      inherit system;
+      modules =
+        [
+          {nixpkgs.config.allowUnfree = true;}
+          {nixpkgs.overlays = [overlay-unstable overlay-lkl-memory];}
+        ]
+        ++ optionsModules
+        ++ nixpkgs'.lib.optional (allInputs ? stylix) allInputs.stylix.nixosModules.stylix
+        ++ [
+          home-manager.nixosModules.home-manager
+          {
+            home-manager.useGlobalPkgs = true;
+            home-manager.useUserPackages = true;
+          }
+          microvm.nixosModules.microvm
+          ../vm/microvm/infra/microvm-router-stable.nix
+          {networking.hostName = hostname;}
+        ]
+        ++ nixpkgs'.lib.optional (wifiPciAddress != "") {
+          hydrix.hardware.vfio.wifiPciAddress = wifiPciAddress;
+        }
+        ++ nixpkgs'.lib.optional (extraNetworks != []) {
+          hydrix.networking.extraNetworks = extraNetworks;
+        }
+        ++ nixpkgs'.lib.optional (profileNetworks != []) {
+          hydrix.networking.profileNetworks = profileNetworks;
+        }
+        ++ modules;
+    };
 
   # =========================================================================
   # mkMicrovmBuilder - Create the MicroVM builder for lockdown mode
@@ -263,31 +299,37 @@ in rec {
   # hostUsername: Username on the host machine (for mounting ~/hydrix-config)
   mkMicrovmBuilder = {
     system ? "x86_64-linux",
-    hostUsername,  # Required: host user whose hydrix-config to mount
+    hostUsername, # Required: host user whose hydrix-config to mount
     modules ? [],
     extraInputs ? {},
-  }:
-  let
+  }: let
     allInputs = inputs // extraInputs;
     nixpkgs' = inputs.nixpkgs;
-  in nixpkgs'.lib.nixosSystem {
-    inherit system;
-    modules = [
-      { nixpkgs.config.allowUnfree = true; }
-      { nixpkgs.overlays = [ overlay-unstable overlay-lkl-memory ]; }
-    ] ++ optionsModules
-      ++ nixpkgs'.lib.optional (allInputs ? stylix) allInputs.stylix.nixosModules.stylix
-      ++ [
-      home-manager.nixosModules.home-manager
-      { home-manager.useGlobalPkgs = true; home-manager.useUserPackages = true; }
-      microvm.nixosModules.microvm
-      ../vm/microvm/infra/microvm-builder.nix
-      {
-        networking.hostName = "microvm-builder";
-        hydrix.builder.hostUsername = hostUsername;
-      }
-    ] ++ modules;
-  };
+  in
+    nixpkgs'.lib.nixosSystem {
+      inherit system;
+      modules =
+        [
+          {nixpkgs.config.allowUnfree = true;}
+          {nixpkgs.overlays = [overlay-unstable overlay-lkl-memory];}
+        ]
+        ++ optionsModules
+        ++ nixpkgs'.lib.optional (allInputs ? stylix) allInputs.stylix.nixosModules.stylix
+        ++ [
+          home-manager.nixosModules.home-manager
+          {
+            home-manager.useGlobalPkgs = true;
+            home-manager.useUserPackages = true;
+          }
+          microvm.nixosModules.microvm
+          ../vm/microvm/infra/microvm-builder.nix
+          {
+            networking.hostName = "microvm-builder";
+            hydrix.builder.hostUsername = hostUsername;
+          }
+        ]
+        ++ modules;
+    };
 
   # =========================================================================
   # mkInfraVm - Create a user-declared headless infrastructure VM
@@ -308,28 +350,34 @@ in rec {
   #
   mkInfraVm = {
     name,
-    system  ? "x86_64-linux",
+    system ? "x86_64-linux",
     modules ? [],
     extraInputs ? {},
-  }:
-  let
+  }: let
     allInputs = inputs // extraInputs;
     nixpkgs' = inputs.nixpkgs;
-  in nixpkgs'.lib.nixosSystem {
-    inherit system;
-    modules = [
-      { nixpkgs.config.allowUnfree = true; }
-      { nixpkgs.overlays = [ overlay-unstable overlay-lkl-memory ]; }
-    ] ++ optionsModules
-      ++ nixpkgs'.lib.optional (allInputs ? stylix) allInputs.stylix.nixosModules.stylix
-      ++ [
-      home-manager.nixosModules.home-manager
-      { home-manager.useGlobalPkgs = true; home-manager.useUserPackages = true; }
-      microvm.nixosModules.microvm
-      ../vm/microvm/infra/microvm-infra-base.nix
-      { networking.hostName = "microvm-${name}"; }
-    ] ++ modules;
-  };
+  in
+    nixpkgs'.lib.nixosSystem {
+      inherit system;
+      modules =
+        [
+          {nixpkgs.config.allowUnfree = true;}
+          {nixpkgs.overlays = [overlay-unstable overlay-lkl-memory];}
+        ]
+        ++ optionsModules
+        ++ nixpkgs'.lib.optional (allInputs ? stylix) allInputs.stylix.nixosModules.stylix
+        ++ [
+          home-manager.nixosModules.home-manager
+          {
+            home-manager.useGlobalPkgs = true;
+            home-manager.useUserPackages = true;
+          }
+          microvm.nixosModules.microvm
+          ../vm/microvm/infra/microvm-infra-base.nix
+          {networking.hostName = "microvm-${name}";}
+        ]
+        ++ modules;
+    };
 
   # =========================================================================
   # mkVM - Create a libvirt VM configuration (for images)
@@ -341,54 +389,55 @@ in rec {
     system ? "x86_64-linux",
     profile,
     modules ? [],
-    userProfiles ? null,  # Path to user's profiles directory (overlays base profile)
-    hostConfig ? {},      # Host settings VMs should inherit (font family, etc.)
+    userProfiles ? null, # Path to user's profiles directory (overlays base profile)
+    hostConfig ? {}, # Host settings VMs should inherit (font family, etc.)
     userColorschemesDir ? null,
     extraInputs ? {},
-  }:
-  let
+  }: let
     allInputs = inputs // extraInputs;
     nixpkgs' = inputs.nixpkgs;
-  in nixpkgs'.lib.nixosSystem {
-    inherit system;
-    specialArgs = { hasStylix = allInputs ? stylix; };
-    modules = commonModules
-      ++ nixpkgs'.lib.optional (allInputs ? stylix)
-           allInputs.stylix.nixosModules.stylix
-      ++ [
-      { hydrix.userColorschemesDir = userColorschemesDir; }
-      ../vm/libvirt/vm-base.nix  # VM base configuration
-      ../vm/profiles/${profile} # Hydrix base profile (always included)
-      "${nixpkgs'}/nixos/modules/virtualisation/disk-image.nix"
-      {
-        image.efiSupport = false;
-      }
-      # hydrix.microvm.* option declarations (real schema, shared with
-      # microvm-profile-base.nix) so profiles/<name>/default.nix's
-      # lib.mkDefault/lib.mkForce-wrapped settings resolve correctly here too
-      # — a plain freeform stub would leak the raw override wrapper through
-      # instead of unwrapping it, breaking any mkIf that reads these values.
-      # None of it is actually acted on by the libvirt/disk-image build.
-      ../vm/microvm/infra/microvm-profile-options.nix
-      # microvm.*: the real microvm-nix option tree (e.g. profiles/pentest's
-      # microvm.qemu.extraArgs USB passthrough flags) — only meaningful when
-      # microvm.nixosModules.microvm (a live QEMU launch) is actually wired
-      # in. No profile currently wraps this in mkDefault/mkForce, so a plain
-      # ignored freeform stub is sufficient.
-      {
-        options.microvm = nixpkgs'.lib.mkOption {
-          type = nixpkgs'.lib.types.attrs;
-          default = {};
-          description = "Ignored by libvirt image builds — real microvm-nix settings.";
-        };
-      }
-    ] ++ modules
-    # Host settings applied after base profile, before user overrides
-    ++ nixpkgs'.lib.optional (hostConfig != {}) hostConfig
-    # Layer user's profile customizations on top (if provided)
-    ++ nixpkgs'.lib.optionals (userProfiles != null && builtins.pathExists (userProfiles + "/${profile}")) [
-      (userProfiles + "/${profile}")
-    ];
-  };
+  in
+    nixpkgs'.lib.nixosSystem {
+      inherit system;
+      specialArgs = {hasStylix = allInputs ? stylix;};
+      modules =
+        commonModules
+        ++ nixpkgs'.lib.optional (allInputs ? stylix)
+        allInputs.stylix.nixosModules.stylix
+        ++ [
+          {hydrix.userColorschemesDir = userColorschemesDir;}
+          ../vm/libvirt/vm-base.nix # VM base configuration
+          ../vm/profiles/${profile} # Hydrix base profile (always included)
+          "${nixpkgs'}/nixos/modules/virtualisation/disk-image.nix"
+          {
+            image.efiSupport = false;
+          }
+          # hydrix.microvm.* option declarations (real schema, shared with
+          # microvm-profile-base.nix) so profiles/<name>/default.nix's
+          # lib.mkDefault/lib.mkForce-wrapped settings resolve correctly here too
+          # — a plain freeform stub would leak the raw override wrapper through
+          # instead of unwrapping it, breaking any mkIf that reads these values.
+          # None of it is actually acted on by the libvirt/disk-image build.
+          ../vm/microvm/infra/microvm-profile-options.nix
+          # microvm.*: the real microvm-nix option tree (e.g. profiles/pentest's
+          # microvm.qemu.extraArgs USB passthrough flags) — only meaningful when
+          # microvm.nixosModules.microvm (a live QEMU launch) is actually wired
+          # in. No profile currently wraps this in mkDefault/mkForce, so a plain
+          # ignored freeform stub is sufficient.
+          {
+            options.microvm = nixpkgs'.lib.mkOption {
+              type = nixpkgs'.lib.types.attrs;
+              default = {};
+              description = "Ignored by libvirt image builds — real microvm-nix settings.";
+            };
+          }
+        ]
+        ++ modules
+        # Host settings applied after base profile, before user overrides
+        ++ nixpkgs'.lib.optional (hostConfig != {}) hostConfig
+        # Layer user's profile customizations on top (if provided)
+        ++ nixpkgs'.lib.optionals (userProfiles != null && builtins.pathExists (userProfiles + "/${profile}")) [
+          (userProfiles + "/${profile}")
+        ];
+    };
 }
-

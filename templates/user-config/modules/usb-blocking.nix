@@ -9,7 +9,7 @@
 #   2. usb list                    — see storage devices and their busids
 #   3. usb attach <busid> [--rw]   — pass to usb-sandbox VM (default read-only)
 #   4. shard console usb-sandbox — then: usb scan / usb mount /dev/vdbX
-#   5. microvm files transfer <src-vm>/<path> usb-sandbox/shared/  — bring files in
+#   5. shard files transfer <src-vm>/<path> usb-sandbox/shared/  — bring files in
 #   6. usb detach                  — release device back to host (unmount in the VM first)
 {
   config,
@@ -145,8 +145,8 @@
           fi
           echo ""
           echo "Move files in/out (run on the host, not in the VM console):"
-          echo "  microvm files transfer <src-vm>/<path> usb-sandbox/shared/"
-          echo "  microvm files transfer usb-sandbox/shared/<path> <dst-vm>/<dest>"
+          echo "  shard files transfer <src-vm>/<path> usb-sandbox/shared/"
+          echo "  shard files transfer usb-sandbox/shared/<path> <dst-vm>/<dest>"
           echo ""
           echo "When done: unmount in the VM (usb umount ...), then 'usb detach' here."
           ;;

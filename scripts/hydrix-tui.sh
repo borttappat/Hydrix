@@ -487,7 +487,7 @@ show_microvm_actions() {
             local eng
             eng=$(pentest_task_engagement "$vm")
             header="$vm ($state)"
-            [[ -n "$eng" ]] && header+=" — engagement: $eng" || header+=" — unassigned (microvm pentest create <name>)"
+            [[ -n "$eng" ]] && header+=" — engagement: $eng" || header+=" — unassigned (shard pentest create <name>)"
         fi
 
         local actions=()

@@ -5,11 +5,11 @@
 # No internet access. Only the files VM (192.168.214.2) can reach port 8888.
 #
 # Usage from host:
-#   microvm files transfer <src-vm>/<path> hostsync/<dest-subdir>
+#   shard files transfer <src-vm>/<path> hostsync/<dest-subdir>
 #   → files appear at ~/vm-inbox/<dest-subdir>/<filename>
 #
 #   Drop a file into ~/vm-inbox/, then:
-#   microvm files transfer hostsync/<filename> <dst-vm>/<dest-path>
+#   shard files transfer hostsync/<filename> <dst-vm>/<dest-path>
 #   → file delivered from inbox into destination VM
 #
 # vsock 14506: host ↔ hostsync (ENCRYPT, SERVE, RECEIVE_PREPARE, DECRYPT, CLEANUP, PING)
@@ -254,7 +254,7 @@ in {
     networks."10-hostsync" = {
       matchConfig.MACAddress = meta.tapMac;
       # Own CID as last octet, matching get_vm_ip's subnet.cid derivation in
-      # scripts/microvm (same convention every profile VM uses).
+      # scripts/shard.nix (same convention every profile VM uses).
       address = ["${meta.subnet}.${toString meta.vsockCid}/24"];
       linkConfig.RequiredForOnline = "no";
     };

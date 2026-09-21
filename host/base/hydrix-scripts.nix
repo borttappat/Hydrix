@@ -19,8 +19,8 @@
 #
 # MICROVM MANAGEMENT
 # ------------------
-#   microvm <cmd> [name]      MicroVM CLI (see `microvm help`)
-#     microvm list            List available microVMs
+#   shard <cmd> [name]        MicroVM CLI (see `shard help`)
+#     shard list              List available microVMs
 #     shard status            Show running microVMs
 #     shard build <name>      Build/rebuild a microVM
 #     shard start <name>      Start a microVM (waits for display readiness)
@@ -127,9 +127,9 @@
     new-profile = "new-profile";
 
     # ===== MICROVM MANAGEMENT =====
-    # Note: 'microvm' command is added in microvm-host.nix with path substitution
-    # For interactive microVM management, use 'microvm' CLI directly:
-    #   microvm list/status/build/start/stop/app
+    # Note: 'shard' command is added in microvm-host.nix with path substitution
+    # For interactive microVM management, use 'shard' CLI directly:
+    #   shard list/status/build/start/stop/app
     # The hydrix-tui handles libvirt VMs, not microVMs
 
     # ===== LIBVIRT VM MANAGEMENT =====

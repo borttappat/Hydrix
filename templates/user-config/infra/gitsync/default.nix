@@ -8,10 +8,10 @@
 # volume for its OAuth token.
 #
 # Host commands:
-#   microvm git repos            List mounted repos and current branch
-#   microvm git push <repo>      Push commits
-#   microvm git pull <repo>      Pull changes
-#   microvm git status <repo>    Show status + recent log
+#   shard git repos            List mounted repos and current branch
+#   shard git push <repo>      Push commits
+#   shard git pull <repo>      Pull changes
+#   shard git status <repo>    Show status + recent log
 #
 {
   config,
@@ -139,11 +139,11 @@
       "|  First time:  gh auth login                     |"
     ]
     ++ [
-      "|  Commands from host (via microvm git):          |"
-      "|    microvm git repos          List repos        |"
-      "|    microvm git push <repo>    Push commits      |"
-      "|    microvm git pull <repo>    Pull changes      |"
-      "|    microvm git status <repo>  Show status       |"
+      "|  Commands from host (via shard git):          |"
+      "|    shard git repos          List repos        |"
+      "|    shard git push <repo>    Push commits      |"
+      "|    shard git pull <repo>    Pull changes      |"
+      "|    shard git status <repo>  Show status       |"
       "+-------------------------------------------------+"
       ""
     ];

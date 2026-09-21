@@ -637,7 +637,7 @@ rebuild_microvms() {
     while IFS= read -r vm; do
         [[ -z "$vm" ]] && continue
         echo -e "${CYAN}Building $vm...${NC}"
-        "$SCRIPT_DIR/microvm" build "$vm" || echo -e "${YELLOW}Failed: $vm${NC}"
+        shard build "$vm" || echo -e "${YELLOW}Failed: $vm${NC}"
     done <<< "$vms_to_rebuild"
 
     success "MicroVM rebuild complete"

@@ -472,7 +472,7 @@ hydrix.router.microvm.firewall.allowedAccessTo = [
 
 Unlike `sharedSubnets`, this doesn't open the destination to every other VM, and doesn't open the source subnet to anything beyond the declared `to`/`ports` pair - every other subnet combination stays isolated exactly as before. If the destination VM has its own VPN exit-node table (e.g. a privacy-profile VM routed through Mullvad), traffic in **both** directions needs a bypass for the pair to actually route (not just be firewall-accepted) - this option handles that automatically, no manual `ip rule` needed.
 
-Applying a change here requires an explicit `microvm build router` (updates the running VM's `current` symlink) followed by `microvm restart router` - `rebuild` alone only rebuilds the router's toplevel into the store, it does not restart the running VM or repoint `current`, even though the router is a "coupled" VM.
+Applying a change here requires an explicit `shard build router` (updates the running VM's `current` symlink) followed by `shard restart router` - `rebuild` alone only rebuilds the router's toplevel into the store, it does not restart the running VM or repoint `current`, even though the router is a "coupled" VM.
 
 ---
 
@@ -621,7 +621,7 @@ GRUB EFI graphics mode. Set to your display's native resolution.
 
 Pass a USB webcam through to a profile VM via QEMU USB host passthrough. The host's udev rules are updated automatically to grant the `kvm` group ownership of the device node. QEMU args are injected into the target profile VM via `microvmHost.profileOverrides` - only on this machine.
 
-The passthrough is exclusive: the webcam is unavailable on the host while the VM is running. Stop the VM to release it back to the host (`microvm stop microvm-comms`).
+The passthrough is exclusive: the webcam is unavailable on the host while the VM is running. Stop the VM to release it back to the host (`shard stop microvm-comms`).
 
 ---
 

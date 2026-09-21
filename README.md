@@ -233,7 +233,7 @@ Built-in profiles and their defaults:
 
 Each profile is actually built as its own per-machine nixosConfiguration
 (`microvm-<profile>-<serial>`, the same pattern the router already uses), but you never
-need to know or type that: `microvm <cmd> <profile>` always resolves to the current
+need to know or type that: `shard <cmd> <profile>` always resolves to the current
 machine's real VM name via `/etc/hydrix/vm-registry.json`. Infra VMs (router, builder,
 files, gitsync, hostsync, usb-sandbox, vault) are the exception - they stay a single
 shared name across every machine, since they hold no persistent state to differentiate.

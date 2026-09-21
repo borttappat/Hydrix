@@ -311,7 +311,7 @@ in {
       environment.systemPackages = [
         pkgs.virtiofsd
         pkgs.socat # For microvm-router console access
-        pkgs.openssl # For microvm files passphrase generation
+        pkgs.openssl # For shard files passphrase generation
         # TAP→bridge lookup — wraps the build-time generated tapLookupScript so it
         # is on PATH. Dynamic: covers router, infra, profile, and extra-network TAPs.
         # Used by hydrix-switch for post-mode-switch TAP reattachment.
