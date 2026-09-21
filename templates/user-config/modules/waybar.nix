@@ -390,7 +390,7 @@
     names=$(${pkgs.jq}/bin/jq -r '.names | join(", ")' "$CACHE" 2>/dev/null)
     ${pkgs.jq}/bin/jq -cn \
       --arg t "GC +$count" \
-      --arg tt "$count orphaned VM dir(s): $names — run: microvm gc" \
+      --arg tt "$count orphaned VM dir(s): $names — run: shard gc" \
       --arg c "unsaved" \
       '{"text":$t,"tooltip":$tt,"class":$c}'
   '';

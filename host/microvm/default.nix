@@ -9,8 +9,8 @@
 # Usage:
 #   1. Enable in your machine config: hydrix.microvmHost.enable = true;
 #   2. Rebuild host: rebuild
-#   3. Build microVM: microvm build microvm-browsing
-#   4. Start microVM: microvm start microvm-browsing
+#   3. Build microVM: shard -b browsing
+#   4. Start microVM: shard -s browsing
 #   5. Or enable autostart: hydrix.microvmHost.vms."microvm-browsing".autostart = true;
 #
 # Coupled vs decoupled VMs:
@@ -19,7 +19,7 @@
 #   host's own system.build.toplevel. Infra VMs (router, builder, etc.) are
 #   coupled by default so they're always built and reliably autostarted with
 #   the host. Profile and task VMs are decoupled by default: they're built
-#   and managed only via the `microvm` CLI (build/start/update/restart), never
+#   and managed only via the `shard` CLI (-b/-s/-r/-R/switch/...), never
 #   as a side effect of `rebuild`. This keeps host rebuild times independent of
 #   how many heavy desktop profile VMs are declared. Flip the default for all
 #   profile/task VMs at once with hydrix.microvmHost.coupleProfiles = true, or
@@ -217,6 +217,10 @@
     [ -z "$BRIDGE" ] && exit 0
     ${attachTapScript} "$TAP" "$BRIDGE"
   '';
+
+  # VM lifecycle CLI. Bound once here and referenced everywhere below instead
+  # of each call site wrapping scripts/shard.nix independently.
+  shardPkg = lib.hiPrio (pkgs.callPackage ../../scripts/shard.nix {});
 in {
   # Note: microvm.nixosModules.host is imported by mkHost in lib/default.nix
   # Options for hydrix.microvmHost are declared in modules/options.nix
@@ -226,15 +230,10 @@ in {
   config = lib.mkMerge [
     # Always available — fallback mode and fresh installs need these to manage VMs
     {
-      environment.systemPackages = [
-        (lib.hiPrio (
-          pkgs.writeShellScriptBin "microvm"
-          (builtins.readFile ../../scripts/microvm)
-        ))
-      ];
+      environment.systemPackages = [shardPkg];
 
       # Machine identity for scripts — present in all modes (fallback, administrative, lockdown)
-      # so 'microvm build router' resolves the correct per-machine VM name everywhere.
+      # so 'shard build router' resolves the correct per-machine VM name everywhere.
       environment.etc."hydrix/host-config.json" = {
         text = builtins.toJSON {
           hostIp = config.hydrix.networking.hostIp;
@@ -308,7 +307,7 @@ in {
       };
 
       # Ensure virtiofsd is available
-      # Install custom microvm script with high priority to override upstream
+      # Install shard with high priority to override any upstream binary
       environment.systemPackages = [
         pkgs.virtiofsd
         pkgs.socat # For microvm-router console access
@@ -349,14 +348,11 @@ in {
               sys.stdout.buffer.flush()
           sock.close()
         '')
-        # The microvm script has built-in flake detection that checks:
+        # shard has built-in flake detection that checks:
         # 1. HYDRIX_FLAKE_DIR env var
         # 2. ~/hydrix-config/flake.nix
         # 3. ~/Hydrix/flake.nix
-        (lib.hiPrio (
-          pkgs.writeShellScriptBin "microvm"
-          (builtins.readFile ../../scripts/microvm)
-        ))
+        shardPkg
       ];
 
       # Allow wheel users to start/stop/restart microvm@ units without a password
@@ -443,7 +439,7 @@ in {
       # Only coupled VMs: this is what makes upstream microvm.nix build a VM's
       # toplevel as part of the host's own system.build.toplevel. Decoupled
       # VMs (profile/task, by default) are managed exclusively via the
-      # `microvm` CLI, see header comment.
+      # `shard` CLI, see header comment.
       microvm.vms =
         lib.mapAttrs (name: vmCfg: {
           inherit (vmCfg) autostart;
@@ -485,7 +481,7 @@ in {
         })
 
         # Stable router: root for VFIO, conflicts with main router (can't share WiFi card).
-        # Never auto-starts — launch manually with: microvm start router-stable
+        # Never auto-starts — launch manually with: shard start router-stable
         (lib.mkIf stableRouterEnabled {
           "microvm@${stableRouterVmName}" = {
             serviceConfig = {
@@ -648,7 +644,7 @@ in {
         # host toplevel, this just links /var/lib/microvms/<name>/current for the
         # Hydrix CLI) and any decoupled VM explicitly opted into autostart. Decoupled
         # VMs without autostart (e.g. microvm-pentest by default) are intentionally
-        # left unbuilt - they only get built via an explicit `microvm build <name>`.
+        # left unbuilt - they only get built via an explicit `shard build <name>`.
         # Runs once per install, gated by /var/lib/hydrix/.firstboot-vms-done.
         {
           hydrix-firstboot-vms = {
@@ -677,7 +673,7 @@ in {
                     out_link="/tmp/firstboot-${name}"
                     if nix build "path:${configDir}#nixosConfigurations.${name}.config.microvm.declaredRunner" \
                         -o "$out_link" --print-build-logs 2>&1; then
-                      # Create symlink (same as microvm build CLI)
+                      # Create symlink (same as shard build CLI)
                       store_path=$(readlink -f "$out_link")
                       mkdir -p "/var/lib/microvms/${name}/config"
                       chown microvm:kvm "/var/lib/microvms/${name}"
@@ -716,7 +712,7 @@ in {
         # microvm.autostart -> systemd.targets.microvms.wants mechanism never
         # sees them (it's built only from config.microvm.vms names). One
         # concrete oneshot service per decoupled+autostart VM, gated on the
-        # runner already having been built at least once (via `microvm build
+        # runner already having been built at least once (via `shard build
         # <name>`, or hydrix-firstboot-vms above on a fresh install), skips
         # cleanly via ConditionPathExists if not, rather than failing boot.
         (lib.mapAttrs' (name: _:
@@ -729,14 +725,14 @@ in {
             serviceConfig = {
               Type = "oneshot";
               RemainAfterExit = true;
-              # detect_flake_dir() in scripts/microvm falls back to
+              # detect_flake_dir() in scripts/shard.nix falls back to
               # $SUDO_USER/$USER, neither of which exist for a root systemd
               # service with no login session, set it explicitly.
               Environment = "HYDRIX_FLAKE_DIR=${config.hydrix.paths.configDir}";
               ExecStart = "${pkgs.writeShellScript "hydrix-microvm-autostart-${name}" ''
                 set -e
                 systemctl is-active --quiet "microvm@${name}.service" && exit 0
-                exec ${pkgs.writeShellScriptBin "microvm" (builtins.readFile ../../scripts/microvm)}/bin/microvm start "${name}"
+                exec ${shardPkg}/bin/shard start "${name}"
               ''}";
             };
           })
@@ -795,18 +791,18 @@ in {
     })
 
     # Periodically refreshes /tmp/hydrix-gc-status (orphaned VM directory count)
-    # for waybar/eww to read cheaply. `microvm gc` itself always checks live -
+    # for waybar/eww to read cheaply. `shard gc` itself always checks live -
     # this cache exists purely because a fresh `nix eval` on every 10-30s UI
     # poll would be wasteful; orphans don't appear or disappear that often.
     # User-level (not system) service: runs as the logged-in user so
-    # detect_flake_dir()'s $USER/$HOME fallback in scripts/microvm resolves
+    # detect_flake_dir()'s $USER/$HOME fallback in scripts/shard.nix resolves
     # naturally, and shares /tmp with the waybar/eww processes reading the cache.
     (lib.mkIf cfg.enable {
       systemd.user.services.hydrix-gc-check = {
         description = "Refresh orphaned microVM directory cache";
         serviceConfig = {
           Type = "oneshot";
-          ExecStart = "${pkgs.writeShellScriptBin "microvm" (builtins.readFile ../../scripts/microvm)}/bin/microvm gc-check";
+          ExecStart = "${shardPkg}/bin/shard gc-check";
         };
       };
 

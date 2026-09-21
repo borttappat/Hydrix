@@ -8,13 +8,15 @@
 #   1. Plug in USB drive — host blocks auto-mount via udev
 #   2. usb list                    — see storage devices and their busids
 #   3. usb attach <busid> [--rw]   — pass to usb-sandbox VM (default read-only)
-#   4. microvm console usb-sandbox — then: usb scan / usb mount /dev/vdbX
+#   4. shard console usb-sandbox — then: usb scan / usb mount /dev/vdbX
 #   5. microvm files transfer <src-vm>/<path> usb-sandbox/shared/  — bring files in
 #   6. usb detach                  — release device back to host (unmount in the VM first)
-
-{ config, lib, pkgs, ... }:
-
 {
+  config,
+  lib,
+  pkgs,
+  ...
+}: {
   # =========================================================================
   # UDEV RULES — block USB storage from auto-mounting on host
   # bInterfaceClass 08 = Mass Storage; does NOT affect HID (03), audio (01), etc.
@@ -37,7 +39,7 @@
   # the usb-sandbox QEMU process can open them via drive_add hotplug.
   # Adding to the 'disk' group is the standard way to grant raw block access.
   # =========================================================================
-  users.users.microvm.extraGroups = [ "disk" ];
+  users.users.microvm.extraGroups = ["disk"];
 
   # =========================================================================
   # HOST-SIDE USB HELPER
@@ -129,7 +131,7 @@
           fi
           echo "OK — disk passed to VM as /dev/vdb ($MODE_DESC)"
           echo ""
-          echo "Next: microvm console usb-sandbox"
+          echo "Next: shard console usb-sandbox"
           echo ""
           echo "Inside the VM:"
           echo "  usb list                    — show block devices + mount state"

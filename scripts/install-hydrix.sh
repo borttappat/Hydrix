@@ -3719,7 +3719,7 @@ prebuild_microvms() {
     fi
 
     log "Other VMs (microvm-browsing, microvm-pentest, microvm-dev, microvm-comms, microvm-lurking) can be built on-demand:"
-    log "  microvm build <name>"
+    log "  shard build <name>"
 }
 
 # ========== RESUME ==========

@@ -12,13 +12,17 @@
 #   vault-cli sync                Commit + push vault DB to git via gitsync
 #   vault-cli pull                Pull vault DB changes from git via gitsync
 #   vault-cli ping                Check vault VM connectivity
-{ config, lib, pkgs, ... }:
-let
+{
+  config,
+  lib,
+  pkgs,
+  ...
+}: let
   cfg = config.hydrix.vault;
 
   vaultCli = pkgs.writeShellApplication {
     name = "vault-cli";
-    runtimeInputs = with pkgs; [ socat coreutils ];
+    runtimeInputs = with pkgs; [socat coreutils];
     text = ''
       CID="${toString cfg.vsockCid}"
       PORT="${toString cfg.vsockPort}"
@@ -31,7 +35,7 @@ let
 
       require_vault() {
         if ! echo "PING" | socat -T5 - "VSOCK-CONNECT:$CID:$PORT" 2>/dev/null | grep -q "PONG"; then
-          echo "vault not configured — run: microvm start vault" >&2
+          echo "vault not configured — run: shard start vault" >&2
           echo "See DOCUMENTATION.md §Vault VM for setup instructions." >&2
           exit 1
         fi
@@ -114,23 +118,22 @@ let
       esac
     '';
   };
-
 in {
   options.hydrix.vault = {
     enable = lib.mkEnableOption "Vault VM credential integration";
     vsockCid = lib.mkOption {
-      type    = lib.types.int;
+      type = lib.types.int;
       default = 213;
       description = "vsock CID of the vault VM";
     };
     vsockPort = lib.mkOption {
-      type    = lib.types.int;
+      type = lib.types.int;
       default = 14514;
       description = "vsock port of the vault agent";
     };
   };
 
   config = lib.mkIf cfg.enable {
-    environment.systemPackages = [ vaultCli pkgs.socat ];
+    environment.systemPackages = [vaultCli pkgs.socat];
   };
 }

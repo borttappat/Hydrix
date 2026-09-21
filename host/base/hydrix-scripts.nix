@@ -21,12 +21,12 @@
 # ------------------
 #   microvm <cmd> [name]      MicroVM CLI (see `microvm help`)
 #     microvm list            List available microVMs
-#     microvm status          Show running microVMs
-#     microvm build <name>    Build/rebuild a microVM
-#     microvm start <name>    Start a microVM (waits for display readiness)
-#     microvm stop <name>     Stop a microVM
-#     microvm app <name> <cmd>  Launch app in microVM
-#     microvm console <name>  Attach to microVM console
+#     shard status            Show running microVMs
+#     shard build <name>      Build/rebuild a microVM
+#     shard start <name>      Start a microVM (waits for display readiness)
+#     shard stop <name>       Stop a microVM
+#     shard app <name> <cmd>  Launch app in microVM
+#     shard console <name>    Attach to microVM console
 #
 # LIBVIRT VM MANAGEMENT
 # ---------------------

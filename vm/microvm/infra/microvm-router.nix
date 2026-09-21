@@ -10,7 +10,7 @@
 #   1. Enable in user's machine config:
 #      hydrix.microvmHost.vms.microvm-router.enable = true;
 #   2. Rebuild host: rebuild
-#   3. Start microvm router: microvm start microvm-router
+#   3. Start microvm router: shard start microvm-router
 #
 # Non-destructive testing:
 #   - The libvirt "router" VM and microvm "microvm-router" can coexist
@@ -186,7 +186,7 @@ in {
     ../../options.nix
     # QEMU Guest profile for virtio modules
     (modulesPath + "/profiles/qemu-guest.nix")
-    # Live NixOS switch via vsock:14504 (microvm update / microvm switch)
+    # Live NixOS switch via vsock:14504 (shard switch)
     ./vm-switch.nix
   ];
 
@@ -341,7 +341,7 @@ in {
           proto = "virtiofs";
         }
         # VM config directory - used by vm-switch to receive .switch-reg nix DB dump.
-        # Created by `microvm build` at /var/lib/microvms/<name>/config on the host.
+        # Created by `shard build` at /var/lib/microvms/<name>/config on the host.
         {
           tag = "router-config";
           source = "/var/lib/microvms/${vmName}/config";
@@ -366,7 +366,7 @@ in {
       # /var/lib/NetworkManager gets a small persistent qcow2 volume so
       # runtime-added (nmcli) connections survive. Declared config (wifi.nix,
       # hydrix.router.vpn.mullvad.*) is the source of truth for anything
-      # declarative either way; no `microvm purge` needed to clear stale
+      # declarative either way; no `shard purge` needed to clear stale
       # runtime state.
       volumes = lib.optionals cfg.router.persistence.enable [
         {

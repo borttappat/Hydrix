@@ -105,7 +105,7 @@ cmd_list() {
     if [[ ${#running_vms[@]} -eq 0 ]]; then
         log "  ${DIM}No VMs running${NC}"
         echo ""
-        log "Start a VM with: microvm start <vm>"
+        log "Start a VM with: shard start <vm>"
         return
     fi
 
@@ -226,7 +226,7 @@ regenerate_default() {
 #   1. In VM:  vm-dev build https://github.com/owner/repo
 #   2. In VM:  vm-sync push --name repo
 #   3. On host: vm-sync pull repo --target PROFILE
-#   4. Rebuild: microvm build micro<name>
+#   4. Rebuild: shard build micro<name>
 #
 { config, lib, pkgs, ... }:
 
@@ -362,7 +362,7 @@ cmd_pull() {
     success "Pulled $pkg_name to: ${targets[*]}"
     log ""
     log "Rebuild to apply:"
-    log "  microvm build microvm-${targets[0]}"
+    log "  shard build microvm-${targets[0]}"
 }
 
 # Remove package from user's profile packages
@@ -462,7 +462,7 @@ Workflow (in VM):
 Workflow (on host):
   vm-sync list
   vm-sync pull repo --target browsing
-  microvm build microvm-browsing
+  shard build microvm-browsing
 
 EOF
 }

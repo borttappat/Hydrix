@@ -12,7 +12,7 @@
   vmName = config.networking.hostName;
 in {
   imports = [
-    # Live NixOS switch via vsock:14504 (microvm update / microvm switch)
+    # Live NixOS switch via vsock:14504 (shard switch)
     ./vm-switch.nix
   ];
 
@@ -72,7 +72,7 @@ in {
           readOnly = true;
         }
         # VM config directory - used by vm-switch to receive .switch-reg nix DB dump.
-        # Created by `microvm build` at /var/lib/microvms/<name>/config on the host.
+        # Created by `shard build` at /var/lib/microvms/<name>/config on the host.
         {
           tag = "vm-config";
           source = "/var/lib/microvms/${vmName}/config";

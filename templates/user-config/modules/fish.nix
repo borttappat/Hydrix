@@ -153,8 +153,8 @@ in {
             ip = "ip -color";
             cf = "clear && fastfetch";
 
-            # Multi-VM commands
-            mvm = "microvm";
+            # MicroVM CLI
+            s = "shard";
 
             # Config files
             f = "vim ~/.config/fish/config.fish";

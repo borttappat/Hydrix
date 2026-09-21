@@ -73,7 +73,7 @@ in {
     # Files transfer agent (vsock 14506) for host-orchestrated encrypted file ops
     ../../dev/files-agent.nix
 
-    # Live NixOS switch via vsock:14504 (microvm update / microvm switch)
+    # Live NixOS switch via vsock:14504 (shard switch)
     ./vm-switch.nix
 
     # hydrix.microvm.* option declarations (also imported standalone by

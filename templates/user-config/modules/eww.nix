@@ -1,7 +1,7 @@
 # modules/eww.nix — eww widget daemon + unified left-side overlay
 #
 # Single left-overlay window (center left) with three stacked sections:
-#   - VMS:      running/stopped VM overview (parses `microvm status`)
+#   - VMS:      running/stopped VM overview (parses `shard status`)
 #   - EXIT NODES: active WireGuard exit nodes with session totals
 #                 (queries router CID 200 vsock 14506, WG command)
 #   - NETWORK:  connected SSID, unsaved count, WAN + per-VM bandwidth
@@ -52,9 +52,9 @@
   # command) for wg dump JSON, then cross-references currently-running VMs to
   # filter down to active tunnels. Returns JSON array for eww defpoll. Reads
   # the running-VM list from eww-mvm-status's cache file (VM_STATUS_CACHE)
-  # instead of independently re-invoking `microvm status` — both widgets
-  # polled the same data every 10s, and `microvm status` is not cheap (full
-  # VM enumeration + per-VM CID lookup). Falls back to `microvm status`
+  # instead of independently re-invoking `shard status` — both widgets
+  # polled the same data every 10s, and `shard status` is not cheap (full
+  # VM enumeration + per-VM CID lookup). Falls back to `shard status`
   # directly if the cache is missing (e.g. before eww-mvm-status has run
   # once). Deliberately does not depend on /tmp/hydrix-metrics-* — those
   # files are workspace-focus-driven (only the currently-focused VM's file
@@ -108,7 +108,7 @@
           short=$(jq -r --arg n "$name" 'to_entries[] | select(.value.vmName == $n) | .key' "$registry" 2>/dev/null | head -1)
           [ -z "$short" ] && short="''${name#microvm-}"
           running_vms="$running_vms $short"
-        done < <(/run/current-system/sw/bin/microvm status 2>/dev/null \
+        done < <(/run/current-system/sw/bin/shard status 2>/dev/null \
           | sed -E 's/\x1b\[[0-9;]*[a-zA-Z]//g' \
           || true)
       fi
@@ -144,21 +144,21 @@
     '';
   };
 
-  # Polling script: parses `microvm status` table output (NAME STATUS CID columns).
+  # Polling script: parses `shard status` table output (NAME STATUS CID columns).
   # Also writes its result to a cache file so eww-wg-status can reuse the
-  # running-VM list instead of independently re-running `microvm status`.
+  # running-VM list instead of independently re-running `shard status`.
   ewwMvmStatus = pkgs.writeShellApplication {
     name = "eww-mvm-status";
     runtimeInputs = [pkgs.jq pkgs.coreutils pkgs.gnused];
     text = ''
-      microvm=/run/current-system/sw/bin/microvm
+      shard=/run/current-system/sw/bin/shard
       cache="/tmp/hydrix-eww-vm-status.json"
       registry="/etc/hydrix/vm-registry.json"
 
       running_json="[]"
       stopped_json="[]"
 
-      if [ ! -x "$microvm" ]; then
+      if [ ! -x "$shard" ]; then
         echo '{"running":[],"stopped":[]}'
         exit 0
       fi
@@ -176,7 +176,7 @@
             entry="{\"name\":\"$short\"}"
             stopped_json=$(echo "$stopped_json" | jq --argjson e "$entry" '. + [$e]') ;;
         esac
-      done < <("$microvm" status 2>/dev/null \
+      done < <("$shard" status 2>/dev/null \
         | sed -E 's/\x1b\[[0-9;]*[a-zA-Z]//g' \
         || true)
 
@@ -426,7 +426,7 @@
         (label
           :class {gc_status.count > 0 ? "vs-pending unsaved" : "vs-pending"}
           :visible {gc_status.count > 0}
-          :text {"+" + gc_status.count + " orphaned (microvm gc)"}
+          :text {"+" + gc_status.count + " orphaned (shard gc)"}
           :halign "start")
         (for vm in {vm_status.running}
           (vm-row-running :vm vm))

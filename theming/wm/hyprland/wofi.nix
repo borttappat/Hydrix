@@ -135,7 +135,7 @@
   wofiLauncher = pkgs.writeShellScriptBin "wofi-launcher" ''
     set -euo pipefail
 
-    readonly MICROVM_SCRIPT="microvm"
+    readonly MICROVM_SCRIPT="shard"
     readonly VM_REGISTRY="/etc/hydrix/vm-registry.json"
     readonly WOFI_STYLE="$HOME/.config/wofi/style.css"
 
@@ -246,7 +246,7 @@
     }
 
     # ── Encrypted Volume Unlock ────────────────────────────────────────────
-    # Mirrors the LUKS unlock in scripts/microvm cmd_start, but captures the
+    # Mirrors the LUKS unlock in scripts/shard.nix cmd_start, but captures the
     # passphrase via wofi's own --password dmenu mode (same pattern as
     # vault-pick.nix) instead of requiring a terminal. sudo is passwordless
     # for the interactive host user (security.sudo.wheelNeedsPassword = false),
@@ -407,7 +407,7 @@
                 if [[ -n "''${HYPRLAND_INSTANCE_SIGNATURE:-}" ]]; then
                     hypr-ws-app "$selected_app" &
                 else
-                    microvm app "''${selected}" "$selected_app" &
+                    shard app "''${selected}" "$selected_app" &
                 fi
                 disown 2>/dev/null || true
             fi

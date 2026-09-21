@@ -626,7 +626,7 @@ in {
           default (pre-decoupling behavior: every `rebuild` builds their full
           toplevel and restarts them on config changes), same as infra VMs.
           When false (default), profile/task VMs are decoupled: built and
-          managed only via `microvm build/start/update <name>`, keeping host
+          managed only via `shard build/start <name>`, keeping host
           rebuilds fast. Per-VM `vms.<name>.coupled` always overrides this.
         '';
       };
@@ -660,7 +660,7 @@ in {
           infra/*/meta.nix, and tasks/task*/meta.nix discovery, do not set
           manually. Drives host-build coupling: profile/task VMs are excluded
           from microvm.vms by default (built and managed only via the
-          `microvm` CLI); infra VMs, or any name absent from this map
+          `shard` CLI); infra VMs, or any name absent from this map
           (covers router/router-stable/builder, wired outside knownVms),
           stay coupled to the host build.
         '';
@@ -790,7 +790,7 @@ in {
               default = false;
               description = ''
                 Enable LUKS-encrypted home volume for this VM on this machine.
-                Run 'microvm encrypt-setup <name>' once after setting this, then rebuild.
+                Run 'shard encrypt-setup <name>' once after setting this, then rebuild.
               '';
             };
             coupled = lib.mkOption {
@@ -802,7 +802,7 @@ in {
                 true: build with `rebuild` (host toplevel depends on this VM's
                 nixosSystem toplevel, current framework behavior for all VMs).
                 false: exclude from microvm.vms even if classed as infra;
-                manage exclusively via `microvm build/start/update <name>`.
+                manage exclusively via `shard build/start <name>`.
                 null (default): use the class default from vmClasses.
               '';
             };

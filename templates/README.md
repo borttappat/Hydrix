@@ -349,7 +349,7 @@ Each infra directory has `meta.nix` and `default.nix`. The `default.nix` is a Ni
   vsockCid   = 200;
   workspace  = 10;        # null for VMs with no workspace
   label      = "ROUTER";
-  hasDisplay = false;     # headless - microvm start won't wait for display
+  hasDisplay = false;     # headless - shard start won't wait for display
   builtinVm  = true;      # uses mkMicrovmRouter, not mkInfraVm
 }
 ```

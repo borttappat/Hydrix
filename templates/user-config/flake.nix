@@ -235,7 +235,7 @@
                 # Uncomment to build/rebuild ALL profile and task VMs together with the
                 # host (pre-decoupling behavior: every `rebuild` also builds their full
                 # toplevel). Off by default: profile/task VMs are built and managed only
-                # via `microvm build/start/update <name>`, keeping host rebuilds fast.
+                # via `shard build/start <name>`, keeping host rebuilds fast.
                 # hydrix.microvmHost.coupleProfiles = true;
                 # Per-machine router VM names: each machine gets its own router
                 # nixosConfiguration with the correct wifiPciAddress baked in.

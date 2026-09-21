@@ -238,7 +238,7 @@ microvm_cid() {
 
 microvm_build() {
     local vm="$1"
-    if run_logged microvm build "$vm"; then
+    if run_logged shard build "$vm"; then
         log_action ok "$vm built"
     else
         log_action err "$vm build failed"
@@ -248,7 +248,7 @@ microvm_build() {
 
 microvm_start() {
     local vm="$1"
-    if run_logged microvm start "$vm"; then
+    if run_logged shard start "$vm"; then
         log_action ok "$vm started"
     else
         log_action err "$vm start failed"
@@ -258,7 +258,7 @@ microvm_start() {
 
 microvm_stop() {
     local vm="$1"
-    if run_logged microvm stop "$vm"; then
+    if run_logged shard stop "$vm"; then
         log_action ok "$vm stopped"
     else
         log_action err "$vm stop failed"
@@ -268,7 +268,7 @@ microvm_stop() {
 
 microvm_restart() {
     local vm="$1"
-    if run_logged microvm restart "$vm"; then
+    if run_logged shard restart "$vm"; then
         log_action ok "$vm restarted"
     else
         log_action err "$vm restart failed"
@@ -278,7 +278,7 @@ microvm_restart() {
 
 microvm_update() {
     local vm="$1"
-    if run_logged microvm update "$vm"; then
+    if run_logged shard switch "$vm"; then
         log_action ok "$vm updated (live)"
     else
         log_action err "$vm update failed"
@@ -303,7 +303,7 @@ microvm_purge() {
     [[ "$confirm" != "yes" ]] && { log_action warn "$vm purge aborted"; return 0; }
 
     # Use --force since we already confirmed
-    if run_logged microvm purge "$vm" --force; then
+    if run_logged shard purge "$vm" --force; then
         log_action ok "$vm purged"
     else
         log_action err "$vm purge failed"

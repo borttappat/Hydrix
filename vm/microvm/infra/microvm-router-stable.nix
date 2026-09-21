@@ -19,7 +19,7 @@
 #   autostart = false  - manual-only "break glass" fallback
 #   coupled by default (infra class, available in lockdown mode)
 #
-# To launch: microvm start router-stable
+# To launch: shard start router-stable
 # (stops the main router if running, then starts stable)
 {
   config,
