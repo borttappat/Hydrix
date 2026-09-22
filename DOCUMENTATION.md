@@ -4539,6 +4539,7 @@ The `hypr-clip-guard` Hyprland C++ plugin hooks all clipboard delivery methods i
 | VM → host | **Allowed** (paste on host terminal) |
 | Host → focused VM | **Allowed** (paste into active VM) |
 | VM-A → VM-B | **Blocked** (cross-VM isolation) |
+| VM-A → VM-B, bridge armed | **Allowed once** (`Mod+Shift+P`, see One-Shot Cross-VM Bridge below) |
 | microVM ↔ libvirt VM | **Blocked** (libvirt VMs are their own group, see below) |
 
 "Host" means any window without a `[vm-name]` title prefix. VM group identity comes from the waypipe `--title-prefix "[vm-name] "` convention - the plugin extracts the group from the window title, falling back to PID/PPID lineage for windowless clients (e.g. `wl-paste` through waypipe).
@@ -4546,6 +4547,14 @@ The `hypr-clip-guard` Hyprland C++ plugin hooks all clipboard delivery methods i
 **Libvirt VMs (virt-manager/virt-viewer):** these have no waypipe title prefix to tag them with, since libvirt controls the window title, not Hydrix. Without special handling they'd fall through to the untagged "host" default and become an unrestricted bridge between otherwise isolated microVM groups, since any group can always reach "host" and "host" can always reach whatever's currently focused. Instead, `classifyWindow()` checks window **class** first: any window whose class contains `virt-manager`, `virt-viewer`, or `remote-viewer` is tagged into its own `"libvirt"` group before falling back to the title-prefix check, so it's isolated from every microVM group exactly like microVM groups are isolated from each other. No changes to the allow/block policy itself were needed, correct tagging alone was sufficient.
 
 **Known limitation:** class-based tagging can't distinguish *which* libvirt VM a window belongs to, so all libvirt VM instances currently share the same `"libvirt"` group and can freely clipboard-share with each other. Isolation from microVMs (and from other libvirt guests, via the host as an explicit intermediary) holds regardless, but per-instance libvirt isolation is unimplemented.
+
+#### One-Shot Cross-VM Bridge
+
+Direct VM-A to VM-B transfer is blocked by default (see Policy above), which otherwise forces a host-hop workaround: copy in VM-A, paste on host, copy on host, paste in VM-B. `Mod+Shift+P` (`vm-clip-bridge`, wrapping `hyprctl clipguard bridge`) arms a narrow, auto-expiring exception instead: copy in VM-A, press the keybind while VM-A is still focused, then focus VM-B and paste normally. That one delivery is allowed, then the bridge disarms itself and full isolation reverts.
+
+Arming only succeeds if the currently focused client's group matches the clipboard's live source group right now, so firing the keybind without having actually copied something from the focused VM fails cleanly ("nothing to bridge") instead of arming stale state. The bridge expires after 20 seconds if never used (checked lazily, no timer/event-loop hook). Consumption is restricted to the two focus-gated hooks (`CWLDataDeviceProtocol`, `CPrimarySelectionProtocol`) only, deliberately excluding the broadcast data-control hooks (`CDataDeviceWLRProtocol`, `CExtDataDeviceProtocol`), since those aren't focus-gated and a background data-control client in an unrelated VM could otherwise consume the grant unattended.
+
+Two accepted, bounded properties worth knowing: consumption fires on offer-delivery (triggered by focus landing on the recipient), not on an actual paste keystroke, since there's no lower-level hook to gate on the real paste gesture; this is no looser than the pre-existing host-mediated path, which has the same offer-on-focus granularity with an unbounded window. And arming doesn't pin a destination at arm time, whichever VM group next asks for the offer within the window receives it, since the destination isn't chosen until after arming by design.
 
 #### Architecture
 
@@ -4591,17 +4600,24 @@ The plugin tracks clipboard ownership using weak pointers (`WP<IDataSource>`) to
 
 Keyboard focus seeding: when keyboard focus changes, the plugin updates the source group from the focused client's group. This ensures the host→focused-VM path works correctly (host copies land in the focused VM on paste).
 
+Windowless clients (waypipe's per-app forks, headless tools like `clip-test`'s `wl-paste --watch`) resolve their group via a PID, falling back to PPID, lookup cache. That cache entry must not outlive the process it was recorded for: PIDs get reused fast, especially under the churn of repeatedly launching short-lived headless clients, and a stale entry would silently hand an unrelated new client someone else's group. Every client the plugin ever caches a group for gets a real Wayland client-destroy listener (`wl_client_add_destroy_listener`) that invalidates its own PID cache entry, only if unchanged since written, the moment it exits. The PPID entry is deliberately left alone: it identifies a longer-lived shared parent process, not a `wl_client` itself, and other live children of the same parent still need it valid.
+
 #### Debug Interface
 
 ```bash
-hyprctl clipguard
+hyprctl clipguard           # per-hook stats, client-group map, PID/PPID, event log
+hyprctl clipguard bridge    # arm the one-shot cross-VM bridge from the focused VM
+hyprctl -j clipguard        # JSON, either subcommand, includes a seq-numbered events array
+clip-monitor-host           # host: live-tails the event log by polling hyprctl -j clipguard
 ```
 
-Shows:
+`hyprctl clipguard` shows:
 - Per-hook statistics (allowed/blocked counts for all 6 hooks)
 - Client → group mapping with PID/PPID
-- Current source groups (selection + primary)
+- Current source groups (selection + primary), and current bridge arm state for each
 - Timestamped event log (last 256 entries with HH:MM:SS.mmm)
+
+`clip-monitor-host` is the more useful tool for live debugging: it polls the JSON form and prints only new events by their monotonic `seq`, so it reads like a live feed of every hook firing across all 4 protocols plus bridge arm/use/expire events, instead of a manually re-diffed snapshot. A VM-side `clip-test` exists too (`wl-paste --watch` based), but it can only ever see the two data-control protocols, never the interactive one (`wl_data_device`, what Ctrl+C/V actually uses), since that protocol is only ever pushed to the focused client and isn't passively observable by a bystander. `clip-test` opens with a `wayland-info` dump of clipboard-related globals so protocol availability inside a given VM session is directly visible rather than inferred from silence.
 
 **Testing gotcha:** after rebuilding the plugin, do a full Hyprland restart, not `hyprctl plugin unload` followed by `load`. Live reload can leave the underlying `CFunctionHook` trampolines corrupted, silently disabling all blocking (not just anything related to a specific change) while `hyprctl plugin list` still reports the plugin as loaded. This produces a false "everything leaks" result across every group pair, a full restart resolves it with no code changes needed.
 
