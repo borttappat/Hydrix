@@ -56,6 +56,16 @@
 
     nix-index-database.url = "github:Mic92/nix-index-database";
     nix-index-database.inputs.nixpkgs.follows = "nixpkgs";
+
+    # Not declared by default -- programs.hyprland.package falls back to plain
+    # nixpkgs (see modules/hyprland.nix's `hyprlandPkg`). Uncomment to pin it
+    # independently of nixpkgs instead, so a Hyprland update landing in
+    # nixpkgs doesn't touch your build until you bump this tag yourself.
+    # Handy to freeze on a known-good release ahead of a config-breaking
+    # upstream change (e.g. a config-format switch):
+    #   hyprland.url = "git+https://github.com/hyprwm/Hyprland?ref=refs/tags/v0.55.4&submodules=1";
+    # then it's picked up automatically -- modules/hyprland.nix already
+    # threads `hyprland` through specialArgs below and uses it when present.
   };
 
   outputs = {
@@ -63,6 +73,7 @@
     hydrix,
     nixpkgs,
     nixpkgs-unstable,
+    hyprland ? null,
     ...
   } @ inputs: let
     # =========================================================================
@@ -166,7 +177,7 @@
         in {
           name = machineName;
           value = hydrix.lib.mkHost {
-            specialArgs = {inherit self hydrix machineName;};
+            specialArgs = {inherit self hydrix machineName hyprland;};
             extraInputs = {inherit (inputs) disko sops-nix nix-index-database;};
             inherit userColorschemesDir;
             modules = [

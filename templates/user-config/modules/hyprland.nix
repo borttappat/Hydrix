@@ -19,8 +19,19 @@
   config,
   lib,
   pkgs,
+  hyprland ? null,
   ...
 }: let
+  # Pinned build if you've declared a `hyprland` flake input and threaded it
+  # through specialArgs (see flake.nix) -- falls back to plain nixpkgs
+  # otherwise. Used for every hyprctl invocation in this file too, so helper
+  # scripts always talk to a hyprctl matching the compositor's actual IPC
+  # version.
+  hyprlandPkg =
+    if hyprland == null
+    then pkgs.hyprland
+    else hyprland.packages.${pkgs.stdenv.hostPlatform.system}.hyprland;
+
   username = config.hydrix.username;
   sc = config.hydrix.graphical.scaling.computed;
   ui = config.hydrix.graphical.ui;
@@ -63,7 +74,7 @@
     mkdir -p "$_dir" "$(dirname "$_hyprconf")"
     [ -f "$_state" ] || echo '{}' > "$_state"
 
-    _monitors_json() { ${pkgs.hyprland}/bin/hyprctl monitors -j; }
+    _monitors_json() { ${hyprlandPkg}/bin/hyprctl monitors -j; }
     _strip_port() { ${pkgs.gnused}/bin/sed -E 's/[[:space:]]*\([^)]*\)[[:space:]]*$//'; }
     _restart_waybar() {
       systemctl --user stop waybar 2>/dev/null || true
@@ -91,7 +102,7 @@
       _restart=1
       [ "''${1:-}" = "--no-restart" ] && _restart=0
       _write_conf
-      ${pkgs.hyprland}/bin/hyprctl reload
+      ${hyprlandPkg}/bin/hyprctl reload
       [ "$_restart" = 1 ] && _restart_waybar
     }
 
@@ -124,7 +135,7 @@
       # else (e.g. "invalid auto direction") is an error text on the same stdout.
       # Checked explicitly so a rejected command can never save/persist a stale
       # or unrelated position under the requested one.
-      _result=$(${pkgs.hyprland}/bin/hyprctl keyword monitor "$_name,preferred,$_pos,1")
+      _result=$(${hyprlandPkg}/bin/hyprctl keyword monitor "$_name,preferred,$_pos,1")
       if [ "$_result" != "ok" ]; then
         echo "monitor-layout: hyprctl rejected '$_pos' for $_name: $_result" >&2
         exit 1
@@ -210,8 +221,8 @@
   '';
 
   dockRight = pkgs.writeShellScript "dock-right" ''
-    ${pkgs.hyprland}/bin/hyprctl dispatch togglefloating active
-    floating=$(${pkgs.hyprland}/bin/hyprctl activewindow -j | ${pkgs.jq}/bin/jq '.floating')
+    ${hyprlandPkg}/bin/hyprctl dispatch togglefloating active
+    floating=$(${hyprlandPkg}/bin/hyprctl activewindow -j | ${pkgs.jq}/bin/jq '.floating')
     if [ "$floating" = "true" ]; then
       # monitors -j: width/height are physical pixels (divide by scale for logical
       # coords, matching resizeactive/moveactive); x/y and reserved[] are already
@@ -225,11 +236,11 @@
       # further in than gaps_out/reserved alone would suggest (the border is drawn
       # outside the box), and the gap between two adjacent tiles is 2*gaps_in from
       # each window's own margin plus 2*border_size from their facing borders.
-      read -r mx my w h rl rt rr rb <<< "$(${pkgs.hyprland}/bin/hyprctl monitors -j | ${pkgs.jq}/bin/jq -r \
+      read -r mx my w h rl rt rr rb <<< "$(${hyprlandPkg}/bin/hyprctl monitors -j | ${pkgs.jq}/bin/jq -r \
         '[.[] | select(.focused)][0] | "\(.x) \(.y) \((.width/.scale)|floor) \((.height/.scale)|floor) \(.reserved[0]) \(.reserved[1]) \(.reserved[2]) \(.reserved[3])"')"
-      read -r gt gr gb gl <<< "$(${pkgs.hyprland}/bin/hyprctl getoption general:gaps_out -j | ${pkgs.jq}/bin/jq -r '.custom')"
-      gin=$(${pkgs.hyprland}/bin/hyprctl getoption general:gaps_in -j | ${pkgs.jq}/bin/jq -r '.custom' | ${pkgs.gawk}/bin/awk '{print $1}')
-      border=$(${pkgs.hyprland}/bin/hyprctl getoption general:border_size -j | ${pkgs.jq}/bin/jq -r '.int')
+      read -r gt gr gb gl <<< "$(${hyprlandPkg}/bin/hyprctl getoption general:gaps_out -j | ${pkgs.jq}/bin/jq -r '.custom')"
+      gin=$(${hyprlandPkg}/bin/hyprctl getoption general:gaps_in -j | ${pkgs.jq}/bin/jq -r '.custom' | ${pkgs.gawk}/bin/awk '{print $1}')
+      border=$(${hyprlandPkg}/bin/hyprctl getoption general:border_size -j | ${pkgs.jq}/bin/jq -r '.int')
       left=$((rl + gl + border))
       top=$((rt + border))
       right=$((rr + gr + border))
@@ -238,18 +249,18 @@
       usable_h=$((h - top - bottom))
       mid=$(( gin * 2 + border * 2 ))
       half=$(( (usable_w - mid) / 2 ))
-      ${pkgs.hyprland}/bin/hyprctl dispatch resizeactive exact "$half" "$usable_h"
-      ${pkgs.hyprland}/bin/hyprctl dispatch moveactive exact "$((mx + w - right - half))" "$((my + top))"
+      ${hyprlandPkg}/bin/hyprctl dispatch resizeactive exact "$half" "$usable_h"
+      ${hyprlandPkg}/bin/hyprctl dispatch moveactive exact "$((mx + w - right - half))" "$((my + top))"
     fi
   '';
 
   toggleMouseFocus = pkgs.writeShellScript "toggle-mouse-focus" ''
-    cur=$(${pkgs.hyprland}/bin/hyprctl getoption input:follow_mouse -j | ${pkgs.jq}/bin/jq -r '.int')
+    cur=$(${hyprlandPkg}/bin/hyprctl getoption input:follow_mouse -j | ${pkgs.jq}/bin/jq -r '.int')
     if [ "$cur" = "0" ]; then
-      ${pkgs.hyprland}/bin/hyprctl keyword input:follow_mouse 1
+      ${hyprlandPkg}/bin/hyprctl keyword input:follow_mouse 1
       ${pkgs.libnotify}/bin/notify-send -t 1500 "Mouse focus: on"
     else
-      ${pkgs.hyprland}/bin/hyprctl keyword input:follow_mouse 0
+      ${hyprlandPkg}/bin/hyprctl keyword input:follow_mouse 0
       ${pkgs.libnotify}/bin/notify-send -t 1500 "Mouse focus: off"
     fi
   '';
@@ -648,6 +659,12 @@
   '';
 in
   lib.mkIf config.hydrix.hyprland.enable {
+    # No-op by default (hyprlandPkg falls back to pkgs.hyprland above). Pins
+    # to a specific Hyprland release instead if you uncomment the `hyprland`
+    # input in flake.nix -- handy to freeze on a known-good version ahead of
+    # an upstream config-breaking change (e.g. hyprlang -> Lua).
+    programs.hyprland.package = hyprlandPkg;
+
     environment.systemPackages = [lockTimeout monitorLayout pkgs.nwg-displays];
     security.pam.services.hyprlock = {};
 
