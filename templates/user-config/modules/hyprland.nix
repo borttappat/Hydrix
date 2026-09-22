@@ -440,6 +440,9 @@
     # Vault credential picker
     bind = $mod,       P, exec, vault-pick
 
+    # Cross-VM clipboard bridge (one-shot)
+    bind = $mod SHIFT, P, exec, vm-clip-bridge
+
     # Brightness / Vibrancy
     bind = $mod,       F7, exec, hydrix-brightness-hypr -
     bind = $mod,       F8, exec, hydrix-brightness-hypr +

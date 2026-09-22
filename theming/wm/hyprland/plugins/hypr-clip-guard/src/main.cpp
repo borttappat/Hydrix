@@ -10,6 +10,7 @@
 #include <hyprland/src/Compositor.hpp>
 #include <hyprland/src/event/EventBus.hpp>
 
+#include <hyprland/src/helpers/varlist/VarList.hpp>
 #include <wayland-server-core.h>
 #include <cstring>
 #include <unordered_map>
@@ -17,6 +18,7 @@
 #include <atomic>
 #include <array>
 #include <cstdio>
+#include <ctime>
 #include <sys/time.h>
 
 static HANDLE                                      s_handle = nullptr;
@@ -28,6 +30,17 @@ static std::string                                  s_selTargetGroup  = "host";
 static std::string                                  s_priTargetGroup  = "host";
 static bool                                         s_selTargetLocked = false;
 static bool                                         s_priTargetLocked = false;
+
+// One-shot cross-VM transfer: armed by `hyprctl clipguard bridge` while the
+// source VM is focused, consumed by the first delivery to a different
+// non-host group, or lazily expired after BRIDGE_TIMEOUT_MS.
+static constexpr uint64_t BRIDGE_TIMEOUT_MS = 20000;
+static bool                                         s_selBridgeArmed = false;
+static std::string                                  s_selBridgeSourceGroup;
+static uint64_t                                     s_selBridgeArmedAtMs = 0;
+static bool                                         s_priBridgeArmed = false;
+static std::string                                  s_priBridgeSourceGroup;
+static uint64_t                                     s_priBridgeArmedAtMs = 0;
 
 struct HookStats {
     std::atomic<uint64_t> allowed{0};
@@ -46,7 +59,14 @@ static std::string nowTimestamp() {
     return buf;
 }
 
+static uint64_t nowMonoMs() {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (uint64_t)ts.tv_sec * 1000 + (uint64_t)ts.tv_nsec / 1000000;
+}
+
 struct EventEntry {
+    uint64_t    seq;
     std::string ts;
     std::string hook;
     std::string srcGroup;
@@ -58,8 +78,25 @@ static std::array<EventEntry, 256> s_eventLog;
 static std::atomic<uint64_t>       s_eventIdx{0};
 
 static void logEvent(const std::string& hook, const std::string& src, const std::string& dst, pid_t pid, bool allowed) {
-    auto idx = s_eventIdx.fetch_add(1) % s_eventLog.size();
-    s_eventLog[idx] = {nowTimestamp(), hook, src, dst, pid, allowed};
+    auto seq = s_eventIdx.fetch_add(1);
+    s_eventLog[seq % s_eventLog.size()] = {seq, nowTimestamp(), hook, src, dst, pid, allowed};
+}
+
+// Window titles (and therefore group names, derived from a `[group] ` title
+// prefix) are attacker-controlled from inside a VM, so anything derived from
+// them needs escaping before landing in hand-built JSON debug output.
+static std::string jsonEscape(const std::string& s) {
+    std::string out;
+    out.reserve(s.size());
+    for (char c : s) {
+        switch (c) {
+            case '"':  out += "\\\""; break;
+            case '\\': out += "\\\\"; break;
+            case '\n': out += "\\n"; break;
+            default:   out += c;
+        }
+    }
+    return out;
 }
 
 static CHyprSignalListener s_windowOpenListener;
@@ -145,12 +182,61 @@ static wl_client* clientFromWindow(PHLWINDOW w) {
     return nullptr;
 }
 
+// A PID's s_pidGroup entry must not outlive the process it was recorded
+// for: PIDs get reused (fast, inside a VM's small PID space, especially
+// under the churn of repeatedly launching/killing headless clients like
+// clip-test), and a stale entry would silently hand an unrelated new
+// client someone else's group. Every client we ever cache a group for
+// (windowed or, via the PID/PPID fallback below, headless) gets a real
+// Wayland client-destroy listener that invalidates its own s_pidGroup[pid]
+// entry (only if still unchanged since we wrote it) the moment it exits.
+// The ppid entry is deliberately left alone here: it identifies a longer-
+// lived shared parent process (not itself a wl_client), not this specific
+// child, and other live children of the same parent still need it valid.
+struct ClientCleanup {
+    wl_listener listener;
+    wl_client*  client;
+    pid_t       pid;
+    std::string group;
+};
+static std::unordered_map<wl_client*, ClientCleanup*> s_cleanupListeners;
+
+static void onClientDestroy(wl_listener* listener, void*) {
+    ClientCleanup* cc = wl_container_of(listener, cc, listener);
+    s_clientGroup.erase(cc->client);
+    if (cc->pid > 0) {
+        auto it = s_pidGroup.find(cc->pid);
+        if (it != s_pidGroup.end() && it->second == cc->group)
+            s_pidGroup.erase(it);
+    }
+    s_cleanupListeners.erase(cc->client);
+    delete cc;
+}
+
+static void trackClientForCleanup(wl_client* cl, pid_t pid, const std::string& group) {
+    if (!cl)
+        return;
+    auto existing = s_cleanupListeners.find(cl);
+    if (existing != s_cleanupListeners.end()) {
+        // Re-tagged (e.g. title changed) -- keep the listener, refresh what
+        // it invalidates on destroy so it matches the client's current group.
+        existing->second->pid   = pid;
+        existing->second->group = group;
+        return;
+    }
+    auto* cc            = new ClientCleanup{{}, cl, pid, group};
+    cc->listener.notify = onClientDestroy;
+    wl_client_add_destroy_listener(cl, &cc->listener);
+    s_cleanupListeners[cl] = cc;
+}
+
 static void tagClient(wl_client* cl, const std::string& group) {
     s_clientGroup[cl] = group;
     if (group != "host") {
         pid_t pid = getPid(cl);
         if (pid > 0) {
             s_pidGroup[pid] = group;
+            trackClientForCleanup(cl, pid, group);
             pid_t ppid = getPpid(pid);
             if (ppid > 1)
                 s_pidGroup[ppid] = group;
@@ -195,6 +281,7 @@ static std::string groupForClient(wl_client* cl) {
         auto pit = s_pidGroup.find(pid);
         if (pit != s_pidGroup.end()) {
             s_clientGroup[cl] = pit->second;
+            trackClientForCleanup(cl, pid, pit->second);
             return pit->second;
         }
         pid_t ppid = getPpid(pid);
@@ -202,6 +289,9 @@ static std::string groupForClient(wl_client* cl) {
             auto ppit = s_pidGroup.find(ppid);
             if (ppit != s_pidGroup.end()) {
                 s_clientGroup[cl] = ppit->second;
+                // Matched via the parent's pid, not this client's own --
+                // nothing of this client's own is in s_pidGroup to invalidate.
+                trackClientForCleanup(cl, 0, ppit->second);
                 return ppit->second;
             }
         }
@@ -220,6 +310,7 @@ static std::string groupForRecipient(wl_client* cl) {
         auto pit = s_pidGroup.find(pid);
         if (pit != s_pidGroup.end()) {
             s_clientGroup[cl] = pit->second;
+            trackClientForCleanup(cl, pid, pit->second);
             return pit->second;
         }
         pid_t ppid = getPpid(pid);
@@ -227,6 +318,7 @@ static std::string groupForRecipient(wl_client* cl) {
             auto ppit = s_pidGroup.find(ppid);
             if (ppit != s_pidGroup.end()) {
                 s_clientGroup[cl] = ppit->second;
+                trackClientForCleanup(cl, 0, ppit->second);
                 return ppit->second;
             }
         }
@@ -346,6 +438,88 @@ static bool shouldAllow(const std::string& srcGroup, const std::string& dstGroup
     return false;
 }
 
+// Bridge only ever needs to be checked in shouldAllow()'s final (VM-A -> VM-B)
+// branch: srcGroup can never be "host" there, so there's no overlap with the
+// host-sourced target-lock logic above and no need to touch it.
+static bool bridgeApplies(const std::string& srcGroup, const std::string& dstGroup,
+                           bool armed, bool expired, const std::string& bridgeGroup) {
+    if (!armed || expired) return false;
+    if (srcGroup != bridgeGroup) return false; // clipboard moved on since arming
+    if (dstGroup == "host") return false;      // already unconditionally allowed
+    if (dstGroup == bridgeGroup) return false; // same-group already allowed
+    return true;
+}
+
+// Deliberately restricted to the two focus-gated hooks (interactive
+// wl_data_device / primary-selection): CDataDeviceWLRProtocol and
+// CExtDataDeviceProtocol broadcast to every bound client with no focus
+// gating, so wiring the bridge into those would let a background
+// data-control client in an unrelated VM consume the grant unattended.
+static bool consumeBridgeIfApplicable(bool& armed, std::string& bridgeGroup, uint64_t armedAtMs,
+                                       const std::string& srcGroup, const std::string& dstGroup) {
+    if (!armed) return false;
+    bool expired = (nowMonoMs() - armedAtMs) > BRIDGE_TIMEOUT_MS;
+    if (expired) {
+        armed = false;
+        return false;
+    }
+    if (!bridgeApplies(srcGroup, dstGroup, armed, expired, bridgeGroup)) return false;
+    armed = false; // consume-once
+    return true;
+}
+
+static void expireBridgesIfNeeded() {
+    uint64_t now = nowMonoMs();
+    if (s_selBridgeArmed && now - s_selBridgeArmedAtMs > BRIDGE_TIMEOUT_MS) {
+        s_selBridgeArmed = false;
+        logEvent("bridge-expire", s_selBridgeSourceGroup, "-", 0, false);
+    }
+    if (s_priBridgeArmed && now - s_priBridgeArmedAtMs > BRIDGE_TIMEOUT_MS) {
+        s_priBridgeArmed = false;
+        logEvent("bridge-expire", s_priBridgeSourceGroup, "-", 0, false);
+    }
+}
+
+// Arms only if the focused client's group matches the clipboard's live
+// source group right now, so firing the keybind without having actually
+// copied something from the focused VM fails cleanly instead of arming
+// stale/garbage state.
+static bool armBridgeTrack(bool& armed, std::string& bridgeGroup, uint64_t& armedAtMs,
+                            const std::string& liveSourceGroup) {
+    std::string focusGroup = groupFromKeyboardFocus();
+    if (focusGroup == "host") return false;
+    if (liveSourceGroup != focusGroup) return false;
+    armed      = true;
+    bridgeGroup = focusGroup;
+    armedAtMs   = nowMonoMs();
+    return true;
+}
+
+static std::string handleBridgeArm(eHyprCtlOutputFormat fmt) {
+    bool selWasArmed = s_selBridgeArmed, priWasArmed = s_priBridgeArmed;
+
+    bool selArmed = armBridgeTrack(s_selBridgeArmed, s_selBridgeSourceGroup, s_selBridgeArmedAtMs, s_selSourceGroup);
+    bool priArmed = armBridgeTrack(s_priBridgeArmed, s_priBridgeSourceGroup, s_priBridgeArmedAtMs, s_priSourceGroup);
+
+    bool armed        = selArmed || priArmed;
+    bool alreadyArmed = (selArmed && selWasArmed) || (priArmed && priWasArmed);
+    std::string group = selArmed ? s_selBridgeSourceGroup : (priArmed ? s_priBridgeSourceGroup : "");
+
+    logEvent("bridge-arm", group.empty() ? "-" : group, "-", 0, armed);
+
+    if (fmt == eHyprCtlOutputFormat::FORMAT_NORMAL) {
+        if (!armed)
+            return "clip-guard bridge: nothing to bridge (focused window isn't the source of the current clipboard)\n";
+        return "clip-guard bridge: armed from '" + group + "'"
+             + (alreadyArmed ? " (was already armed, timer refreshed)" : "")
+             + ", expires in " + std::to_string(BRIDGE_TIMEOUT_MS / 1000) + "s\n";
+    }
+    return std::string("{\"armed\":") + (armed ? "true" : "false")
+         + ",\"group\":\"" + jsonEscape(group) + "\""
+         + ",\"alreadyArmed\":" + (alreadyArmed ? "true" : "false")
+         + ",\"timeoutMs\":" + std::to_string(BRIDGE_TIMEOUT_MS) + "}";
+}
+
 // Hook: CWLDataDeviceProtocol::sendSelectionToDevice(SP<IDataDevice>, SP<IDataSource>)
 typedef void (*tSendSelData)(void*, SP<IDataDevice>, SP<IDataSource>);
 static void hkSendSelectionToDevice(void* thisptr, SP<IDataDevice> dev, SP<IDataSource> sel) {
@@ -357,11 +531,16 @@ static void hkSendSelectionToDevice(void* thisptr, SP<IDataDevice> dev, SP<IData
         std::string srcGroup = groupForSource(sel, s_selSourceGroup);
         s_selSourceGroup = srcGroup;
 
-        if (!shouldAllow(srcGroup, dstGroup, effectiveTarget(s_selTargetLocked, s_selTargetGroup))) {
+        bool allowed = shouldAllow(srcGroup, dstGroup, effectiveTarget(s_selTargetLocked, s_selTargetGroup));
+        bool bridged = !allowed && consumeBridgeIfApplicable(s_selBridgeArmed, s_selBridgeSourceGroup,
+                                                               s_selBridgeArmedAtMs, srcGroup, dstGroup);
+        if (!allowed && !bridged) {
             s_statsData.blocked++;
             logEvent("data", srcGroup, dstGroup, getPid(cl), false);
             return;
         }
+        if (bridged)
+            logEvent("bridge-used", srcGroup, dstGroup, getPid(cl), true);
         s_statsData.allowed++;
         logEvent("data", srcGroup, dstGroup, getPid(cl), true);
     }
@@ -380,11 +559,16 @@ static void hkSendPrimarySelectionToDevice(void* thisptr, SP<CPrimarySelectionDe
         std::string srcGroup = groupForSource(sel, s_priSourceGroup);
         s_priSourceGroup = srcGroup;
 
-        if (!shouldAllow(srcGroup, dstGroup, effectiveTarget(s_priTargetLocked, s_priTargetGroup))) {
+        bool allowed = shouldAllow(srcGroup, dstGroup, effectiveTarget(s_priTargetLocked, s_priTargetGroup));
+        bool bridged = !allowed && consumeBridgeIfApplicable(s_priBridgeArmed, s_priBridgeSourceGroup,
+                                                               s_priBridgeArmedAtMs, srcGroup, dstGroup);
+        if (!allowed && !bridged) {
             s_statsPri.blocked++;
             logEvent("pri", srcGroup, dstGroup, getPid(cl), false);
             return;
         }
+        if (bridged)
+            logEvent("bridge-used", srcGroup, dstGroup, getPid(cl), true);
         s_statsPri.allowed++;
         logEvent("pri", srcGroup, dstGroup, getPid(cl), true);
     }
@@ -478,8 +662,38 @@ static void hkWlrSendInitialSelections(void* thisptr) {
     logEvent("wlr-init", s_selSourceGroup, dstGroup, getPid(cl), false);
 }
 
-static std::string handleHyprctl(eHyprCtlOutputFormat fmt, std::string req) {
+static std::string bridgeLine(bool armed, const std::string& grp, uint64_t armedAtMs) {
+    if (!armed) return "disarmed";
+    uint64_t left = BRIDGE_TIMEOUT_MS - (nowMonoMs() - armedAtMs);
+    return "armed from " + grp + ", " + std::to_string(left) + "ms left";
+}
+
+// Full ring-buffer contents as a JSON array, newest first, each entry
+// carrying the monotonic `seq` so a polling client (clip-monitor-host) can
+// print only what's new since its last poll instead of the whole backlog.
+static std::string eventsToJson() {
+    std::string out = "[";
+    uint64_t idx = s_eventIdx.load();
+    uint64_t count = std::min(idx, (uint64_t)s_eventLog.size());
+    for (uint64_t i = 0; i < count; i++) {
+        auto& e = s_eventLog[(idx - 1 - i) % s_eventLog.size()];
+        if (i) out += ",";
+        out += "{\"seq\":" + std::to_string(e.seq)
+             + ",\"ts\":\"" + jsonEscape(e.ts) + "\""
+             + ",\"hook\":\"" + jsonEscape(e.hook) + "\""
+             + ",\"src\":\"" + jsonEscape(e.srcGroup) + "\""
+             + ",\"dst\":\"" + jsonEscape(e.dstGroup) + "\""
+             + ",\"pid\":" + std::to_string(e.dstPid)
+             + ",\"allowed\":" + (e.allowed ? "true" : "false") + "}";
+    }
+    out += "]";
+    return out;
+}
+
+static std::string handleStatusDump(eHyprCtlOutputFormat fmt) {
     std::string out;
+
+    expireBridgesIfNeeded();
 
     uint64_t totalBlocked = s_statsData.blocked + s_statsPri.blocked + s_statsWlr.blocked + s_statsExt.blocked;
     uint64_t totalAllowed = s_statsData.allowed + s_statsPri.allowed + s_statsWlr.allowed + s_statsExt.allowed;
@@ -490,6 +704,8 @@ static std::string handleHyprctl(eHyprCtlOutputFormat fmt, std::string req) {
              + (s_selTargetLocked ? s_selTargetGroup + ", locked" : "live focus, chasing") + ")\n";
         out += "  primary source:   " + s_priSourceGroup + " (target: "
              + (s_priTargetLocked ? s_priTargetGroup + ", locked" : "live focus, chasing") + ")\n";
+        out += "  bridge (sel):     " + bridgeLine(s_selBridgeArmed, s_selBridgeSourceGroup, s_selBridgeArmedAtMs) + "\n";
+        out += "  bridge (primary): " + bridgeLine(s_priBridgeArmed, s_priBridgeSourceGroup, s_priBridgeArmedAtMs) + "\n";
         out += "  totals: " + std::to_string(totalBlocked) + " blocked, " + std::to_string(totalAllowed) + " allowed\n";
         out += "  per-hook:\n";
         out += "    data:  " + std::to_string(s_statsData.allowed.load()) + " allowed, " + std::to_string(s_statsData.blocked.load()) + " blocked\n";
@@ -516,13 +732,25 @@ static std::string handleHyprctl(eHyprCtlOutputFormat fmt, std::string req) {
                  + (e.allowed ? "ALLOWED" : "BLOCKED") + "\n";
         }
     } else {
-        out = "{\"selectionSource\":\"" + s_selSourceGroup + "\","
-              "\"primarySource\":\"" + s_priSourceGroup + "\","
+        out = "{\"selectionSource\":\"" + jsonEscape(s_selSourceGroup) + "\","
+              "\"primarySource\":\"" + jsonEscape(s_priSourceGroup) + "\","
+              "\"selBridgeArmed\":" + (s_selBridgeArmed ? "true" : "false") + ","
+              "\"selBridgeGroup\":\"" + jsonEscape(s_selBridgeSourceGroup) + "\","
+              "\"priBridgeArmed\":" + (s_priBridgeArmed ? "true" : "false") + ","
+              "\"priBridgeGroup\":\"" + jsonEscape(s_priBridgeSourceGroup) + "\","
               "\"blocked\":" + std::to_string(totalBlocked) + ","
-              "\"allowed\":" + std::to_string(totalAllowed) + "}";
+              "\"allowed\":" + std::to_string(totalAllowed) + ","
+              "\"events\":" + eventsToJson() + "}";
     }
 
     return out;
+}
+
+static std::string handleHyprctl(eHyprCtlOutputFormat fmt, std::string req) {
+    CVarList vars(req, 0, ' ');
+    if (vars.size() >= 2 && vars[1] == "bridge")
+        return handleBridgeArm(fmt);
+    return handleStatusDump(fmt);
 }
 
 APICALL EXPORT std::string PLUGIN_API_VERSION() {
@@ -602,7 +830,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
         .fn    = handleHyprctl,
     });
 
-    return {"hypr-clip-guard", "VM clipboard isolation", "hydrix", "0.1.0"};
+    return {"hypr-clip-guard", "VM clipboard isolation", "hydrix", "0.3.0"};
 }
 
 APICALL EXPORT void PLUGIN_EXIT() {
@@ -622,6 +850,12 @@ APICALL EXPORT void PLUGIN_EXIT() {
     s_windowOpenListener.reset();
     s_windowTitleListener.reset();
     s_windowCloseListener.reset();
+
+    for (auto& [cl, cc] : s_cleanupListeners) {
+        wl_list_remove(&cc->listener.link);
+        delete cc;
+    }
+    s_cleanupListeners.clear();
 
     s_clientGroup.clear();
     s_pidGroup.clear();

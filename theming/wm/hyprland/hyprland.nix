@@ -29,7 +29,7 @@
 
   clipGuardPlugin = pkgs.hyprlandPlugins.mkHyprlandPlugin {
     pluginName = "hypr-clip-guard";
-    version = "0.1.0";
+    version = "0.3.0";
     src = ./plugins/hypr-clip-guard;
     nativeBuildInputs = [pkgs.cmake];
     meta.description = "VM clipboard isolation for Hyprland";
@@ -400,6 +400,49 @@
     '
   '';
 
+  # Unlike clip-test-host (which watches the host's own clipboard content via
+  # the data-control protocol), this tails the plugin's own hook-level event
+  # log via `hyprctl -j clipguard` -- every one of the 4 hooked protocols and
+  # every allow/block/bridge decision, not just what data-control happens to
+  # see. Polling is the only option: hyprctl has no push/subscribe mode.
+  clipMonitorHost = pkgs.writeShellScriptBin "clip-monitor-host" ''
+    set -euo pipefail
+    echo "=== Host Clipboard Event Monitor (all hooks: data/pri/wlr/ext/bridge) ==="
+    echo "Press Ctrl+C to stop."
+    echo ""
+
+    LAST=$(${pkgs.hyprland}/bin/hyprctl -j clipguard 2>/dev/null | ${pkgs.jq}/bin/jq -r '[.events[]?.seq] | max // 0')
+
+    while true; do
+      RESP=$(${pkgs.hyprland}/bin/hyprctl -j clipguard 2>/dev/null || echo '{}')
+      printf '%s\n' "$RESP" | ${pkgs.jq}/bin/jq -r --argjson last "$LAST" '
+        (.events // []) | map(select(.seq > $last)) | sort_by(.seq) | .[] |
+        "[\(.ts)] [\(.hook)] \(.src) -> \(.dst) (pid \(.pid)) " + (if .allowed then "ALLOWED" else "BLOCKED" end)
+      '
+      NEW=$(printf '%s\n' "$RESP" | ${pkgs.jq}/bin/jq -r --argjson last "$LAST" '[(.events // [])[] | select(.seq > $last) | .seq] | max // $last')
+      LAST=$NEW
+      sleep 0.3
+    done
+  '';
+
+  vmClipBridge = pkgs.writeShellScriptBin "vm-clip-bridge" ''
+    RESP=$(${pkgs.hyprland}/bin/hyprctl -j clipguard bridge)
+    ARMED=$(printf '%s' "$RESP" | ${pkgs.jq}/bin/jq -r '.armed // false')
+    GROUP=$(printf '%s' "$RESP" | ${pkgs.jq}/bin/jq -r '.group // empty')
+    ALREADY=$(printf '%s' "$RESP" | ${pkgs.jq}/bin/jq -r '.alreadyArmed // false')
+
+    if [ "$ARMED" != "true" ]; then
+      ${pkgs.libnotify}/bin/notify-send "Clipboard bridge" \
+        "Nothing to bridge - copy something in a VM window first" --urgency=low --expire-time=4000
+    elif [ "$ALREADY" = "true" ]; then
+      ${pkgs.libnotify}/bin/notify-send "Clipboard bridge" \
+        "Already armed from '$GROUP' - timer refreshed" --urgency=normal --expire-time=4000
+    else
+      ${pkgs.libnotify}/bin/notify-send "Clipboard bridge" \
+        "Armed from '$GROUP' - paste once in another VM within 20s" --urgency=normal --expire-time=4000
+    fi
+  '';
+
   hyprFocusDaemon = pkgs.writeShellScriptBin "hypr-focus-daemon" ''
     REGISTRY=/etc/hydrix/vm-registry.json
     MARKER="$HOME/.cache/hydrix/focus-override-active"
@@ -510,6 +553,8 @@ in
       hyprFloatTerminal
       hyprFocusDaemon
       clipTestHost
+      clipMonitorHost
+      vmClipBridge
       pkgs.hypridle
       pkgs.swaybg
       pkgs.wl-clipboard

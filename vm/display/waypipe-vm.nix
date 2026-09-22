@@ -210,26 +210,50 @@ in {
     pkgs.waypipe
     pkgs.socat
     pkgs.wl-clipboard
+    pkgs.wayland-utils
     (pkgs.writeShellScriptBin "clip-test" ''
-      echo "=== VM Clipboard Test Runner ==="
-      echo "Watching clipboard events on ''${WAYLAND_DISPLAY:-waypipe-0}..."
+      export WAYLAND_DISPLAY="''${WAYLAND_DISPLAY:-waypipe-0}"
+      echo "=== VM Clipboard Event Monitor ==="
+      echo "Wayland display: $WAYLAND_DISPLAY"
+      echo ""
+      echo "--- Clipboard-related globals this session actually advertises ---"
+      ${pkgs.wayland-utils}/bin/wayland-info 2>&1 \
+        | ${pkgs.gnugrep}/bin/grep -iE "data.control|data_device|primary.selection|primary_selection" \
+        || echo "(none found -- wayland-info unavailable or waypipe isn't forwarding these globals)"
+      echo ""
+      echo "Note: only data-control-protocol changes (below) are passively"
+      echo "observable by a bystander process like this one. Regular Ctrl+C/"
+      echo "Ctrl+V (wl_data_device) is only ever pushed to whichever client"
+      echo "currently has keyboard focus -- a Wayland protocol limitation, not"
+      echo "something a watcher can see around. Use clip-monitor-host on the"
+      echo "HOST for full visibility into every clipboard interaction,"
+      echo "including the interactive protocol and every allow/block decision."
+      echo ""
+      echo "--- Watching data-control selection + primary selection ---"
       echo "Press Ctrl+C to stop."
       echo ""
-      export WAYLAND_DISPLAY="''${WAYLAND_DISPLAY:-waypipe-0}"
-      ${pkgs.wl-clipboard}/bin/wl-paste --watch ${pkgs.bash}/bin/bash -c '
-        TS=$(date +%H:%M:%S.%3N)
-        TYPES=$(${pkgs.wl-clipboard}/bin/wl-paste --list-types 2>/dev/null | tr "\n" ", ")
-        CONTENT=$(${pkgs.wl-clipboard}/bin/wl-paste --no-newline 2>/dev/null | head -c 200)
-        LEN=''${#CONTENT}
-        echo "[$TS] SELECTION: ''${LEN}B types=[$TYPES] content=\"''${CONTENT:0:80}\"..."
-      ' &
+      watch_selection() {
+        ${pkgs.wl-clipboard}/bin/wl-paste --watch ${pkgs.bash}/bin/bash -c '
+          TS=$(date +%H:%M:%S.%3N)
+          TYPES=$(${pkgs.wl-clipboard}/bin/wl-paste --list-types 2>/dev/null | tr "\n" ", ")
+          CONTENT=$(${pkgs.wl-clipboard}/bin/wl-paste --no-newline 2>/dev/null | head -c 200)
+          LEN=''${#CONTENT}
+          echo "[$TS] SELECTION: ''${LEN}B types=[$TYPES] content=\"''${CONTENT:0:80}\"..."
+        '
+        echo "[selection watcher exited -- data-control (regular clipboard) unavailable in this session]"
+      }
+      watch_primary() {
+        ${pkgs.wl-clipboard}/bin/wl-paste --primary --watch ${pkgs.bash}/bin/bash -c '
+          TS=$(date +%H:%M:%S.%3N)
+          CONTENT=$(${pkgs.wl-clipboard}/bin/wl-paste --primary --no-newline 2>/dev/null | head -c 200)
+          LEN=''${#CONTENT}
+          echo "[$TS] PRIMARY: ''${LEN}B content=\"''${CONTENT:0:80}\"..."
+        '
+        echo "[primary watcher exited -- primary-selection data-control unavailable in this session]"
+      }
+      watch_selection &
       SEL_PID=$!
-      ${pkgs.wl-clipboard}/bin/wl-paste --primary --watch ${pkgs.bash}/bin/bash -c '
-        TS=$(date +%H:%M:%S.%3N)
-        CONTENT=$(${pkgs.wl-clipboard}/bin/wl-paste --primary --no-newline 2>/dev/null | head -c 200)
-        LEN=''${#CONTENT}
-        echo "[$TS] PRIMARY: ''${LEN}B content=\"''${CONTENT:0:80}\"..."
-      ' &
+      watch_primary &
       PRI_PID=$!
       trap "kill $SEL_PID $PRI_PID 2>/dev/null; echo 'Stopped.'; exit 0" INT TERM
       wait
