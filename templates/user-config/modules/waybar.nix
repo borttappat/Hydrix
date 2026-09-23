@@ -506,7 +506,8 @@
       Full)     lbl="BAT"; class="full" ;;
       *)
         lbl="BAT"
-        if   [ "$cap" -lt 10 ]; then class="critical"
+        if   [ "$cap" -lt 5 ]; then class="flashing"
+        elif [ "$cap" -lt 15 ]; then class="critical"
         elif [ "$cap" -lt 20 ]; then class="warning"
         else class=""
         fi ;;
@@ -557,7 +558,8 @@
       *)
         lbl="BAT"
         if   [ "$cap" -ge 80 ]; then class="full"
-        elif [ "$cap" -lt 10 ]; then class="critical"
+        elif [ "$cap" -lt 5 ]; then class="flashing"
+        elif [ "$cap" -lt 15 ]; then class="critical"
         elif [ "$cap" -lt 20 ]; then class="warning"
         else class=""
         fi ;;
@@ -1264,11 +1266,23 @@
       box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
     }
 
-    /* Battery fills on low/charging states — base pill styling comes from the shared rule above */
-    #custom-battery.warning  { color: @color8; }
-    #custom-battery.critical { background: @alert; color: @background; }
+    /* Battery low/charging states — base pill styling comes from the shared rule above */
+    #custom-battery.warning  { color: @accent; }
+    #custom-battery.critical { color: @accent; }
     #custom-battery.charging { color: @accent; }
     #custom-battery.full     { color: @accent; }
+
+    /* Below 5% — alternate the pill between the normal background and the critical fill every second */
+    @keyframes battery-flash {
+      0%     { background-color: @background; color: @foreground; }
+      49.9%  { background-color: @background; color: @foreground; }
+      50%    { background-color: @alert;      color: @background; }
+      99.9%  { background-color: @alert;      color: @background; }
+      100%   { background-color: @background; color: @foreground; }
+    }
+    #custom-battery.flashing {
+      animation: battery-flash 2s linear infinite;
+    }
 
     /* @accent — clock (time anchor) and pomo (active timer) */
     #custom-clock { color: @accent; }
