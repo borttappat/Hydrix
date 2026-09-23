@@ -11,15 +11,15 @@ This directory contains templates used by `install-hydrix.sh` and `setup-hydrix.
 │  Fresh install:                                                     │
 │    1. Auto-detect hardware (CPU, WiFi PCI, ASUS, serial)            │
 │    2. Prompt for identity (username, colorscheme, disk, WiFi)       │
-│    3. Copy templates/user-config/ → ~/hydrix-config/                │
+│    3. Copy templates/user-config/ → ~/hydrix-config/               │
 │    4. Substitute @PLACEHOLDERS@ in user.nix, common.nix, machine    │
-│    5. nixos-install → pre-build router, router-stable, builder      │
+│    5. nixos-install → pre-build router, router-stable, builder     │
 │                                                                     │
 │  Add machine (existing hydrix-config detected):                     │
 │    1. Clone existing repo                                           │
 │    2. Auto-detect hardware only (no identity prompts)               │
 │    3. Generate machines/<serial>.nix with detected hardware         │
-│    4. nixos-install → pre-build router, router-stable, builder      │
+│    4. nixos-install → pre-build router, router-stable, builder     │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
