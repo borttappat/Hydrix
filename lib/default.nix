@@ -399,7 +399,10 @@ in rec {
   in
     nixpkgs'.lib.nixosSystem {
       inherit system;
-      specialArgs = {hasStylix = allInputs ? stylix;};
+      specialArgs = {
+        inputs = allInputs;
+        hasStylix = allInputs ? stylix;
+      };
       modules =
         commonModules
         ++ nixpkgs'.lib.optional (allInputs ? stylix)
