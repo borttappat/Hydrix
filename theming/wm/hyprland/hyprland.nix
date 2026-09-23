@@ -133,6 +133,10 @@
       disable_hyprland_logo    = true
       disable_splash_rendering = true
       background_color         = 0xff000000
+      # Config files are rewritten via activation, which already triggers its
+      # own explicit reload; the implicit inotify-based reload is redundant
+      # and can race it.
+      disable_autoreload = true
     }
 
     ${lib.optionalString xwaylandEnabled ''
