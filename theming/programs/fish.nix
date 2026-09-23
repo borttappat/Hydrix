@@ -1,4 +1,4 @@
-# Fish Shell — Framework Integration
+# Fish Shell - Framework Integration
 #
 # Provides: pywal color sequences, fzf/zoxide integration, Ctrl+R history,
 # vi key bindings (gated by hydrix.graphical.fish.viKeyBindings),
@@ -74,7 +74,7 @@ in {
                   set -l toplevel (command git rev-parse --show-toplevel 2>/dev/null)
                   if test -n "$toplevel"
                     set -l repo_name (basename $toplevel)
-                    echo -e "\033[33m::\033[0m Lockdown mode — routing through git-sync VM."
+                    echo -e "\033[33m::\033[0m Lockdown mode - routing through git-sync VM."
                     read -P "Use git-sync VM for $argv[1] $repo_name? [Y/n] " confirm
                     if test -z "$confirm" -o "$confirm" = Y -o "$confirm" = y
                       shard git $argv[1] $repo_name
@@ -128,7 +128,7 @@ in {
         enableFishIntegration = lib.mkDefault true;
       };
 
-      # FZF (fuzzy finder) — colors set dynamically from pywal in interactiveShellInit
+      # FZF (fuzzy finder) - colors set dynamically from pywal in interactiveShellInit
       programs.fzf = {
         enable = lib.mkDefault true;
         enableFishIntegration = lib.mkDefault true;
