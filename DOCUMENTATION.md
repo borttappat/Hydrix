@@ -1648,6 +1648,7 @@ The `modules/` directory in your `hydrix-config` holds settings that apply to al
 | `firefox.nix` | Host Firefox toggle and user-agent spoofing | User |
 | `obsidian.nix` | Host Obsidian toggle and vault CSS theme deployment | User |
 | `tor-hardening.nix` | Tor anonymity: bridges, Firefox hardening, no-swap enforcement | User |
+| `repos.nix` | Declarative git repo cloning, on host or any VM that imports it | User |
 
 `user.nix` and `common.nix` are the only two files the installer writes to. All other modules are copied from templates with sensible defaults and are edited manually by the user.
 
@@ -1711,6 +1712,31 @@ hydrix.graphical.obsidian.hostEnable = lib.mkDefault false;
 ```
 
 The framework auto-generates a CSS snippet from the active colorscheme and font settings, deploying it to each vault's `.obsidian/snippets/` directory and enabling it via `appearance.json`.
+
+#### repos.nix
+
+Unlike the other shared modules, `repos.nix` isn't imported globally, import it wherever you want repo cloning: the host machine config, or any profile VM's own `default.nix`. Each importer declares its own `hydrix.repos.entries`, so different VMs can clone different repos.
+
+```nix
+# In machines/<serial>.nix, or a profile's default.nix (e.g. profiles/dev/default.nix)
+imports = [ ../../modules/repos.nix ];   # path depth varies by importer
+
+hydrix.repos = {
+  enable = true;
+  entries = {
+    my-notes = {
+      url = "https://github.com/youruser/my-notes.git";       # used with gh CLI when authenticated
+      sshUrl = "git@github.com:youruser/my-notes.git";         # fallback when gh isn't authenticated
+      path = "/home/${config.hydrix.username}/my-notes";
+      description = "Personal notes";
+    };
+  };
+};
+```
+
+A `hydrix-ensure-repos.service` runs once at boot (`After=network-online.target`, so it's safe on a VM whose network comes up through the router after boot rather than at activation time). For each entry: if `path` already exists, it's left alone; otherwise it's cloned, trying `gh repo clone` first (if `gh auth status` succeeds) and falling back to `sshUrl` via the user's `~/.ssh/id_ed25519`/`id_rsa`. A missing repo that fails to clone (no gh auth, no SSH key) logs a warning to the journal and is skipped, it never fails the boot.
+
+On a VM, the SSH fallback needs a key present, wire that VM into `hydrix.secrets.github` (`microvmHost.vms.<name>.secrets = ["github"]` in the machine config) to have one provisioned automatically. See [Secrets Management](#secrets-management) below.
 
 #### waybar.nix
 

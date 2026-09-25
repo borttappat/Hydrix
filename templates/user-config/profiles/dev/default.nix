@@ -19,6 +19,8 @@ in {
     ./packages.nix
     # Custom packages (added via vm-sync pull)
     ./packages
+    # Declarative git repos, uncomment to enable (see hydrix.repos below)
+    # ../../modules/repos.nix
   ];
 
   # =========================================================================
@@ -48,6 +50,21 @@ in {
 
   # Inherit host colors for consistent look
   hydrix.vmColors.enable = true;
+
+  # Repos to auto-clone on boot. Needs ../../modules/repos.nix imported above
+  # and this VM's own machine-config entry in microvmHost.vms.<name>.secrets
+  # to include "github" so the SSH key is present.
+  # hydrix.repos = {
+  #   enable = true;
+  #   entries = {
+  #     my-notes = {
+  #       url = "https://github.com/youruser/my-notes.git";
+  #       sshUrl = "git@github.com:youruser/my-notes.git";
+  #       path = "/home/${config.hydrix.username}/my-notes";
+  #       description = "Personal notes";
+  #     };
+  #   };
+  # };
 
   # MicroVM resources (must match CID in host scripts)
   hydrix.microvm = {

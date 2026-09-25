@@ -1,42 +1,26 @@
 # Declarative Git Repositories
 #
-# Repos listed here are cloned on activation if they don't already exist.
-# Runs as the user (not root), non-blocking - failures are logged to journal,
-# never to the console, and never break a rebuild.
+# hydrix.repos.entries declares repos that should be cloned once present on a
+# machine or VM. Missing repos are cloned on boot; existing ones are left
+# alone (never pulled/overwritten automatically).
 #
 # Authentication (tried in order):
 #   1. gh CLI  - run `gh auth login` once after first boot
-#   2. SSH key - ~/.ssh/id_ed25519 or ~/.ssh/id_rsa
+#   2. SSH key - ~/.ssh/id_ed25519 or ~/.ssh/id_rsa (on VMs, provisioned by
+#      hydrix.secrets.github via vms.<name>.secrets = ["github"])
 #   3. Warning logged, repo skipped (no error thrown)
 #
-# No gh auth or sops setup required to import this file safely.
-# An empty `repos` attrset below is a valid no-op.
-#
-{ config, lib, pkgs, ... }:
-
-let
-  cfg = config.hydrix;
-  username = cfg.username;
+# Import this file and set hydrix.repos.enable = true; an empty `entries`
+# attrset is a valid no-op, so it's safe to import speculatively.
+{
+  config,
+  lib,
+  pkgs,
+  ...
+}: let
+  cfg = config.hydrix.repos;
+  username = config.hydrix.username;
   homeDir = "/home/${username}";
-
-  # ─── Add your repositories here ──────────────────────────────────────────
-  # Each entry needs: url (HTTPS), sshUrl (SSH fallback), path, description.
-  #
-  # repos = {
-  #   my-notes = {
-  #     url    = "https://github.com/youruser/my-notes.git";
-  #     sshUrl = "git@github.com:youruser/my-notes.git";
-  #     path   = "${homeDir}/my-notes";
-  #     description = "Personal notes";
-  #   };
-  #   my-site = {
-  #     url    = "https://github.com/youruser/youruser.github.io.git";
-  #     sshUrl = "git@github.com:youruser/youruser.github.io.git";
-  #     path   = "${homeDir}/youruser.github.io";
-  #     description = "GitHub Pages site";
-  #   };
-  # };
-  repos = {};
 
   ensureReposScript = pkgs.writeShellScriptBin "ensure-repos" ''
     set -e
@@ -76,22 +60,69 @@ let
     }
 
     ${lib.concatStringsSep "\n" (lib.mapAttrsToList (name: repo: ''
-      clone_repo "${name}" "${repo.url}" "${repo.sshUrl}" "${repo.path}" || true
-    '') repos)}
+        clone_repo "${name}" "${repo.url}" "${repo.sshUrl}" "${repo.path}" || true
+      '')
+      cfg.entries)}
 
     log "Done"
   '';
-
 in {
-  environment.systemPackages = [ pkgs.gh ensureReposScript ];
+  options.hydrix.repos = {
+    enable = lib.mkEnableOption "declarative git repo cloning";
 
-  system.activationScripts.ensureRepos = {
-    text = ''
-      if id "${username}" &>/dev/null; then
-        ${pkgs.sudo}/bin/sudo -u ${username} ${ensureReposScript}/bin/ensure-repos 2>&1 | \
-          ${pkgs.systemd}/bin/systemd-cat -t ensure-repos || true
-      fi
-    '';
-    deps = [ "users" ];
+    entries = lib.mkOption {
+      type = lib.types.attrsOf (lib.types.submodule {
+        options = {
+          url = lib.mkOption {
+            type = lib.types.str;
+            description = "HTTPS clone URL, used with gh CLI when authenticated.";
+          };
+          sshUrl = lib.mkOption {
+            type = lib.types.str;
+            description = "SSH clone URL, used when gh isn't authenticated.";
+          };
+          path = lib.mkOption {
+            type = lib.types.str;
+            description = "Absolute path to clone into.";
+          };
+          description = lib.mkOption {
+            type = lib.types.str;
+            default = "";
+          };
+        };
+      });
+      default = {};
+      description = "Repos to keep cloned. Missing entries are cloned on boot; existing ones are untouched.";
+      example = lib.literalExpression ''
+        {
+          my-notes = {
+            url = "https://github.com/youruser/my-notes.git";
+            sshUrl = "git@github.com:youruser/my-notes.git";
+            path = "/home/youruser/my-notes";
+            description = "Personal notes";
+          };
+        }
+      '';
+    };
+  };
+
+  config = lib.mkIf cfg.enable {
+    environment.systemPackages = with pkgs; [gh ensureReposScript];
+
+    # network-online.target ordering matters on VMs: their network comes up
+    # through the router after boot, unlike an activation script (which runs
+    # before systemd starts any units and would race a cold boot).
+    systemd.services.hydrix-ensure-repos = {
+      description = "Clone declared git repos (hydrix.repos.entries)";
+      after = ["network-online.target" "local-fs.target"];
+      wants = ["network-online.target"];
+      wantedBy = ["multi-user.target"];
+      serviceConfig = {
+        Type = "oneshot";
+        RemainAfterExit = true;
+        User = username;
+        ExecStart = "${ensureReposScript}/bin/ensure-repos";
+      };
+    };
   };
 }
