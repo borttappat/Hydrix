@@ -55,6 +55,18 @@ in {
       '';
     };
 
+    firefox.package = lib.mkOption {
+      type = lib.types.package;
+      default = pkgs.firefox;
+      defaultText = lib.literalExpression "pkgs.firefox";
+      example = lib.literalExpression "pkgs.firefox-esr";
+      description = ''
+        Firefox package wrapped by the Hydrix launcher. Release builds enforce
+        add-on signing; use firefox-esr or firefox-devedition to install
+        unsigned local extensions.
+      '';
+    };
+
     firefox.userAgent = lib.mkOption {
       type = lib.types.nullOr lib.types.str;
       default = null;

@@ -137,7 +137,7 @@
       fi
 
       # Launch Firefox in background, then run pywalfox update in parallel
-      ${firefoxPkg}/bin/firefox "$@" &
+      ${lib.getExe firefoxPkg} "$@" &
       FF_PID=$!
 
       # Wait for Firefox to be ready, then apply pywal colors.
@@ -170,9 +170,12 @@
     base = pkgs.symlinkJoin {
       name = "firefox-hydrix";
       paths = [firefoxPkg];
+      # ESR/devedition ship bin/firefox-esr etc.; keep that name and also
+      # expose it as plain "firefox", both pointing at the Hydrix launcher.
       postBuild = ''
-        rm $out/bin/firefox
-        ln -s ${hydrixWrapper}/bin/firefox-hydrix $out/bin/firefox
+        rm -f $out/bin/${firefoxPkg.meta.mainProgram}
+        ln -sf ${hydrixWrapper}/bin/firefox-hydrix $out/bin/${firefoxPkg.meta.mainProgram}
+        ln -sf ${hydrixWrapper}/bin/firefox-hydrix $out/bin/firefox
       '';
     };
   in
@@ -184,7 +187,7 @@
       inherit (firefoxPkg) version pname;
     };
 
-  firefoxWrapped = mkFirefoxWrapped pkgs.firefox;
+  firefoxWrapped = mkFirefoxWrapped config.hydrix.graphical.firefox.package;
 
   # Helper script to add new Firefox extensions from AMO
   # Usage: firefox-extension-add <slug>
