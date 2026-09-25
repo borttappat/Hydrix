@@ -70,6 +70,23 @@
   # Get font configuration from unified options
   fontCfg = config.hydrix.graphical.font;
   fontName = fontCfg.family;
+  # Firefox's built-in browser.display.use_document_fonts.icon_font_allowlist.
+  defaultIconFonts = [
+    "Material Icons"
+    "Material Icons Extended"
+    "Material Icons Outlined"
+    "Material Icons Round"
+    "Material Icons Sharp"
+    "Material Icons Two Tone"
+    "Google Material Icons"
+    "Google Material Icons Filled"
+    "Material Symbols Outlined"
+    "Material Symbols Round"
+    "Material Symbols Rounded"
+    "Material Symbols Sharp"
+    "Google Symbols"
+    "FontAwesome"
+  ];
   # Use override if set, otherwise scale base size by firefox relation
   fontSize = fontCfg.overrides.firefox or (builtins.floor (fontCfg.size * (fontCfg.relations.firefox or 1.2)));
   headerFontSize = fontCfg.overrides.firefoxHeader or (builtins.floor (fontCfg.size * 1.9));
@@ -483,12 +500,19 @@ in {
               # since the portal works on both host and VMs.
               "widget.use-xdg-desktop-portal.file-picker" = 1;
 
-              # Allow web fonts so icon fonts (Font Awesome etc.) render correctly.
-              # System font is set as default via font.name.* below — no need to block web fonts.
-              "browser.display.use_document_fonts" = lib.mkDefault 1;
-              "font.name.monospace.x-western" = lib.mkDefault fontName;
-              "font.name.sans-serif.x-western" = lib.mkDefault fontName;
-              "font.name.serif.x-western" = lib.mkDefault fontName;
+              # Pages render all text in the system font: document fonts are
+              # off except those on the icon allowlist, so icon fonts still load.
+              # Setting the allowlist replaces Firefox's default, hence
+              # defaultIconFonts is carried over.
+              "browser.display.use_document_fonts" = lib.mkDefault 0;
+              "browser.display.use_document_fonts.icon_font_allowlist" =
+                lib.concatStringsSep ", " (defaultIconFonts ++ ffCfg.iconFontAllowlist);
+            }
+            // lib.genAttrs
+            (lib.concatMap (group: map (type: "font.name.${type}.${group}") ["monospace" "sans-serif" "serif"])
+              ["x-western" "x-unicode" "x-cyrillic" "el"])
+            (_: lib.mkDefault fontName)
+            // {
               "font.size.variable.x-western" = lib.mkDefault fontSize;
               "font.size.monospace.x-western" = lib.mkDefault fontSize;
             }
@@ -613,16 +637,6 @@ in {
           '';
 
           userContent = ''
-            /* Force system font on all web content.
-               Exclude <i> elements — icon fonts (Font Awesome etc.) universally
-               use <i> as the container, and their glyphs live in the Unicode
-               Private Use Area which only the icon web font has. */
-            @-moz-document regexp(".*") {
-              *:not(i) {
-                font-family: "${fontName}", monospace !important;
-              }
-            }
-
             /* Apply to internal pages (about:*, etc.) */
             @-moz-document url-prefix("about:") {
               body {

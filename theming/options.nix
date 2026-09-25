@@ -196,6 +196,18 @@ in {
       '';
     };
 
+    firefox.iconFontAllowlist = lib.mkOption {
+      type = lib.types.listOf lib.types.str;
+      default = [];
+      example = ["Anthropic Icons"];
+      description = ''
+        Extra icon font families pages may still load. Firefox renders all page
+        text in the system font (browser.display.use_document_fonts = 0) and
+        only lets fonts on its icon allowlist through; these are appended to
+        Firefox's built-in list (Material Icons/Symbols, FontAwesome, ...).
+      '';
+    };
+
     firefox.uidensity = lib.mkOption {
       type = lib.types.int;
       default = 1;
