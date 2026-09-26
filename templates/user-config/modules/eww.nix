@@ -9,12 +9,16 @@
 #   EXIT NODES  WireGuard exit node per running VM; click a row to route that
 #               VM direct or back through its tunnel (router VPNSET command)
 #   NETWORK     SSID, unsaved count, WAN + per-VM bandwidth
-#   CPU         2 minute usage graph, load average
+#   TRAFFIC     2 minute graph of combined throughput across all bridges
 #   GIT         working-tree state of hydrix-config, hydrix.repos.entries and
 #               dashboard.git.extraRepos (local only, fine in lockdown mode)
 #   TODO        ~/.local/share/hydrix/todo.txt; click to tick, `todo` to edit
 #   WEATHER     dashboard.weather.locations, fetched by the router VM since the
 #               host has no internet in lockdown mode (router WEATHER command)
+#   CPU         2 minute usage graph, load average
+#
+# TRAFFIC and CPU have the same fixed shape and close their columns, so the
+# two graphs line up; the text blocks above them take the spare height.
 #
 # Router data comes from router-stats-server on vsock 200:14506. Colors come
 # from ~/.cache/wal/colors.scss; fonts and geometry from hydrix.graphical.
@@ -233,30 +237,35 @@
     '';
   };
 
-  # Formats router NET stats (from the ALL snapshot when fresh) and
-  # normalises direction to the VM's perspective (router rx/tx -> VM up/down).
+  # Formats router NET stats (from the ALL snapshot when fresh), direction
+  # normalised to the VM's perspective (router rx/tx -> VM up/down), plus
+  # "total": combined throughput of every bridge row (each VM's down + up)
+  # for the traffic graph.
   ewwNetStats = pkgs.writeShellApplication {
     name = "eww-net-stats";
     runtimeInputs = [pkgs.socat pkgs.jq pkgs.coreutils];
     text = ''
+      empty='{"wan":{"iface":"","down":"","up":""},"vms":[],"total":0,"total_fmt":"0B/s"}'
+
       raw=""
       if [ -f "${routerAllCache}" ]; then
         age=$(( $(date +%s) - $(stat -c %Y "${routerAllCache}" 2>/dev/null || echo 0) ))
         [ "$age" -lt 15 ] && raw=$(jq -c '.net' "${routerAllCache}" 2>/dev/null || true)
       fi
-      if [ -z "$raw" ]; then
-        raw=$(printf 'NET\n' | socat -T4 - VSOCK-CONNECT:200:14506 2>/dev/null || true)
-      fi
-      [ -z "$raw" ] && { echo '{"wan":{"iface":"","down":"","up":""},"vms":[]}'; exit 0; }
-      echo "$raw" | jq '
+      [ -n "$raw" ] || raw=$(printf 'NET\n' | socat -T4 - VSOCK-CONNECT:200:14506 2>/dev/null || true)
+      [ -n "$raw" ] || { echo "$empty"; exit 0; }
+
+      jq -c '
         def fmt:
           if . >= 1048576 then "\(. / 1048576 | floor)MB/s"
           elif . >= 1024 then "\(. / 1024 | floor)KB/s"
           else "\(.)B/s"
           end;
-        {wan:{iface:.wan.iface,down:(.wan.rx|fmt),up:(.wan.tx|fmt)},
-         vms:[.vms[]|{vm:.vm,down:(.tx|fmt),up:(.rx|fmt)}]}
-      ' 2>/dev/null || echo '{"wan":{"iface":"","down":"","up":""},"vms":[]}'
+        ([.vms[] | .rx + .tx] | add // 0) as $total
+        | {wan: {iface: .wan.iface, down: (.wan.rx | fmt), up: (.wan.tx | fmt)},
+           vms: [.vms[] | {vm: .vm, down: (.tx | fmt), up: (.rx | fmt)}],
+           total: $total, total_fmt: ($total | fmt)}
+      ' <<< "$raw" 2>/dev/null || echo "$empty"
     '';
   };
 
@@ -609,7 +618,7 @@
 
       (defpoll net_stats
         :interval "10s"
-        :initial "{\"wan\":{\"iface\":\"\",\"down\":\"\",\"up\":\"\"},\"vms\":[]}"
+        :initial "{\"wan\":{\"iface\":\"\",\"down\":\"\",\"up\":\"\"},\"vms\":[],\"total\":0,\"total_fmt\":\"0B/s\"}"
         `eww-net-stats`)
 
       (defpoll gc_status
@@ -655,8 +664,8 @@
           :orientation "h"
           :space-evenly true
           :spacing ${toString gaps}
-          (dash-column (vm-status-widget) (exit-nodes-widget) (router-widget))
-          (dash-column (cpu-widget) (git-widget) (todo-widget) (weather-widget))))
+          (dash-column (vm-status-widget) (exit-nodes-widget) (router-widget) (traffic-widget))
+          (dash-column (git-widget) (todo-widget) (weather-widget) (cpu-widget))))
 
       (defwidget dash-column []
         (box
@@ -665,7 +674,7 @@
           :spacing ${toString gaps}
           (children)))
 
-      (defwidget block-title [text ?aside]
+      (defwidget block-title [text ?aside ?style]
         (box
           :orientation "h"
           :space-evenly false
@@ -675,7 +684,7 @@
             :hexpand true
             :halign "start")
           (label
-            :class "title-aside"
+            :class "title-aside ''${style}"
             :visible {aside != ""}
             :text {aside ?: ""})))
 
@@ -783,11 +792,10 @@
           :orientation "v"
           :space-evenly false
           :visible {router_stats.current != ""}
-          (block-title :text "NETWORK")
-          (label
-            :class "rs-ssid"
-            :text {router_stats.current}
-            :halign "start")
+          (block-title
+            :text "NETWORK"
+            :aside {router_stats.current}
+            :style "strong")
           (label
             :class {router_stats.pending > 0 ? "rs-pending unsaved" : "rs-pending"}
             :visible {router_stats.pending > 0}
@@ -833,19 +841,42 @@
             :class "net-up"
             :text {vm.up + "↑"})))
 
+      ;; Combined throughput of every bridge in the NETWORK block, auto-scaled
+      ;; to its own recent peak. Same shape as cpu-widget so the graphs line up.
+      (defwidget traffic-widget []
+        (box
+          :class "block"
+          :orientation "v"
+          :space-evenly false
+          :visible {net_stats.wan.iface != ""}
+          (block-title
+            :text "TRAFFIC"
+            :aside {net_stats.total_fmt})
+          (graph
+            :class "graph net-graph"
+            :height 90
+            :value {net_stats.total}
+            :min 0
+            :dynamic true
+            :time-range "120s"
+            :thickness 1.5
+            :line-style "round")
+          (label
+            :class "graph-meta"
+            :halign "start"
+            :text {"all " + arraylength(net_stats.vms) + " bridges, down + up"})))
+
       (defwidget cpu-widget []
         (box
           :class "block"
-          :vexpand true
           :orientation "v"
           :space-evenly false
           (block-title
             :text "CPU"
             :aside {round(EWW_CPU.avg, 0) + "%"})
           (graph
-            :class "cpu-graph"
-            :vexpand true
-            :height 56
+            :class "graph cpu-graph"
+            :height 90
             :value {EWW_CPU.avg}
             :min 0
             :max 100
@@ -854,7 +885,7 @@
             :thickness 1.5
             :line-style "round")
           (label
-            :class "cpu-meta"
+            :class "graph-meta"
             :halign "start"
             :text {"load " + loadavg + "   " + arraylength(EWW_CPU.cores) + " threads"})))
 
@@ -867,7 +898,8 @@
           :visible {arraylength(git_repos) > 0}
           (block-title
             :text "GIT"
-            :aside {jq(git_repos, "map(select(.state != \"clean\")) | length") + " need attention"})
+            :aside {jq(git_repos, "map(select(.state != \"clean\")) | length") + " need attention"}
+            :style "strong")
           (for repo in git_repos
             (box
               :class "git-repo"
@@ -1061,6 +1093,10 @@
         color: $color8;
         margin-bottom: 4px;
       }
+      .title-aside.strong {
+        font-weight: bold;
+        color: $foreground;
+      }
 
       /* vms */
 
@@ -1129,11 +1165,6 @@
 
       /* network */
 
-      .rs-ssid {
-        font-weight: bold;
-        color: $foreground;
-      }
-
       .rs-pending.unsaved {
         color: $color1;
       }
@@ -1164,15 +1195,18 @@
         color: $color8;
       }
 
-      /* cpu */
+      /* cpu + traffic graphs */
 
-      .cpu-graph {
-        color: $color4;
-        background-color: rgba($color4, 0.12);
+      .graph {
         margin-top: 4px;
       }
+      .cpu-graph,
+      .net-graph {
+        color: $color4;
+        background-color: rgba($color4, 0.12);
+      }
 
-      .cpu-meta {
+      .graph-meta {
         color: $color8;
         margin-top: 4px;
       }
