@@ -2515,7 +2515,7 @@
           fi
           log "Attaching to git-sync console for gh auth login..."
           log "Run: ''${BOLD}gh auth login''${NC}"
-          log "Press Ctrl+O to detach from console"
+          log "Press Ctrl+] to detach from console"
           cmd_console "$GITSYNC_NAME"
       }
 
