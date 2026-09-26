@@ -14,6 +14,8 @@ in {
   imports = [
     # Live NixOS switch via vsock:14504 (shard switch)
     ./vm-switch.nix
+    # Serial console follows the attached terminal's size
+    ../../common/serial-console.nix
   ];
 
   config = {

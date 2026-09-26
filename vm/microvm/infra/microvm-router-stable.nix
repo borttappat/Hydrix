@@ -154,6 +154,8 @@ in {
   imports = [
     ../../options.nix
     (modulesPath + "/profiles/qemu-guest.nix")
+    # Serial console follows the attached terminal's size
+    ../../common/serial-console.nix
   ];
 
   config = {

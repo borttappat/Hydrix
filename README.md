@@ -44,7 +44,7 @@ Things being actively worked on or not yet verified. Checked off once resolved a
 
 **Polish / lower priority**
 
-- [ ] **Socat terminal output**: raw-mode attach/detach (`shard console <name>`) verified working. Removed the `screen` fallback: it was broken since `console.sock` is a UNIX socket rather than a character device, so screen tried to exec the socket path as a command instead of connecting to it. Remaining known limitation: the console renders in a small, fixed geometry, inherent to qemu's serial-over-socket transport having no window-size negotiation with the guest, not fixable via socat or screen alone.
+- [x] **Socat terminal output**: raw-mode attach/detach (`shard console <name>`) verified working. Removed the `screen` fallback: it was broken since `console.sock` is a UNIX socket rather than a character device, so screen tried to exec the socket path as a command instead of connecting to it. Console geometry: the serial line carries no window size, so the guest (`vm/common/serial-console.nix`, imported by all infra VMs) queries the attached terminal's size before each prompt and applies it with `stty`, so output follows the host window as it is resized.
 - [x] **Phase out xpra**: xpra, i3, and sway have been fully removed from the framework. Hyprland + waypipe is the only supported desktop stack.
 - [x] **Live-switch edge cases** (`shard switch`): fixed two silent-failure paths: the host-side nix-store DB registration step now surfaces errors instead of swallowing them, and `vm-switch` no longer mislabels hard failures (e.g. exit 100, incompatible init requiring reboot) as "OK, some units failed". Other edge cases may still surface; report if found.
 
