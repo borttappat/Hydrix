@@ -86,11 +86,27 @@
               except OSError:
                   pass  # host relay unreachable — nothing else to fall back to
 
+              # Nothing is rendered locally, so signal closure ourselves once the
+              # requested timeout lapses; libnotify clients (Firefox) otherwise
+              # keep every notification's listener alive indefinitely.
+              delay = expire_timeout if expire_timeout > 0 else 5000
+              GLib.timeout_add(delay, self._expire, nid)
               return nid
 
+          def _expire(self, nid):
+              self.NotificationClosed(dbus.UInt32(nid), dbus.UInt32(1))
+              return False
+
+          @dbus.service.signal("org.freedesktop.Notifications", signature="uu")
+          def NotificationClosed(self, nid, reason):
+              pass
+
+          # Firefox marks web notifications clickable and falls back to its own
+          # in-browser popup unless the server advertises "actions". Actions are
+          # accepted but never invoked, since the host popup cannot click back.
           @dbus.service.method("org.freedesktop.Notifications", out_signature="as")
           def GetCapabilities(self):
-              return ["body"]
+              return ["body", "actions"]
 
           @dbus.service.method("org.freedesktop.Notifications", in_signature="u")
           def CloseNotification(self, nid):
