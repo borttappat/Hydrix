@@ -338,6 +338,11 @@ in {
               default = null;
               description = "Focus border color for this VM's windows in Hyprland. Named color (red, yellow, ...) or hex RRGGBBAA. Set in meta.nix, read by Hyprland window rules via vm-registry.json.";
             };
+            notifyForward = lib.mkOption {
+              type = lib.types.bool;
+              default = false;
+              description = "Whether the host accepts notifications forwarded from this VM (vsock:14518). Set in meta.nix; the VM's hydrix.microvm.notifyForward.enable should read the same value.";
+            };
             memCeilingMb = lib.mkOption {
               type = lib.types.nullOr lib.types.int;
               default = null;

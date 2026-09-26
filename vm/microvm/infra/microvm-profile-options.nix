@@ -19,7 +19,7 @@
     notifyForward.enable = lib.mkOption {
       type = lib.types.bool;
       default = false;
-      description = "Forward VM desktop notifications (org.freedesktop.Notifications) to the host over vsock instead of rendering them locally. The VM has no notification daemon otherwise, so notify-send and app notifications silently fail unless this is on.";
+      description = "Forward VM desktop notifications (org.freedesktop.Notifications) to the host over vsock instead of rendering them locally. The VM has no notification daemon otherwise, so notify-send and app notifications silently fail unless this is on. The host only accepts notifications from VMs whose meta.nix sets notifyForward = true, so set this from that same value.";
     };
 
     vcpu = lib.mkOption {

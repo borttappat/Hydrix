@@ -3569,7 +3569,7 @@ All host-VM communication uses virtio-vsock. No SSH or network access to VMs. Ea
 | 14509 | display-mode | Host -> VM | Display mode selector / readiness gate: `PING`/`waypipe-reconnect`/`STATUS`/`stop` |
 | 14510 | builder-build | Host -> Builder | Send build commands |
 | 14511 | builder-status | Host -> Builder | Query builder status |
-| 14518 | vm-notify-relay | VM -> Host | Forwards `org.freedesktop.Notifications` calls to a host popup. Opt-in per VM via `hydrix.microvm.notifyForward.enable` (default false) |
+| 14518 | vm-notify-relay | VM -> Host | Forwards `org.freedesktop.Notifications` calls to a host popup. Opt-in per VM via `notifyForward = true` in the profile's `meta.nix`, which drives both `hydrix.microvm.notifyForward.enable` and the host's per-CID allowlist |
 | 146xx | waypipe per-VM | VM -> Host | Wayland tunnel, one port per VM: `14600 + CID - 100` |
 
 > **waypipe per-VM ports**: browsing (CID 103) -> 14603, pentest (CID 102) -> 14602, lurking (CID 106) -> 14606, etc. This avoids collision when multiple VMs are tunnelled simultaneously.
@@ -4728,11 +4728,29 @@ No configuration required \- audio works automatically for all profile VMs as so
 
 ### Notification Forwarding (waypipe mode)
 
-VMs have no local notification daemon \- calling `notify-send` (or any app hitting
-`org.freedesktop.Notifications`) fails with `NameHasNoOwner` unless this is enabled. Opt-in
-per VM via `hydrix.microvm.notifyForward.enable` (default `false`). When on, the VM claims
-the `org.freedesktop.Notifications` D-Bus name itself and forwards each `Notify()` call to
-the host over vsock instead of rendering anything locally \- the VM never draws a popup.
+VMs have no local notification daemon, so calling `notify-send` (or any app hitting
+`org.freedesktop.Notifications`) fails with `NameHasNoOwner` unless this is enabled. When on,
+the VM claims the `org.freedesktop.Notifications` D-Bus name itself and forwards each
+`Notify()` call to the host over vsock instead of rendering anything locally: the VM never
+draws a popup.
+
+**Opt-in lives in the profile's `meta.nix`:**
+
+```nix
+# profiles/<name>/meta.nix
+notifyForward = true;
+
+# profiles/<name>/default.nix
+hydrix.microvm.notifyForward.enable = meta.notifyForward;
+```
+
+The same `meta.nix` value feeds both sides: the VM-side relay
+(`hydrix.microvm.notifyForward.enable`, default `false`) and the host registry
+(`/etc/hydrix/vm-registry.json`, `notifyForward` field, default `false`), which is what the
+host listener authorizes against. Task slots follow the pentest profile's value unless their
+own `tasks/<slot>/meta.nix` sets `notifyForward`; `flake.nix` threads that into both the task
+VM and its registry entry. If the two sides disagree, the host drops the notification and logs
+a rejection.
 
 **Architecture:**
 
@@ -4745,44 +4763,65 @@ VM app calls notify-send / Notification API
                                           vsock port 14518
                                                     │
                                     Host vm-notify-relay user service
-                                      socat VSOCK-LISTEN:14518 → notify-send (host dunst)
+                                      socat VSOCK-LISTEN:14518 → vm-notify-forward
+                                        (authorize by peer CID, sanitize) → notify-send (host dunst)
 ```
 
 **Host side (`theming/wm/hyprland/waypipe.nix`):**
 
-- `vm-notify-relay` user service: `socat VSOCK-LISTEN:14518,fork` piped into a script that
-  parses the JSON payload (`vm`, `app_name`, `summary`, `body`, `urgency`) and calls
-  `notify-send`, tagging the summary as `[vm] summary` \- dunst's format string only renders
-  `%s`/`%b`, never `%a`, so the app-name field set via `-a` is invisible regardless; tagging
-  the summary text itself is what actually shows up, matching waypipe's own `[vm] ` window-title
-  prefix convention.
-- Always listening whenever `hydrix.hyprland.enable`, regardless of which VMs have the option
-  on \- same reasoning as `pulse-vsock`: an idle vsock listener costs nothing, so there's no
-  need to gate the host side per-VM.
+Everything a VM sends is treated as untrusted: a compromised VM does not need the relay and
+can connect to vsock:14518 directly with arbitrary JSON. The `vm-notify-relay` user service
+(`socat VSOCK-LISTEN:14518,fork,max-children=8`) runs `vm-notify-forward` per connection, which:
+
+- **Resolves the VM from the vsock peer CID** (`SOCAT_PEERADDR`, set by socat), looked up in
+  `vm-registry.json`. The payload's own `vm` field is ignored, so a VM cannot label its
+  notifications as another VM (e.g. `[vault]`) or as the host.
+- **Accepts only registry entries with `notifyForward = true`.** Anything else is dropped and
+  logged as `rejected notification from CID N` (`journalctl --user -u vm-notify-relay`).
+- **Caps input:** 8 KiB per message, read with a 3 s timeout (a connection held open cannot
+  pin a child), `app_name` 64 / `summary` 200 / `body` 1000 characters.
+- **Escapes `&`, `<`, `>`** since dunst runs with `markup = full`, so VM text renders
+  literally and cannot style itself to mimic another source.
+- **Breaks URL prefixes** (`://`, `mailto:`, `www.`) with a zero-width space. dunst extracts
+  `http(s)`, `ftp(s)`, `news`, `mailto`, `file://` and `www.` links from the body and offers
+  them to the host browser (context menu, and `do_action` on a single URL), so VM-supplied
+  links and host `file://` paths are never openable. Text looks unchanged; copied links carry
+  the invisible character.
+- **Caps urgency at `normal`** (`low` is kept), so a VM cannot pin sticky critical popups.
+- **Rate-limits per VM:** a per-VM `flock` held for one second after each notification;
+  anything arriving meanwhile is dropped, not queued.
+- Calls `notify-send -u <urgency> --app-name=<app> -- "[vm] summary" "body"`. The `--` and
+  `--app-name=` form stop VM text that starts with `-` from being parsed as `notify-send`
+  options (e.g. `--action` plus `--wait`, which would echo the user's click back to the VM).
+  The summary is tagged `[vm] ` because dunst's format string only renders `%s`/`%b`, never
+  `%a`, matching waypipe's own `[vm] ` window-title prefix convention.
+
+Only plain strings cross the boundary: icons, image data, hints and actions are dropped
+VM-side, and nothing flows back to the VM.
 
 **VM side (`vm/display/waypipe-vm.nix`):**
 
 - `notify-relay` user service, gated by `hydrix.microvm.notifyForward.enable`: a small Python
   D-Bus service (`python3-dbus` + PyGObject) that registers itself as
   `org.freedesktop.Notifications` on the session bus and implements `Notify`,
-  `GetCapabilities`, `CloseNotification`, `GetServerInformation`.
+  `GetCapabilities`, `CloseNotification`, `GetServerInformation` and the
+  `NotificationClosed` signal.
+- `GetCapabilities` returns `["body", "actions"]`. Firefox (which sends through `libnotify`,
+  dlopened) marks every web notification clickable and falls back to its own in-browser popup
+  window unless the server advertises `actions`. Actions are accepted but never invoked, since
+  the host popup cannot click back into the VM.
+- Emits `NotificationClosed` once the requested timeout lapses (5 s if none), since nothing is
+  rendered locally to close it; without it `libnotify` clients keep every notification's
+  listener alive indefinitely.
 - Also implements `org.freedesktop.DBus.Properties` (`Get`/`GetAll`/`Set`, all effectively
-  no-ops). GDBus-based clients (`GDBusProxy`, used internally by `libnotify` as linked into
-  apps like Firefox) call `Properties.GetAll` while constructing a proxy, before ever calling
-  `Notify()` \- without a handler here that call fails with `UnknownMethod` and the whole
-  proxy construction fails, so the app never gets as far as sending a notification at all.
+  no-ops). GDBus-based clients (`GDBusProxy`) call `Properties.GetAll` while constructing a
+  proxy, before ever calling `Notify()`; without a handler proxy construction fails and the app
+  never sends anything.
 - On `Notify()`, opens a short-lived `AF_VSOCK` connection to the host (CID 2, port 14518),
   ships the payload as one JSON line, and closes it. No persistent VM→host connection, no
-  polling on either side \- purely event-driven (D-Bus bus-ownership on the VM side, blocking
-  `accept()` on the host side).
+  polling on either side.
 
-**Known limitation:** verified working end-to-end for `notify-send` and GTK apps (`zenity`),
-including the exact `Gio.DBusProxy` mechanism real apps use internally. Firefox specifically
-does not display notifications when running inside a waypipe VM with this enabled, even
-though the identical Firefox build works normally when run directly on the host. Root cause
-narrowed down to something inside Firefox's own notification code path (not the relay, not
-D-Bus, not `libnotify`'s library path, not desktop-environment detection \- all individually
-ruled out) but not yet fully diagnosed. Everything else works normally.
+Verified working for `notify-send`, GTK apps (`zenity`) and Firefox web notifications.
 
 ### Status Bar Notes
 

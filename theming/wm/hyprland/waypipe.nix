@@ -652,17 +652,49 @@
     fi
   '';
 
+  # Everything a VM sends is untrusted. The VM name is resolved from the vsock
+  # peer CID (set by socat), never from the payload, and only registry entries
+  # with notifyForward = true are accepted. Fields are length-capped and
+  # markup-escaped (dunst runs with markup = full), URL prefixes are broken
+  # with a zero-width space so dunst never offers VM-supplied links (or
+  # file:// paths) to the host browser, urgency is capped at
+  # normal so a VM cannot pin sticky critical popups, and a per-VM lock drops
+  # anything beyond one notification per second.
+  #
   # dunst's format string only renders %s/%b, never %a, so the app-name field
   # is invisible regardless of what -a is set to. Tag the summary itself
   # instead, matching waypipe's own "[vm] " window-title prefix convention.
   notifyForwardScript = pkgs.writeShellScript "vm-notify-forward" ''
-    read -r line
-    vm=$(printf '%s' "$line" | ${pkgs.jq}/bin/jq -r '.vm // "vm"')
-    app=$(printf '%s' "$line" | ${pkgs.jq}/bin/jq -r '.app_name // "notify"')
-    summary=$(printf '%s' "$line" | ${pkgs.jq}/bin/jq -r '.summary // ""')
-    body=$(printf '%s' "$line" | ${pkgs.jq}/bin/jq -r '.body // ""')
-    urgency=$(printf '%s' "$line" | ${pkgs.jq}/bin/jq -r '.urgency // "normal"')
-    ${pkgs.libnotify}/bin/notify-send -u "$urgency" -a "$app" "[$vm] $summary" "$body"
+    set -u
+    jq=${pkgs.jq}/bin/jq
+    cid=''${SOCAT_PEERADDR:-}
+    vm=$($jq -r --arg cid "$cid" \
+      'to_entries[] | select((.value.cid | tostring) == $cid and .value.notifyForward == true) | .key' \
+      ${VM_REGISTRY} 2>/dev/null | head -n1)
+    if [ -z "$vm" ]; then
+      echo "rejected notification from CID ''${cid:-unknown}" >&2
+      exit 0
+    fi
+
+    exec 9>"''${XDG_RUNTIME_DIR:-/tmp}/vm-notify-$vm.lock"
+    ${pkgs.util-linux}/bin/flock -n 9 || exit 0
+
+    line=$(${pkgs.coreutils}/bin/timeout 3 head -c 8192 | head -n1)
+    {
+      IFS= read -r -d "" app
+      IFS= read -r -d "" summary
+      IFS= read -r -d "" body
+      IFS= read -r -d "" urgency
+    } < <(printf '%s' "$line" | $jq --raw-output0 '
+      def clean(n): (. // "" | tostring | .[0:n]
+        | gsub("&"; "&amp;") | gsub("<"; "&lt;") | gsub(">"; "&gt;")
+        | gsub("(?<p>://|mailto:|www\\.)"; "\(.p[0:1])​\(.p[1:])"; "i"));
+      (.app_name | clean(64)), (.summary | clean(200)), (.body | clean(1000)),
+      (if .urgency == "low" then "low" else "normal" end)
+    ' 2>/dev/null) || exit 0
+
+    ${pkgs.libnotify}/bin/notify-send -u "$urgency" --app-name="$app" -- "[$vm] $summary" "$body"
+    sleep 1
   '';
 in
   lib.mkIf config.hydrix.hyprland.enable {
@@ -714,16 +746,14 @@ in
     };
 
     # ── Notification forwarding for waypipe VMs ───────────────────────────────
-    # VMs opt in via hydrix.microvm.notifyForward.enable (default false, see
-    # vm/microvm/infra/microvm-profile-options.nix). Listens here unconditionally
-    # regardless of which VMs have it on — same reasoning as pulse-vsock above:
-    # an idle vsock listener costs nothing, so there's no need to gate the host
-    # side per-VM.
+    # One listener serves every VM; per-VM authorization happens in
+    # notifyForwardScript against the registry's notifyForward flag, which is
+    # the same meta.nix value that enables the VM-side relay.
     systemd.user.services.vm-notify-relay = {
       description = "VM notification relay listener (vsock:14518)";
       wantedBy = ["default.target"];
       serviceConfig = {
-        ExecStart = "${pkgs.socat}/bin/socat VSOCK-LISTEN:14518,reuseaddr,fork EXEC:${notifyForwardScript}";
+        ExecStart = "${pkgs.socat}/bin/socat VSOCK-LISTEN:14518,reuseaddr,fork,max-children=8 EXEC:${notifyForwardScript}";
         Restart = "always";
         RestartSec = "3s";
       };

@@ -11,6 +11,7 @@
   subnet    = "__SUBNET__";      # /24 prefix — matches CID last octet
   workspace = __WORKSPACE__;
   label     = "__LABEL__";
+  notifyForward = false;  # true: forward VM notifications to host popups (vsock:14518)
 
   mem  = __MEM__;                       # ceiling, MB - balloon reclaims idle memory
   vcpu = __VCPU__;                      # ceiling

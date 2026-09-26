@@ -46,6 +46,7 @@ let meta = import ./meta.nix; in
   # of editing this profile, e.g.:
   #   hydrix.vmElastic.vms.__NAME__.memFloorMb = 2048;
   hydrix.microvm = {
+    notifyForward.enable = meta.notifyForward;
     inherit (meta) vsockCid bridge tapId mem vcpu memLowFloorMb memFloorMb cpuLowFloorPct cpuFloorPct;
     persistence = {
       enable = true;

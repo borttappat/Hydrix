@@ -9,6 +9,7 @@
   workspace   = 3;
   label       = "BROWSING";
   focusBorder = "yellow";
+  notifyForward = true;   # host accepts this VM's notifications (vsock:14518)
 
   mem  = 3072;             # ceiling, MB - balloon reclaims idle memory
   vcpu = 6;                # ceiling - generous headroom, balloons down properly when idle

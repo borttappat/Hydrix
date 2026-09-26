@@ -330,6 +330,11 @@
     # One nixosConfiguration per (machine, task slot) pair -- task VMs always carry
     # real (encrypted) engagement data, so they're always per-machine, same as the
     # persistent profile VMs below.
+    # Task slots build on the pentest profile, so they follow its meta.nix
+    # notifyForward unless their own meta.nix sets one. Feeds both the VM-side
+    # relay and the host registry so the two cannot disagree.
+    taskNotifyForward = m: m.notifyForward or ((import ./profiles/pentest/meta.nix).notifyForward or false);
+
     taskConfigs = builtins.listToAttrs (builtins.concatMap (
       machineName: let
         mc = builtins.getAttr machineName machineConfigs;
@@ -347,6 +352,7 @@
               vmThemeSyncModule
               {hydrix.vmThemeSync.enable = true;}
               {system.stateVersion = mc.config.system.stateVersion;}
+              {hydrix.microvm.notifyForward.enable = taskNotifyForward m;}
             ];
             inherit userProfiles hostConfig userColorschemesDir;
           };
@@ -423,6 +429,7 @@
             label = m.label or m._profileName;
             hasDisplay = m.hasDisplay or true;
             focusBorder = m.focusBorder or null;
+            notifyForward = m.notifyForward or false;
           };
         })
         discoveredMetas)
@@ -448,6 +455,7 @@
             workspace = m.workspace;
             label = m.label;
             hasDisplay = true;
+            notifyForward = taskNotifyForward m;
           };
         })
         discoveredTasks);

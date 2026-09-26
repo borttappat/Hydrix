@@ -53,8 +53,8 @@ in {
   # MicroVM resources
   hydrix.microvm = {
     # Forward VM notifications to a host popup, tagged with the VM name.
-    # To disable: notifyForward.enable = false;
-    notifyForward.enable = true;
+    # Toggle via notifyForward in meta.nix (also gates the host listener).
+    notifyForward.enable = meta.notifyForward;
     inherit (meta) vsockCid bridge tapId mem vcpu memLowFloorMb memFloorMb cpuLowFloorPct cpuFloorPct;
     persistence = {
       enable = true;

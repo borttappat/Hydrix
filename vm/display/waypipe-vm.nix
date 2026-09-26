@@ -411,9 +411,9 @@ in {
   # ── notify-relay — claims org.freedesktop.Notifications, forwards to host ──
   # The VM has no notification daemon otherwise (notify-send fails with
   # NameHasNoOwner). Forwards each Notify() call to the host over vsock
-  # instead of rendering anything locally. Host side listens unconditionally
-  # (see theming/wm/hyprland/waypipe.nix) — this option only controls whether
-  # the VM sends.
+  # instead of rendering anything locally. The host only accepts CIDs whose
+  # registry entry has notifyForward = true (see theming/wm/hyprland/waypipe.nix),
+  # so this option and the profile's meta.nix flag must agree.
   systemd.user.services.notify-relay = lib.mkIf notifyForwardEnabled {
     description = "Notification relay to host (vsock:${toString notifyForwardPort})";
     wantedBy = ["default.target"];
