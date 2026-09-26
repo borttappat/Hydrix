@@ -1177,17 +1177,51 @@ in {
     # Persistent no-fork vsock server (port 14506). Handles POLL/STATUS/ADD/
     # REMOVE (unchanged wire protocol, scripts/wifi-sync.sh needs no changes)
     # plus NET/ALL/WG, consolidating what used to be three separate ports
-    # (14506/14515/14517) onto this one process. See router-stats-server.c.
+    # (14506/14515/14517) onto this one process, and WEATHER/VPN/VPNSET for
+    # the host eww dashboard. See router-stats-server.c.
     systemd.services.router-stats-server = {
       description = "Router stats vsock server (port 14506)";
       wantedBy = ["multi-user.target"];
       after = ["router-netlink-poller.service"];
+      # VPNSET execs vpn-assign, which needs the same tools as vpn-boot-assign.
+      path = lib.optionals hasMullvad [pkgs.wireguard-tools pkgs.iproute2 pkgs.gawk vpnAssign];
       serviceConfig = {
         Type = "simple";
         ExecStart = "${routerStatsServerBin}/bin/router-stats-server";
         Restart = "always";
         RestartSec = 5;
       };
+    };
+
+    # Weather relay for the host's eww widget, which has no internet of its
+    # own in lockdown mode. router-stats-server's WEATHER command records the
+    # host's coordinate list in /tmp/weather-request (already validated to
+    # digits and ".,- "); this fetches the Open-Meteo forecast for it when it
+    # changes and every 15 minutes after, into /tmp/weather.json.
+    systemd.paths.router-weather = {
+      wantedBy = ["multi-user.target"];
+      pathConfig.PathChanged = "/tmp/weather-request";
+    };
+
+    systemd.timers.router-weather = {
+      wantedBy = ["timers.target"];
+      timerConfig.OnUnitActiveSec = "15min";
+    };
+
+    systemd.services.router-weather = {
+      description = "Fetch weather forecast for the host";
+      unitConfig.ConditionPathExists = "/tmp/weather-request";
+      serviceConfig.Type = "oneshot";
+      script = ''
+        read -r lats lons < /tmp/weather-request
+        case "$lats$lons" in *[!0-9.,-]*|"") exit 0 ;; esac
+        data=$(${pkgs.curl}/bin/curl -sf --max-time 15 \
+          "https://api.open-meteo.com/v1/forecast?latitude=$lats&longitude=$lons&current=temperature_2m,weather_code,is_day&daily=weather_code,temperature_2m_max,temperature_2m_min&forecast_days=3&timezone=auto") \
+          || exit 0
+        printf '{"query":"%s %s","fetched":%s,"data":%s}\n' "$lats" "$lons" "$(date +%s)" "$data" \
+          > /tmp/weather.json.tmp
+        mv /tmp/weather.json.tmp /tmp/weather.json
+      '';
     };
 
     # ===== WiFi from Sops =====

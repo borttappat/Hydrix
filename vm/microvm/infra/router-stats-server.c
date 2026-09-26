@@ -20,9 +20,17 @@
  *   POLL | STATUS   -> contents of /tmp/wifi-sync-status.json
  *   NET             -> contents of /tmp/net-stats.json
  *   WG              -> contents of /tmp/wg-status.json
- *   ALL             -> {"wifi":<wifi>,"net":<net>,"wg":<wg>}
+ *   ALL             -> {"wifi":<wifi>,"net":<net>,"wg":<wg>,"vpn":<vpn>}
+ *   VPN             -> {"<network>":"<wg-iface|direct|blocked>",...} from
+ *                      vpn-assign's state dir
+ *   VPNSET\n<on|off> <network> -> vpn-assign on|off <network>, then
+ *                      {"ok":bool,"vpn":<vpn>}
  *   ADD\n<ssid>\n<psk>    -> nmcli device wifi connect / connection add
  *   REMOVE\n<ssid>        -> nmcli con delete
+ *   WEATHER\n<lats> <lons> -> contents of /tmp/weather.json; records the
+ *                            coordinate list in /tmp/weather-request for
+ *                            router-weather to fetch (the host has no
+ *                            internet of its own in lockdown mode)
  */
 
 #include <ctype.h>
@@ -33,6 +41,7 @@
 #include <sys/socket.h>
 #include <sys/wait.h>
 #include <fcntl.h>
+#include <dirent.h>
 
 #ifndef AF_VSOCK
 #define AF_VSOCK 40
@@ -51,10 +60,14 @@ struct sockaddr_vm {
 #define WIFI_CACHE "/tmp/wifi-sync-status.json"
 #define NET_CACHE  "/tmp/net-stats.json"
 #define WG_CACHE   "/tmp/wg-status.json"
+#define WX_CACHE   "/tmp/weather.json"
+#define WX_REQUEST "/tmp/weather-request"
+#define VPN_STATE  "/var/lib/hydrix-vpn"
 
 #define WIFI_DEFAULT "{\"current\":\"\",\"connections\":[]}"
 #define NET_DEFAULT  "{\"wan\":{\"iface\":\"\",\"rx\":0,\"tx\":0},\"vms\":[]}"
 #define WG_DEFAULT   "[]"
+#define WX_DEFAULT   "{}"
 
 #define BUF_MAX 65536
 
@@ -88,10 +101,10 @@ static void send_all(int fd, const char *data, size_t len) {
     }
 }
 
-/* Runs nmcli directly via fork/execvp (argv array, no shell) so ssid/psk
- * can never be interpreted as shell syntax. Returns nmcli's exit code, or
- * -1 on fork/exec failure. */
-static int run_nmcli(char *const argv[]) {
+/* Runs argv[0] directly via fork/execvp (argv array, no shell) so ssid/psk
+ * or network names can never be interpreted as shell syntax. Returns the
+ * command's exit code, or -1 on fork/exec failure. */
+static int run_cmd(char *const argv[]) {
     pid_t pid = fork();
     if (pid < 0) return -1;
     if (pid == 0) {
@@ -100,7 +113,7 @@ static int run_nmcli(char *const argv[]) {
             dup2(devnull, STDOUT_FILENO);
             dup2(devnull, STDERR_FILENO);
         }
-        execvp("nmcli", argv);
+        execvp(argv[0], argv);
         _exit(127);
     }
     int status = 0;
@@ -124,7 +137,7 @@ static void handle_add(const char *ssid, const char *psk, char *out, size_t outs
     char *connect_argv[] = {
         "nmcli", "device", "wifi", "connect", (char *)ssid, "password", (char *)psk, NULL,
     };
-    if (run_nmcli(connect_argv) == 0) {
+    if (run_cmd(connect_argv) == 0) {
         snprintf(out, outsz, "{\"ok\":true,\"connected\":true}");
         return;
     }
@@ -135,11 +148,104 @@ static void handle_add(const char *ssid, const char *psk, char *out, size_t outs
         "wifi-sec.key-mgmt", "wpa-psk", "wifi-sec.psk", (char *)psk,
         "connection.autoconnect", "yes", NULL,
     };
-    if (run_nmcli(add_argv) == 0) {
+    if (run_cmd(add_argv) == 0) {
         snprintf(out, outsz, "{\"ok\":true,\"connected\":false}");
         return;
     }
     snprintf(out, outsz, "{\"ok\":false,\"error\":\"failed to add connection\"}");
+}
+
+/* Records the requested coordinate list ("<lat>,<lat> <lon>,<lon>") for
+ * router-weather's path unit, rewriting the file only when it changes so a
+ * repeated poll doesn't retrigger a fetch. Restricted to digits and ".,- "
+ * since the fetcher splices it into a URL. */
+static void handle_weather(const char *query, char *out, size_t outsz) {
+    size_t len = strlen(query);
+    int ok = len > 0 && strchr(query, ' ') != NULL;
+    for (size_t i = 0; ok && i < len; i++)
+        ok = isdigit((unsigned char)query[i]) || strchr(".,- ", query[i]) != NULL;
+    if (!ok) {
+        snprintf(out, outsz, "{\"error\":\"invalid weather query\"}");
+        return;
+    }
+
+    char cur[256];
+    read_cache(WX_REQUEST, "", cur, sizeof(cur));
+    if (strcmp(cur, query) != 0) {
+        FILE *f = fopen(WX_REQUEST, "w");
+        if (f) {
+            fprintf(f, "%s\n", query);
+            fclose(f);
+        }
+    }
+    read_cache(WX_CACHE, WX_DEFAULT, out, outsz);
+}
+
+static int valid_network(const char *s) {
+    size_t len = strlen(s);
+    if (len == 0 || len > 32) return 0;
+    for (size_t i = 0; i < len; i++)
+        if (!islower((unsigned char)s[i]) && !isdigit((unsigned char)s[i]) && s[i] != '-')
+            return 0;
+    return 1;
+}
+
+/* Collects vpn-assign's per-network assignment files into a JSON object.
+ * Values are the file's first word, kept only if it is a plain identifier. */
+static void read_assignments(char *buf, size_t bufsz) {
+    size_t off = (size_t)snprintf(buf, bufsz, "{");
+    DIR *d = opendir(VPN_STATE);
+    if (d) {
+        const char *sep = "";
+        struct dirent *e;
+        while ((e = readdir(d)) != NULL) {
+            char net[64];
+            const char *dot = strstr(e->d_name, ".assignment");
+            size_t nlen = dot ? (size_t)(dot - e->d_name) : 0;
+            if (!dot || dot[11] != 0 || nlen == 0 || nlen >= sizeof(net)) continue;
+            memcpy(net, e->d_name, nlen);
+            net[nlen] = 0;
+            if (!valid_network(net)) continue;
+
+            char path[256], val[64];
+            snprintf(path, sizeof(path), "%s/%s", VPN_STATE, e->d_name);
+            read_cache(path, "", val, sizeof(val));
+            val[strcspn(val, " \t\r\n")] = 0;
+            int ok = val[0] != 0;
+            for (char *c = val; ok && *c; c++)
+                ok = isalnum((unsigned char)*c) || *c == '-' || *c == '_';
+            if (!ok) continue;
+
+            int n = snprintf(buf + off, bufsz - off, "%s\"%s\":\"%s\"", sep, net, val);
+            if (n < 0 || (size_t)n >= bufsz - off) break;
+            off += (size_t)n;
+            sep = ",";
+        }
+        closedir(d);
+    }
+    if (off + 2 <= bufsz) {
+        buf[off++] = '}';
+        buf[off] = 0;
+    } else {
+        snprintf(buf, bufsz, "{}");
+    }
+}
+
+/* "<on|off> <network>": routes the network through its wg-<network> tunnel
+ * or straight out the WAN via vpn-assign, then reports every assignment. */
+static void handle_vpnset(const char *arg, char *out, size_t outsz) {
+    char action[8] = "", net[64] = "";
+    if (sscanf(arg, "%7s %63s", action, net) != 2
+        || (strcmp(action, "on") && strcmp(action, "off"))
+        || !valid_network(net)) {
+        snprintf(out, outsz, "{\"ok\":false,\"error\":\"usage: VPNSET\\non|off <network>\"}");
+        return;
+    }
+    char *argv[] = {"vpn-assign", action, net, NULL};
+    int rc = run_cmd(argv);
+    char vpn[4096];
+    read_assignments(vpn, sizeof(vpn));
+    snprintf(out, outsz, "{\"ok\":%s,\"vpn\":%s}", rc == 0 ? "true" : "false", vpn);
 }
 
 static void handle_remove(const char *ssid, char *out, size_t outsz) {
@@ -148,7 +254,7 @@ static void handle_remove(const char *ssid, char *out, size_t outsz) {
         return;
     }
     char *argv[] = {"nmcli", "con", "delete", (char *)ssid, NULL};
-    if (run_nmcli(argv) == 0) {
+    if (run_cmd(argv) == 0) {
         snprintf(out, outsz, "{\"ok\":true}");
     } else {
         snprintf(out, outsz, "{\"ok\":false,\"error\":\"connection not found: %s\"}", ssid);
@@ -156,7 +262,7 @@ static void handle_remove(const char *ssid, char *out, size_t outsz) {
 }
 
 /* Reads one request off cfd: first line is the command, ADD/REMOVE carry
- * one/two more lines. Stops as soon as it has enough lines for the command
+ * one/two more lines, WEATHER/VPNSET one. Stops as soon as it has enough lines for the command
  * it saw, so a one-line POLL/STATUS/PING/NET/WG/ALL doesn't block waiting
  * for a peer that already sent its full request and is waiting on a reply. */
 static int read_request(int cfd, char lines[3][256]) {
@@ -184,6 +290,7 @@ static int read_request(int cfd, char lines[3][256]) {
                         up[k] = (char)toupper((unsigned char)lines[0][k]);
                     up[k] = 0;
                     if (!strcmp(up, "ADD") || !strcmp(up, "REMOVE")) need = 3;
+                    else if (!strcmp(up, "WEATHER") || !strcmp(up, "VPNSET")) need = 2;
                 }
                 if (nlines >= need) goto done;
             } else if (buflen < 255) {
@@ -223,17 +330,28 @@ static void handle_conn(int cfd) {
         size_t n = read_cache(WG_CACHE, WG_DEFAULT, out, sizeof(out));
         send_all(cfd, out, n);
     } else if (!strcmp(lines[0], "ALL")) {
-        char wifi[BUF_MAX / 3], net[BUF_MAX / 3], wg[BUF_MAX / 3];
+        char wifi[BUF_MAX / 4], net[BUF_MAX / 4], wg[BUF_MAX / 4], vpn[4096];
         read_cache(WIFI_CACHE, WIFI_DEFAULT, wifi, sizeof(wifi));
         read_cache(NET_CACHE, NET_DEFAULT, net, sizeof(net));
         read_cache(WG_CACHE, WG_DEFAULT, wg, sizeof(wg));
-        int n = snprintf(out, sizeof(out), "{\"wifi\":%s,\"net\":%s,\"wg\":%s}", wifi, net, wg);
+        read_assignments(vpn, sizeof(vpn));
+        int n = snprintf(out, sizeof(out), "{\"wifi\":%s,\"net\":%s,\"wg\":%s,\"vpn\":%s}",
+                         wifi, net, wg, vpn);
         if (n > 0) send_all(cfd, out, (size_t)n);
     } else if (!strcmp(lines[0], "ADD")) {
         handle_add(lines[1], lines[2], out, sizeof(out));
         send_all(cfd, out, strlen(out));
     } else if (!strcmp(lines[0], "REMOVE")) {
         handle_remove(lines[1], out, sizeof(out));
+        send_all(cfd, out, strlen(out));
+    } else if (!strcmp(lines[0], "VPN")) {
+        read_assignments(out, sizeof(out));
+        send_all(cfd, out, strlen(out));
+    } else if (!strcmp(lines[0], "VPNSET")) {
+        handle_vpnset(lines[1], out, sizeof(out));
+        send_all(cfd, out, strlen(out));
+    } else if (!strcmp(lines[0], "WEATHER")) {
+        handle_weather(lines[1], out, sizeof(out));
         send_all(cfd, out, strlen(out));
     } else {
         const char *err = "{\"error\":\"unknown command\"}";
