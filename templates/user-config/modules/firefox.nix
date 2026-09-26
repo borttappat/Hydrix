@@ -26,12 +26,15 @@
 # To add a custom extension, use firefox-extension-add <slug> to get the entry,
 # then add it to firefox.extensionRegistry below and select it per-profile.
 #
-# Wal-themed Firefox chrome and hints, both on by default:
-#   vimiumHints  restyles stock vimium-ff link hints (userContent.css)
-#   walMenus     restyles context and dropdown menus (userChrome.css)
-# A user service regenerates vimium-hints.css and wal-menus.css in the profile's
-# chrome/ dir from ~/.cache/wal/colors.json at login and whenever it changes;
-# Firefox reads them at startup, so new colors apply on the next launch. Opt
+# Wal-themed Firefox chrome and vimium, all on by default:
+#   vimiumHints  restyles stock vimium-ff link hints
+#   vimiumUi     restyles the vimium vomnibar (o, O, T, b), HUD and help (?)
+#   walMenus     restyles context menus, dropdowns and panels (hamburger menu)
+# A user service regenerates vimium-hints.css, vimium-ui.css and wal-menus.css
+# in the profile's chrome/ dir from ~/.cache/wal/colors.json at login and
+# whenever it changes. An autoconfig script baked into the Firefox package
+# registers the sheets and
+# reloads them when they change, so new colors reach open windows live. Opt
 # out per VM with e.g.
 #   hydrix.graphical.firefox.vimiumHints.enable = false;
 
@@ -66,19 +69,53 @@ let
     }) (builtins.filter (n: reg ? ${n}) names));
 
   hints    = config.hydrix.graphical.firefox.vimiumHints;
+  ui       = config.hydrix.graphical.firefox.vimiumUi;
   menus    = config.hydrix.graphical.firefox.walMenus;
   username = config.hydrix.username;
   # Same profile path the Hydrix firefox launcher uses.
   chromeDir   = "/home/${username}/.mozilla/firefox/default/chrome";
   hintCssPath = "${chromeDir}/vimium-hints.css";
+  uiCssPath   = "${chromeDir}/vimium-ui.css";
   menuCssPath = "${chromeDir}/wal-menus.css";
   hintSel     = "#vimium-hint-marker-container div.internal-vimium-hint-marker";
 
-  # Absolute: userChrome/userContent.css are home-manager symlinks into the
-  # store, and a relative @import resolves against the link target. @import
-  # must precede every other rule in the sheet.
-  importCss = path: lib.mkBefore ''
-    @import url("file://${path}");
+  # Firefox autoconfig (mozilla.cfg, privileged). Registers the generated
+  # sheets as user sheets, which the stylesheet service applies to chrome and
+  # to every content process, then polls their mtime and swaps in a fresh copy
+  # on change. The mtime query makes each version a distinct URI, bypassing
+  # the style loader's per-URI cache.
+  walCssPaths = lib.optional hints.enable hintCssPath
+    ++ lib.optional ui.enable uiCssPath
+    ++ lib.optional menus.enable menuCssPath;
+  walCssReload = pkgs.writeText "firefox-wal-css-reload.js" ''
+    try {
+      const { classes: Cc, interfaces: Ci } = Components;
+      const sss = Cc["@mozilla.org/content/style-sheet-service;1"].getService(Ci.nsIStyleSheetService);
+      const io = Cc["@mozilla.org/network/io-service;1"].getService(Ci.nsIIOService);
+      const sheets = ${builtins.toJSON walCssPaths}.map(path => ({ path, mtime: 0, uri: null }));
+      const poll = () => {
+        for (const s of sheets) {
+          try {
+            const f = Cc["@mozilla.org/file/local;1"].createInstance(Ci.nsIFile);
+            f.initWithPath(s.path);
+            const mtime = f.exists() ? f.lastModifiedTime : 0;
+            if (mtime === s.mtime) continue;
+            const old = s.uri;
+            s.uri = mtime ? io.newURI("file://" + s.path + "?" + mtime) : null;
+            s.mtime = mtime;
+            if (s.uri) sss.loadAndRegisterSheet(s.uri, sss.USER_SHEET);
+            if (old) sss.unregisterSheet(old, sss.USER_SHEET);
+          } catch (e) {}
+        }
+      };
+      const timer = Cc["@mozilla.org/timer;1"].createInstance(Ci.nsITimer);
+      Cc["@mozilla.org/observer-service;1"].getService(Ci.nsIObserverService).addObserver({
+        observe() {
+          poll();
+          timer.initWithCallback({ notify: poll }, 1000, Ci.nsITimer.TYPE_REPEATING_SLACK);
+        },
+      }, "final-ui-startup");
+    } catch (e) {}
   '';
 
   generateWalCss = pkgs.writeShellScript "firefox-wal-css" ''
@@ -111,18 +148,83 @@ let
     EOF
     mv "${hintCssPath}.tmp" "${hintCssPath}"
     ''}
+    ${lib.optionalString ui.enable ''
+    cat > "${uiCssPath}.tmp" <<EOF
+    @-moz-document url-prefix("moz-extension://") {
+      #vomnibar, #hud-container {
+        background: $(c ${ui.colors.bg}) !important;
+        color: $(c ${ui.colors.text}) !important;
+        border: 1px solid $(c ${ui.colors.border}) !important;
+      }
+      #vomnibar-search-area {
+        border-bottom: 1px solid $(c ${ui.colors.border}) !important;
+      }
+      #vomnibar input {
+        background: $(c ${ui.colors.inputBg}) !important;
+        color: $(c ${ui.colors.text}) !important;
+        border: none !important;
+        box-shadow: none !important;
+      }
+      #search-area, #hud, #hud-body {
+        background: transparent !important;
+        color: $(c ${ui.colors.text}) !important;
+        border: none !important;
+      }
+      #vomnibar input::selection {
+        background: $(c ${ui.colors.selectedBg}) !important;
+        color: $(c ${ui.colors.selectedText}) !important;
+      }
+      #vomnibar li {
+        border-bottom: 1px solid color-mix(in srgb, $(c ${ui.colors.border}) 40%, transparent) !important;
+      }
+      #vomnibar li :is(.title, em) { color: $(c ${ui.colors.text}) !important; }
+      #vomnibar li .url { color: $(c ${ui.colors.url}) !important; }
+      #vomnibar li :is(.source, .relevancy), span#hud-match-count {
+        color: $(c ${ui.colors.muted}) !important;
+      }
+      #vomnibar li .match { color: $(c ${ui.colors.match}) !important; }
+      #vomnibar li.selected { background: $(c ${ui.colors.selectedBg}) !important; }
+      #vomnibar li.selected :is(.title, em, .url, .source, .relevancy, .match) {
+        color: $(c ${ui.colors.selectedText}) !important;
+      }
+    }
+    @-moz-document regexp("moz-extension://[^/]+/pages/help_dialog_page.html.*") {
+      #container {
+        background: $(c ${ui.colors.bg}) !important;
+        border-color: $(c ${ui.colors.border}) !important;
+      }
+      #dialog, h1, h2, .help-description {
+        background: transparent !important;
+        color: $(c ${ui.colors.text}) !important;
+      }
+      a, h1 .vim { color: $(c ${ui.colors.url}) !important; }
+      a#close, .comma { color: $(c ${ui.colors.muted}) !important; }
+      a#close:hover { color: $(c ${ui.colors.text}) !important; }
+      div.divider { background-color: $(c ${ui.colors.border}) !important; }
+      .key {
+        background: $(c ${ui.colors.inputBg}) !important;
+        color: $(c ${ui.colors.key}) !important;
+        border-color: $(c ${ui.colors.border}) !important;
+      }
+    }
+    EOF
+    mv "${uiCssPath}.tmp" "${uiCssPath}"
+    ''}
     ${lib.optionalString menus.enable ''
     cat > "${menuCssPath}.tmp" <<EOF
-    menupopup:not([type="arrow"]) {
-      --panel-background-color: $(c ${menus.colors.bg}) !important;
-      --panel-text-color: $(c ${menus.colors.text}) !important;
-      --panel-border-color: $(c ${menus.colors.border}) !important;
-      --panel-separator-color: $(c ${menus.colors.border}) !important;
-      --text-color-disabled: $(c ${menus.colors.disabled}) !important;
-    }
-    menupopup :is(menu, menuitem)[_moz-menuactive]:not([disabled]) {
-      color: $(c ${menus.colors.hoverText}) !important;
-      background-color: $(c ${menus.colors.hoverBg}) !important;
+    @-moz-document url-prefix("chrome://") {
+      :is(menupopup, panel) {
+        --panel-background-color: $(c ${menus.colors.bg}) !important;
+        --panel-text-color: $(c ${menus.colors.text}) !important;
+        --panel-border-color: $(c ${menus.colors.border}) !important;
+        --panel-separator-color: $(c ${menus.colors.border}) !important;
+        --text-color-disabled: $(c ${menus.colors.disabled}) !important;
+      }
+      menupopup :is(menu, menuitem)[_moz-menuactive]:not([disabled]),
+      panel .subviewbutton:not([disabled]):hover {
+        color: $(c ${menus.colors.hoverText}) !important;
+        background-color: $(c ${menus.colors.hoverBg}) !important;
+      }
     }
     EOF
     mv "${menuCssPath}.tmp" "${menuCssPath}"
@@ -138,7 +240,7 @@ in
     enable = lib.mkOption {
       type = lib.types.bool;
       default = true;
-      description = "Theme vimium-ff link hints from wal colors via userContent.css.";
+      description = "Theme vimium-ff link hints from wal colors, reloaded live.";
     };
     colors = {
       bg     = strOpt "color3";
@@ -159,16 +261,36 @@ in
     fontFamily = lib.mkOption {
       type = lib.types.nullOr lib.types.str;
       default = null;
-      description = "Hint font. Null keeps the userContent.css system font.";
+      description = "Hint font. Null keeps the page's system font.";
     };
     shadow = lib.mkOption { type = lib.types.bool; default = true; };
+  };
+
+  options.hydrix.graphical.firefox.vimiumUi = {
+    enable = lib.mkOption {
+      type = lib.types.bool;
+      default = true;
+      description = "Theme the vimium-ff vomnibar, HUD and help dialog from wal colors, reloaded live.";
+    };
+    colors = {
+      bg           = strOpt "background";
+      text         = strOpt "foreground";
+      border       = strOpt "color8";
+      inputBg      = strOpt "color0";
+      selectedBg   = strOpt "color3";
+      selectedText = strOpt "background";
+      url          = strOpt "color4";
+      match        = strOpt "color1";
+      muted        = strOpt "color8";
+      key          = strOpt "color3";
+    };
   };
 
   options.hydrix.graphical.firefox.walMenus = {
     enable = lib.mkOption {
       type = lib.types.bool;
       default = true;
-      description = "Theme Firefox context and dropdown menus from wal colors via userChrome.css.";
+      description = "Theme Firefox menus and panels from wal colors, reloaded live.";
     };
     colors = {
       bg        = strOpt "background";
@@ -217,13 +339,26 @@ in
       # hydrix.graphical.firefox.newTab = lib.mkDefault "about:blank";
     }
 
-    (lib.mkIf (config.programs.firefox.enable && (hints.enable || menus.enable)) {
-      home-manager.users.${username} = {
-        programs.firefox.profiles.default = {
-          userContent = lib.mkIf hints.enable (importCss hintCssPath);
-          userChrome = lib.mkIf menus.enable (importCss menuCssPath);
+    (lib.mkIf config.programs.firefox.enable {
+      # Sidebar launcher tools, comma-separated, in order. Built-ins: aichat,
+      # syncedtabs, history, bookmarks, opentabs; extension sidebars go by
+      # add-on id. Marking every selected extension as already installed stops
+      # Firefox from appending its sidebar to the list on first install. Set as
+      # policy user values: reapplied every startup, before add-ons load.
+      programs.firefox.policies.Preferences = {
+        "sidebar.main.tools" = lib.mkDefault { Value = "history"; Status = "user"; };
+        "sidebar.installed.extensions" = lib.mkDefault {
+          Value = lib.concatMapStringsSep "," (n: reg.${n}.id) (builtins.filter (n: reg ? ${n}) exts);
+          Status = "user";
         };
+      };
+    })
 
+    (lib.mkIf (config.programs.firefox.enable && walCssPaths != [ ]) {
+      hydrix.graphical.firefox.package = lib.mkDefault
+        (pkgs.firefox.override { extraPrefsFiles = [ walCssReload ]; });
+
+      home-manager.users.${username} = {
         systemd.user.services.firefox-wal-css = {
           Unit.Description = "Generate Firefox chrome/hint CSS from wal colors";
           Service = { Type = "oneshot"; ExecStart = "${generateWalCss}"; };
