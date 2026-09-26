@@ -15,9 +15,12 @@
 #   DEBUG_IP <CID>            - Debug IP lookup for a CID
 #   RESET_STATE               - Reset state file
 #
-{ config, pkgs, lib, ... }:
-
-let
+{
+  config,
+  pkgs,
+  lib,
+  ...
+}: let
   stateDir = "/var/lib/hydrix-router";
 
   lanControlBin = pkgs.writeShellScriptBin "router-lan-control" ''
@@ -337,16 +340,14 @@ let
       *)           echo "Unknown: $cmd"; echo "Commands: ENABLE_LAN, DISABLE_LAN, PORT_ADD, PORT_REMOVE, LAN_STATUS, PING, DEBUG_IP, DEBUG_NAT, DEBUG_RULESET, RESET_STATE" ;;
     esac
   '';
-in
-
-{
-  environment.systemPackages = [ lanControlBin pkgs.jq pkgs.iptables pkgs.nftables ];
+in {
+  environment.systemPackages = [lanControlBin pkgs.jq pkgs.iptables pkgs.nftables];
 
   # Init: ensure state dir exists at boot
   systemd.services.router-lan-control = {
     description = "LAN access control state init";
-    wantedBy = [ "multi-user.target" ];
-    after = [ "router-network-setup.service" "router-firewall.service" ];
+    wantedBy = ["multi-user.target"];
+    after = ["router-network-setup.service" "router-firewall.service"];
     serviceConfig = {
       Type = "oneshot";
       RemainAfterExit = true;
@@ -364,8 +365,8 @@ in
   # Vsock server on port 14516
   systemd.services.lan-control-server = {
     description = "LAN control vsock server (port 14516)";
-    wantedBy = [ "multi-user.target" ];
-    after = [ "router-lan-control.service" ];
+    wantedBy = ["multi-user.target"];
+    after = ["router-lan-control.service"];
     serviceConfig = {
       Type = "simple";
       ExecStart = "${pkgs.socat}/bin/socat VSOCK-LISTEN:14516,reuseaddr,fork EXEC:${lanControlBin}/bin/router-lan-control";
