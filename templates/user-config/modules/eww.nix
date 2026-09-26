@@ -406,7 +406,7 @@
         def deg: round | (if . == 0 then 0 else . end) | tostring + "°";
         .fetched as $t
         | (.data | if type == "array" then . else [.] end) as $all
-        | {stale: (($now - $t) > 3 * $ttl), updated: ($t | strflocaltime("%H:%M")),
+        | {stale: (($now - $t) > 3 * $ttl),
            locations: [range(0; $all | length) as $i | $all[$i] as $l
             | ($l.current.weather_code | wmo($l.current.is_day == 1)) as $c
             | {name: $names[$i], temp: ($l.current.temperature_2m | deg),
@@ -415,6 +415,7 @@
                  | ($l.daily.weather_code[$d] | wmo(true)) as $w
                  | {day: (if $d == 0 then "today"
                           else $l.daily.time[$d] | strptime("%Y-%m-%d") | strftime("%a") | ascii_downcase end),
+                    align: (["start", "center", "end"][$d]),
                     icon: $w[0], class: $w[2],
                     hi: ($l.daily.temperature_2m_max[$d] | deg),
                     lo: ($l.daily.temperature_2m_min[$d] | deg)}]}]}
@@ -674,7 +675,7 @@
           :spacing ${toString gaps}
           (children)))
 
-      (defwidget block-title [text ?aside ?style]
+      (defwidget block-title [text ?aside]
         (box
           :orientation "h"
           :space-evenly false
@@ -684,7 +685,7 @@
             :hexpand true
             :halign "start")
           (label
-            :class "title-aside ''${style}"
+            :class "title-aside"
             :visible {aside != ""}
             :text {aside ?: ""})))
 
@@ -794,8 +795,7 @@
           :visible {router_stats.current != ""}
           (block-title
             :text "NETWORK"
-            :aside {router_stats.current}
-            :style "strong")
+            :aside {router_stats.current})
           (label
             :class {router_stats.pending > 0 ? "rs-pending unsaved" : "rs-pending"}
             :visible {router_stats.pending > 0}
@@ -851,7 +851,7 @@
           :visible {net_stats.wan.iface != ""}
           (block-title
             :text "TRAFFIC"
-            :aside {net_stats.total_fmt})
+            :aside {"all " + arraylength(net_stats.vms) + " bridges, down + up · " + net_stats.total_fmt})
           (graph
             :class "graph net-graph"
             :height 90
@@ -860,11 +860,7 @@
             :dynamic true
             :time-range "120s"
             :thickness 1.5
-            :line-style "round")
-          (label
-            :class "graph-meta"
-            :halign "start"
-            :text {"all " + arraylength(net_stats.vms) + " bridges, down + up"})))
+            :line-style "round")))
 
       (defwidget cpu-widget []
         (box
@@ -873,7 +869,7 @@
           :space-evenly false
           (block-title
             :text "CPU"
-            :aside {round(EWW_CPU.avg, 0) + "%"})
+            :aside {"load " + loadavg + " · " + arraylength(EWW_CPU.cores) + " threads · " + round(EWW_CPU.avg, 0) + "%"})
           (graph
             :class "graph cpu-graph"
             :height 90
@@ -883,11 +879,7 @@
             :dynamic false
             :time-range "120s"
             :thickness 1.5
-            :line-style "round")
-          (label
-            :class "graph-meta"
-            :halign "start"
-            :text {"load " + loadavg + "   " + arraylength(EWW_CPU.cores) + " threads"})))
+            :line-style "round")))
 
       (defwidget git-widget []
         (box
@@ -898,8 +890,7 @@
           :visible {arraylength(git_repos) > 0}
           (block-title
             :text "GIT"
-            :aside {jq(git_repos, "map(select(.state != \"clean\")) | length") + " need attention"}
-            :style "strong")
+            :aside {jq(git_repos, "map(select(.state != \"clean\")) | length") + " need attention"})
           (for repo in git_repos
             (box
               :class "git-repo"
@@ -971,7 +962,7 @@
           :visible {arraylength(weather.locations) > 0}
           (block-title
             :text "WEATHER"
-            :aside {weather.stale ? "offline" : weather.updated})
+            :aside {weather.stale ? "offline" : ""})
           (for loc in {weather.locations}
             (box
               :class "wx-loc"
@@ -1003,13 +994,15 @@
                   (box
                     :orientation "v"
                     :space-evenly false
+                    :halign {day.align}
                     (label
                       :class "wx-day"
+                      :halign {day.align}
                       :text {day.day})
                     (box
                       :orientation "h"
                       :space-evenly false
-                      :halign "center"
+                      :halign {day.align}
                       :spacing 4
                       (label
                         :class "wx-icon ''${day.class}"
@@ -1090,12 +1083,9 @@
       }
 
       .title-aside {
-        color: $color8;
-        margin-bottom: 4px;
-      }
-      .title-aside.strong {
         font-weight: bold;
         color: $foreground;
+        margin-bottom: 4px;
       }
 
       /* vms */
@@ -1206,10 +1196,6 @@
         background-color: rgba($color4, 0.12);
       }
 
-      .graph-meta {
-        color: $color8;
-        margin-top: 4px;
-      }
 
       /* git */
 
