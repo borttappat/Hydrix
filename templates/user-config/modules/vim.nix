@@ -9,13 +9,20 @@ let
   username = config.hydrix.username;
 
   vimrc = pkgs.writeText "vimrc" ''
-    " Force 16-color mode so colors match the terminal palette (pywal/Stylix)
+    " Restrict to the 16 terminal palette colors so every highlight comes from wal.
+    " With t_Co=256, names like LightBlue resolve to fixed xterm-cube indices (81)
+    " that wal never sets.
     set notermguicolors
-    autocmd ColorScheme * highlight Search ctermbg=3 ctermfg=0
-    autocmd ColorScheme * highlight IncSearch ctermbg=6 ctermfg=0
-    autocmd ColorScheme * highlight Visual ctermbg=8 ctermfg=NONE
-    autocmd ColorScheme * highlight LineNr ctermfg=8
-    autocmd ColorScheme * highlight CursorLineNr ctermfg=7
+    set t_Co=16
+
+    function! s:WalHi()
+      highlight Search ctermbg=3 ctermfg=0
+      highlight IncSearch ctermbg=6 ctermfg=0
+      highlight Visual ctermbg=8 ctermfg=NONE
+      highlight LineNr ctermfg=8
+      highlight CursorLineNr ctermfg=7
+    endfunction
+    autocmd ColorScheme * call s:WalHi()
 
     set background=dark
     set number relativenumber
@@ -54,6 +61,7 @@ let
     set ruler
 
     syntax on
+    call s:WalHi()
 
     autocmd BufEnter * execute "chdir ".escape(expand("%:p:h"), "")
     autocmd BufWritePost *Xresources,*Xdefaults !xrdb %
