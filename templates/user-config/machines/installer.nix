@@ -29,7 +29,7 @@
     ../specialisations/lockdown.nix
     ./@SERIAL@-grub-entries.nix
     ../modules/usb-blocking.nix
-    ../modules/eww.nix            # eww widget daemon + exit-nodes/vm-status overlay
+    ../modules/eww.nix            # eww desktop dashboard (VMs, network, cpu, git, todo, weather)
   ];
 
   # =========================================================================
@@ -308,6 +308,31 @@
     showMessages = true;
     fontSize = 27;
   };
+
+  # eww desktop dashboard (modules/eww.nix): VMs, exit nodes, network, CPU,
+  # git, todo and weather in the left half of each screen.
+  # hydrix.eww.dashboard = {
+  #   monitors = "internal";                       # DEFAULT: "all" - or only eDP/LVDS/DSI panels
+  #   git.extraRepos.Hydrix = config.hydrix.paths.hydrixDir;  # on top of hydrix-config + hydrix.repos.entries
+  #   weather.locations = [                        # DEFAULT: [] - weather block hidden
+  #     { name = "Stockholm"; latitude = 59.33; longitude = 18.07; }
+  #   ];
+  # };
+
+  # Foreground cutout drawn over the wallpaper, below normal windows
+  # (modules/eww.nix). `image` is a transparent-background PNG read at runtime.
+  # hydrix.eww.wallpaperLayer = {
+  #   enable = true;
+  #   image = "/home/<username>/images/cutout.png";
+  #   halign = "end";                              # DEFAULT: "end" - corner the cutout sits in
+  #   valign = "end";                              # DEFAULT: "end"
+  #   screenWidth = 1920;                          # DEFAULT: 1920 - Hyprland logical resolution
+  #   screenHeight = 1200;                         # DEFAULT: 1200
+  #   imageWidth = 1920;                           # DEFAULT: 1697 - keep the PNG's aspect ratio
+  #   imageHeight = 1200;                          # DEFAULT: 1200
+  #   title = { text = "H y d r i x"; x = 1155; y = 362; };  # DEFAULT: "" (hidden); `slurp -p` picks x/y
+  #   caption = { text = ""; x = 0; y = 0; };      # DEFAULT: "" (hidden)
+  # };
 
   # Required for sops age key derivation (SSH host key -> age key)
   services.openssh.enable = true;
