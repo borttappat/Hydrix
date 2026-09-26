@@ -38,7 +38,7 @@ Things being actively worked on or not yet verified. Checked off once resolved a
 - [x] **Encrypted VM launch via wofi**: `mod+d` on a stopped encrypted VM now detects the LUKS volume and prompts for the passphrase via `wofi --password` (same masked-input pattern as `vault-pick.nix`), unlocking before `shard start` runs. No terminal needed.
 - [x] **Builder build progress**: `shard builder build X` now streams live status (`Building...` / `OK building ...` / `DONE`/`ERROR`) instead of going silent; errors are visible without socat'ing into the builder. Still coarse-grained: not the full per-derivation live stream `shard build X` shows in administrative mode.
 - [ ] **Setup script** (`setup-hydrix.sh`): not fully end-to-end tested
-- [ ] **Installer post-reboot, gh auth**: persistence is implemented but untested; git config is not yet declarative (requires manual `git config` after reboot)
+- [ ] **Installer post-reboot, gh auth**: the installer copies `~/.config/gh` into the new system, but carrying the login across the reboot is untested. Git identity is already declarative: `modules/user.nix` sets `~/hydrix-config`'s local `user.name`/`user.email` from the machine name on every home-manager activation, so no manual `git config` is needed.
 - [x] **Infra VM ephemerality**: router/router-stable/files/gitsync/hostsync/usb-sandbox/vault now wipe state on every restart, matching the lurking-profile pattern; `shard purge` is no longer required after WiFi credential changes. See [DOCUMENTATION.md § Infra VM Persistence Model](#infra-vm-persistence-model).
 - [x] **Clipboard isolation**: handled by the `hypr-clip-guard` Hyprland plugin - hooks all Wayland clipboard protocols to enforce per-VM isolation. See [DOCUMENTATION.md § Clipboard Isolation](#clipboard-isolation-hypr-clip-guard).
 
@@ -153,17 +153,17 @@ hydrix.graphical.enable = false;                   # no Hyprland/waybar/wofi/dun
 ```
 
 Bridges (`br-mgmt` and friends) and the router's management-LAN IP both have real
-built-in defaults now — no `infra/router/meta.nix`-style convention has to be
+built-in defaults now, so no `infra/router/meta.nix`-style convention has to be
 replicated by hand for the router to be reachable from the host. The router VM itself is
 still declared separately in your flake via `hydrix.lib.mkMicrovmRouter { ... }` (see
 `lib/default.nix`); `pciIds` and `wifiPciAddress` both need to be set (one binds the
-device to `vfio-pci`, the other tells the router VM which PCI slot to take) — they're not
+device to `vfio-pci`, the other tells the router VM which PCI slot to take); they're not
 derived from each other.
 
 With no profile VMs declared and `hydrix.graphical.enable = false`, the host builds with
 zero graphical packages. Three profile VMs (`browsing`, `comms`, `lurking`) ship with
 real default CID/bridge/subnet/workspace metadata baked into the framework
-(`hydrix.microvm.defaultProfiles`) — declare one with nothing but a profile name and
+(`hydrix.microvm.defaultProfiles`): declare one with nothing but a profile name and
 hostname and it's buildable and reachable through the router with no
 `profiles/<name>/meta.nix`-equivalent required:
 
@@ -174,11 +174,11 @@ hostname and it's buildable and reachable through the router with no
 };
 ```
 
-(`dev` and `pentest` are not zero-config defaults — `pentest` especially is meant to be
+(`dev` and `pentest` are not zero-config defaults; `pentest` especially is meant to be
 individually tweaked per engagement; use `setup-hydrix`/hand-write your own profile for
 either.) Each is usable from a plain terminal with no window manager at all:
 `shard app <name> <cmd>` (e.g. `shard app microvm-browsing firefox`) launches an app
-inside it and forwards its window via waypipe to *any* running Wayland compositor — it
+inside it and forwards its window via waypipe to *any* running Wayland compositor; it
 has no Hyprland dependency. `shard console <name>` gives a real serial-console login
 with no compositor required at all.
 
