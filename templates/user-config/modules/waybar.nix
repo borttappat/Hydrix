@@ -1420,23 +1420,29 @@ in {
         _dir="$HOME/.config/waybar"
         mkdir -p "$_dir"
 
-        # config — remove any stale nix store symlink, always write (structural changes must apply)
-        [ -L "$_dir/config" ] && rm -f "$_dir/config"
-        printf '%s' ${lib.escapeShellArg configJson} > "$_dir/config"
+        # Remove any stale nix store symlink, then write only when content changed.
+        # Returns 0 if the file was (re)written.
+        _waybarWrite() {
+          [ -L "$1" ] && rm -f "$1"
+          printf '%s' "$2" | cmp -s - "$1" && return 1
+          printf '%s' "$2" > "$1"
+        }
 
-        # style.css — always regenerate (structural changes must apply)
-        [ -L "$_dir/style.css" ] && rm -f "$_dir/style.css"
-        printf '%s' ${lib.escapeShellArg styleCSS} > "$_dir/style.css"
+        _waybarRestart=
+        _waybarWrite "$_dir/config" ${lib.escapeShellArg configJson} && _waybarRestart=1
+        # reload_style_on_change makes waybar pick up style.css itself.
+        _waybarWrite "$_dir/style.css" ${lib.escapeShellArg styleCSS} || true
 
         # colors.css — only write default if absent (hypr-apply-colors owns this file)
         if [ ! -f "$_dir/colors.css" ]; then
           printf '%s' ${lib.escapeShellArg defaultColorsCSS} > "$_dir/colors.css"
         fi
 
-        # Restart so structural config/style changes actually apply. waybar only
-        # hot-reloads CSS on SIGUSR2, not config. try-restart is a no-op if waybar
-        # isn't running yet (first boot, headless rebuild).
-        ${pkgs.systemd}/bin/systemctl --user try-restart waybar.service 2>/dev/null || true
+        # waybar does not hot-reload its config, so restart it when that changed.
+        # try-restart is a no-op if waybar isn't running yet (first boot, headless rebuild).
+        if [ -n "$_waybarRestart" ]; then
+          ${pkgs.systemd}/bin/systemctl --user try-restart waybar.service 2>/dev/null || true
+        fi
       '';
 
       # Seeds waybar config files before waybar starts — guards against the race where

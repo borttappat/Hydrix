@@ -716,28 +716,33 @@ in
         temperature.night = lib.mkDefault 3500;
       };
 
-      home.activation.hyprlandKeymap = lib.hm.dag.entryAfter ["writeBoundary"] ''
+      # Files Hyprland reads are only rewritten when their content changed, and
+      # set hydrixHyprReload so the framework's reloadHyprland step applies them.
+      home.activation.hyprlandKeymap = lib.hm.dag.entryBetween ["reloadHyprland"] ["writeBoundary"] ''
         _dir="$HOME/.config/hypr"
         mkdir -p "$_dir"
         ${lib.optionalString (kb.xkbFile != null) ''
-          rm -f "$_dir/keymap.xkb"
-          cat ${kb.xkbFile} > "$_dir/keymap.xkb"
+          if ! cmp -s ${kb.xkbFile} "$_dir/keymap.xkb"; then
+            rm -f "$_dir/keymap.xkb"
+            cat ${kb.xkbFile} > "$_dir/keymap.xkb"
+            hydrixHyprReload=1
+          fi
         ''}
         # monitor-layout owns this file after first run; only seed it so the
         # `source` line in hyprland.conf doesn't fail before that first run.
         [ -f "$_dir/monitor-layout.conf" ] || echo "# monitor-layout: no saved positions yet" > "$_dir/monitor-layout.conf"
       '';
 
-      home.activation.hyprlandConfig = lib.hm.dag.entryAfter ["hyprlandKeymap"] ''
+      home.activation.hyprlandConfig = lib.hm.dag.entryBetween ["reloadHyprland"] ["hyprlandKeymap"] ''
         _dir="$HOME/.config/hypr"
         # Remove stale symlink if HM previously managed this file
         [ -L "$_dir/hyprland.conf" ] && rm -f "$_dir/hyprland.conf"
-        # Skip write when content unchanged — nix store path is a content hash.
-        # Unconditional writes trigger an inotify-based Hyprland reload on every rebuild.
+        # Skip write when content unchanged: the nix store path is a content hash.
         _stamp="$_dir/.hyprland-conf-stamp"
         if [ "$(cat "$_stamp" 2>/dev/null)" != "${hyprlandConf}" ]; then
           cat ${hyprlandConf} > "$_dir/hyprland.conf"
           echo "${hyprlandConf}" > "$_stamp"
+          hydrixHyprReload=1
         fi
       '';
 

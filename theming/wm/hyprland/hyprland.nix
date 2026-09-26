@@ -594,9 +594,9 @@ in
       '';
 
       # Write the framework-generated config (VM routing, keyboard, monitor, colors source).
-      # Skip write when content is unchanged — the nix store path is a content hash,
-      # so comparing stamp → path avoids an inotify-triggered Hyprland reload on
-      # every rebuild when nothing structural changed.
+      # Skip write when content is unchanged: the nix store path is a content hash,
+      # so comparing stamp -> path avoids a Hyprland reload on every rebuild when
+      # nothing structural changed.
       home.activation.hyprlandGenerated = lib.hm.dag.entryAfter ["writeBoundary"] ''
         _dir="$HOME/.config/hypr"
         mkdir -p "$_dir"
@@ -608,19 +608,21 @@ in
           rm -f "$_dir/hydrix-generated.conf"
           cp ${hyprlandGeneratedConf} "$_dir/hydrix-generated.conf"
           echo "${hyprlandGeneratedConf}" > "$_stamp"
-          touch /tmp/hypr-gen-changed
-        else
-          rm -f /tmp/hypr-gen-changed
+          hydrixHyprReload=1
         fi
       '';
 
-      # Reload Hyprland after rebuild — only when generated config actually changed.
-      # Colors are reloaded separately by the colorscheme service; the activation
-      # reload is only needed when VM routing, keyboard, or monitor config changed.
+      # Reload Hyprland after rebuild, only when a config file it reads actually
+      # changed. Any activation step that rewrites such a file sets
+      # hydrixHyprReload=1 and orders itself before this entry. Activation runs
+      # from a system service without HYPRLAND_INSTANCE_SIGNATURE, so running
+      # instances are discovered via XDG_RUNTIME_DIR (imported from the user
+      # session by home-manager).
       home.activation.reloadHyprland = lib.hm.dag.entryAfter ["hyprlandGenerated"] ''
-        if [[ -n "''${HYPRLAND_INSTANCE_SIGNATURE:-}" ]] && [ -f /tmp/hypr-gen-changed ]; then
-          rm -f /tmp/hypr-gen-changed
-          ${hyprApplyColors}/bin/hypr-apply-colors 2>/dev/null || true
+        if [ -n "''${hydrixHyprReload:-}" ]; then
+          for _sig in $(${pkgs.hyprland}/bin/hyprctl instances -j 2>/dev/null | ${pkgs.jq}/bin/jq -r '.[].instance' 2>/dev/null); do
+            HYPRLAND_INSTANCE_SIGNATURE="$_sig" ${hyprApplyColors}/bin/hypr-apply-colors 2>/dev/null || true
+          done
         fi
       '';
 
