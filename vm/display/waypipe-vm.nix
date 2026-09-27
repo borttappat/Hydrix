@@ -3,15 +3,15 @@
 # Services (none auto-start — host pushes display mode at VM start via vsock:14509):
 #
 #   display-mode  (14509) — receives "waypipe"/"PING"/"STATUS" from host
-#   waypipe-vsock          — waypipe client connecting to host (vsock:14507)
+#   waypipe-vsock          - waypipe server connecting out to host (vsock:14600+CID-100)
 #   waypipe-launch(14508)  — receives app launch commands from host
 #
 # Flow:
 #   shard start <vm>  → host pushes "waypipe" → vsock:14509
 #   VM display-mode     → starts waypipe-vsock+waypipe-launch
 #
-#   waypipe client (VM): connects to host server on vsock:14507
-#   waypipe server (HOST): listens on vsock:14507, forwards to Hyprland
+#   waypipe server (VM): connects out to host CID 2 on vsock:14600+CID-100
+#   waypipe client (HOST): listens on that port, forwards to Hyprland
 #   Apps inside VM use WAYLAND_DISPLAY=waypipe-0
 #
 {
@@ -323,12 +323,12 @@ in {
   };
 
   # ── waypipe-vsock — on-demand, started by display-mode ───────────────────
-  # waypipe server connects to host (CID 2) client on vsock:14507.
-  # Host runs: waypipe --vsock --socket 14507 client  (listens, forwards to Hyprland)
+  # waypipe server connects to host (CID 2) client on vsock:<waypipePort> (14600 + CID - 100).
+  # Host runs: waypipe --vsock --socket <waypipePort> client  (listens, forwards to Hyprland)
   # VM→HOST vsock works because vhost_vsock is loaded on host.
   # Apps inside VM use WAYLAND_DISPLAY=waypipe-0
   systemd.services.waypipe-vsock = {
-    description = "waypipe Wayland compositor proxy (vsock:14507)";
+    description = "waypipe Wayland compositor proxy (vsock:${waypipePort})";
     after = ["network.target"];
     restartIfChanged = false;
     startLimitIntervalSec = 0;
@@ -346,7 +346,7 @@ in {
       ];
       ExecStart = pkgs.writeShellScript "waypipe-vsock-start" ''
         export XDG_RUNTIME_DIR="/run/user/1000"
-        # Connect to host waypipe client listening on vsock:14507.
+        # Connect to host waypipe client listening on vsock:${waypipePort}.
         # Per waypipe docs: from guest, use just port (not CID:port)
         # "sleep infinity" keeps waypipe alive; apps connect via WAYLAND_DISPLAY=waypipe-0
         exec ${pkgs.waypipe}/bin/waypipe \

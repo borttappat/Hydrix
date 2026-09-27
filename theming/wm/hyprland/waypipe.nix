@@ -1,7 +1,7 @@
 # waypipe host-side module
 #
 # Provides:
-#   waypipe-connect   - connect to a VM's waypipe server (run once per VM)
+#   waypipe-connect   - host listener for a VM's waypipe server (run once per VM)
 #   hypr-ws-app       - workspace-aware app launcher
 #   vm-push-display-mode - push waypipe mode to VMs
 #
@@ -11,8 +11,11 @@
 #   hypr-ws-app firefox https://foo.com # same with args
 #
 # Architecture:
-#   VM:   waypipe --vsock --socket s14507 server  (listens on vsock:14507)
-#   HOST: waypipe --vsock --socket CID:14507 client  (connects host→VM, forwards to Hyprland)
+#   Per-VM port: 14600 + CID - 100 (CID 106 -> 14606).
+#   HOST: waypipe --vsock --socket PORT client  (listens on vsock:PORT, forwards to Hyprland)
+#   VM:   waypipe --vsock --socket PORT server  (connects out to host CID 2 on PORT)
+#   The host starts listening first, then sends waypipe-reconnect on vsock:14509
+#   so the VM dials in. The listener does not check the peer CID.
 #   No socat needed - waypipe speaks vsock natively.
 #
 {
