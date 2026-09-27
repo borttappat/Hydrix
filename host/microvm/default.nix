@@ -453,6 +453,17 @@ in {
       # ===== Systemd Services =====
       # Combines router TAP setup and secrets provisioning
       systemd.services = lib.mkMerge [
+        # Upstream gates first install on the VM's state dir not existing, but
+        # upstream's own tmpfiles rule for the vm-config share source creates
+        # that dir (root-owned) before install-microvm-* runs. Gate on the
+        # `current` runner symlink instead; the install script is idempotent
+        # and also chowns the dir to microvm:kvm.
+        (lib.mapAttrs' (name: _:
+          lib.nameValuePair "install-microvm-${name}" {
+            unitConfig.ConditionPathExists = lib.mkForce "!${config.microvm.stateDir}/${name}/current";
+          })
+        coupledVMs)
+
         # Create config directories for microVMs after install-microvm-* has run.
         # Cannot use tmpfiles because creating /var/lib/microvms/<name>/config
         # would implicitly create the parent directory, which blocks the upstream
