@@ -19,6 +19,10 @@
     };
   };
 
+  # Raises cptofs's LKL memory from 100M so make-disk-image can populate
+  # large libvirt images. Applied in mkVM only: the patch changes lkl's hash,
+  # so anywhere else it would force a local kernel-sized lkl build (e.g. the
+  # nftables checkRuleset step) instead of using the binary cache.
   overlay-lkl-memory = final: prev: {
     lkl = prev.lkl.overrideAttrs (old: {
       postPatch =
@@ -40,7 +44,7 @@
   commonModules =
     [
       {nixpkgs.config.allowUnfree = true;}
-      {nixpkgs.overlays = [overlay-unstable overlay-lkl-memory];}
+      {nixpkgs.overlays = [overlay-unstable];}
     ]
     ++ optionsModules
     ++ [
@@ -198,7 +202,7 @@ in rec {
       modules =
         [
           {nixpkgs.config.allowUnfree = true;}
-          {nixpkgs.overlays = [overlay-unstable overlay-lkl-memory];}
+          {nixpkgs.overlays = [overlay-unstable];}
         ]
         ++ optionsModules
         ++ nixpkgs'.lib.optional (allInputs ? stylix) allInputs.stylix.nixosModules.stylix
@@ -267,7 +271,7 @@ in rec {
       modules =
         [
           {nixpkgs.config.allowUnfree = true;}
-          {nixpkgs.overlays = [overlay-unstable overlay-lkl-memory];}
+          {nixpkgs.overlays = [overlay-unstable];}
         ]
         ++ optionsModules
         ++ nixpkgs'.lib.optional (allInputs ? stylix) allInputs.stylix.nixosModules.stylix
@@ -311,7 +315,7 @@ in rec {
       modules =
         [
           {nixpkgs.config.allowUnfree = true;}
-          {nixpkgs.overlays = [overlay-unstable overlay-lkl-memory];}
+          {nixpkgs.overlays = [overlay-unstable];}
         ]
         ++ optionsModules
         ++ nixpkgs'.lib.optional (allInputs ? stylix) allInputs.stylix.nixosModules.stylix
@@ -362,7 +366,7 @@ in rec {
       modules =
         [
           {nixpkgs.config.allowUnfree = true;}
-          {nixpkgs.overlays = [overlay-unstable overlay-lkl-memory];}
+          {nixpkgs.overlays = [overlay-unstable];}
         ]
         ++ optionsModules
         ++ nixpkgs'.lib.optional (allInputs ? stylix) allInputs.stylix.nixosModules.stylix
@@ -408,6 +412,7 @@ in rec {
         ++ nixpkgs'.lib.optional (allInputs ? stylix)
         allInputs.stylix.nixosModules.stylix
         ++ [
+          {nixpkgs.overlays = [overlay-lkl-memory];}
           {hydrix.userColorschemesDir = userColorschemesDir;}
           ../vm/libvirt/vm-base.nix # VM base configuration
           ../vm/profiles/${profile} # Hydrix base profile (always included)
