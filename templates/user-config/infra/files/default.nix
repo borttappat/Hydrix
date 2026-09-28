@@ -69,7 +69,16 @@
     };
   };
 
-  ifaceMap = profileIfaceMap // infraIfaceMap;
+  # One interface per task slot bridge, same MAC scheme as profile VMs
+  taskIfaceMap = builtins.listToAttrs (map (t:
+    lib.nameValuePair t.name {
+      tap = "mv-files-${t.name}";
+      mac = "02:00:00:02:${toString (t.vsockCid - 100)}:01";
+      inherit (t) subnet;
+    })
+  (import ../../tasks/slots.nix));
+
+  ifaceMap = profileIfaceMap // taskIfaceMap // infraIfaceMap;
 
   extraInterfaces =
     lib.mapAttrsToList (_: i: {

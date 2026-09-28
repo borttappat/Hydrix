@@ -343,6 +343,11 @@ in {
               default = false;
               description = "Whether the host accepts notifications forwarded from this VM (vsock:14518). Set in meta.nix; the VM's hydrix.microvm.notifyForward.enable should read the same value.";
             };
+            taskSlot = lib.mkOption {
+              type = lib.types.nullOr lib.types.str;
+              default = null;
+              description = "Task slot name (e.g. \"task1\") for VMs that engagements are bound to at runtime via `shard pentest`. Null for every other VM.";
+            };
             memCeilingMb = lib.mkOption {
               type = lib.types.nullOr lib.types.int;
               default = null;

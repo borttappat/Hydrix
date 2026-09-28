@@ -206,7 +206,6 @@
       # --- Legacy/fixed infra globs ---
       mv-build*)   echo "br-builder" ;;
       mv-gitsyn*)  echo "br-builder" ;;
-      mv-task-*)   echo "br-pentest" ;;
     esac
   '';
 

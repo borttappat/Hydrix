@@ -566,14 +566,17 @@
               notify-send "MicroVM launched" "''${vm_name} is ready for interaction" 2>/dev/null || true
           fi
 
-          # Register task pentest slots as the active pentest VM for waybar/vm-select
-          if [[ "$vm_name" == microvm-pentest-task* ]]; then
+          # Register task slots as the active VM of their base profile's workspace
+          # for waybar/vm-select
+          local slot_profile
+          slot_profile=$(task_slot_profile "$vm_name")
+          if [[ -n "$slot_profile" ]]; then
               local active_vms_file="$HOME/.cache/hydrix/active-vms.json"
               mkdir -p "$(dirname "$active_vms_file")"
               [[ ! -f "$active_vms_file" ]] && echo '{}' > "$active_vms_file"
               local tmp
               tmp=$(mktemp)
-              jq --arg vm "$vm_name" '."pentest" = $vm' "$active_vms_file" > "$tmp" && mv "$tmp" "$active_vms_file"
+              jq --arg p "$slot_profile" --arg vm "$vm_name" '.[$p] = $vm' "$active_vms_file" > "$tmp" && mv "$tmp" "$active_vms_file"
           fi
 
           echo ""
@@ -657,13 +660,16 @@
               sudo cryptsetup luksClose "$mapper_name" || log "''${YELLOW}Warning: Could not lock encrypted volume''${NC}"
           fi
 
-          # Deregister task pentest slots from active-vms.json
-          if [[ "$vm_name" == microvm-pentest-task* ]]; then
+          # Deregister task slots from active-vms.json (only if still the active one)
+          local slot_profile
+          slot_profile=$(task_slot_profile "$vm_name")
+          if [[ -n "$slot_profile" ]]; then
               local active_vms_file="$HOME/.cache/hydrix/active-vms.json"
               if [[ -f "$active_vms_file" ]]; then
                   local tmp
                   tmp=$(mktemp)
-                  jq 'del(."pentest")' "$active_vms_file" > "$tmp" && mv "$tmp" "$active_vms_file"
+                  jq --arg p "$slot_profile" --arg vm "$vm_name" 'if .[$p] == $vm then del(.[$p]) else . end' \
+                      "$active_vms_file" > "$tmp" && mv "$tmp" "$active_vms_file"
               fi
           fi
 
@@ -1641,7 +1647,7 @@
                   echo "microvm-vault"
                   ;;
               task[0-9]*)
-                  registry_vm_name "pentest-$target"
+                  task_slot_vm "$target"
                   ;;
               micro*)
                   # Direct microVM name
@@ -1658,12 +1664,11 @@
                       registry_vm_name "$target"
                       return
                   fi
-                  # Try engagement-name lookup (tasks/.engagement-registry) before
-                  # falling back to prepending microvm-. Lets "shard start amazon"
-                  # resolve straight to microvm-pentest-task2, using the registry as
-                  # the single source of truth for engagement -> slot mapping.
+                  # Try engagement-name lookup (see ENGAGEMENTS_FILE) before
+                  # falling back to prepending microvm-. Lets "shard -s google"
+                  # resolve straight to the task slot the engagement is bound to.
                   local slot
-                  slot=$(pentest_find_slot "$target" 2>/dev/null)
+                  slot=$(engagement_slot "$target" 2>/dev/null)
                   if [[ -n "$slot" ]]; then
                       echo "$slot"
                   elif [[ "$target" == microvm-* ]]; then
@@ -2027,331 +2032,373 @@
           esac
       }
 
-      # ===== Task Pentest VM Commands =====
-      # Pre-declared task slots with a shared engagement registry.
-      # Slots are permanent (registered with host config). Engagements are assigned
-      # to slots via this registry, no rebuild needed per engagement.
+      # ===== Task Slot Engagements =====
+      # Task slots are generic VMs generated from hydrix-config's tasks/default.nix
+      # (vm-registry entries carrying a taskSlot), each on its own isolated bridge.
+      # An engagement is a name bound to a slot at runtime: no rebuild per
+      # engagement, and the binding lives outside the flake so engagement names
+      # never reach git or the nix store. Ending an engagement moves its home
+      # volume out of the slot into the archive, so the slot is empty for the next
+      # engagement and the data can later be resumed into any free slot.
 
-      # Task slot vmNames, resolved from the registry (per-machine, e.g.
-      # "microvm-pentest-task1-<serial>"). Falls back to the pre-registry default
-      # names for fresh installs where the registry doesn't exist yet.
-      PENTEST_TASK_SLOTS=()
-      if [[ -f "$VM_REGISTRY" ]]; then
-          while IFS= read -r name; do
-              PENTEST_TASK_SLOTS+=("$name")
-          done < <(jq -r 'to_entries[] | select(.key | startswith("pentest-task")) | .value.vmName' "$VM_REGISTRY" 2>/dev/null)
-      fi
-      [[ ''${#PENTEST_TASK_SLOTS[@]} -eq 0 ]] && PENTEST_TASK_SLOTS=("microvm-pentest-task1" "microvm-pentest-task2" "microvm-pentest-task3")
+      ENGAGEMENTS_FILE="/home/''${SUDO_USER:-$USER}/.local/share/hydrix/engagements.json"
+      readonly ENGAGEMENTS_FILE
+      # Same filesystem as the slot volumes, so end/resume is a rename, not a copy.
+      # Dot-prefixed so VM directory globs (shard gc) never see it.
+      readonly ENGAGEMENT_ARCHIVE="/var/lib/microvms/.engagements"
 
-      pentest_registry_path() {
-          echo "''${FLAKE_DIR}/tasks/.engagement-registry"
+      # One "task1<TAB>vmName" line per slot, in CID order
+      task_slots() {
+          [[ -f "$VM_REGISTRY" ]] || return 0
+          jq -r '[.[] | select(.taskSlot != null)] | sort_by(.cid)[] | "\(.taskSlot)\t\(.vmName)"' "$VM_REGISTRY" 2>/dev/null
       }
 
-      pentest_registry_read() {
-          local path
-          path=$(pentest_registry_path)
-          [[ -f "$path" ]] && cat "$path" || echo "{}"
+      # Slot name (task1) -> vmName, empty if there is no such slot
+      task_slot_vm() {
+          [[ -f "$VM_REGISTRY" ]] || return 0
+          jq -r --arg s "$1" '[.[] | select(.taskSlot == $s) | .vmName][0] // empty' "$VM_REGISTRY" 2>/dev/null
       }
 
-      # Get engagement for a slot (empty string if unassigned)
-      pentest_registry_get() {
-          local slot="$1"
-          local reg
-          reg=$(pentest_registry_read)
-          python3 -c "
-      import json, sys
-      d = json.loads(sys.argv[1])
-      v = d.get(sys.argv[2])
-      print(v if v else ''')
-      " "$reg" "$slot" 2>/dev/null || echo ""
+      # vmName -> the slot's base profile registry key (e.g. "pentest"), empty for non-slot VMs
+      task_slot_profile() {
+          [[ -f "$VM_REGISTRY" ]] || return 0
+          jq -r --arg v "$1" \
+              'to_entries[] | . as $e | select(.value.vmName == $v and .value.taskSlot != null) | .key | rtrimstr("-" + $e.value.taskSlot)' \
+              "$VM_REGISTRY" 2>/dev/null | head -1
       }
 
-      # Set or clear engagement for a slot (empty engagement = clear)
-      pentest_registry_set() {
-          local slot="$1"
-          local engagement="$2"
-          local path
-          path=$(pentest_registry_path)
-          local reg
-          reg=$(pentest_registry_read)
-          local new_reg
-          if [[ -z "$engagement" ]]; then
-              new_reg=$(python3 -c "
-      import json, sys
-      d = json.loads(sys.argv[1])
-      d.pop(sys.argv[2], None)
-      print(json.dumps(d, indent=2))
-      " "$reg" "$slot" 2>/dev/null)
+      engagements_read() {
+          if [[ -f "$ENGAGEMENTS_FILE" ]]; then
+              cat "$ENGAGEMENTS_FILE"
           else
-              new_reg=$(python3 -c "
-      import json, sys
-      d = json.loads(sys.argv[1])
-      d[sys.argv[2]] = sys.argv[3]
-      print(json.dumps(d, indent=2))
-      " "$reg" "$slot" "$engagement" 2>/dev/null)
+              echo '{"slots": {}, "archived": {}}'
           fi
-          echo "$new_reg" > "$path"
       }
 
-      # Find which slot an engagement is assigned to (empty if not found)
-      pentest_find_slot() {
-          local engagement="$1"
-          local reg
-          reg=$(pentest_registry_read)
-          python3 -c "
-      import json, sys
-      d = json.loads(sys.argv[1])
-      target = sys.argv[2]
-      for slot, eng in d.items():
-          if eng == target:
-              print(slot)
-              break
-      " "$reg" "$engagement" 2>/dev/null || echo ""
+      # Replace the engagements file with stdin, written 0600 and atomically
+      engagements_write() {
+          local new
+          new=$(cat)
+          [[ -n "$new" ]] || return 1
+          mkdir -p "$(dirname "$ENGAGEMENTS_FILE")"
+          (umask 077 && printf '%s\n' "$new" > "$ENGAGEMENTS_FILE.tmp") && mv "$ENGAGEMENTS_FILE.tmp" "$ENGAGEMENTS_FILE"
       }
 
-      # Find first free slot (returns slot name or fails)
-      pentest_find_free_slot() {
-          for slot in "''${PENTEST_TASK_SLOTS[@]}"; do
-              local engagement
-              engagement=$(pentest_registry_get "$slot")
-              if [[ -z "$engagement" ]]; then
-                  echo "$slot"
-                  return 0
-              fi
+      engagement_of_slot() {
+          engagements_read | jq -r --arg v "$1" '.slots[$v] // empty'
+      }
+
+      engagement_slot() {
+          engagements_read | jq -r --arg n "$1" '(.slots // {}) | to_entries[] | select(.value == $n) | .key' | head -1
+      }
+
+      engagement_archived() {
+          engagements_read | jq -e --arg n "$1" '(.archived // {}) | has($n)' >/dev/null
+      }
+
+      engagement_name_valid() {
+          [[ "$1" =~ ^[a-z0-9][a-z0-9_-]{0,31}$ ]]
+      }
+
+      # Home volume files present in a slot directory (qcow2 snapshots live inside the file)
+      slot_volumes() {
+          local f
+          for f in "$1/home.qcow2" "$1/home.luks"; do
+              if [[ -f "$f" ]]; then echo "$f"; fi
           done
-          return 1
       }
 
-      # Print engagement table
       pentest_print_table() {
-          printf "''${BOLD}%-26s %-20s %-8s %-10s''${NC}\n" "SLOT" "ENGAGEMENT" "RUNNING" "VOLUME"
-          printf '%s\n' "──────────────────────────────────────────────────────────────────"
-          for slot in "''${PENTEST_TASK_SLOTS[@]}"; do
-              local engagement
-              engagement=$(pentest_registry_get "$slot")
-              local running_str="-"
-              is_running "$slot" 2>/dev/null && running_str="''${GREEN}yes''${NC}"
-              local vol_size="-"
-              local vol="/var/lib/microvms/''${slot}/home.qcow2"
-              [[ -f "$vol" ]] && vol_size=$(du -sh "$vol" 2>/dev/null | cut -f1)
+          printf "''${BOLD}%-7s %-20s %-8s %-10s''${NC}\n" "SLOT" "ENGAGEMENT" "RUNNING" "VOLUME"
+          local key vm
+          while IFS=$'\t' read -r key vm; do
+              local eng running_str="-" vol_size="-" f
+              eng=$(engagement_of_slot "$vm")
+              is_running "$vm" && running_str="''${GREEN}yes''${NC}"
+              f=$(slot_volumes "/var/lib/microvms/$vm" | head -1)
+              if [[ -n "$f" ]]; then
+                  vol_size=$(du -sh "$f" 2>/dev/null | cut -f1)
+                  [[ -z "$eng" ]] && vol_size="$vol_size (unbound)"
+              fi
               # shellcheck disable=SC2059
-              printf "''${DIM}%-26s''${NC} %-20s %-8b %-10s\n" \
-                  "$slot" "''${engagement:--}" "$running_str" "$vol_size"
-          done
+              printf "%-7s %-20s %-8b %-10s\n" "$key" "''${eng:--}" "$running_str" "$vol_size"
+          done < <(task_slots)
+
+          local archived
+          archived=$(engagements_read | jq -r '(.archived // {}) | to_entries[] | "\(.key)\t\(.value)"')
+          if [[ -n "$archived" ]]; then
+              echo ""
+              echo -e "''${BOLD}ARCHIVED''${NC}"
+              local name ended
+              while IFS=$'\t' read -r name ended; do
+                  printf "  %-20s ''${DIM}ended %s''${NC}\n" "$name" "$ended"
+              done <<< "$archived"
+          fi
       }
 
-      # shard pentest create <name> [--slot N]
-      cmd_pentest_create() {
-          local engagement="''${1:-}"
-          [[ -z "$engagement" ]] && { log_error "Usage: shard pentest create <name> [--slot N]"; return 1; }
-          shift
-
-          local slot_override=""
+      # shard pentest [taskN] <name> [--adopt]
+      # shard pentest start <name> [--slot N] [--adopt]
+      cmd_pentest_start() {
+          local slot_key="" name="" adopt=0
           while [[ $# -gt 0 ]]; do
               case "$1" in
-                  --slot) slot_override=$(registry_vm_name "pentest-task''${2}"); shift 2 ;;
-                  *)      shift ;;
+                  --slot)
+                      [[ $# -lt 2 ]] && { log_error "--slot needs a slot number"; return 1; }
+                      slot_key="task$2"
+                      shift 2
+                      ;;
+                  --adopt) adopt=1; shift ;;
+                  task[0-9]*) slot_key="$1"; shift ;;
+                  -*) log_error "Unknown option: $1"; return 1 ;;
+                  *)
+                      [[ -n "$name" ]] && { log_error "Unexpected argument: $1"; return 1; }
+                      name="$1"
+                      shift
+                      ;;
               esac
           done
 
-          # Reject if engagement already registered
-          local existing_slot
-          existing_slot=$(pentest_find_slot "$engagement")
-          if [[ -n "$existing_slot" ]]; then
-              log_error "Engagement '${""}''${engagement}' is already assigned to ''${existing_slot}"
+          if [[ -z "$name" ]]; then
+              log_error "Usage: shard pentest [taskN] <name>"
+              return 1
+          fi
+          if ! engagement_name_valid "$name"; then
+              log_error "Engagement names use lowercase letters, digits, - and _ (max 32 chars)"
+              return 1
+          fi
+          case "$name" in
+              list|ls|start|end|purge|help|task[0-9]*|micro*|router*|builder|gitsync|files|vault|host)
+                  log_error "$name is a reserved word, pick another engagement name"
+                  return 1
+                  ;;
+          esac
+          if [[ -f "$VM_REGISTRY" ]] && jq -e --arg k "$name" 'has($k)' "$VM_REGISTRY" >/dev/null 2>&1; then
+              log_error "$name is already a VM name, pick another engagement name"
               return 1
           fi
 
-          # Resolve slot
-          local slot
-          if [[ -n "$slot_override" ]]; then
-              local occupied
-              occupied=$(pentest_registry_get "$slot_override")
-              if [[ -n "$occupied" ]]; then
-                  log_error "Slot ''${slot_override} is occupied by '${""}''${occupied}'"
-                  log "Close it first: shard pentest close ''${occupied}"
-                  return 1
-              fi
-              slot="$slot_override"
-          else
-              slot=$(pentest_find_free_slot) || {
-                  log_error "No free task slots available."
-                  log "Close an existing engagement or rebuild after adding more slot configs."
+          local existing
+          existing=$(engagement_slot "$name")
+          if [[ -n "$existing" ]]; then
+              log_error "Engagement $name is already active in $existing"
+              return 1
+          fi
+
+          local slot=""
+          if [[ -n "$slot_key" ]]; then
+              slot=$(task_slot_vm "$slot_key")
+              if [[ -z "$slot" ]]; then
+                  log_error "No task slot named $slot_key"
                   pentest_print_table
                   return 1
-              }
+              fi
+              local occupant
+              occupant=$(engagement_of_slot "$slot")
+              if [[ -n "$occupant" ]]; then
+                  log_error "$slot_key is in use by $occupant (free it with: shard pentest end $occupant)"
+                  return 1
+              fi
+          else
+              local key vm
+              while IFS=$'\t' read -r key vm; do
+                  if [[ -z "$(engagement_of_slot "$vm")" ]]; then
+                      slot="$vm"
+                      slot_key="$key"
+                      break
+                  fi
+              done < <(task_slots)
+              if [[ -z "$slot" ]]; then
+                  log_error "No free task slot"
+                  pentest_print_table
+                  return 1
+              fi
           fi
 
-          log "Creating engagement ''${BOLD}''${engagement}''${NC} → slot ''${BOLD}''${slot}''${NC}"
-
-          # Register first (before potentially long build)
-          pentest_registry_set "$slot" "$engagement"
-
-          # Build the slot closure (auto-provisions the LUKS volume if the slot
-          # declares hydrix.microvm.encryption.enable and doesn't have one yet,
-          # see cmd_build's universal encryption auto-setup)
-          log "Building ''${slot} closure..."
-          if ! cmd_build "$slot"; then
-              log_warn "Build failed, rolling back registry"
-              pentest_registry_set "$slot" ""
+          if is_running "$slot"; then
+              log_error "$slot_key is running without an engagement, stop it first: shard -S $slot_key"
               return 1
           fi
 
-          log_success "Engagement '${""}''${BOLD}''${engagement}''${NC}' ready in slot ''${slot}"
+          local vm_dir="/var/lib/microvms/$slot" leftover
+          leftover=$(slot_volumes "$vm_dir")
+          if [[ -n "$leftover" ]]; then
+              if engagement_archived "$name"; then
+                  log_error "Can't resume $name into $slot_key: the slot still holds an unbound volume"
+                  log "Pick another slot, or delete it first: shard -p $slot_key"
+                  return 1
+              fi
+              if [[ "$adopt" -eq 0 ]]; then
+                  log_error "$slot_key holds a home volume that isn't bound to any engagement:"
+                  local f
+                  while IFS= read -r f; do echo "     $f" >&2; done <<< "$leftover"
+                  log "Keep it as $name: shard pentest $slot_key $name --adopt"
+                  log "Delete it:        shard -p $slot_key"
+                  return 1
+              fi
+              log_warn "Adopting the existing volume in $slot_key as $name"
+          fi
+
+          if engagement_archived "$name"; then
+              log "Resuming archived engagement ''${BOLD}$name''${NC} into $slot_key..."
+              sudo mkdir -p "$vm_dir"
+              sudo find "$ENGAGEMENT_ARCHIVE/$name" -maxdepth 1 -name 'home.*' -exec mv -t "$vm_dir" {} +
+              sudo rmdir "$ENGAGEMENT_ARCHIVE/$name"
+              engagements_read | jq --arg n "$name" 'del(.archived[$n])' | engagements_write
+          fi
+
+          engagements_read | jq --arg v "$slot" --arg n "$name" '.slots[$v] = $n' | engagements_write
+          log_success "Engagement ''${BOLD}$name''${NC} bound to $slot_key"
           echo ""
-          echo -e "  ''${DIM}Start VM:''${NC}        shard start ''${slot}"
-          echo -e "  ''${DIM}Baseline snapshot:''${NC} shard snapshot create ''${slot} ''${engagement}-clean"
-          echo -e "  ''${DIM}Launch terminal:''${NC}  shard app ''${slot} alacritty"
-          echo -e "  ''${DIM}Close when done:''${NC}  shard pentest close ''${engagement}"
+          echo -e "  ''${DIM}Build:''${NC}  shard -b $name"
+          echo -e "  ''${DIM}Start:''${NC}  shard -s $name"
+          echo -e "  ''${DIM}Finish:''${NC} shard pentest end $name"
       }
 
-      # shard pentest list
       cmd_pentest_list() {
           pentest_print_table
       }
 
-      # shard pentest close <name>
-      cmd_pentest_close() {
-          local engagement="''${1:-}"
-          [[ -z "$engagement" ]] && { log_error "Usage: shard pentest close <name>"; return 1; }
+      # shard pentest end <name>: free the slot, archive the engagement's volume
+      cmd_pentest_end() {
+          local name="''${1:-}"
+          [[ -z "$name" ]] && { log_error "Usage: shard pentest end <name>"; return 1; }
 
           local slot
-          slot=$(pentest_find_slot "$engagement")
+          slot=$(engagement_slot "$name")
           if [[ -z "$slot" ]]; then
-              log_error "No engagement named '${""}''${engagement}' found"
+              log_error "No active engagement named $name"
               echo ""
               pentest_print_table
               return 1
           fi
 
           if is_running "$slot"; then
-              log "Stopping ''${slot}..."
+              log "Stopping $slot..."
               cmd_stop "$slot"
           fi
 
-          local vol_qcow2="/var/lib/microvms/''${slot}/home.qcow2"
-          local vol_luks="/var/lib/microvms/''${slot}/home.luks"
-          [[ -f "$vol_qcow2" ]] && log_warn "Volume preserved at ''${vol_qcow2} (snapshots intact)"
-          [[ -f "$vol_luks" ]] && log_warn "Encrypted volume preserved at ''${vol_luks}"
+          local vols
+          vols=$(slot_volumes "/var/lib/microvms/$slot")
+          if [[ -n "$vols" ]]; then
+              local dest="$ENGAGEMENT_ARCHIVE/$name"
+              if sudo test -e "$dest"; then
+                  log_error "$dest already exists, refusing to overwrite it"
+                  return 1
+              fi
+              sudo install -d -m 700 "$ENGAGEMENT_ARCHIVE" "$dest"
+              xargs sudo mv -t "$dest" <<< "$vols"
+              engagements_read | jq --arg n "$name" --arg d "$(date +%F)" '.archived[$n] = $d' | engagements_write
+              log "Home volume archived at $dest"
+          fi
 
-          pentest_registry_set "$slot" ""
-          log_success "Engagement '${""}''${engagement}' closed. Slot ''${slot} is now free."
-          echo ""
-          local slot_num
-          slot_num=$(echo "$slot" | grep -oP 'task\K[0-9]+')
-          echo -e "  ''${DIM}Reopen later:''${NC} shard pentest create ''${engagement} --slot ''${slot_num}"
+          engagements_read | jq --arg v "$slot" 'del(.slots[$v])' | engagements_write
+          log_success "Engagement ''${BOLD}$name''${NC} ended, its slot is free"
+          if [[ -n "$vols" ]]; then
+              echo ""
+              echo -e "  ''${DIM}Resume later:''${NC} shard pentest $name"
+              echo -e "  ''${DIM}Delete data:''${NC}  shard pentest purge $name"
+          fi
       }
 
-      # shard pentest purge <name> [--force]
+      # shard pentest purge <name> [-f]: delete an engagement's data, active or archived
       cmd_pentest_purge() {
-          local engagement="''${1:-}"
-          local force="''${2:-}"
-          [[ -z "$engagement" ]] && { log_error "Usage: shard pentest purge <name> [--force]"; return 1; }
+          local name="" force=0 arg
+          for arg in "$@"; do
+              case "$arg" in
+                  -f|--force) force=1 ;;
+                  *) name="$arg" ;;
+              esac
+          done
+          if [[ -z "$name" ]] || ! engagement_name_valid "$name"; then
+              log_error "Usage: shard pentest purge <name> [-f|--force]"
+              return 1
+          fi
 
-          local slot
-          slot=$(pentest_find_slot "$engagement")
-          if [[ -z "$slot" ]]; then
-              log_error "No engagement named '${""}''${engagement}' found"
+          local slot purge_paths=""
+          slot=$(engagement_slot "$name")
+          if [[ -n "$slot" ]]; then
+              if is_running "$slot"; then
+                  log "Stopping $slot..."
+                  cmd_stop "$slot"
+              fi
+              purge_paths=$(slot_volumes "/var/lib/microvms/$slot")
+          elif engagement_archived "$name"; then
+              purge_paths="$ENGAGEMENT_ARCHIVE/$name"
+          else
+              log_error "No engagement named $name"
               echo ""
               pentest_print_table
               return 1
           fi
 
-          if is_running "$slot"; then
-              log "Stopping ''${slot}..."
-              cmd_stop "$slot"
+          echo -e "''${YELLOW}This deletes all data for engagement ''${BOLD}$name''${NC}''${YELLOW}:''${NC}"
+          if [[ -n "$purge_paths" ]]; then
+              xargs sudo du -sh <<< "$purge_paths" 2>/dev/null | sed 's/^/  /' || true
+          else
+              echo "  (no volume, only the binding)"
           fi
-
-          local vol_qcow2="/var/lib/microvms/''${slot}/home.qcow2"
-          local vol_luks="/var/lib/microvms/''${slot}/home.luks"
-          if [[ -f "$vol_qcow2" || -f "$vol_luks" ]]; then
-              echo -e "''${YELLOW}This will delete all data for engagement ''${BOLD}''${engagement}''${NC}''${YELLOW} in ''${slot}:''${NC}"
-              if [[ -f "$vol_qcow2" ]]; then
-                  echo -e "  Volume: ''${vol_qcow2} ($(du -sh "$vol_qcow2" 2>/dev/null | cut -f1))"
-              fi
-              if [[ -f "$vol_luks" ]]; then
-                  echo -e "  Encrypted volume: ''${vol_luks} ($(du -sh "$vol_luks" 2>/dev/null | cut -f1))"
-              fi
-              echo ""
-          fi
-
-          if [[ "$force" != "--force" && "$force" != "-f" ]]; then
+          echo ""
+          if [[ "$force" -eq 0 ]]; then
               echo -e "''${RED}This cannot be undone.''${NC}"
               read -rp "Type 'yes' to confirm: " confirm
               [[ "$confirm" != "yes" ]] && { log "Aborted"; return 1; }
           fi
 
-          [[ -f "$vol_qcow2" ]] && sudo rm -f "$vol_qcow2"
-          [[ -f "$vol_luks" ]] && sudo rm -f "$vol_luks"
-          pentest_registry_set "$slot" ""
-          log_success "Engagement '${""}''${engagement}' purged. Slot ''${slot} is now free."
+          if [[ -n "$slot" ]]; then
+              [[ -n "$purge_paths" ]] && xargs sudo rm -f -- <<< "$purge_paths"
+              engagements_read | jq --arg v "$slot" 'del(.slots[$v])' | engagements_write
+          else
+              sudo rm -rf -- "$ENGAGEMENT_ARCHIVE/$name"
+              engagements_read | jq --arg n "$name" 'del(.archived[$n])' | engagements_write
+          fi
+          log_success "Engagement ''${BOLD}$name''${NC} purged"
       }
 
-      # shard pentest help
       cmd_pentest_help() {
           cat <<EOF
-      ''${BOLD}shard pentest''${NC} - Task-specific pentest VM management
+      ''${BOLD}shard pentest''${NC} - Bind engagements to task slots
 
       ''${BOLD}USAGE''${NC}
-          shard pentest <command> [args]
+          shard pentest task<N> <name>      Bind <name> to slot N
+          shard pentest <name>              Bind <name> to the first free slot
+          shard pentest start <name> [--slot N]   Same, long form
+          shard pentest end <name>          Free the slot, archive the engagement's volume
+          shard pentest purge <name> [-f]   Delete an engagement's data (active or archived)
+          shard pentest list                Slots, bindings, archived engagements
 
-      ''${BOLD}COMMANDS''${NC}
-          create <name> [--slot N]   Assign engagement to a task slot and build its closure
-          list                       Show all slots, their engagements, and status
-          close <name>               Free slot (volume and snapshots preserved)
-          purge <name> [--force]     Free slot and delete volume
+      Once bound, the engagement name works everywhere a VM name does:
+          shard -b google, shard -s google, shard -S google, shard -a google firefox
 
       ''${BOLD}WORKFLOW''${NC}
-          # New engagement
-          shard pentest create google
-          shard start microvm-pentest-task1
-          shard snapshot create microvm-pentest-task1 google-clean
-          shard app microvm-pentest-task1 alacritty
+          shard pentest task1 google        # bind
+          shard -b google                   # build (sets up the encrypted volume first time)
+          shard -s google                   # start
+          shard pentest end google          # stop, archive data, free task1
+          shard pentest task2 google        # resume archived data in any free slot
+          shard pentest purge google        # delete it for good
 
-          # Between sessions (revert to clean state)
-          shard stop microvm-pentest-task1
-          shard snapshot revert microvm-pentest-task1 google-clean
-          shard start microvm-pentest-task1
-
-          # Close engagement (slot freed, volume/snapshots kept)
-          shard pentest close google
-
-          # Reopen from snapshot
-          shard pentest create google --slot 1
-          shard snapshot revert microvm-pentest-task1 google-clean
-          shard start microvm-pentest-task1
-
-          # Delete all data
-          shard pentest purge google
-
-      ''${BOLD}SLOTS''${NC}
-          task1  CID 115  TAP mv-task-1
-          task2  CID 116  TAP mv-task-2
-          task3  CID 117  TAP mv-task-3
+      ''${BOLD}OPTIONS''${NC}
+          --adopt     Bind a slot's existing unbound volume to the new engagement
+                      instead of refusing (volumes left from before bindings existed)
 
       ''${BOLD}NOTES''${NC}
-          - Slots are permanently registered in the host NixOS config (no rebuild per engagement)
-          - Snapshots use: shard snapshot create/revert/list <slot> <name>
-          - Add more slots by creating tasks/task4.nix (CID 118) and rebuilding once
+          - Slots come from tasks/default.nix in hydrix-config; each has its own
+            bridge and subnet, isolated from every other VM network by the router
+          - Binding and ending never rebuild; bindings are stored in
+            $ENGAGEMENTS_FILE, archived volumes in $ENGAGEMENT_ARCHIVE
+          - Snapshots (plain qcow2 slots only): shard snapshot create/revert <slot> <name>
       EOF
       }
 
-      # shard pentest dispatcher
+      # shard pentest dispatcher: anything that isn't a subcommand is a bind
       cmd_pentest() {
-          local subcmd="''${1:-help}"
-          shift 2>/dev/null || true
-
-          case "$subcmd" in
-              create) cmd_pentest_create "$@" ;;
-              list)   cmd_pentest_list ;;
-              close)  cmd_pentest_close "$@" ;;
-              purge)  cmd_pentest_purge "$@" ;;
+          case "''${1:-help}" in
+              list|ls) cmd_pentest_list ;;
+              end) shift; cmd_pentest_end "$@" ;;
+              purge) shift; cmd_pentest_purge "$@" ;;
+              start) shift; cmd_pentest_start "$@" ;;
               help|-h|--help) cmd_pentest_help ;;
-              *)
-                  log_error "Unknown pentest command: $subcmd"
-                  cmd_pentest_help
-                  return 1
-                  ;;
+              *) cmd_pentest_start "$@" ;;
           esac
       }
 
@@ -2395,8 +2442,16 @@
                   mv-comms*)   bridge="br-comms" ;;
                   mv-build*)   bridge="br-builder" ;;
                   mv-gitsyn*)  bridge="br-builder" ;;
-                  mv-task-*)   bridge="br-pentest" ;;
               esac
+              if ip link show "$bridge" &>/dev/null; then
+                  sudo ip link set "$tap" master "$bridge" 2>/dev/null || true
+                  sudo ip link set "$tap" up 2>/dev/null || true
+              fi
+          done
+
+          # Task slot TAPs: mv-taskN belongs on its own br-taskN
+          for tap in $(ip -o link show 2>/dev/null | grep -oP 'mv-task[0-9]+(?=[@:])' | sort -u); do
+              local bridge="br-''${tap#mv-}"
               if ip link show "$bridge" &>/dev/null; then
                   sudo ip link set "$tap" master "$bridge" 2>/dev/null || true
                   sudo ip link set "$tap" up 2>/dev/null || true
@@ -2975,7 +3030,7 @@
           files <cmd>             Encrypted inter-VM file ops (see: shard files help)
 
         ''${BOLD}Task pentest VMs:''${NC}
-          pentest <cmd>           Manage engagement slots (see: shard pentest help)
+          pentest task<N> <name>  Bind an engagement to a task slot (see: shard pentest help)
 
         ''${BOLD}Encryption:''${NC}
           encrypt-setup <name>    Set up LUKS-encrypted home volume (run once, VM must be stopped)
@@ -3007,7 +3062,8 @@
           builder                  Builder for lockdown mode (populates host store)
           gitsync                  Git-sync for lockdown mode (push/pull repos)
           files                    Encrypted file transfer hub (see: shard files)
-          task1 / task2 / task3    Task pentest slots (per-engagement, see: shard pentest)
+          task1 .. taskN           Task slots from tasks/default.nix, or use the bound
+                                   engagement name (see: shard pentest)
 
           Each profile/task VM above is its own per-machine VM (e.g. "browsing" resolves to
           microvm-browsing-<serial> for whichever machine you're on) - always use the short
@@ -3399,7 +3455,7 @@
     complete -c shard -n __fish_use_subcommand -a builder -d 'Lockdown-mode build workflow'
     complete -c shard -n __fish_use_subcommand -a git -d 'Git ops via gitsync VM'
     complete -c shard -n __fish_use_subcommand -a files -d 'Encrypted inter-VM file transfer'
-    complete -c shard -n __fish_use_subcommand -a pentest -d 'Manage pentest engagement slots'
+    complete -c shard -n __fish_use_subcommand -a pentest -d 'Bind engagements to task slots'
     complete -c shard -n __fish_use_subcommand -a task -d 'Alias for pentest'
     complete -c shard -n __fish_use_subcommand -a test -d 'Full workflow smoke test'
     complete -c shard -n __fish_use_subcommand -a purge -d 'Delete all persistent data'

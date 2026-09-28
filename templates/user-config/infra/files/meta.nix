@@ -9,31 +9,15 @@
   tapMac        = "02:00:00:02:00:01";
   routerTap     = "mv-router-file";  # Router serves this subnet via extraNetworks dynamic wiring
 
-  # Host-side TAP → bridge wiring — auto-discovered from profiles/*/meta.nix
-  # and tasks/*/meta.nix (for task VMs with custom isolated bridges).
+  # Host-side TAP → bridge wiring, auto-discovered from profiles/*/meta.nix
+  # and tasks/slots.nix (one isolated bridge per task slot).
   tapBridges =
     let
       profilesDir = ../../profiles;
-      tasksDir    = ../../tasks;
 
       profileNames = builtins.filter
         (n: builtins.pathExists (profilesDir + "/${n}/meta.nix"))
         (builtins.attrNames (builtins.readDir profilesDir));
-
-      taskNames = if builtins.pathExists tasksDir
-        then builtins.filter
-          (n: builtins.match "task[0-9]+" n != null
-            && builtins.pathExists (tasksDir + "/${n}/meta.nix"))
-          (builtins.attrNames (builtins.readDir tasksDir))
-        else [];
-
-      # Bridges already reachable via profile TAPs — don't add redundant task TAPs
-      coveredBridges = map (n: (import (profilesDir + "/${n}/meta.nix")).bridge) profileNames;
-
-      # Tasks with custom bridges not already covered by a profile TAP
-      tasksNeedingTap = builtins.filter (n:
-        !(builtins.elem (import (tasksDir + "/${n}/meta.nix")).bridge coveredBridges))
-        taskNames;
 
       abbrev4 = n: builtins.substring 0 4 n;
     in
@@ -44,12 +28,11 @@
       name  = "mv-files-${abbrev4 n}";
       value = (import (profilesDir + "/${n}/meta.nix")).bridge;
     }) profileNames) //
-    # Task VM custom bridges (only tasks whose bridge isn't already covered above)
-    # TAP name: mv-files-task1, mv-files-task2, etc. (max 15 chars, fits task1–task9)
-    builtins.listToAttrs (map (n: {
-      name  = "mv-files-${n}";
-      value = (import (tasksDir + "/${n}/meta.nix")).bridge;
-    }) tasksNeedingTap) //
+    # Task slot bridges. TAP name: mv-files-task1 .. mv-files-task9 (15-char limit)
+    builtins.listToAttrs (map (t: {
+      name  = "mv-files-${t.name}";
+      value = t.bridge;
+    }) (import ../../tasks/slots.nix)) //
     # Infra VM bridges (explicit)
     { "mv-files-usb" = "br-usb-sandbox"; } //
     { "mv-files-hsy" = "br-hostsync"; };

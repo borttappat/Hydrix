@@ -80,12 +80,9 @@ templates/user-config/               # Becomes ~/hydrix-config/
 │   ├── hostsync/                    # Secure host file inbox
 │   ├── vault/                       # Offline KeepassXC credential store
 │   └── usb-sandbox/                 # Safe USB device handling
-├── tasks/                           # Pentest task VM slots
-│   ├── task1/
-│   │   ├── meta.nix                 # CID 115, mv-task-1, br-pentest
-│   │   └── default.nix              # Persistence size, encryption, GitHub secrets
-│   ├── task2/                       # CID 116
-│   └── task3/                       # CID 117
+├── tasks/                           # Task slots, generated from one block
+│   ├── default.nix                  # count, baseCid, base profile, secrets, shared module
+│   └── slots.nix                    # expands default.nix: CID, bridge, subnet per slot
 ├── specialisations/
 │   ├── _base.nix                    # Packages present in all boot modes
 │   ├── lockdown.nix                 # Default: hardened, no host internet
@@ -356,36 +353,30 @@ Each infra directory has `meta.nix` and `default.nix`. The `default.nix` is a Ni
 
 `builtinVm = true` means the VM is declared via a specialized framework function (`mkMicrovmRouter`, `mkMicrovmBuilder`, etc.) rather than the generic `mkInfraVm`. The user config is still imported but the framework owns the base structure.
 
-### tasks/ - Pentest Task Slots
+### tasks/ - Task Slots
 
-Task slots are pre-declared pentest VM slots that can be assigned to named engagements without a host rebuild. Structure:
+Task slots are generic VMs that engagements are bound to at runtime, without a host rebuild.
+All slots come from one block in `tasks/default.nix`:
 
 ```nix
-# tasks/task1/meta.nix
 {
-  vsockCid   = 115;
-  bridge     = "br-pentest";
-  tapId      = "mv-task-1";
-  subnet     = "192.168.102";
-  workspace  = 2;
-  label      = "TASK 1";
-  hasDisplay = true;
-}
-```
-
-```nix
-# tasks/task1/default.nix - override pentest profile defaults
-{ ... }: {
-  hydrix.microvm = {
-    vsockCid             = 115;
-    tapId                = "mv-task-1";
-    persistence.homeSize = 20480;   # 20GB (pentest default is 100GB)
-    # encryption.enable = true;     # enable per-engagement encryption
+  count = 3;           # task1..task3, max 9
+  baseCid = 115;       # task1 = 115, task2 = 116, task3 = 117
+  profile = "pentest"; # base profile every slot builds on
+  secrets = [];        # hydrix secrets delivered to every slot, e.g. ["burp"]
+  module = {lib, ...}: {
+    hydrix.microvm.persistence.homeSize = 20480;
+    hydrix.microvm.encryption.enable = true;
   };
+  overrides = {};      # per-slot additions, e.g. task2 = {...};
 }
 ```
 
-The pentest profile base (`hydrix.lib.mkPentestTaskVm`) provides all other defaults via `lib.mkDefault`. Task configs only set what differs.
+`tasks/slots.nix` expands it: slot N gets CID = subnet octet = `baseCid + N - 1` and its own
+bridge `br-taskN`, subnet `192.168.<cid>.0/24` and router TAP `mv-router-taskN`, so the
+router isolates every slot from every other VM network. Engagements are bound with
+`shard pentest task1 <name>` and released with `shard pentest end <name>` (see
+`shard pentest help`); bindings are kept outside the flake.
 
 ---
 

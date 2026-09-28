@@ -202,7 +202,7 @@
                 hydrix.networking.vmRegistry = let
                   perMachineKeys =
                     map (m: m._profileName) discoveredMetas
-                    ++ map (m: "pentest-${m._taskName}") discoveredTasks;
+                    ++ map (m: "${taskCfg.profile}-${m.name}") discoveredTasks;
                   base =
                     vmRegistry
                     // {
@@ -223,7 +223,14 @@
                 hydrix.microvmHost.knownVms =
                   map (m: "microvm-${m._profileName}-${machineName}") discoveredMetas
                   ++ map (m: "microvm-${m._infraName}") (builtins.filter (m: !(m.builtinVm or false)) discoveredInfra)
-                  ++ map (m: "microvm-pentest-${m._taskName}-${machineName}") discoveredTasks;
+                  ++ map (m: "${taskVmName m}-${machineName}") discoveredTasks;
+                # Every task slot gets the secrets declared in tasks/default.nix;
+                # a machine config can still override per slot.
+                hydrix.microvmHost.vms = builtins.listToAttrs (map (m: {
+                    name = "${taskVmName m}-${machineName}";
+                    value.secrets = nixpkgs.lib.mkDefault (taskCfg.secrets or []);
+                  })
+                  discoveredTasks);
                 # Tags each known VM with its category (infra/profile/task) so
                 # the host module can decouple profile/task VMs from the host
                 # build closure by default (see host/microvm/default.nix).
@@ -239,7 +246,7 @@
                     })
                     (builtins.filter (m: !(m.builtinVm or false)) discoveredInfra))
                   // builtins.listToAttrs (map (m: {
-                      name = "microvm-pentest-${m._taskName}-${machineName}";
+                      name = "${taskVmName m}-${machineName}";
                       value = "task";
                     })
                     discoveredTasks);
@@ -307,52 +314,43 @@
         discoveredMetas);
 
     # -------------------------------------------------------------------------
-    # Task VM auto-discovery
-    # Scans tasks/task*/ for directories containing meta.nix and builds:
-    #   discoveredTasks: list of meta attrsets (one per task slot)
-    #   taskConfigs:      nixosConfigurations entries using mkMicroVM (pentest profile)
+    # Task slots, generated from the single block in tasks/default.nix (expanded
+    # by tasks/slots.nix). Engagements are bound to slots at runtime by
+    # `shard pentest`, never here, so engagement names stay out of git and the store.
     # -------------------------------------------------------------------------
-    discoveredTasks = let
-      tasksDir = ./tasks;
-      taskDirs =
-        if builtins.pathExists tasksDir
-        then
-          builtins.filter
-          (name:
-            builtins.match "task[0-9]+" name
-            != null
-            && builtins.pathExists (tasksDir + "/${name}/meta.nix"))
-          (builtins.attrNames (builtins.readDir tasksDir))
-        else [];
-    in
-      map (n: import (tasksDir + "/${n}/meta.nix") // {_taskName = n;}) taskDirs;
+    taskCfg = import ./tasks;
+    discoveredTasks = import ./tasks/slots.nix;
+    taskVmName = m: "microvm-${taskCfg.profile}-${m.name}";
+
+    # Each slot is its own network: bridge br-taskN, router TAP, subnet, DHCP.
+    taskNetworks = map (m: {inherit (m) name subnet routerTap;}) discoveredTasks;
 
     # One nixosConfiguration per (machine, task slot) pair -- task VMs always carry
     # real (encrypted) engagement data, so they're always per-machine, same as the
     # persistent profile VMs below.
-    # Task slots build on the pentest profile, so they follow its meta.nix
-    # notifyForward unless their own meta.nix sets one. Feeds both the VM-side
-    # relay and the host registry so the two cannot disagree.
-    taskNotifyForward = m: m.notifyForward or ((import ./profiles/pentest/meta.nix).notifyForward or false);
-
     taskConfigs = builtins.listToAttrs (builtins.concatMap (
       machineName: let
         mc = builtins.getAttr machineName machineConfigs;
       in
         map (m: let
-          vmName = "microvm-pentest-${m._taskName}-${machineName}";
+          vmName = "${taskVmName m}-${machineName}";
         in {
           name = vmName;
           value = hydrix.lib.mkMicroVM {
-            profile = "pentest";
+            inherit (taskCfg) profile;
             hostname = vmName;
             extraInputs = {inherit (inputs) nix-index-database hydrix;};
             modules = [
-              (./tasks + "/${m._taskName}/default.nix")
+              {
+                hydrix.microvm = {inherit (m) vsockCid bridge tapId;};
+                hydrix.networking.vmSubnet = m.subnet;
+              }
+              (taskCfg.module or {})
+              (taskCfg.overrides.${m.name} or {})
               vmThemeSyncModule
               {hydrix.vmThemeSync.enable = true;}
               {system.stateVersion = mc.config.system.stateVersion;}
-              {hydrix.microvm.notifyForward.enable = taskNotifyForward m;}
+              {hydrix.microvm.notifyForward.enable = m.notifyForward;}
             ];
             inherit userProfiles hostConfig userColorschemesDir;
           };
@@ -403,7 +401,8 @@
       builtins.foldl' (acc: m: acc // m.tapBridges)
       {} (builtins.filter (m: m ? tapBridges) discoveredInfra);
 
-    extraNetworks = profileExtraNetworks ++ infraNetworks;
+    # One isolated network per task slot, after profile and infra networks
+    extraNetworks = profileExtraNetworks ++ infraNetworks ++ taskNetworks;
 
     # Only non-builtin infra VMs: router/builder use specialized mk functions below
     infraVMConfigs = builtins.listToAttrs (map (m: {
@@ -446,16 +445,13 @@
         };
       }) (builtins.filter (m: m ? vsockCid) discoveredInfra))
       // builtins.listToAttrs (map (m: {
-          name = "pentest-${m._taskName}";
+          name = "${taskCfg.profile}-${m.name}";
           value = {
-            vmName = "microvm-pentest-${m._taskName}";
+            vmName = taskVmName m;
             cid = m.vsockCid;
-            bridge = m.bridge;
-            subnet = m.subnet;
-            workspace = m.workspace;
-            label = m.label;
+            inherit (m) bridge subnet workspace label focusBorder notifyForward;
             hasDisplay = true;
-            notifyForward = taskNotifyForward m;
+            taskSlot = m.name;
           };
         })
         discoveredTasks);

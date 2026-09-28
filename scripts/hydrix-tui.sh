@@ -208,17 +208,10 @@ get_microvms() {
 # Get engagement name for a pentest task slot (empty if unassigned)
 pentest_task_engagement() {
     local vm="$1"
-    local registry="${FLAKE_DIR}/tasks/.engagement-registry"
+    # Written by `shard pentest`, kept outside the flake so names stay out of git
+    local registry="$HOME/.local/share/hydrix/engagements.json"
     [[ ! -f "$registry" ]] && echo "" && return
-    python3 -c "
-import json, sys
-try:
-    with open(sys.argv[1]) as f:
-        d = json.load(f)
-    print(d.get(sys.argv[2]) or '')
-except Exception:
-    print('')
-" "$registry" "$vm" 2>/dev/null || echo ""
+    jq -r --arg v "$vm" '.slots[$v] // empty' "$registry" 2>/dev/null || echo ""
 }
 
 microvm_state() {
@@ -487,7 +480,7 @@ show_microvm_actions() {
             local eng
             eng=$(pentest_task_engagement "$vm")
             header="$vm ($state)"
-            [[ -n "$eng" ]] && header+=" — engagement: $eng" || header+=" — unassigned (shard pentest create <name>)"
+            [[ -n "$eng" ]] && header+=": engagement $eng" || header+=": unbound (shard pentest <slot> <name>)"
         fi
 
         local actions=()
