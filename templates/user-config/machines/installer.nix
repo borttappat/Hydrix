@@ -312,7 +312,7 @@
   # eww desktop dashboard (modules/eww.nix): VMs, exit nodes, network, CPU,
   # git, todo and weather in the left half of each screen.
   # hydrix.eww.dashboard = {
-  #   monitors = "internal";                       # DEFAULT: "all" - or only eDP/LVDS/DSI panels
+  #   monitors = "all";                            # DEFAULT: "internal" (eDP/LVDS/DSI panels) - or every output
   #   git.extraRepos.Hydrix = config.hydrix.paths.hydrixDir;  # on top of hydrix-config + hydrix.repos.entries
   #   weather.locations = [                        # DEFAULT: [] - weather block hidden
   #     { name = "Stockholm"; latitude = 59.33; longitude = 18.07; }

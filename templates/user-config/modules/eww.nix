@@ -1336,7 +1336,7 @@ in {
       };
       monitors = lib.mkOption {
         type = lib.types.enum ["all" "internal"];
-        default = "all";
+        default = "internal";
         description = ''
           Which monitors get a dashboard: every connected output, or only
           internal panels (outputs named eDP-*, LVDS-* or DSI-*).
