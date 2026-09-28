@@ -214,7 +214,7 @@ in rec {
           }
           microvm.nixosModules.microvm
           ../vm/microvm/infra/microvm-router.nix
-          {networking.hostName = hostname;}
+          {hydrix.vm.storeName = hostname;}
         ]
         ++ nixpkgs'.lib.optional (wifiPciAddress != "") {
           hydrix.hardware.vfio.wifiPciAddress = wifiPciAddress;
@@ -231,7 +231,7 @@ in rec {
   # =========================================================================
   # mkMicrovmRouterUser - User-configured router variant
   # =========================================================================
-  # Identical to mkMicrovmRouter but uses hostname "microvm-router-user".
+  # Identical to mkMicrovmRouter but uses storeName "microvm-router-user".
   # Only one router can run at a time (same WiFi card, same CID, same TAPs).
   mkMicrovmRouterUser = args: let
     allInputs = inputs // (args.extraInputs or {});
@@ -243,7 +243,7 @@ in rec {
         modules =
           (args.modules or [])
           ++ [
-            {networking.hostName = nixpkgs'.lib.mkForce "microvm-router-user";}
+            {hydrix.vm.storeName = nixpkgs'.lib.mkForce "microvm-router-user";}
           ];
       });
 

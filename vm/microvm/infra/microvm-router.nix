@@ -116,7 +116,7 @@
   vpnAssign = pkgs.writeShellScriptBin "vpn-assign" (builtins.readFile ../../../scripts/vpn-assign.sh);
   vpnStatus = pkgs.writeShellScriptBin "vpn-status" (builtins.readFile ../../../scripts/vpn-status.sh);
 
-  vmName = config.networking.hostName;
+  vmName = cfg.vm.storeName;
   extraNetworks = cfg.networking.extraNetworks;
   profileNetworks = cfg.networking.profileNetworks;
   # extraNetworks may contain user-defined profiles that are already in
@@ -214,7 +214,11 @@ in {
     ];
 
     # ===== Basic Identity =====
-    networking.hostName = lib.mkDefault "microvm-router";
+    # storeName drives host-side paths (/var/lib/microvms/<storeName>, secrets,
+    # console socket); hydrix.vm.hostname is only the name visible inside the VM.
+    hydrix.vm.storeName = lib.mkDefault "microvm-router";
+    hydrix.vm.hostname = lib.mkDefault cfg.vm.storeName;
+    networking.hostName = lib.mkOverride 500 cfg.vm.hostname;
     system.stateVersion = "25.05";
     nixpkgs.config.allowUnfree = true;
     nixpkgs.hostPlatform = lib.mkDefault "x86_64-linux";
@@ -269,9 +273,9 @@ in {
           "none"
 
           # Additional serial console via unix socket for interactive access
-          # Connect with: socat -,rawer unix-connect:/var/lib/microvms/${config.networking.hostName}/console.sock
+          # Connect with: socat -,rawer unix-connect:/var/lib/microvms/${vmName}/console.sock
           "-chardev"
-          "socket,id=console,path=/var/lib/microvms/${config.networking.hostName}/console.sock,server=on,wait=off"
+          "socket,id=console,path=/var/lib/microvms/${vmName}/console.sock,server=on,wait=off"
           "-serial"
           "chardev:console"
 
