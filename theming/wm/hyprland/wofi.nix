@@ -74,13 +74,19 @@
         animation: none;
     }
 
+    /* Transparent so #outer-box can carry the panel and a shadow; its margin
+       is the room the shadow needs inside the window (padding on #window has
+       no effect). */
     #window {
-        background-color: alpha(@background, ${wofiOpacity});
-        border-radius: ${wofiCornerRadius}px;
+        background-color: transparent;
         border: 0px solid transparent;
     }
 
     #outer-box {
+        background-color: alpha(@background, ${wofiOpacity});
+        border-radius: ${wofiCornerRadius}px;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.7);
+        margin: 4px 4px 5px 4px;
         padding: 8px;
     }
 
