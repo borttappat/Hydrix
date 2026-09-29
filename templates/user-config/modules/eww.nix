@@ -590,7 +590,7 @@
         while read -r mon width height; do
           active=$(jq -r --arg m "$mon" '.[] | select(.name == $m) | .activeWorkspace.id' <<< "$mons")
           if [ -z "$_ws" ] || [ "$active" = "$_ws" ]; then
-            if ! grep -q "^dashboard-$mon:" <<< "$open"; then
+            if ! grep -q "^dashboard-$mon:" <<< "$open" && eww ping >/dev/null 2>&1; then
               eww open dashboard --id "dashboard-$mon" --screen "$mon" \
                 --arg width="$width" --arg height="$height" 2>/dev/null || true
             fi
@@ -617,7 +617,11 @@
         update_visibility
       }
 
-      sleep 3
+      # The daemon is eww.service. `eww open` starts a daemon of its own when
+      # it cannot reach one, and that stray keeps its windows when the real
+      # one comes back (stacked dashboards), so every open waits for or
+      # checks `eww ping` first.
+      until eww ping >/dev/null 2>&1; do sleep 0.5; done
       eww close-all 2>/dev/null || true
       ${lib.optionalString wlEnabled ''eww open wallpaper-layer 2>/dev/null || true''}
       sync_dashboards
@@ -1512,13 +1516,25 @@ in {
         ewwDashboardWatch
       ];
 
+      # Only rewritten when the content changed: eww live-reloads on any write,
+      # and a reload racing the watcher is what leaves stacked windows. A real
+      # change restarts eww.service instead (the watcher follows via PartOf),
+      # so every window is reopened by one clean daemon.
       home.activation.ewwConfig = lib.hm.dag.entryAfter ["writeBoundary"] ''
         _dir="$HOME/.config/eww"
+        _changed=0
         mkdir -p "$_dir"
-        [ -L "$_dir/eww.yuck" ] && rm "$_dir/eww.yuck" || true
-        [ -L "$_dir/eww.scss" ] && rm "$_dir/eww.scss" || true
-        cp ${ewwYuckFile} "$_dir/eww.yuck" && chmod 644 "$_dir/eww.yuck"
-        cp ${ewwScssFile} "$_dir/eww.scss" && chmod 644 "$_dir/eww.scss"
+        for _f in eww.yuck:${ewwYuckFile} eww.scss:${ewwScssFile}; do
+          _dst="$_dir/''${_f%%:*}"; _src="''${_f#*:}"
+          [ -L "$_dst" ] && rm "$_dst"
+          if ! ${pkgs.diffutils}/bin/cmp -s "$_src" "$_dst"; then
+            cp "$_src" "$_dst" && chmod 644 "$_dst"
+            _changed=1
+          fi
+        done
+        if [ "$_changed" = 1 ]; then
+          ${pkgs.systemd}/bin/systemctl --user try-restart eww.service 2>/dev/null || true
+        fi
       '';
 
       systemd.user.paths.eww-colors = {
@@ -1534,15 +1550,33 @@ in {
         };
         Service = {
           Type = "oneshot";
-          ExecStart = "${pkgs.eww}/bin/eww reload";
+          # No daemon, nothing to reload (and `eww reload` must not start one).
+          ExecStart = "${pkgs.bash}/bin/sh -c '${pkgs.eww}/bin/eww ping >/dev/null 2>&1 && ${pkgs.eww}/bin/eww reload || true'";
         };
+      };
+
+      systemd.user.services.eww = {
+        Unit = {
+          Description = "eww daemon";
+          After = ["hyprland-session.target"];
+          PartOf = ["hyprland-session.target"];
+        };
+        Service = {
+          Type = "simple";
+          ExecStart = "${pkgs.eww}/bin/eww daemon --no-daemonize";
+          Restart = "on-failure";
+          RestartSec = 2;
+        };
+        Install.WantedBy = ["hyprland-session.target"];
       };
 
       systemd.user.services.eww-dashboard-watch = {
         Unit = {
           Description = "eww dashboard watcher";
-          After = ["hyprland-session.target"];
-          PartOf = ["hyprland-session.target"];
+          # Restarted along with the daemon, so it reopens every window.
+          Requires = ["eww.service"];
+          After = ["hyprland-session.target" "eww.service"];
+          PartOf = ["hyprland-session.target" "eww.service"];
         };
         Service = {
           Type = "simple";
