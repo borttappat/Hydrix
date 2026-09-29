@@ -51,44 +51,16 @@
     vmRegistry
   );
 
-  namedColorToRgba = name: let
-    table = {
-      "red" = "ff0000ff";
-      "orange" = "ff8c00ff";
-      "yellow" = "ffff00ff";
-      "green" = "00ff00ff";
-      "cyan" = "00ffffff";
-      "blue" = "0000ffff";
-      "purple" = "800080ff";
-      "pink" = "ffc0cbff";
-      "magenta" = "ff00ffff";
-      "white" = "ffffffff";
-      "black" = "000000ff";
-      "gray" = "808080ff";
-      "grey" = "808080ff";
-    };
-  in
-    table.${name} or "${lib.removePrefix "#" name}ff";
-
-  vmBorderColorRules = lib.concatStringsSep "\n" (
-    lib.mapAttrsToList (key: v:
-      lib.optionalString (
-        (v.hasDisplay or true)
-        && v.workspace != null
-        && (v ? focusBorder)
-        && v.focusBorder != null
-      )
-      "windowrule = border_color rgba(${namedColorToRgba (v.focusBorder or "")}), match:title ^\\[${key}\\]")
-    vmRegistry
-  );
-
   workspaceColors = config.hydrix.hyprland.workspaceColors;
   workspaceColorRules = lib.concatStringsSep "\n" (
     lib.mapAttrsToList (ws: color: "windowrule = border_color rgba(${color}), match:workspace ${ws}")
     workspaceColors
   );
 
-  dynamicColorMap = config.hydrix.vmThemeSync.focusDaemon.dynamicColorMap;
+  # Active border is a gradient: first stop (per-VM or host color) -> baseColor.
+  focusCfg = config.hydrix.vmThemeSync.focusDaemon;
+  borderAngle = "${toString focusCfg.gradientAngle}deg";
+  dynamicColorMap = focusCfg.dynamicColorMap;
   dynamicMapCases = lib.concatStringsSep "\n      " (
     lib.mapAttrsToList (vm: colorKey: "${vm}) WAL_KEY=\"${colorKey}\" ;;") dynamicColorMap
   );
@@ -125,8 +97,8 @@
     # ── Per-workspace active border color overrides ───────────────────────────
     ${workspaceColorRules}
 
-    # ── Per-VM border colors at window creation (from vmRegistry.focusBorder) ──
-    ${vmBorderColorRules}
+    # Per-VM active border colors are set on focus by hypr-focus-daemon, not by
+    # windowrules here: a per-window rule would override the daemon's gradient.
 
     # ── Misc ───────────────────────────────────────────────────────────────────
     misc {
@@ -184,12 +156,16 @@
     if [ -f "$WAL" ]; then
       . "$WAL"
     else
-      color0="#0c0c0c"; color1="#bf616a"; color2="#88c0d0"; color4="#7aa2f7"; color6="#5e81ac"; color7="#d8dee9"; color8="#4c566a"
+      color0="#0c0c0c"; color1="#bf616a"; color2="#88c0d0"; color3="#ebcb8b"; color4="#7aa2f7"; color6="#5e81ac"; color7="#d8dee9"; color8="#4c566a"
     fi
 
+    # Host active border: hostColor -> baseColor gradient (indirect wal keys).
+    _host_key="${focusCfg.hostColor}"; _base_key="${focusCfg.baseColor}"
+    _host="''${!_host_key:-$color4}"; _base="''${!_base_key:-$color4}"
+
     mkdir -p "$(dirname "$HYPR_OUT")"
-    printf '$activeBorder = rgba(%sff)\n$inactiveBorder = rgba(%sff)\n' \
-      "''${color4#\#}" "''${color0#\#}" > "$HYPR_OUT"
+    printf '$activeBorder = rgba(%sff) rgba(%sff) %s\n$inactiveBorder = rgba(%sff)\n' \
+      "''${_host#\#}" "''${_base#\#}" "${borderAngle}" "''${color0#\#}" > "$HYPR_OUT"
 
     mkdir -p "$(dirname "$BAR_OUT")"
     printf '@define-color background %s;\n' "$color0" > "$BAR_OUT"
@@ -317,8 +293,11 @@
       esac
     }
     _generate() {
+      local base
+      base=$(${pkgs.jq}/bin/jq -r '.colors["${focusCfg.baseColor}"] // empty' "$HOME/.cache/wal/colors.json" 2>/dev/null | sed 's/#//')
+      base="''${base:-7aa2f7}ff"
       while IFS=' ' read -r key color; do
-        echo "windowrule = border_color rgba($(_rgba "$color")), match:tag vm-$key"
+        echo "windowrule = border_color rgba($(_rgba "$color")) rgba($base) ${borderAngle}, match:tag vm-$key"
       done < <(${pkgs.jq}/bin/jq -r 'to_entries[] | select(.value.focusBorder != null) | "\(.key) \(.value.focusBorder)"' "$REGISTRY")
     }
     _apply_keyword() {
@@ -460,43 +439,39 @@
         *) hex="''${1#\#}"; [[ "''${#hex}" -eq 6 ]] && echo "''${hex}ff" || echo "$hex" ;;
       esac
     }
-    _wal_color() {
+    # Wal color key -> rrggbbaa, or the fallback when the key is missing.
+    _wal() {
       local c
-      c=$(grep '^color4=' "$HOME/.cache/wal/colors.sh" 2>/dev/null \
-        | sed "s/^color4='//;s/'$//;s/#//" | head -1)
-      [ -n "$c" ] && echo "''${c}ff" || echo "7aa2f7ff"
+      c=$(${pkgs.jq}/bin/jq -r --arg k "$1" '.colors[$k] // empty' "$WAL_COLORS" 2>/dev/null \
+        | sed 's/#//')
+      [ -n "$c" ] && echo "''${c}ff" || echo "''${2:-7aa2f7ff}"
     }
+    # First stop (rrggbbaa) -> full gradient ending at baseColor.
+    _grad() { echo "rgba($1) rgba($(_wal ${focusCfg.baseColor})) ${borderAngle}"; }
     _dynamic_color() {
-      local profile="$1" WAL_KEY=""
+      # Task slots (pentest-task1, ...) follow their base profile's color.
+      local profile="''${1%-task[0-9]*}" WAL_KEY=""
       case "$profile" in
       ${dynamicMapCases}
-      *) WAL_KEY="color4" ;;
+      *) WAL_KEY="${focusCfg.baseColor}" ;;
       esac
-      local c
-      c=$(${pkgs.jq}/bin/jq -r --arg k "$WAL_KEY" '.colors[$k] // empty' "$WAL_COLORS" 2>/dev/null \
-        | sed 's/#//')
-      [ -n "$c" ] && echo "''${c}ff" || echo "7aa2f7ff"
+      _wal "$WAL_KEY"
     }
     _border_for_profile() {
-      local profile="$1"
+      local profile="$1" first="" c
       if [ -f "$MARKER" ]; then
-        local d; d=$(_dynamic_color "$profile")
-        [ -n "$d" ] && { echo "$d"; return; }
+        first=$(_dynamic_color "$profile")
+      else
+        c=$(${pkgs.jq}/bin/jq -r --arg p "$profile" '.[$p].focusBorder // empty' "$REGISTRY" 2>/dev/null)
+        if [ -n "$c" ]; then first=$(_rgba "$c"); else first=$(_dynamic_color "$profile"); fi
       fi
-      local c; c=$(${pkgs.jq}/bin/jq -r --arg p "$profile" '.[$p].focusBorder // empty' "$REGISTRY" 2>/dev/null)
-      if [ -n "$c" ]; then _rgba "$c"; return; fi
-      _wal_color
+      _grad "$first"
     }
-    _apply() { ${pkgs.hyprland}/bin/hyprctl keyword general:col.active_border "rgba($1)" 2>/dev/null || true; }
-    # Paints the active border with the inactive-border color, so a window left
-    # behind on an unfocused workspace stops looking focused.
-    _apply_neutral() {
-      local inact hex
-      inact=$(${pkgs.hyprland}/bin/hyprctl getoption general:col.inactive_border -j 2>/dev/null \
-        | ${pkgs.jq}/bin/jq -r '.custom // empty')
-      hex="''${inact%% *}"
-      [ -n "$hex" ] && _apply "$hex"
-    }
+    _apply() { ${pkgs.hyprland}/bin/hyprctl keyword general:col.active_border "$1" 2>/dev/null || true; }
+    # Paints the active border with the inactive-border color (wal color0, as
+    # written by hypr-apply-colors), so a window left behind on an unfocused
+    # workspace stops looking focused.
+    _apply_neutral() { _apply "rgba($(_wal color0 1a1b26ff))"; }
     # Hyprland keeps its last real window as "active" when focus moves to an
     # empty workspace -- no activewindow event fires, so check on every
     # workspace/monitor-focus event too whether the reported active window is
@@ -513,7 +488,7 @@
       title=$(printf '%s' "$aw" | ${pkgs.jq}/bin/jq -r '.title // empty')
       profile=$(echo "$title" | sed -n 's/^\[\([^]]*\)\].*/\1/p')
       if [ -n "$profile" ]; then _apply "$(_border_for_profile "$profile")"
-      else _apply "$(_wal_color)"; fi
+      else _apply "$(_grad "$(_wal ${focusCfg.hostColor})")"; fi
     }
     _sig() {
       local sig="''${HYPRLAND_INSTANCE_SIGNATURE:-}"

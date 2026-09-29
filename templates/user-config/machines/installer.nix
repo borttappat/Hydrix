@@ -81,10 +81,17 @@
     # hyprland.hideBorderOnSingleWindow = true;  # DEFAULT: false - hide border when a workspace has one tiled window
 
     # ── VM focus border colors ────────────────────────────────────────────
-    # Controls how the active window border color changes when you switch to a VM workspace.
-    # Default (set by the hyprland module): "dynamic"; maps each VM type to a wal palette color.
-    # Override here to lock to the static per-VM colorscheme instead:
-    # vmThemeSync.focusDaemon.mode = "static";  # options: "dynamic" (default) | "static"
+    # The active window border is a gradient: first stop -> baseColor.
+    # First stop is the profile's focusBorder (meta.nix) for VM windows, or hostColor
+    # for host windows. `hydrix-focus on` swaps VM first stops to dynamicColorMap wal keys.
+    # vmThemeSync.focusDaemon = {
+    #   baseColor     = "color4";  # DEFAULT: "color4" - second stop of every gradient
+    #   hostColor     = "color3";  # DEFAULT: "color3" - first stop for host windows
+    #   gradientAngle = 45;        # DEFAULT: 45 (degrees)
+    #   dynamicColorMap = {        # replaces the whole default map, list every VM
+    #     pentest = "color1"; browsing = "color2"; comms = "color5"; dev = "color6"; lurking = "color7";
+    #   };
+    # };
 
     # ─────────────────────────────────────────────────────────────────────
     # USER ACCOUNT (optional overrides)

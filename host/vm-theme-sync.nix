@@ -97,6 +97,8 @@
 #     false: VM keeps own colorscheme, no virtiofs share
 #   hydrix.vmThemeSync.focusDaemon.dynamicColorMap — attrs
 #     Maps VM types to wal color keys (e.g. pentest → color1)
+#   hydrix.vmThemeSync.focusDaemon.{baseColor,hostColor,gradientAngle}
+#     Active border is a gradient: first stop (VM/host color) → baseColor
 #
 # ═══════════════════════════════════════════════════════════════════════
 # NIXOS MODULE SYSTEM NOTES
@@ -193,11 +195,29 @@ in {
         default = {
           pentest = "color1";
           browsing = "color2";
-          comms = "color3";
-          dev = "color5";
-          lurking = "color6";
+          comms = "color5";
+          dev = "color6";
+          lurking = "color7";
         };
-        description = "Map VM types to wal color keys for dynamic mode";
+        description = "Map VM types to wal color keys for dynamic mode (first gradient stop)";
+      };
+
+      baseColor = lib.mkOption {
+        type = lib.types.str;
+        default = "color4";
+        description = "Wal color key used as the second stop of every active border gradient";
+      };
+
+      hostColor = lib.mkOption {
+        type = lib.types.str;
+        default = "color3";
+        description = "Wal color key used as the first gradient stop for host windows";
+      };
+
+      gradientAngle = lib.mkOption {
+        type = lib.types.int;
+        default = 45;
+        description = "Angle in degrees of the active border gradient";
       };
     };
   };
