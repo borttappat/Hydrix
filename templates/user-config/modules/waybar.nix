@@ -54,6 +54,11 @@
       else builtins.floor (ui.cornerRadius * ui.pillRadiusScale)
     );
   pillBorder = toString (config.hydrix.graphical.ui.border or 2);
+  # Pill fill is color0 at the shared overlay opacity; text stays opaque.
+  pillOpacity = let
+    o = config.hydrix.graphical.ui.opacity;
+  in
+    toString (o.overlayOverrides.waybar or o.overlay);
   pillShadow = config.hydrix.graphical.scaling.computed.shadow {
     blur = 4;
     alpha = 0.5;
@@ -1261,7 +1266,7 @@
     #custom-vm-up,
     #custom-wifi-sync,
     #custom-gc-status {
-      background: @background;
+      background: alpha(@background, ${pillOpacity});
       color: @foreground;
       border: none;
       border-radius: ${pillRadius}px;
@@ -1278,11 +1283,11 @@
 
     /* Below 5% — alternate the pill between the normal background and the critical fill every second */
     @keyframes battery-flash {
-      0%     { background-color: @background; color: @foreground; }
-      49.9%  { background-color: @background; color: @foreground; }
+      0%     { background-color: alpha(@background, ${pillOpacity}); color: @foreground; }
+      49.9%  { background-color: alpha(@background, ${pillOpacity}); color: @foreground; }
       50%    { background-color: @alert;      color: @background; }
       99.9%  { background-color: @alert;      color: @background; }
-      100%   { background-color: @background; color: @foreground; }
+      100%   { background-color: alpha(@background, ${pillOpacity}); color: @foreground; }
     }
     #custom-battery.flashing {
       animation: battery-flash 2s linear infinite;
@@ -1385,7 +1390,7 @@
     /* Tooltip */
     tooltip {
       border-radius: ${pillRadius}px;
-      background: @background;
+      background: alpha(@background, ${pillOpacity});
       border: ${pillBorder}px solid alpha(@foreground, 0.4);
       color: @foreground;
     }

@@ -10,6 +10,10 @@
 }: let
   cfg = config.hydrix;
 in {
+  imports = [
+    (lib.mkRemovedOptionModule ["hydrix" "graphical" "ui" "opacity" "alacritty"] "Use hydrix.graphical.ui.opacity.overlay (or overlayOverrides.alacritty).")
+  ];
+
   options.hydrix.graphical = {
     enable = lib.mkEnableOption "Hydrix graphical environment";
 
@@ -760,22 +764,16 @@ in {
           description = "Windows excluded from opacity rules";
         };
 
-        alacritty = lib.mkOption {
-          type = lib.types.float;
-          default = 0.85;
-          description = "Alacritty terminal opacity (deprecated: use overlay)";
-        };
-
         overlay = lib.mkOption {
           type = lib.types.float;
           default = 0.85;
-          description = "Unified opacity for transparent UI elements (terminals, overlays)";
+          description = "Background opacity shared by alacritty, waybar, wofi, eww and dunst. Text stays opaque.";
         };
 
         overlayOverrides = lib.mkOption {
           type = lib.types.attrsOf lib.types.float;
-          default = {alacritty = 0.95;};
-          description = "Per-app overrides for overlay opacity";
+          default = {};
+          description = "Per-app overrides for overlay opacity, keyed by app name (alacritty, waybar, wofi, eww, dunst)";
         };
       };
 

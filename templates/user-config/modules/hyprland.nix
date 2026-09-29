@@ -347,8 +347,8 @@
     decoration {
       rounding         = ${rounding}
       rounding_power   = 4
-      active_opacity   = 0.95
-      inactive_opacity = 0.95
+      active_opacity   = ${toString ui.opacity.active}
+      inactive_opacity = ${toString ui.opacity.inactive}
 
       blur {
         enabled  = true

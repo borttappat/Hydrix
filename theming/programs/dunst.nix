@@ -38,6 +38,12 @@
   fontName = cfg.font.family;
   fontSize = cfg.font.size;
 
+  # Background alpha as a 2-digit hex suffix for dunst's #RRGGBBAA colors
+  overlayAlpha = let
+    o = cfg.ui.opacity;
+  in
+    lib.fixedWidthString 2 "0" (lib.toHexString (builtins.floor ((o.overlayOverrides.dunst or o.overlay) * 255 + 0.5)));
+
   generateDunstLayout = pkgs.writeShellScript "generate-dunstrc-layout" ''
     #!/usr/bin/env bash
     # Generate dunstrc-layout: sizing/timeouts/font from Nix config, no colors.
@@ -172,7 +178,7 @@
 
     ${pkgs.coreutils}/bin/mkdir -p "$DUNST_DIR"
 
-    OVERLAY_ALPHA="D9"
+    OVERLAY_ALPHA="${overlayAlpha}"
     PREFIX_DEFAULT="#e0af68"
     FG_DEFAULT="#c0caf5"
 

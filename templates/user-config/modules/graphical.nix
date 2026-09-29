@@ -31,10 +31,12 @@
     # ui.pillRadiusScale = lib.mkDefault 2.0;   # Scale factor applied to cornerRadius for pill radius
 
     # ─── Opacity ───────────────────────────────────────────────────────
+    # overlay: background opacity for alacritty, waybar, wofi, eww, dunst
     # ui.opacity.overlay          = lib.mkDefault 0.85;
-    # ui.opacity.overlayOverrides = lib.mkDefault { alacritty = 0.95; wofi = 0.95; eww = 0.95; };
-    # ui.opacity.active           = lib.mkDefault 1.0;
-    # ui.opacity.inactive         = lib.mkDefault 1.0;
+    # ui.opacity.overlayOverrides = lib.mkDefault { };  # Per-app exceptions, e.g. { alacritty = 0.95; }
+    # active/inactive: whole-window opacity (text included) for non-excluded Hyprland windows
+    ui.opacity.active           = lib.mkDefault 0.95;
+    ui.opacity.inactive         = lib.mkDefault 0.95;
     # ui.opacity.exclude          = lib.mkDefault [ "Alacritty" "feh" "Feh" "firefox" "Firefox" "mpv" "vlc" ];
 
     # ─── Keyboard remapping ────────────────────────────────────────────
