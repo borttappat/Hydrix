@@ -54,6 +54,10 @@
       else builtins.floor (ui.cornerRadius * ui.pillRadiusScale)
     );
   pillBorder = toString (config.hydrix.graphical.ui.border or 2);
+  pillShadow = config.hydrix.graphical.scaling.computed.shadow {
+    blur = 4;
+    alpha = 0.5;
+  };
   # pillVMargin = gaps is the key invariant that makes all gaps uniform:
   #   screen→pill-top  = margin-top(0) + pillVMargin     = gaps
   #   pill-bottom→win  = actual_surface - pill_bottom    = pillVMargin = gaps
@@ -1263,7 +1267,7 @@
       border-radius: ${pillRadius}px;
       padding: ${toString pillPaddingV}px ${toString pillPaddingH}px;
       margin: ${toString pillVMargin}px ${toString pillHMargin}px;
-      box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
+      box-shadow: ${pillShadow.css};
     }
 
     /* Battery low/charging states — base pill styling comes from the shared rule above */

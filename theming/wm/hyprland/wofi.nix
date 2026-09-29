@@ -38,17 +38,12 @@
       else raw
     );
 
-  # Scaled up from the shared waybar pill-radius formula (which stays sharp
-  # at low cornerRadius values, e.g. 2px) so wofi reads as visibly rounded
-  # without changing waybar's own pill radius.
-  wofiCornerRadius = let
-    ui = config.hydrix.graphical.ui;
-    pillRadius =
-      if (ui.pillRadius or null) != null
-      then ui.pillRadius
-      else builtins.floor ((ui.cornerRadius or 2) * (ui.pillRadiusScale or 2.0));
-  in
-    toString (pillRadius * 2);
+  sc = config.hydrix.graphical.scaling.computed;
+  wofiCornerRadius = toString sc.panelRadius;
+  wofiShadow = sc.shadow {
+    blur = 2;
+    alpha = 0.9;
+  };
   wofiWidth = toString config.hydrix.graphical.ui.rofiWidth;
   wofiHeight = toString config.hydrix.graphical.ui.rofiHeight;
 
@@ -85,8 +80,8 @@
     #outer-box {
         background-color: alpha(@background, ${wofiOpacity});
         border-radius: ${wofiCornerRadius}px;
-        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.7);
-        margin: 4px 4px 5px 4px;
+        box-shadow: ${wofiShadow.css};
+        margin: ${toString wofiShadow.room}px ${toString wofiShadow.room}px ${toString wofiShadow.roomBottom}px ${toString wofiShadow.room}px;
         padding: 8px;
     }
 

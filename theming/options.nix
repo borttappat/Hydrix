@@ -700,6 +700,24 @@ in {
         description = "Window corner radius";
       };
 
+      shadow = {
+        enable = lib.mkOption {
+          type = lib.types.bool;
+          default = true;
+          description = "Drop shadows on windows (Hyprland), eww dashboard blocks, waybar pills and wofi";
+        };
+
+        strength = lib.mkOption {
+          type = lib.types.numbers.nonnegative;
+          default = 1.0;
+          description = ''
+            Multiplier on every shadow's opacity and size (1.0 = default look).
+            Each program keeps its own baseline, since GTK and Hyprland draw
+            shadows differently; this scales them together.
+          '';
+        };
+      };
+
       workspaceLabels = lib.mkOption {
         type = lib.types.attrsOf lib.types.str;
         default = {

@@ -55,6 +55,7 @@
 }: let
   username = config.hydrix.username;
   ui = config.hydrix.graphical.ui;
+  sc = config.hydrix.graphical.scaling.computed;
   gaps = let
     v = ui.gaps or null;
   in
@@ -64,11 +65,15 @@
   # Matches gaps_in in modules/hyprland.nix: the inset toward a neighbouring
   # tiled window, as opposed to the full outer gap at the screen edge.
   gapsIn = (gaps + 1) / 2;
+  blockShadow = sc.shadow {
+    blur = 4;
+    alpha = 0.8;
+  };
   # Margin around the dashboard blocks so their box-shadow is not clipped at
   # the window edge. The window grows by it and .dash-root pads it back, so
-  # block edges still line up with tiled windows. The shadow is offset 1px
-  # down, hence the extra px at the bottom.
-  shadowRoom = 4;
+  # block edges still line up with tiled windows.
+  shadowRoom = blockShadow.room;
+  shadowRoomBottom = blockShadow.roomBottom;
   fontFamily = config.hydrix.graphical.font.family or "Iosevka";
   fontSize = let
     base = config.hydrix.graphical.font.size or 10;
@@ -80,12 +85,7 @@
   wlEnabled = cfg.enable && cfg.image != null;
   dash = config.hydrix.eww.dashboard;
 
-  # Matches the visible corner of a Hyprland window: its rounding plus the
-  # border drawn outside it.
-  panelRadius = let
-    sc = config.hydrix.graphical.scaling.computed;
-  in
-    toString ((sc.cornerRadius or 0) + (sc.border or 2));
+  panelRadius = toString sc.panelRadius;
   panelOpacity = toString (ui.opacity.overlayOverrides.eww or ui.opacity.overlay);
   blockPadding = let
     p = ui.padding or 8;
@@ -609,7 +609,7 @@
         : > "$_state"
         jq -r --arg ws "$_ws" '.[] ${lib.optionalString (dash.monitors == "internal") "| select($ws != \"\" or (.name | test(\"^(eDP|LVDS|DSI)-\"))) "}| "\(.name) \(.width / .scale | floor) \(.height / .scale | floor) \(.reserved[1]) \(.reserved[3])"' <<< "$mons" \
           | while read -r mon w h top bottom; do
-              echo "$mon $(( w / 2 - ${toString gaps} - ${toString gapsIn} + ${toString (2 * shadowRoom)} )) $(( h - top - bottom - ${toString gaps} + ${toString (2 * shadowRoom + 1)} ))" >> "$_state"
+              echo "$mon $(( w / 2 - ${toString gaps} - ${toString gapsIn} + ${toString (2 * shadowRoom)} )) $(( h - top - bottom - ${toString gaps} + ${toString (shadowRoom + shadowRoomBottom)} ))" >> "$_state"
               if [ -n "$_ws" ]; then
                 hyprctl keyword workspace "r[$_ws-$_ws]m[$mon],gapsout:$gt $gr $gb $(( w / 2 + ${toString gapsIn} ))" > /dev/null
               fi
@@ -1119,11 +1119,11 @@
         background-color: rgba($color0, ${panelOpacity});
         border-radius: ${panelRadius}px;
         padding: ${blockPadding};
-        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.7);
+        box-shadow: ${blockShadow.css};
       }
 
       .dash-root {
-        padding: ${toString shadowRoom}px ${toString shadowRoom}px ${toString (shadowRoom + 1)}px ${toString shadowRoom}px;
+        padding: ${toString shadowRoom}px ${toString shadowRoom}px ${toString shadowRoomBottom}px ${toString shadowRoom}px;
       }
 
       .title {

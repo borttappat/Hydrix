@@ -16,7 +16,12 @@
     # ─── Layout ────────────────────────────────────────────────────────
     # ui.gaps         = lib.mkDefault 10;    # Gap size everywhere (px): screen-to-bar, bar-to-window, window-to-window
     # ui.border       = lib.mkDefault 2;     # Window border width (px)
-    # ui.cornerRadius = lib.mkDefault 2;     # Window corner radius (px); also base for pill radius
+    # ui.cornerRadius = lib.mkDefault 2;     # Window corner radius (px); waybar pills = cornerRadius * pillRadiusScale, eww/wofi = cornerRadius + border - 1
+
+    # ─── Shadows ───────────────────────────────────────────────────────
+    # One setting for window (Hyprland), eww, waybar pill and wofi shadows.
+    # ui.shadow.enable   = lib.mkDefault true;
+    # ui.shadow.strength = lib.mkDefault 1.0;   # Multiplier on every shadow's opacity and size
 
     # ─── Waybar sizing (active bar stack) ───────────────────────────────
     # Bar content height and pill vertical padding are auto-derived from

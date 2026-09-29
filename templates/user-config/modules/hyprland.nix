@@ -35,6 +35,10 @@
   username = config.hydrix.username;
   sc = config.hydrix.graphical.scaling.computed;
   ui = config.hydrix.graphical.ui;
+  # Window shadow at ui.shadow.strength 1.0: range 2, 70% black (0xb3).
+  shadowOn = ui.shadow.enable && ui.shadow.strength > 0;
+  shadowRange = toString (builtins.floor (2 * ui.shadow.strength + 0.5));
+  shadowAlpha = lib.fixedWidthString 2 "0" (lib.toHexString (lib.min 255 (builtins.floor (179 * ui.shadow.strength + 0.5))));
   gaps = ui.gaps or 10;
   barType = config.hydrix.graphical.waybar.barType or "monobar";
   # Bottom gap: dualbar's bottom bar provides it via exclusive zone, monobar needs gaps_out.
@@ -354,11 +358,10 @@
       }
 
       shadow {
-        enabled      = true
-        range        = 4
-        render_power = 3
-        offset       = 0 1
-        color        = rgba(000000cc)
+        enabled      = ${lib.boolToString shadowOn}
+        range        = ${shadowRange}
+        render_power = 4
+        color        = rgba(000000${shadowAlpha})
       }
     }
 

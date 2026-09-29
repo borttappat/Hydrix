@@ -1490,8 +1490,15 @@ daemon's logic runs unaffected.
       border = 2;
       barHeight = 23;                # Also used by dunst notification positioning
       barPadding = 2;
-      cornerRadius = 2;
-      shadowRadius = 18;
+      cornerRadius = 2;              # Windows; eww/wofi panels use cornerRadius + border - 1
+
+      # Drop shadows on windows (Hyprland), eww blocks, waybar pills and wofi.
+      # Each keeps its own tuned baseline; strength scales them all together.
+      # dunst cannot draw shadows.
+      shadow = {
+        enable = true;
+        strength = 1.0;              # Multiplier on opacity and size
+      };
 
       # Workspace labels (attrset mapping number to label)
       workspaceLabels = {
