@@ -508,7 +508,7 @@ in {
         type = lib.types.attrsOf lib.types.float;
         default = {
           alacritty = 1.0;
-          dunst = 1.0;
+          notifications = 1.0;
           firefox = 1.2;
           gtk = 1.0;
         };
@@ -671,7 +671,7 @@ in {
       barHeight = lib.mkOption {
         type = lib.types.int;
         default = 23;
-        description = "Bar height (base value, also used by dunst positioning)";
+        description = "Bar height (base value)";
       };
 
       barPadding = lib.mkOption {
@@ -767,13 +767,13 @@ in {
         overlay = lib.mkOption {
           type = lib.types.float;
           default = 0.85;
-          description = "Background opacity shared by alacritty, waybar, wofi, eww and dunst. Text stays opaque.";
+          description = "Background opacity shared by alacritty, waybar, wofi, eww and notifications. Text stays opaque.";
         };
 
         overlayOverrides = lib.mkOption {
           type = lib.types.attrsOf lib.types.float;
           default = {};
-          description = "Per-app overrides for overlay opacity, keyed by app name (alacritty, waybar, wofi, eww, dunst)";
+          description = "Per-app overrides for overlay opacity, keyed by app name (alacritty, waybar, wofi, eww, notifications)";
         };
       };
 
@@ -789,84 +789,79 @@ in {
         description = "Rofi window height";
       };
 
-      dunstWidth = lib.mkOption {
-        type = lib.types.int;
-        default = 300;
-        description = "Dunst notification width";
-      };
-
-      dunstOffset = lib.mkOption {
-        type = lib.types.int;
-        default = 5;
-        description = "Dunst notification clearance past a tiled window's edge, on both axes";
-      };
-
-      dunstOffsetCompensation = lib.mkOption {
-        type = lib.types.submodule {
-          options = {
-            x = lib.mkOption {
-              type = lib.types.int;
-              default = 0;
-              description = "Extra px added to dunst's X offset";
-            };
-            y = lib.mkOption {
-              type = lib.types.int;
-              default = 0;
-              description = "Extra px added to dunst's Y offset";
-            };
-          };
+      notifications = {
+        width = lib.mkOption {
+          type = lib.types.int;
+          default = 300;
+          description = "Notification popup width (px)";
         };
-        default = {};
-        description = ''
-          Empirical per-machine fudge on top of dunstOffset. gaps/dunstOffset are
-          logical-pixel values; at a fractional display scale the width-derived
-          (X) and height-derived (Y) offsets don't necessarily round to the
-          physical framebuffer the same way, since a non-square resolution has
-          no reason to carry the same rounding remainder on both axes. There is
-          no formula that gets this exact on every resolution/scale combination,
-          it's tuned by eye once per machine: hand-edit the `offset` line in
-          `~/.config/dunst/dunstrc-layout` and restart dunst.service to test,
-          then set the confirmed value here.
-        '';
-      };
 
-      dunstEnablePopup = lib.mkOption {
-        type = lib.types.bool;
-        default = false;
-        description = "Enable dunst notification popups";
-      };
-
-      dunstSound = lib.mkOption {
-        type = lib.types.nullOr lib.types.str;
-        default = null;
-        description = ''
-          Notification sound for dunst. Set to a sound file path (e.g., "bell.wav") to enable.
-          Empty string or null disables sound.
-        '';
-        example = "bell.wav";
-      };
-
-      dunstBrowser = lib.mkOption {
-        type = lib.types.str;
-        default = "firefox";
-        description = "Browser command dunst uses to open URLs from notifications.";
-      };
-
-      dunstUrgencyTimeout = {
-        low = lib.mkOption {
+        offset = lib.mkOption {
           type = lib.types.int;
           default = 5;
-          description = "Seconds before low-urgency notifications expire. 0 = never.";
+          description = "Notification clearance past a tiled window's edge, on both axes";
         };
-        normal = lib.mkOption {
-          type = lib.types.int;
-          default = 10;
-          description = "Seconds before normal-urgency notifications expire. 0 = never.";
+
+        offsetCompensation = lib.mkOption {
+          type = lib.types.submodule {
+            options = {
+              x = lib.mkOption {
+                type = lib.types.int;
+                default = 0;
+                description = "Extra px added to the notification X offset";
+              };
+              y = lib.mkOption {
+                type = lib.types.int;
+                default = 0;
+                description = "Extra px added to the notification Y offset";
+              };
+            };
+          };
+          default = {};
+          description = ''
+            Empirical per-machine fudge on top of notifications.offset. gaps and
+            offset are logical-pixel values; at a fractional display scale the
+            width-derived (X) and height-derived (Y) offsets don't necessarily
+            round to the physical framebuffer the same way, since a non-square
+            resolution has no reason to carry the same rounding remainder on both
+            axes. It is tuned by eye once per machine: hand-edit the padding of
+            `.notification-background` in `~/.config/swaync/style.css`, run
+            `swaync-client -rs`, then set the confirmed value here.
+          '';
         };
-        critical = lib.mkOption {
-          type = lib.types.int;
-          default = 0;
-          description = "Seconds before critical-urgency notifications expire. 0 = never.";
+
+        popups = lib.mkOption {
+          type = lib.types.bool;
+          default = false;
+          description = "Show notification popups. When off, notifications only land in the panel (swaync-client -t).";
+        };
+
+        sound = lib.mkOption {
+          type = lib.types.nullOr lib.types.str;
+          default = null;
+          description = ''
+            Notification sound file (e.g., "bell.wav"), played with canberra-gtk-play.
+            Empty string or null disables sound.
+          '';
+          example = "bell.wav";
+        };
+
+        timeout = {
+          low = lib.mkOption {
+            type = lib.types.int;
+            default = 5;
+            description = "Seconds before low-urgency notifications expire. 0 = never.";
+          };
+          normal = lib.mkOption {
+            type = lib.types.int;
+            default = 10;
+            description = "Seconds before normal-urgency notifications expire. 0 = never.";
+          };
+          critical = lib.mkOption {
+            type = lib.types.int;
+            default = 0;
+            description = "Seconds before critical-urgency notifications expire. 0 = never.";
+          };
         };
       };
 

@@ -56,8 +56,7 @@ in {
       wlr-randr          # xrandr equivalent for wlroots
       grim               # Screenshot
       slurp              # Region select (for grim)
-      dunst              # Notifications (Wayland-native since v1.7)
-      libnotify
+      libnotify          # notify-send (daemon: swaync, theming/programs/swaync.nix)
       waybar             # Status bar
       wofi               # Launcher (replaces rofi)
 

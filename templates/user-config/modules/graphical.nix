@@ -31,7 +31,7 @@
     # ui.pillRadiusScale = lib.mkDefault 2.0;   # Scale factor applied to cornerRadius for pill radius
 
     # ─── Opacity ───────────────────────────────────────────────────────
-    # overlay: background opacity for alacritty, waybar, wofi, eww, dunst
+    # overlay: background opacity for alacritty, waybar, wofi, eww, notifications
     # ui.opacity.overlay          = lib.mkDefault 0.85;
     # ui.opacity.overlayOverrides = lib.mkDefault { };  # Per-app exceptions, e.g. { alacritty = 0.95; }
     # active/inactive: whole-window opacity (text included) for non-excluded Hyprland windows

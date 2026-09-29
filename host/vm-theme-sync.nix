@@ -42,7 +42,7 @@
 # │        (new terminals will pick up new colors on start)             │
 # │     2. Runs refresh-colors script for existing terminals:           │
 # │        - OSC escape sequences to running terminals                  │
-# │        - pywalfox, dunst updates                                    │
+# │        - pywalfox, swaync updates                                   │
 # │        Note: SIGUSR1 to alacritty is NOT used (unreliable)          │
 # └─────────────────────────────────────────────────────────────────────┘
 #
@@ -338,9 +338,13 @@ in {
           # Hyprland: immediately re-apply border color for the focused window
           # using the new override state. The daemon checks the marker on every
           # subsequent focus event, so only the current window needs a nudge.
+          # Notification borders follow the same state.
           signal_hyprland() {
             if [[ -n "''${HYPRLAND_INSTANCE_SIGNATURE:-}" ]]; then
               hypr-focus-daemon reapply 2>/dev/null || true
+            fi
+            if command -v swaync-apply-colors >/dev/null 2>&1; then
+              swaync-apply-colors 2>/dev/null || true
             fi
           }
 
@@ -517,7 +521,7 @@ in {
               fi
 
               # Run refresh-colors for the slower, non-critical stuff (pywalfox,
-              # dunst, xsetroot). Backgrounded since these can lag without
+              # swaync, xsetroot). Backgrounded since these can lag without
               # anyone noticing; stdout/stderr go to a log file rather than
               # /dev/null so a future failure here is diagnosable, and rather
               # than the vsock connection's pipe, which closes once this
@@ -622,10 +626,9 @@ in {
             generate-gtk-colors 2>/dev/null || true
           fi
 
-          # dunst
-          if command -v generate-dunstrc-colors >/dev/null 2>&1; then
-            generate-dunstrc-colors 2>/dev/null || true
-            ${pkgs.procps}/bin/pkill dunst 2>/dev/null || true
+          # Notifications
+          if command -v swaync-apply-colors >/dev/null 2>&1; then
+            swaync-apply-colors 2>/dev/null || true
           fi
         ''))
       ];

@@ -133,21 +133,10 @@
         generate-gtk-colors
     fi
 
-    # === Dunst ===
-    echo "  Regenerating dunst colors..."
-    if command -v generate-dunstrc-colors >/dev/null 2>&1; then
-        generate-dunstrc-colors
-    fi
-    # Restart dunst to pick up new colors (kill + let systemd restart, or start manually)
-    echo "  Restarting dunst..."
-    ${pkgs.procps}/bin/pkill -9 dunst 2>/dev/null || true
-    sleep 0.3
-    # Try systemd first, fall back to direct start
-    if systemctl --user start dunst 2>/dev/null; then
-        true
-    else
-        ${pkgs.dunst}/bin/dunst -config "$HOME/.config/dunst/dunstrc-layout" -config "$HOME/.config/dunst/dunstrc-colors" &>/dev/null &
-        disown 2>/dev/null || true
+    # === Notifications (swaync reloads its CSS itself) ===
+    if command -v swaync-apply-colors >/dev/null 2>&1; then
+        echo "  Updating notification colors..."
+        swaync-apply-colors
     fi
 
     # === GTK (for virt-manager, nautilus, etc) ===
@@ -426,7 +415,7 @@
     # Run nixwal to update nix-specific cache
     ${nixWalScript}/bin/nixwal
 
-    # Refresh all color-aware apps (waybar, zathura, firefox, dunst, etc)
+    # Refresh all color-aware apps (waybar, zathura, firefox, swaync, etc)
     ${refreshColorsScript}/bin/refresh-colors
 
     # Pre-generate lockscreen background in background (instant lock on next use)
@@ -501,7 +490,7 @@
     # Run nixwal to update nix-specific cache
     ${nixWalScript}/bin/nixwal
 
-    # Refresh all color-aware apps (waybar, zathura, firefox, dunst, etc)
+    # Refresh all color-aware apps (waybar, zathura, firefox, swaync, etc)
     ${refreshColorsScript}/bin/refresh-colors
 
     # Pre-generate lockscreen background in background (instant lock on next use)
@@ -576,7 +565,7 @@
     # 9p data. init-wal-cache just generates initial wal cache from VM's colorscheme.
 
     # Skip wal cache regeneration if it's recent and the colorscheme hasn't changed.
-    # Still run per-app generators: their output files (gtk-wal.css, dunstrc,
+    # Still run per-app generators: their output files (gtk-wal.css, swaync,
     # etc.) live outside the wal cache and must exist after every rebuild.
     # Zathura needs no generator here -- it reads the wal cache fresh at
     # every launch (see theming/programs/zathura.nix) -- but already-open
@@ -585,7 +574,7 @@
         if [ "$(find "$WAL_CACHE/colors.json" -mtime -1 2>/dev/null)" ]; then
             echo "Wal cache exists and is recent, generating per-app color files..."
             if command -v generate-gtk-colors >/dev/null 2>&1; then generate-gtk-colors; fi
-            if command -v generate-dunstrc-colors >/dev/null 2>&1; then generate-dunstrc-colors; fi
+            if command -v swaync-apply-colors >/dev/null 2>&1; then swaync-apply-colors; fi
             if command -v write-alacritty-colors >/dev/null 2>&1; then write-alacritty-colors; fi
             if command -v zathura-reload-colors >/dev/null 2>&1; then zathura-reload-colors; fi
             exit 0
@@ -646,11 +635,11 @@
     mkdir -p "$HOME/.config/alacritty"
     touch "$HOME/.config/alacritty/colors-runtime.toml"
 
-    # Generate dunstrc-colors with wal colors (for dunst to read on start)
+    # Notification colors, for swaync to read on start
     if [ -f "$WAL_CACHE/colors.json" ]; then
-        if command -v generate-dunstrc-colors >/dev/null 2>&1; then
-            echo "Generating dunstrc-colors..."
-            generate-dunstrc-colors
+        if command -v swaync-apply-colors >/dev/null 2>&1; then
+            echo "Generating notification colors..."
+            swaync-apply-colors
         fi
     fi
   '';

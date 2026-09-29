@@ -40,7 +40,7 @@
     # relations = lib.mkDefault {
     #   alacritty = 1.0;
     #   wofi      = 1.0;
-    #   dunst     = 1.0;
+    #   notifications = 1.0;
     #   firefox   = 1.2;
     #   gtk       = 1.0;
     # };

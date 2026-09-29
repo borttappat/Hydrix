@@ -15,14 +15,12 @@
   # =========================================================================
   # MicroVMs use waypipe for display, not a local X session.
   # Disable xsession to prevent .xsession/.xinitrc generation.
-  # Disable dunst (notifications not useful via waypipe).
 
   # Hardware graphics: mesa/llvmpipe for alacritty GL rendering
   hardware.graphics.enable = true;
 
   home-manager.users.${config.hydrix.username} = {
     xsession.enable = lib.mkForce false;
-    services.dunst.enable = lib.mkForce false;
   };
 
   environment.variables = {

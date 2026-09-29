@@ -103,11 +103,11 @@ in {
 
     # ===== Disable host-centric graphical services for microVMs =====
     # The graphical stack is imported for theming/fonts/alacritty config, but
-    # xsession and dunst are host/libvirt-VM specific and waste CPU in headless
-    # waypipe-forwarded microVMs.
+    # xsession is host/libvirt-VM specific and wastes CPU in headless
+    # waypipe-forwarded microVMs. (The notification daemon needs no override:
+    # swaync is gated on hydrix.hyprland.enable, which microVMs leave off.)
     home-manager.users.${config.hydrix.username} = {
       xsession.enable = lib.mkForce false;
-      services.dunst.enable = lib.mkForce false;
     };
 
     # ===== Audio stack follows hydrix.microvm.audio.enable =====
@@ -395,7 +395,7 @@ in {
             # Signal running alacritty instances to reload
             ${pkgs.procps}/bin/pkill -USR1 alacritty 2>/dev/null || true
 
-            # Refresh colors for other apps (dunst, GTK, alacritty, etc.)
+            # Refresh colors for other apps (GTK, alacritty, etc.)
             # The virtiofs wal cache at /mnt/wal-cache has the host's live colors.
             # refresh-colors reads from ~/.cache/wal (symlinked to /mnt/wal-cache
             # by vmThemeSync) and reloads all color-aware apps.

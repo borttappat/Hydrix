@@ -41,7 +41,7 @@ templates/user-config/               # Becomes ~/hydrix-config/
 │   ├── wifi.nix                     # WiFi credentials (managed by wifi-sync)
 │   ├── fish.nix                     # Shell aliases, abbreviations, functions
 │   ├── alacritty.nix                # Terminal cursor, keyboard overrides
-│   ├── dunst.nix                    # Notification dimensions, urgency colors
+│   ├── notifications.nix            # Notification popup size, sound, timeouts
 │   ├── ranger.nix                   # File manager keybindings, rifle rules
 │   ├── starship.nix                 # Prompt (TOML inlined as Nix string)
 │   ├── vim.nix                      # Editor (vimrc inlined as Nix string)

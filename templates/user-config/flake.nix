@@ -39,7 +39,7 @@
     # Optional framework inputs (user-controlled versions)
     # Stylix isn't declared by default (keeps flake.lock lean -- fonts, console
     # colors, and wallpaper are already handled natively; GTK/zathura/alacritty/
-    # firefox/dunst/waybar are already wal-themed at runtime). Add it back if you
+    # firefox/swaync/waybar are already wal-themed at runtime). Add it back if you
     # want Stylix's broader auto-theming reach for packages Hydrix doesn't
     # curate itself:
     #   stylix.url = "github:danth/stylix/release-26.05";
@@ -135,7 +135,7 @@
         ./modules/starship.nix # Deploy starship.toml from configs/starship/
         ./modules/fish.nix # Shell abbreviations + functions
         ./modules/alacritty.nix # Cursor, keyboard overrides
-        ./modules/dunst.nix # Notification preferences
+        ./modules/notifications.nix # Notification preferences
         ./modules/ranger.nix # File manager mappings + rifle rules
         ./modules/zathura.nix # PDF viewer settings
         ./modules/firefox.nix # Shared Firefox defaults (extensions, UA, UI prefs)
@@ -266,7 +266,7 @@
               ./modules/waybar.nix # Waybar module
               ./modules/fish.nix # Shell abbreviations + functions (user additions)
               ./modules/alacritty.nix # Terminal cursor, keyboard overrides
-              ./modules/dunst.nix # Notification sound + size preferences
+              ./modules/notifications.nix # Notification sound + size preferences
               ./modules/ranger.nix # File manager mappings + rifle rules
               ./modules/zathura.nix # PDF viewer settings
               ./modules/starship.nix # Prompt env vars (config is in configs/starship/)

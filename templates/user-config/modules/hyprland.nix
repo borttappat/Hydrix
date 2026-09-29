@@ -326,7 +326,6 @@
     exec-once = systemctl --user set-environment WAYLAND_DISPLAY=$WAYLAND_DISPLAY
     exec-once = systemctl --user start hyprland-session.target
     exec-once = sh -c 'wal -Rnq; hypr-apply-colors'
-    exec-once = ${pkgs.dunst}/bin/dunst
     exec-once = sh -c 'sleep 2 && hypr-apply-colors'
     exec-once = ${startHypridle}
 
@@ -434,6 +433,7 @@
     bind = $mod,       D, exec, wofi-launcher
     bind = $mod SHIFT, D, exec, wofi-launcher --host
     bind = $mod, F4, exec, focus-wofi
+    bind = $mod SHIFT, N, exec, swaync-client --skip-wait --toggle-panel
 
     # Browser (via VM)
     bind = $mod, B, exec, hypr-ws-app firefox
@@ -588,7 +588,6 @@
     windowrule = opacity 1.0 override, match:class ^(Alacritty)$
     windowrule = opacity 1.0 override, match:class ^(alacritty)$
     windowrule = opacity 1.0 override, match:class ^(hypr-float)$
-    windowrule = rounding ${lkRounding}, match:class ^(Dunst)$
     windowrule = rounding ${lkRounding}, match:class ^(wofi)$
     windowrule = no_anim 1,             match:class ^(wofi)$
     layerrule = no_anim 1, match:namespace ^(wofi)$

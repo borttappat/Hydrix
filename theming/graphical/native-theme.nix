@@ -2,7 +2,7 @@
 #
 # Fonts and console (TTY) colors, driven by the same colorscheme-resolution
 # logic Stylix would otherwise use. Everything else (GTK, zathura, alacritty,
-# firefox, dunst, waybar, Hyprland borders) is themed at runtime by wal/pywal
+# firefox, swaync, waybar, Hyprland borders) is themed at runtime by wal/pywal
 # via theming/programs/*.nix and theming/graphical/scripts.nix, independent of
 # both this file and Stylix.
 #

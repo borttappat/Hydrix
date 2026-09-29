@@ -122,18 +122,6 @@ in {
         readOnly = true;
         default = ui.rofiHeight;
       };
-
-      dunstWidth = lib.mkOption {
-        type = lib.types.int;
-        readOnly = true;
-        default = ui.dunstWidth;
-      };
-
-      dunstOffset = lib.mkOption {
-        type = lib.types.int;
-        readOnly = true;
-        default = ui.dunstOffset;
-      };
     };
 
     # Base values for display-setup.nix fallback

@@ -658,15 +658,16 @@
   # Everything a VM sends is untrusted. The VM name is resolved from the vsock
   # peer CID (set by socat), never from the payload, and only registry entries
   # with notifyForward = true are accepted. Fields are length-capped and
-  # markup-escaped (dunst runs with markup = full), URL prefixes are broken
-  # with a zero-width space so dunst never offers VM-supplied links (or
-  # file:// paths) to the host browser, urgency is capped at
+  # markup-escaped (swaync renders Pango markup), URL prefixes are broken
+  # with a zero-width space so the host never offers VM-supplied links (or
+  # file:// paths) to its browser, urgency is capped at
   # normal so a VM cannot pin sticky critical popups, and a per-VM lock drops
   # anything beyond one notification per second.
   #
-  # dunst's format string only renders %s/%b, never %a, so the app-name field
-  # is invisible regardless of what -a is set to. Tag the summary itself
-  # instead, matching waypipe's own "[vm] " window-title prefix convention.
+  # The summary is tagged "[vm] ", matching waypipe's window-title prefix, and
+  # the category is set to hydrix-vm-<vm> so swaync draws that VM's border
+  # gradient (theming/programs/swaync.nix). Both come from the CID-resolved
+  # name, never from the VM, which cannot set a category through this relay.
   notifyForwardScript = pkgs.writeShellScript "vm-notify-forward" ''
     set -u
     jq=${pkgs.jq}/bin/jq
@@ -696,7 +697,7 @@
       (if .urgency == "low" then "low" else "normal" end)
     ' 2>/dev/null) || exit 0
 
-    ${pkgs.libnotify}/bin/notify-send -u "$urgency" --app-name="$app" -- "[$vm] $summary" "$body"
+    ${pkgs.libnotify}/bin/notify-send -u "$urgency" --app-name="$app" --category="hydrix-vm-$vm" -- "[$vm] $summary" "$body"
     sleep 1
   '';
 in

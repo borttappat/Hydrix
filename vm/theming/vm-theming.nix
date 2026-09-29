@@ -42,10 +42,9 @@
       cat "$HOME/.cache/wal/sequences"
     fi
 
-    # Dunst notifications
-    if command -v generate-dunstrc-colors >/dev/null 2>&1; then
-      generate-dunstrc-colors 2>/dev/null || true
-      ${pkgs.procps}/bin/pkill dunst 2>/dev/null || true
+    # Notifications (libvirt Hyprland VMs run swaync)
+    if command -v swaync-apply-colors >/dev/null 2>&1; then
+      swaync-apply-colors 2>/dev/null || true
     fi
 
     # Firefox via pywalfox last — all other color state must be written first

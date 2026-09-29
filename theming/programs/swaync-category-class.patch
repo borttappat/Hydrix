@@ -1,0 +1,27 @@
+--- a/src/notification/notification.vala
++++ b/src/notification/notification.vala
+@@ -484,11 +484,24 @@
+             }
+         }
+ 
++        // CSS class from the notification's category hint, so a stylesheet
++        // can tell senders apart (e.g. "category-hydrix-vm-dev").
++        private string ? category_class = null;
++
+         private void set_style_urgency () {
+             // Reset state
+             base_box.remove_css_class ("low");
+             base_box.remove_css_class ("normal");
+             base_box.remove_css_class ("critical");
++            if (category_class != null) {
++                base_box.remove_css_class (category_class);
++                category_class = null;
++            }
++            if (param.category != null
++                && Regex.match_simple ("^[a-z0-9][a-z0-9-]{0,63}$", param.category)) {
++                category_class = "category-" + param.category;
++                base_box.add_css_class (category_class);
++            }
+ 
+             switch (param.urgency) {
+                 case UrgencyLevels.LOW :

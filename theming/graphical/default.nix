@@ -3,10 +3,10 @@
 # Complete graphical environment for Hydrix:
 # - Hyprland window manager with gaps
 # - Native wal/pywal-driven theming (fonts, console colors, GTK/zathura/alacritty/
-#   firefox/dunst/waybar colors); Stylix is available as an opt-in (see stylix.nix)
+#   firefox/swaync/waybar colors); Stylix is available as an opt-in (see stylix.nix)
 #   for users who supply the `stylix` flake input and want broader auto-theming
 # - Dynamic DPI scaling and hardware normalization
-# - Waybar, Wofi, Dunst, Alacritty
+# - Waybar, Wofi, swaync, Alacritty
 #
 # All configuration through hydrix.graphical.* options (see options.nix)
 #

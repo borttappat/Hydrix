@@ -26,6 +26,7 @@ Hydrix is an options-driven NixOS framework that provides complete network isola
 - [Colorscheme System](#colorscheme-system)
 - [VM Theme Sync](#vm-theme-sync)
 - [Stylix (Opt-in Theming)](#stylix-opt-in-theming)
+- [Notifications](#notifications)
 - [Font System](#font-system)
 - [MicroVM Management](#microvm-management)
   - [Task Slots](#task-slots-per-engagement-vms)
@@ -745,7 +746,7 @@ When you have a working `hydrix-config` on one machine and want to bring a secon
 │   ├── fonts.nix                # Font packages and per-app profiles
 │   ├── fish.nix                 # Shell abbreviations and functions
 │   ├── alacritty.nix            # Terminal cursor, keyboard overrides
-│   ├── dunst.nix                # Notification dimensions and urgency
+│   ├── notifications.nix        # Notification popups: size, sound, timeouts
 │   ├── ranger.nix               # File manager keybindings and rifle rules
 │   ├── starship.nix             # Prompt configuration
 │   ├── vim.nix                  # Editor configuration
@@ -1473,7 +1474,7 @@ daemon's logic runs unaffected.
         alacritty = 1.0;
         waybar = 1.0;
         wofi = 1.0;
-        dunst = 1.0;
+        notifications = 1.0;
         firefox = 1.2;
         gtk = 1.0;
       };
@@ -1488,13 +1489,13 @@ daemon's logic runs unaffected.
     ui = {
       gaps = 15;
       border = 2;
-      barHeight = 23;                # Also used by dunst notification positioning
+      barHeight = 23;
       barPadding = 2;
       cornerRadius = 2;              # Windows; eww/wofi panels use cornerRadius + border - 1
 
-      # Drop shadows on windows (Hyprland), eww blocks, waybar pills and wofi.
-      # Each keeps its own tuned baseline; strength scales them all together.
-      # dunst cannot draw shadows.
+      # Drop shadows on windows (Hyprland), eww blocks, waybar pills, wofi and
+      # notifications. Each keeps its own tuned baseline; strength scales them
+      # all together.
       shadow = {
         enable = true;
         strength = 1.0;              # Multiplier on opacity and size
@@ -1515,11 +1516,19 @@ daemon's logic runs unaffected.
         exclude = [ "Alacritty" "feh" "Feh" "firefox" "Firefox" "mpv" "vlc" ];
       };
 
-      # Wofi/Dunst dimensions
+      # Wofi dimensions
       rofiWidth = 800;                # Read by wofi.nix (name predates the wofi migration)
       rofiHeight = 400;
-      dunstWidth = 300;
-      dunstOffset = 300;
+
+      # Notifications (swaync, see "Notifications" below)
+      notifications = {
+        width = 300;
+        offset = 5;                  # Clearance past a tiled window's edge, both axes
+        offsetCompensation = { x = 0; y = 0; };  # Per-machine fractional-scale fudge
+        popups = true;               # false = panel only
+        sound = null;                # e.g. "bell.wav"
+        timeout = { low = 5; normal = 10; critical = 0; };  # Seconds, 0 = never
+      };
 
       # Compositor animations
       compositor.animations = "modern"; # "none" or "modern"
@@ -1625,7 +1634,7 @@ The `modules/` directory in your `hydrix-config` holds settings that apply to al
 | `hyprland.nix` | Hyprland keybindings and per-machine rules | User |
 | `fish.nix` | Shell abbreviations and functions | User |
 | `alacritty.nix` | Terminal cursor shape, keyboard overrides | User |
-| `dunst.nix` | Notification dimensions and urgency settings | User |
+| `notifications.nix` | Notification popup size, sound and timeouts | User |
 | `ranger.nix` | File manager keybindings and rifle rules | User |
 | `zathura.nix` | PDF viewer options | User |
 | `starship.nix` | Full prompt configuration (TOML inlined as Nix string) | User |
@@ -2056,7 +2065,7 @@ Hydrix uses pywal-based colorschemes with real-time synchronization between the 
 ┌─────────────────────────────────────────────────────────────────────┐
 │  Layer 1: VM internal colorscheme                                   │
 │  hydrix.colorscheme = "punk"                                        │
-│  Drives pywal palette inside the VM: alacritty, wofi, dunst, GTK    │
+│  Drives pywal palette inside the VM: alacritty, wofi, GTK           │
 │  This is the VM's own base theme, independent of the host.          │
 ├─────────────────────────────────────────────────────────────────────┤
 │  Layer 2: Host wal cache inheritance (virtiofs)                     │
@@ -2081,7 +2090,7 @@ Each VM has its own declarative colorscheme that drives pywal inside the VM:
 hydrix.colorscheme = "hydrix";   # default colorscheme 
 ```
 
-This scheme is used for the VM's own terminals, wofi, dunst, GTK, and any other pywal-aware apps running inside the VM. It acts as the base palette, which colors are actually applied depends on Layer 2.
+This scheme is used for the VM's own terminals, wofi, GTK, and any other pywal-aware apps running inside the VM. It acts as the base palette, which colors are actually applied depends on Layer 2.
 
 **Available colorschemes** (located in `colorschemes/`):
 - `hydrix` - Default teal/cyan
@@ -2110,13 +2119,13 @@ walrgb / randomwalrgb / restore-colorscheme (on host)
        VM handler (as root): cp /mnt/wal-cache/* ~/.cache/wal/
                               regenerates colors-runtime.toml (new terminals)
                               pushes sequences to all user /dev/pts/* (running terminals)
-                              sudo -u user refresh-colors (pywalfox, dunst, xsetroot)
+                              sudo -u user refresh-colors (pywalfox, swaync, xsetroot)
 
 walrgb / wal-sync / restore-colorscheme (inside VM - fully contained)
   -> updates VM's own ~/.cache/wal/ only, never touches host
   -> refresh-colors: regenerates colors-runtime.toml
                      pushes sequences to all owned /dev/pts/*
-                     updates pywalfox, dunst, xsetroot
+                     updates pywalfox, swaync, xsetroot
 ```
 
 This eliminates ~500ms color flash on VM startup, keeps all VMs in sync with the host wallpaper in real time, and ensures VM color changes are fully contained.
@@ -2136,7 +2145,7 @@ Inside VMs (on REFRESH from host or after `walrgb`/`wal-sync` inside VM):
 - **Starship / fastfetch**  pick up updated ANSI palette in running terminals
 - **GTK apps**  `gtk-wal.css` regenerated and re-imported (file pickers, virt-manager, etc.)
 - **Zathura**  already-open windows updated live via D-Bus; new windows always open with current colors regardless
-- **Dunst**  notification colors
+- **swaync**  notification colors (libvirt Hyprland VMs)
 - **Firefox**  via pywalfox
 
 On the host (after `walrgb` / `randomwalrgb` / `restore-colorscheme`):
@@ -2146,7 +2155,7 @@ On the host (after `walrgb` / `randomwalrgb` / `restore-colorscheme`):
 - **Running terminals**  ANSI palette + cursor via sequences to all `/dev/pts/*`
 - **GTK apps**  `gtk-wal.css` regenerated and re-imported
 - **Zathura**  already-open windows updated live via D-Bus; new windows always open with current colors regardless
-- **Dunst**  notification colors
+- **swaync**  notification colors and per-sender borders
 - **Firefox**  via pywalfox extension
 - **RGB lighting**  ASUS Aura / OpenRGB
 
@@ -2375,8 +2384,44 @@ Whichever tier you pick, **Stylix only themes at rebuild time.** It bakes in wha
 everything else uses, so it's not a second/disconnected palette. But Stylix never
 plugs into the live `walrgb`/`refresh-colors` runtime path. A new app it covers won't
 recolor live when you run `walrgb <wallpaper>`; it needs a rebuild. The wal-owned apps
-(GTK, zathura, alacritty, firefox, dunst, waybar, console) always update live
+(GTK, zathura, alacritty, firefox, swaync, waybar, console) always update live
 regardless of any of this.
+
+---
+
+## Notifications
+
+Popups and the notification panel are swaync (`theming/programs/swaync.nix`), enabled with the
+Hyprland stack (`hydrix.hyprland.enable`), so microVMs never run a daemon. `$mod+Shift+N`
+(`swaync-client -t`) opens the panel: history, clear, do not disturb.
+
+- **Placement:** top-right. X = `ui.gaps + notifications.offset` from the screen edge, Y =
+  `notifications.offset` under the bar's exclusive zone, the same clearance past a tiled
+  window's edge on both axes. `offsetCompensation.{x,y}` fixes per-machine fractional-scale
+  rounding, tuned by editing the `.notification-background` padding in
+  `~/.config/swaync/style.css` and running `swaync-client -rs`.
+- **Look:** corners use `scaling.computed.panelRadius` like eww and wofi, the drop shadow
+  comes from `ui.shadow`, the fill uses `ui.opacity.overlay` (or `overlayOverrides.notifications`).
+  Text only (no images or app icons), in the system font at the px equivalent of the eww and
+  alacritty size (`font.size * relations.notifications * 4/3`, waybar's 14px at 11pt). The
+  service runs with `GSK_RENDERER=cairo`: GTK4's default renderer draws text heavier than the
+  GTK3 surfaces around it.
+- **Borders follow the sender**, with the same gradients as windows: the host gradient
+  (`focusDaemon.hostColor` to `baseColor`) by default, and a VM's own gradient (its
+  `focusBorder`, or its `dynamicColorMap` color with `hydrix-focus` on) for notifications the
+  relay tags `hydrix-vm-<vm>`. Both use `theming/wm/hyprland/border-colors.nix`, the shell
+  library `hypr-focus-daemon` also sources. swaync is patched
+  (`swaync-category-class.patch`) to add a `category-<category>` CSS class to each card,
+  since stock swaync has no per-notification style hook.
+- **Rounded gradient ring:** GTK draws `border-image` with square corners, and a gradient
+  under a translucent fill would show through it. The ring is therefore four edge strips in
+  the card's background (backgrounds follow `border-radius`), each fading toward the far
+  corner, around a fill clipped to the padding box.
+
+Files in `~/.config/swaync`: `config.json` and `style.css` are written on every rebuild and
+can be hand-edited in between (`swaync-client -R` / `-rs`); `colors.css` is written by
+`swaync-apply-colors` on rebuild, colorscheme changes (`refresh-colors`) and `hydrix-focus`
+toggles, so it must never carry hand edits.
 
 ---
 
@@ -2395,7 +2440,7 @@ Fonts are configured via `hydrix.graphical.font` and flow through two separate p
       alacritty = 1.0;
       waybar = 1.0;
       wofi = 1.2;
-      dunst = 0.9;
+      notifications = 0.9;
     };
   };
 }
@@ -4739,7 +4784,7 @@ VM app calls notify-send / Notification API
                                                     │
                                     Host vm-notify-relay user service
                                       socat VSOCK-LISTEN:14518 → vm-notify-forward
-                                        (authorize by peer CID, sanitize) → notify-send (host dunst)
+                                        (authorize by peer CID, sanitize) → notify-send (host swaync)
 ```
 
 **Host side (`theming/wm/hyprland/waypipe.nix`):**
@@ -4755,21 +4800,20 @@ can connect to vsock:14518 directly with arbitrary JSON. The `vm-notify-relay` u
   logged as `rejected notification from CID N` (`journalctl --user -u vm-notify-relay`).
 - **Caps input:** 8 KiB per message, read with a 3 s timeout (a connection held open cannot
   pin a child), `app_name` 64 / `summary` 200 / `body` 1000 characters.
-- **Escapes `&`, `<`, `>`** since dunst runs with `markup = full`, so VM text renders
+- **Escapes `&`, `<`, `>`** since swaync renders Pango markup, so VM text renders
   literally and cannot style itself to mimic another source.
-- **Breaks URL prefixes** (`://`, `mailto:`, `www.`) with a zero-width space. dunst extracts
-  `http(s)`, `ftp(s)`, `news`, `mailto`, `file://` and `www.` links from the body and offers
-  them to the host browser (context menu, and `do_action` on a single URL), so VM-supplied
-  links and host `file://` paths are never openable. Text looks unchanged; copied links carry
-  the invisible character.
+- **Breaks URL prefixes** (`://`, `mailto:`, `www.`) with a zero-width space, so nothing on
+  the host ever recognizes a VM-supplied link or host `file://` path as openable. Text looks
+  unchanged; copied links carry the invisible character.
 - **Caps urgency at `normal`** (`low` is kept), so a VM cannot pin sticky critical popups.
 - **Rate-limits per VM:** a per-VM `flock` held for one second after each notification;
   anything arriving meanwhile is dropped, not queued.
-- Calls `notify-send -u <urgency> --app-name=<app> -- "[vm] summary" "body"`. The `--` and
+- Calls `notify-send -u <urgency> --app-name=<app> --category=hydrix-vm-<vm> -- "[vm] summary" "body"`. The `--` and
   `--app-name=` form stop VM text that starts with `-` from being parsed as `notify-send`
   options (e.g. `--action` plus `--wait`, which would echo the user's click back to the VM).
-  The summary is tagged `[vm] ` because dunst's format string only renders `%s`/`%b`, never
-  `%a`, matching waypipe's own `[vm] ` window-title prefix convention.
+  The summary is tagged `[vm] `, matching waypipe's own window-title prefix, and the category
+  `hydrix-vm-<vm>` makes swaync draw that VM's border gradient (see "Notifications"). Both
+  come from the CID-resolved name; the VM cannot set a category through the relay.
 
 Only plain strings cross the boundary: icons, image data, hints and actions are dropped
 VM-side, and nothing flows back to the VM.

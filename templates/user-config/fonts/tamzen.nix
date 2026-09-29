@@ -15,7 +15,7 @@ in {
 
       relations = lib.mkDefault {
         alacritty = 1.0;
-        dunst = 0.75;
+        notifications = 0.75;
         wofi = 1.2;
         firefox = 1.3;
         gtk = 1.0;

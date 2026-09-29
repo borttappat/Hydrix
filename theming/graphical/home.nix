@@ -30,7 +30,7 @@ in {
   imports = [
     ../programs/alacritty.nix
     ../programs/fish.nix
-    ../programs/dunst.nix
+    ../programs/swaync.nix
     ../programs/zathura.nix
     ../programs/firefox.nix
     ../programs/gtk.nix

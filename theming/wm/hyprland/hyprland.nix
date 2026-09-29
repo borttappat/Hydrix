@@ -60,10 +60,7 @@
   # Active border is a gradient: first stop (per-VM or host color) -> baseColor.
   focusCfg = config.hydrix.vmThemeSync.focusDaemon;
   borderAngle = "${toString focusCfg.gradientAngle}deg";
-  dynamicColorMap = focusCfg.dynamicColorMap;
-  dynamicMapCases = lib.concatStringsSep "\n      " (
-    lib.mapAttrsToList (vm: colorKey: "${vm}) WAL_KEY=\"${colorKey}\" ;;") dynamicColorMap
-  );
+  borderColors = import ./border-colors.nix {inherit config lib pkgs;};
 
   xwaylandEnabled = config.hydrix.hyprland.xwayland.enable;
 
@@ -283,19 +280,10 @@
     REGISTRY=/etc/hydrix/vm-registry.json
     CONF=$HOME/.config/hypr/vm-borders.conf
     STATE=$HOME/.config/hypr/vm-borders-enabled
-    _rgba() {
-      case "$1" in
-        red) echo "ff0000ff" ;; orange) echo "ff8c00ff" ;; yellow) echo "ffff00ff" ;;
-        green) echo "00ff00ff" ;; cyan) echo "00ffffff" ;; blue) echo "0000ffff" ;;
-        purple) echo "800080ff" ;; pink) echo "ffc0cbff" ;; magenta) echo "ff00ffff" ;;
-        white) echo "ffffffff" ;; black) echo "000000ff" ;; gray|grey) echo "808080ff" ;;
-        *) hex="''${1#\#}"; [[ "''${#hex}" -eq 6 ]] && echo "''${hex}ff" || echo "$hex" ;;
-      esac
-    }
+    source ${borderColors}
     _generate() {
       local base
-      base=$(${pkgs.jq}/bin/jq -r '.colors["${focusCfg.baseColor}"] // empty' "$HOME/.cache/wal/colors.json" 2>/dev/null | sed 's/#//')
-      base="''${base:-7aa2f7}ff"
+      base=$(_border_base)
       while IFS=' ' read -r key color; do
         echo "windowrule = border_color rgba($(_rgba "$color")) rgba($base) ${borderAngle}, match:tag vm-$key"
       done < <(${pkgs.jq}/bin/jq -r 'to_entries[] | select(.value.focusBorder != null) | "\(.key) \(.value.focusBorder)"' "$REGISTRY")
@@ -427,46 +415,8 @@
   '';
 
   hyprFocusDaemon = pkgs.writeShellScriptBin "hypr-focus-daemon" ''
-    REGISTRY=/etc/hydrix/vm-registry.json
-    MARKER="$HOME/.cache/hydrix/focus-override-active"
-    WAL_COLORS="$HOME/.cache/wal/colors.json"
-    _rgba() {
-      case "$1" in
-        red) echo "ff0000ff" ;; orange) echo "ff8c00ff" ;; yellow) echo "ffff00ff" ;;
-        green) echo "00ff00ff" ;; cyan) echo "00ffffff" ;; blue) echo "0000ffff" ;;
-        purple) echo "800080ff" ;; pink) echo "ffc0cbff" ;; magenta) echo "ff00ffff" ;;
-        white) echo "ffffffff" ;; black) echo "000000ff" ;; gray|grey) echo "808080ff" ;;
-        *) hex="''${1#\#}"; [[ "''${#hex}" -eq 6 ]] && echo "''${hex}ff" || echo "$hex" ;;
-      esac
-    }
-    # Wal color key -> rrggbbaa, or the fallback when the key is missing.
-    _wal() {
-      local c
-      c=$(${pkgs.jq}/bin/jq -r --arg k "$1" '.colors[$k] // empty' "$WAL_COLORS" 2>/dev/null \
-        | sed 's/#//')
-      [ -n "$c" ] && echo "''${c}ff" || echo "''${2:-7aa2f7ff}"
-    }
-    # First stop (rrggbbaa) -> full gradient ending at baseColor.
-    _grad() { echo "rgba($1) rgba($(_wal ${focusCfg.baseColor})) ${borderAngle}"; }
-    _dynamic_color() {
-      # Task slots (pentest-task1, ...) follow their base profile's color.
-      local profile="''${1%-task[0-9]*}" WAL_KEY=""
-      case "$profile" in
-      ${dynamicMapCases}
-      *) WAL_KEY="${focusCfg.baseColor}" ;;
-      esac
-      _wal "$WAL_KEY"
-    }
-    _border_for_profile() {
-      local profile="$1" first="" c
-      if [ -f "$MARKER" ]; then
-        first=$(_dynamic_color "$profile")
-      else
-        c=$(${pkgs.jq}/bin/jq -r --arg p "$profile" '.[$p].focusBorder // empty' "$REGISTRY" 2>/dev/null)
-        if [ -n "$c" ]; then first=$(_rgba "$c"); else first=$(_dynamic_color "$profile"); fi
-      fi
-      _grad "$first"
-    }
+    source ${borderColors}
+    _grad() { echo "rgba($1) rgba($(_border_base)) $BORDER_ANGLE"; }
     _apply() { ${pkgs.hyprland}/bin/hyprctl keyword general:col.active_border "$1" 2>/dev/null || true; }
     # Paints the active border with the inactive-border color (wal color0, as
     # written by hypr-apply-colors), so a window left behind on an unfocused
@@ -487,8 +437,8 @@
       fi
       title=$(printf '%s' "$aw" | ${pkgs.jq}/bin/jq -r '.title // empty')
       profile=$(echo "$title" | sed -n 's/^\[\([^]]*\)\].*/\1/p')
-      if [ -n "$profile" ]; then _apply "$(_border_for_profile "$profile")"
-      else _apply "$(_grad "$(_wal ${focusCfg.hostColor})")"; fi
+      if [ -n "$profile" ]; then _apply "$(_grad "$(_border_vm "$profile")")"
+      else _apply "$(_grad "$(_border_host)")"; fi
     }
     _sig() {
       local sig="''${HYPRLAND_INSTANCE_SIGNATURE:-}"

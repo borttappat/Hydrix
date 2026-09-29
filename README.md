@@ -149,7 +149,7 @@ hydrix.hardware.vfio.pciIds = [ "8086:a840" ];   # from: lspci -nn | grep -i net
 hydrix.hardware.vfio.wifiPciAddress = "00:14.3"; # from: lspci -D | grep -i wireless
 hydrix.router.type = "microvm";                   # default, shown for clarity
 hydrix.router.persistence.enable = true;           # keep nmcli-added WiFi across restarts
-hydrix.graphical.enable = false;                   # no Hyprland/waybar/wofi/dunst/Alacritty
+hydrix.graphical.enable = false;                   # no Hyprland/waybar/wofi/swaync/Alacritty
 ```
 
 Bridges (`br-mgmt` and friends) and the router's management-LAN IP both have real
@@ -344,7 +344,7 @@ Three independent color layers per VM:
 ```
 Layer 1 - VM internal colorscheme
   hydrix.colorscheme = "hydrix"
-  Drives pywal inside the VM: alacritty, dunst, GTK
+  Drives pywal inside the VM: alacritty, GTK
 
 Layer 2 - Host wal cache via virtiofs
   Host ~/.cache/wal shared read-only into VMs at boot.

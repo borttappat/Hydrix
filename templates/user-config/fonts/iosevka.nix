@@ -15,7 +15,7 @@ in {
       relations = lib.mkDefault {
         alacritty = 1.1;
         waybar    = 1.28;  # floor(11 * 1.28) = 14px
-        dunst     = 1.0;
+        notifications = 1.0;
         wofi      = 1.3;
         firefox   = 1.2;
         gtk       = 1.0;
