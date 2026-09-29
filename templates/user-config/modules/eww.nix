@@ -2,8 +2,10 @@
 #
 # One `dashboard` window per monitor (id `dashboard-<output>`), filling the
 # left half of the screen below waybar, inset by the Hyprland gap so block
-# edges line up with tiled windows. Two columns of blocks, each expanding to
-# share its column's height:
+# edges line up with tiled windows. With dashboard.workspace set it is shown
+# only on that workspace, on whichever monitor has it, and that workspace
+# tiles into the right half. Two columns of
+# blocks, each expanding to share its column's height:
 #
 #   VMS         running/stopped VMs (parses `shard status`)
 #   EXIT NODES  WireGuard exit node per running VM; click a row to route that
@@ -559,24 +561,60 @@
 
   # Opens the wallpaper layer (if enabled) and then one dashboard per
   # monitor (or per internal panel, see dashboard.monitors), sized to the
-  # left half of that monitor below its reserved zones. Re-syncs on monitor hotplug and re-maps the dashboards on
-  # Hyprland config reloads so they stay above the wallpaper layer (see top).
-  # Debounced like waybarMonitorWatch in modules/hyprland.nix.
+  # left half of that monitor below its reserved zones. Re-syncs on monitor
+  # hotplug and re-maps the dashboards on Hyprland config reloads so they stay
+  # above the wallpaper layer (see top). Debounced like waybarMonitorWatch in
+  # modules/hyprland.nix.
+  #
+  # With dashboard.workspace set, every monitor gets a size entry and a
+  # dashboard is open only on the monitor currently showing that workspace,
+  # so it follows the workspace between monitors. A runtime workspace rule per
+  # monitor widens that workspace's left gaps_out to the dashboard's edge so
+  # tiled windows keep to the right half. The rule is a `hyprctl keyword`, dropped on config
+  # reload, which the configreloaded re-sync puts back.
   ewwDashboardWatch = pkgs.writeShellApplication {
     name = "eww-dashboard-watch";
     runtimeInputs = [pkgs.eww pkgs.hyprland pkgs.jq pkgs.socat pkgs.gnugrep pkgs.coreutils];
     text = ''
+      # dashboard.workspace, empty when the dashboards show on every workspace.
+      _ws="${lib.optionalString (dash.workspace != null) (toString dash.workspace)}"
+      # "<monitor> <width> <height>" per dashboard, written by sync_dashboards.
+      _state="''${XDG_RUNTIME_DIR}/eww-dashboard-watch-monitors"
+
+      # Opens each dashboard whose monitor shows the pinned workspace (or
+      # always, when not pinned) and closes the rest. Idempotent.
+      update_visibility() {
+        local mons open active
+        mons=$(hyprctl monitors -j)
+        open=$(eww active-windows 2>/dev/null || true)
+        while read -r mon width height; do
+          active=$(jq -r --arg m "$mon" '.[] | select(.name == $m) | .activeWorkspace.id' <<< "$mons")
+          if [ -z "$_ws" ] || [ "$active" = "$_ws" ]; then
+            if ! grep -q "^dashboard-$mon:" <<< "$open"; then
+              eww open dashboard --id "dashboard-$mon" --screen "$mon" \
+                --arg width="$width" --arg height="$height" 2>/dev/null || true
+            fi
+          elif grep -q "^dashboard-$mon:" <<< "$open"; then
+            eww close "dashboard-$mon" 2>/dev/null || true
+          fi
+        done < "$_state"
+      }
+
       sync_dashboards() {
         mons=$(hyprctl monitors -j)
         eww active-windows 2>/dev/null | grep '^dashboard-' | while IFS=: read -r wid _; do
           eww close "$wid" 2>/dev/null || true
         done || true
-        jq -r '.[] ${lib.optionalString (dash.monitors == "internal") "| select(.name | test(\"^(eDP|LVDS|DSI)-\")) "}| "\(.name) \(.width / .scale | floor) \(.height / .scale | floor) \(.reserved[1]) \(.reserved[3])"' <<< "$mons" \
+        read -r gt gr gb _ <<< "$(hyprctl getoption general:gaps_out -j | jq -r '.custom')"
+        : > "$_state"
+        jq -r --arg ws "$_ws" '.[] ${lib.optionalString (dash.monitors == "internal") "| select($ws != \"\" or (.name | test(\"^(eDP|LVDS|DSI)-\"))) "}| "\(.name) \(.width / .scale | floor) \(.height / .scale | floor) \(.reserved[1]) \(.reserved[3])"' <<< "$mons" \
           | while read -r mon w h top bottom; do
-              eww open dashboard --id "dashboard-$mon" --screen "$mon" \
-                --arg width="$(( w / 2 - ${toString gaps} - ${toString gapsIn} + ${toString (2 * shadowRoom)} ))" \
-                --arg height="$(( h - top - bottom - ${toString gaps} + ${toString (2 * shadowRoom + 1)} ))" 2>/dev/null || true
+              echo "$mon $(( w / 2 - ${toString gaps} - ${toString gapsIn} + ${toString (2 * shadowRoom)} )) $(( h - top - bottom - ${toString gaps} + ${toString (2 * shadowRoom + 1)} ))" >> "$_state"
+              if [ -n "$_ws" ]; then
+                hyprctl keyword workspace "r[$_ws-$_ws]m[$mon],gapsout:$gt $gr $gb $(( w / 2 + ${toString gapsIn} ))" > /dev/null
+              fi
             done
+        update_visibility
       }
 
       sleep 3
@@ -598,6 +636,9 @@
               [ "$(cat "$_seq" 2>/dev/null)" = "$_my" ] || exit 0
               sync_dashboards
             ) &
+            ;;
+          workspacev2*|focusedmonv2*|moveworkspacev2*)
+            if [ -n "$_ws" ]; then update_visibility; fi
             ;;
         esac
       done
@@ -1349,7 +1390,19 @@ in {
         default = "internal";
         description = ''
           Which monitors get a dashboard: every connected output, or only
-          internal panels (outputs named eDP-*, LVDS-* or DSI-*).
+          internal panels (outputs named eDP-*, LVDS-* or DSI-*). Ignored
+          while dashboard.workspace is set.
+        '';
+      };
+      workspace = lib.mkOption {
+        type = lib.types.nullOr lib.types.ints.positive;
+        default = null;
+        example = 1;
+        description = ''
+          Show the dashboard only on this workspace, on whichever monitor
+          currently has it, and keep tiled windows on that workspace out of
+          the dashboard's half. null shows the dashboards on every workspace,
+          behind windows, with nothing reserved.
         '';
       };
       git.extraRepos = lib.mkOption {
