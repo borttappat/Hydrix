@@ -59,6 +59,9 @@
     if v != null
     then v
     else 10;
+  # Matches gaps_in in modules/hyprland.nix: the inset toward a neighbouring
+  # tiled window, as opposed to the full outer gap at the screen edge.
+  gapsIn = (gaps + 1) / 2;
   fontFamily = config.hydrix.graphical.font.family or "Iosevka";
   fontSize = let
     base = config.hydrix.graphical.font.size or 10;
@@ -570,7 +573,7 @@
         jq -r '.[] ${lib.optionalString (dash.monitors == "internal") "| select(.name | test(\"^(eDP|LVDS|DSI)-\")) "}| "\(.name) \(.width / .scale | floor) \(.height / .scale | floor) \(.reserved[1]) \(.reserved[3])"' <<< "$mons" \
           | while read -r mon w h top bottom; do
               eww open dashboard --id "dashboard-$mon" --screen "$mon" \
-                --arg width="$(( w / 2 - 2 * ${toString gaps} ))" \
+                --arg width="$(( w / 2 - ${toString gaps} - ${toString gapsIn} ))" \
                 --arg height="$(( h - top - bottom - ${toString gaps} ))" 2>/dev/null || true
             done
       }
