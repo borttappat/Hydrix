@@ -78,16 +78,12 @@
   wlEnabled = cfg.enable && cfg.image != null;
   dash = config.hydrix.eww.dashboard;
 
-  # Same "scale pillRadius up so it reads as visibly rounded" formula as
-  # wofi's #window (theming/wm/hyprland/wofi.nix): blocks are the same kind
-  # of floating rounded surface, not waybar pills.
+  # Matches the visible corner of a Hyprland window: its rounding plus the
+  # border drawn outside it.
   panelRadius = let
-    pillRadius =
-      if (ui.pillRadius or null) != null
-      then ui.pillRadius
-      else builtins.floor ((ui.cornerRadius or 2) * (ui.pillRadiusScale or 2.0));
+    sc = config.hydrix.graphical.scaling.computed;
   in
-    toString (pillRadius * 2);
+    toString ((sc.cornerRadius or 0) + (sc.border or 2));
   panelOpacity = toString (ui.opacity.overlayOverrides.eww or ui.opacity.overlay);
   blockPadding = let
     p = ui.padding or 8;
