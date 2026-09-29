@@ -1,35 +1,34 @@
 #!/usr/bin/env bash
-# hydrix-sops-setup — Initialize sops for the current machine.
+# hydrix-sops-setup: manage the repo's single sops key (the master key).
 #
-# Run this after the first rebuild on a new machine.
-# Creates secrets/.sops.yaml with the machine's age public key so that
-# 'sops secrets/myfile.yaml' works without any additional configuration.
-#
-# If secrets files already exist (e.g. from another machine's config),
-# the script prints the command to re-key them for this machine.
+# Every secret in secrets/ is encrypted to exactly one recipient: the master
+# age key. Its private half is committed as secrets/master-age-key.age,
+# encrypted with a passphrase, and unlocked onto the host at
+# /var/lib/sops-nix/master-age-key.txt. It never leaves the host: VMs only
+# receive decrypted files through /run/hydrix-secrets.
 #
 # Usage:
-#   hydrix-sops-setup                  # create/check .sops.yaml
-#   hydrix-sops-setup --print-key      # just print the host age public key and exit
-#   hydrix-sops-setup --gen-key        # generate a personal age key usable across machines
-#   hydrix-sops-setup --enroll-fido2   # enroll a FIDO2 key (Titan, Yubikey, etc.)
-#   hydrix-sops-setup --gen-master-key # generate password-protected portable master key
-#   hydrix-sops-setup --unlock         # decrypt master key and activate it on this machine
+#   hydrix-sops-setup                  # fresh repo: create master key + .sops.yaml
+#                                      # existing repo: check key and recipients
+#   hydrix-sops-setup --print-key      # print the master public key
+#   hydrix-sops-setup --unlock         # decrypt the master key and activate it here
+#   hydrix-sops-setup --gen-master-key # generate the master key (fresh repo only)
+#   hydrix-sops-setup --rekey          # make the master key the only recipient
+#                                      # in .sops.yaml and every secret
+#   hydrix-sops-setup --enroll-fido2   # enroll a FIDO2 key for a future
+#                                      # replacement of the master key
 #
-# Master key workflow (for multi-machine / reinstall use):
-#   First machine:
-#     hydrix-sops-setup --gen-master-key   # creates secrets/master-age-key.age
-#     # Add printed public key to secrets/.sops.yaml, re-encrypt, commit
-#     git add secrets/master-age-key.age secrets/.sops.yaml && git commit
-#   New machine or reinstall (after cloning hydrix-config and first rebuild):
-#     hydrix-sops-setup --unlock           # prompts for passphrase, activates key
-#     # Secrets decrypt immediately without sops updatekeys
-#
+# Encrypting elsewhere (e.g. on a machine that must never hold the private
+# key) only needs the public key from --print-key:
+#   sops -e --age <pubkey> <plaintext-file> > secrets/<name>.<yaml|json>
 set -euo pipefail
 
 CONFIG_DIR="${HYDRIX_FLAKE_DIR:-$HOME/hydrix-config}"
 SECRETS_DIR="$CONFIG_DIR/secrets"
 SOPS_YAML="$SECRETS_DIR/.sops.yaml"
+MASTER_KEY_ENC="$SECRETS_DIR/master-age-key.age"
+MASTER_KEY_DEST="/var/lib/sops-nix/master-age-key.txt"
+ACTIVE_KEY="/var/lib/sops-nix/age-key.txt"
 SOPS_AGE_DIR="$HOME/.config/sops/age"
 PLUGIN_IDS="$SOPS_AGE_DIR/plugin-identities.txt"
 KEYS_FILE="$SOPS_AGE_DIR/keys.txt"
@@ -37,478 +36,231 @@ KEYS_FILE="$SOPS_AGE_DIR/keys.txt"
 RED=$'\e[31m'; GREEN=$'\e[32m'; YELLOW=$'\e[33m'; CYAN=$'\e[36m'
 NC=$'\e[0m'; BOLD=$'\e[1m'
 
-# ── Derive host age public key ───────────────────────────────────────────────
+die() { echo -e "${RED}Error: $*${NC}" >&2; exit 1; }
 
-AGE_KEY="/var/lib/sops-nix/age-key.txt"
-SSH_PUB="/etc/ssh/ssh_host_ed25519_key.pub"
+is_unlocked() { sudo test -f "$MASTER_KEY_DEST"; }
 
-HOST_PUBKEY=""
-if [[ -f "$AGE_KEY" ]]; then
-  HOST_PUBKEY=$(age-keygen -y "$AGE_KEY" 2>/dev/null || true)
-fi
-if [[ -z "$HOST_PUBKEY" && -f "$SSH_PUB" ]]; then
-  HOST_PUBKEY=$(ssh-to-age -i "$SSH_PUB" 2>/dev/null || true)
-fi
+master_pubkey() { sudo age-keygen -y "$MASTER_KEY_DEST" 2>/dev/null; }
 
-# ── --print-key ──────────────────────────────────────────────────────────────
+# sops-encrypted .yaml/.json files in secrets/ (plain files there are skipped)
+secret_files() {
+  local f
+  for f in "$SECRETS_DIR"/*.yaml "$SECRETS_DIR"/*.json; do
+    [[ -f "$f" ]] || continue
+    [[ "$(basename "$f")" == ".sops.yaml" ]] && continue
+    grep -qE '^sops:|"sops": *\{' "$f" && echo "$f"
+  done
+  return 0
+}
 
-if [[ "${1:-}" == "--print-key" ]]; then
-  if [[ -z "$HOST_PUBKEY" ]]; then
-    echo "Error: could not derive host age public key. Run 'rebuild' first." >&2
-    exit 1
-  fi
-  echo "$HOST_PUBKEY"
-  exit 0
-fi
+recipients_of() { grep -oE 'age1[0-9a-z]{20,}' "$1" | sort -u; }
 
-# ── --gen-key ────────────────────────────────────────────────────────────────
-#
-# Generates a personal age key not tied to any machine's SSH host key.
-# The private key goes into plugin-identities.txt (persists across rebuilds).
-# The public key is added to .sops.yaml so any machine holding the private
-# key can decrypt secrets immediately -- no sops updatekeys required.
-#
-# Transfer the private key to new machines by copying plugin-identities.txt
-# (or just the age key lines) before first rebuild. Keep a copy in your
-# password manager or on an encrypted USB as a backup.
-#
-# When a Yubikey is later set up it replaces this key as the portable
-# recipient -- at that point this key can be removed from .sops.yaml.
-
-if [[ "${1:-}" == "--gen-key" ]]; then
-  mkdir -p "$SOPS_AGE_DIR"
-  chmod 700 "$SOPS_AGE_DIR"
-
-  # Check if a personal key already exists in plugin-identities.txt
-  if [[ -f "$PLUGIN_IDS" ]] && grep -qE '^AGE-SECRET-KEY-1' "$PLUGIN_IDS" 2>/dev/null; then
-    EXISTING=$(grep -oP '(?<=# public key: )age1\S+' "$PLUGIN_IDS" | head -1 || true)
-    echo -e "${YELLOW}A personal age key is already enrolled.${NC}"
-    [[ -n "$EXISTING" ]] && echo "Public key: $EXISTING"
-    echo "Remove the AGE-SECRET-KEY-1 line from $PLUGIN_IDS to re-generate."
-    exit 0
-  fi
-
-  # Generate the key (mktemp creates the file; age-keygen refuses to overwrite, so remove first)
-  TMPKEY=$(mktemp)
-  trap 'rm -f "$TMPKEY"' EXIT
-  rm -f "$TMPKEY"
-  age-keygen -o "$TMPKEY"
-  PERSONAL_PUBKEY=$(age-keygen -y "$TMPKEY")
-
-  # Append to plugin-identities.txt (persists across rebuilds)
-  {
-    echo ""
-    echo "# Personal age key generated $(date -I) — transfer to new machines"
-    echo "# public key: $PERSONAL_PUBKEY"
-    cat "$TMPKEY"
-  } >> "$PLUGIN_IDS"
-  chmod 600 "$PLUGIN_IDS"
-
-  # Also append to keys.txt immediately so sops can use it now
-  if [[ -f "$KEYS_FILE" ]]; then
-    echo "" >> "$KEYS_FILE"
-    cat "$TMPKEY" >> "$KEYS_FILE"
-  fi
-
-  rm -f "$TMPKEY"
-
-  echo -e "${GREEN}Personal age key generated.${NC}"
-  echo -e "Public key: ${BOLD}$PERSONAL_PUBKEY${NC}"
-  echo ""
-
-  # Add to .sops.yaml if it exists
-  if [[ -f "$SOPS_YAML" ]]; then
-    if grep -qF "$PERSONAL_PUBKEY" "$SOPS_YAML"; then
-      echo -e "${GREEN}Key already in $SOPS_YAML.${NC}"
-    else
-      awk -v key="$PERSONAL_PUBKEY" '
-        /^[[:space:]]+-[[:space:]]+age1/ { last=NR; indent=$0; sub(/-.*/, "", indent) }
-        { lines[NR]=$0 }
-        END {
-          for (i=1; i<=NR; i++) {
-            print lines[i]
-            if (i==last) print indent "- " key
-          }
-        }
-      ' "$SOPS_YAML" > "$SOPS_YAML.tmp" && mv "$SOPS_YAML.tmp" "$SOPS_YAML"
-      echo -e "${GREEN}Added to $SOPS_YAML.${NC}"
-
-      existing=$(find "$SECRETS_DIR" -name "*.yaml" ! -name ".sops.yaml" 2>/dev/null | head -5)
-      if [[ -n "$existing" ]]; then
-        echo ""
-        echo "Re-encrypting existing secrets for the personal key..."
-        cd "$SECRETS_DIR"
-        for f in *.yaml; do
-          [[ "$f" == ".sops.yaml" ]] && continue
-          sops updatekeys --yes "$f"
-        done
-        cd "$CONFIG_DIR"
-        echo ""
-        echo -e "${GREEN}Done. Commit the updated secrets:${NC}"
-        echo "  git add secrets/.sops.yaml secrets/*.yaml && git commit -m 'feat(secrets): add personal age key as recipient'"
-      else
-        echo "  git add secrets/.sops.yaml && git commit -m 'feat(secrets): add personal age key as recipient'"
-      fi
-    fi
-  else
-    echo "No .sops.yaml yet. Run 'hydrix-sops-setup' first, then re-run --gen-key."
-  fi
-
-  echo ""
-  echo -e "${YELLOW}Keep a copy of $PLUGIN_IDS (or just the AGE-SECRET-KEY-1 line) in your"
-  echo -e "password manager. On a new machine, append it to ~/.config/sops/age/plugin-identities.txt"
-  echo -e "before the first rebuild.${NC}"
-
-  exit 0
-fi
-
-# ── --enroll-fido2 ───────────────────────────────────────────────────────────
-
-if [[ "${1:-}" == "--enroll-fido2" ]]; then
-  if ! command -v age-plugin-fido2-hmac &>/dev/null; then
-    echo -e "${RED}Error: age-plugin-fido2-hmac not found.${NC}" >&2
-    echo "Run 'rebuild' to install it, then try again." >&2
-    exit 1
-  fi
-
-  echo -e "${CYAN}Enrolling FIDO2 key with age-plugin-fido2-hmac...${NC}"
-  echo "You will be asked to touch your key once to generate the credential."
-  echo ""
-
-  mkdir -p "$SOPS_AGE_DIR"
-  chmod 700 "$SOPS_AGE_DIR"
-
-  # Generate identity (touch required).
-  # The plugin mixes prompts and output on stdout, so we tee to both the
-  # terminal (so the user can see prompts and respond) and a temp file (to
-  # capture the final credential lines).
-  TMPFILE=$(mktemp)
-  trap 'rm -f "$TMPFILE"' EXIT
-  # Capture stdout only; stderr flows to terminal for interactive prompts.
-  age-plugin-fido2-hmac --generate > "$TMPFILE"
-  echo ""
-
-  # The identity credential line (required to use the key for decryption)
-  IDENTITY=$(grep -E '^AGE-PLUGIN-FIDO2-HMAC-' "$TMPFILE" | tr -d '\r' || true)
-  if [[ -z "$IDENTITY" ]]; then
-    echo -e "${RED}Error: no identity produced (empty stdout).${NC}" >&2
-    exit 1
-  fi
-
-  # Extract pubkey from stdout output
-  FIDO2_PUBKEY=$(grep -oP '(?<=# public key: )age1\S+' "$TMPFILE" | tr -d '\r' | head -1 || true)
-  if [[ -z "$FIDO2_PUBKEY" ]]; then
-    echo -e "${RED}Error: could not parse recipient pubkey from stdout.${NC}" >&2
-    echo "Raw stdout above -- paste the 'age1...' pubkey manually if visible." >&2
-    echo -e "${CYAN}Enter recipient pubkey:${NC}"
-    read -r FIDO2_PUBKEY
-    FIDO2_PUBKEY="${FIDO2_PUBKEY// /}"
-  fi
-  if [[ -z "$FIDO2_PUBKEY" || "$FIDO2_PUBKEY" != age1* ]]; then
-    echo -e "${RED}Error: no valid pubkey (expected 'age1...' prefix).${NC}" >&2
-    exit 1
-  fi
-
-  # Check if this key is already enrolled
-  if [[ -f "$PLUGIN_IDS" ]] && grep -qF "$FIDO2_PUBKEY" "$PLUGIN_IDS" 2>/dev/null; then
-    echo -e "${YELLOW}This FIDO2 key is already enrolled.${NC}"
-    echo "Recipient: $FIDO2_PUBKEY"
-    exit 0
-  fi
-
-  # Save to plugin-identities.txt (persists across rebuilds).
-  # Format: comment with pubkey so the file is self-documenting, then the identity.
-  mkdir -p "$SOPS_AGE_DIR"
-  chmod 700 "$SOPS_AGE_DIR"
-  {
-    echo ""
-    echo "# FIDO2 identity enrolled $(date -I)"
-    echo "# public key: $FIDO2_PUBKEY"
-    echo "$IDENTITY"
-  } >> "$PLUGIN_IDS"
-  chmod 600 "$PLUGIN_IDS"
-
-  # Also append to keys.txt immediately so sops can use it without a rebuild
-  if [[ -f "$KEYS_FILE" ]]; then
-    echo "" >> "$KEYS_FILE"
-    echo "$IDENTITY" >> "$KEYS_FILE"
-  fi
-
-  echo -e "${GREEN}FIDO2 key enrolled.${NC}"
-  echo -e "Recipient: ${BOLD}$FIDO2_PUBKEY${NC}"
-  echo ""
-
-  # Add recipient to .sops.yaml if it exists
-  if [[ -f "$SOPS_YAML" ]]; then
-    if grep -qF "$FIDO2_PUBKEY" "$SOPS_YAML"; then
-      echo -e "${GREEN}Key already in $SOPS_YAML.${NC}"
-    else
-      # Insert after the last existing age recipient line, matching its indentation
-      awk -v key="$FIDO2_PUBKEY" '
-        /^[[:space:]]+-[[:space:]]+age1/ { last=NR; indent=$0; sub(/-.*/, "", indent) }
-        { lines[NR]=$0 }
-        END {
-          for (i=1; i<=NR; i++) {
-            print lines[i]
-            if (i==last) print indent "- " key
-          }
-        }
-      ' "$SOPS_YAML" > "$SOPS_YAML.tmp" && mv "$SOPS_YAML.tmp" "$SOPS_YAML"
-      echo -e "${GREEN}Added to $SOPS_YAML.${NC}"
-
-      # Re-encrypt existing secrets for the new recipient
-      existing=$(find "$SECRETS_DIR" -name "*.yaml" ! -name ".sops.yaml" 2>/dev/null | head -5)
-      if [[ -n "$existing" ]]; then
-        echo ""
-        echo "Re-encrypting existing secrets for the FIDO2 key..."
-        echo "You will be asked to touch your key once for decryption."
-        echo ""
-        cd "$SECRETS_DIR"
-        for f in *.yaml; do
-          [[ "$f" == ".sops.yaml" ]] && continue
-          sops updatekeys --yes "$f"
-        done
-        cd "$CONFIG_DIR"
-        echo ""
-        echo -e "${GREEN}Done. Commit the updated secrets:${NC}"
-        echo "  git add secrets/.sops.yaml secrets/*.yaml && git commit -m 'feat(secrets): add FIDO2 key as recipient'"
-      else
-        echo ""
-        echo -e "Commit the updated .sops.yaml:"
-        echo "  git add $SOPS_YAML && git commit -m 'feat(secrets): add FIDO2 key as recipient'"
-      fi
-    fi
-  else
-    echo "No .sops.yaml yet. Run 'hydrix-sops-setup' first to initialize, then"
-    echo "the FIDO2 key will be added automatically as a recipient."
-  fi
-
-  exit 0
-fi
-
-# ── --gen-master-key ─────────────────────────────────────────────────────────
-#
-# Generates a portable age key encrypted with a passphrase. The encrypted file
-# is committed to the hydrix-config repo. On new machines or reinstalls, run
-# --unlock to decrypt it (password required) and activate it as the sops key.
-# The private key is never written to the Nix store or to disk unencrypted.
-#
-# To replace this key with a YubiKey later:
-#   1. hydrix-sops-setup --enroll-fido2
-#   2. Remove master key from secrets/.sops.yaml recipients
-#   3. sops updatekeys --yes secrets/*.yaml
-#   4. Optionally remove secrets/master-age-key.age from the repo
-
-if [[ "${1:-}" == "--gen-master-key" ]]; then
-  MASTER_KEY_ENC="$SECRETS_DIR/master-age-key.age"
-
-  if [[ -f "$MASTER_KEY_ENC" ]]; then
-    echo -e "${YELLOW}Master key already exists at $MASTER_KEY_ENC${NC}"
-    echo "Remove it first to regenerate (and re-encrypt all secrets afterwards)."
-    exit 0
-  fi
-
+write_sops_yaml() {
   mkdir -p "$SECRETS_DIR"
+  printf 'creation_rules:\n  - path_regex: .*\\.(yaml|json)$\n    age:\n      - %s\n' "$1" > "$SOPS_YAML"
+}
 
-  TMPKEY=$(mktemp)
-  trap 'rm -f "$TMPKEY"' EXIT
-  rm -f "$TMPKEY"
-  age-keygen -o "$TMPKEY" 2>/dev/null
-  MASTER_PUBKEY=$(age-keygen -y "$TMPKEY" 2>/dev/null)
+# Install a plaintext master key as the host's only active key, for sops-nix
+# services and for the user's own sops runs. Same result as the next
+# rebuild's activation script, without waiting for it.
+activate_key() {
+  local key="$1"
+  sudo mkdir -p /var/lib/sops-nix
+  sudo chmod 700 /var/lib/sops-nix
+  sudo install -m 600 "$key" "$MASTER_KEY_DEST"
+  sudo install -m 600 "$key" "$ACTIVE_KEY"
+  mkdir -p "$SOPS_AGE_DIR"
+  chmod 700 "$SOPS_AGE_DIR"
+  install -m 600 "$key" "$KEYS_FILE"
+  if [[ -f "$PLUGIN_IDS" ]]; then
+    grep '^AGE-PLUGIN-' "$PLUGIN_IDS" >> "$KEYS_FILE" || true
+  fi
+  sudo systemctl restart 'hydrix-sops-decrypt-*.service' 2>/dev/null || true
+}
 
-  echo ""
+gen_master_key() {
+  [[ -f "$MASTER_KEY_ENC" ]] && die "$MASTER_KEY_ENC already exists."
+  [[ -f "$SOPS_YAML" ]] && die "$SOPS_YAML already exists without a master key; migrate it by hand."
+
+  local tmp
+  tmp=$(mktemp)
+  trap 'rm -f "$tmp"' EXIT
+  rm -f "$tmp"
+  age-keygen -o "$tmp" 2>/dev/null
+
   echo -e "${CYAN}Set a passphrase to protect the master key.${NC}"
-  echo "You will need this passphrase when setting up new machines or reinstalling."
+  echo "It unlocks every secret on every machine: new installs, reinstalls, --unlock."
   echo ""
-  age --passphrase -o "$MASTER_KEY_ENC" "$TMPKEY"
-  rm -f "$TMPKEY"
+  mkdir -p "$SECRETS_DIR"
+  age --passphrase -o "$MASTER_KEY_ENC" "$tmp"
+
+  write_sops_yaml "$(age-keygen -y "$tmp")"
+  activate_key "$tmp"
+  rm -f "$tmp"
   trap - EXIT
 
   echo ""
-  echo -e "${GREEN}Master key encrypted and saved to:${NC} $MASTER_KEY_ENC"
-  echo -e "${CYAN}Master key public key:${NC} ${BOLD}$MASTER_PUBKEY${NC}"
+  echo -e "${GREEN}Master key created and active.${NC}"
+  echo -e "Public key: ${BOLD}$(master_pubkey)${NC}"
   echo ""
-  echo "Next steps:"
-  echo ""
-  echo "1. Add the master key as a recipient in secrets/.sops.yaml:"
-  echo -e "   Under 'age:', add a new line:  ${BOLD}- $MASTER_PUBKEY${NC}"
-  echo ""
-  echo "2. Re-encrypt all existing secrets for the master key"
-  echo "   (do this BEFORE running --unlock or rebuilding):"
-  echo -e "   ${BOLD}cd $SECRETS_DIR${NC}"
-  echo -e "   ${BOLD}sops updatekeys --yes wifi.yaml${NC}"
-  echo -e "   ${BOLD}sops updatekeys --yes github.yaml${NC}"
-  echo ""
-  echo "3. Activate the master key on this machine:"
-  echo -e "   ${BOLD}hydrix-sops-setup --unlock${NC}"
-  echo ""
-  echo "4. Rebuild to make the master key take effect:"
-  echo -e "   ${BOLD}rebuild${NC}"
-  echo ""
-  echo "5. Commit everything:"
-  echo -e "   ${BOLD}cd $CONFIG_DIR${NC}"
-  echo -e "   ${BOLD}git add secrets/master-age-key.age secrets/.sops.yaml secrets/wifi.yaml secrets/github.yaml${NC}"
-  echo -e "   ${BOLD}git commit -m 'feat(secrets): add password-protected master age key'${NC}"
-  echo ""
-  echo "On a new machine or reinstall, after cloning hydrix-config and first rebuild:"
-  echo -e "   ${BOLD}hydrix-sops-setup --unlock${NC}"
-  exit 0
-fi
+  echo "Commit it (the .age file is passphrase-encrypted, safe to commit):"
+  echo -e "  ${BOLD}git -C $CONFIG_DIR add secrets/master-age-key.age secrets/.sops.yaml${NC}"
+}
 
-# ── --unlock ──────────────────────────────────────────────────────────────────
-#
-# Decrypts the master age key (created with --gen-master-key) using the
-# passphrase and writes the private key to /var/lib/sops-nix/master-age-key.txt.
-# The sops.nix activation script prioritises this key over the SSH-derived one,
-# so secrets decrypt immediately after the next rebuild (or service restart).
+unlock() {
+  [[ -f "$MASTER_KEY_ENC" ]] || die "$MASTER_KEY_ENC not found. Pull hydrix-config first."
 
-if [[ "${1:-}" == "--unlock" ]]; then
-  MASTER_KEY_ENC="$SECRETS_DIR/master-age-key.age"
-  MASTER_KEY_DEST="/var/lib/sops-nix/master-age-key.txt"
-
-  if [[ ! -f "$MASTER_KEY_ENC" ]]; then
-    echo -e "${RED}Error: $MASTER_KEY_ENC not found.${NC}" >&2
-    echo "Run 'hydrix-sops-setup --gen-master-key' on another machine first," >&2
-    echo "then commit secrets/master-age-key.age and pull it here." >&2
-    exit 1
-  fi
-
+  local tmp ok=0 attempt
+  tmp=$(mktemp)
+  trap 'rm -f "$tmp"' EXIT
   echo -e "${CYAN}Unlocking master age key...${NC}"
-  echo ""
-
-  # age prompts for the passphrase interactively on the terminal
-  TMPUNLOCK=$(mktemp)
-  trap 'rm -f "$TMPUNLOCK"' EXIT
-  AGE_OK=0
   for attempt in 1 2 3; do
-    echo "(Enter the passphrase you set when generating the master key)"
-    if age -d -o "$TMPUNLOCK" "$MASTER_KEY_ENC"; then
-      AGE_OK=1
+    echo "(Enter the master key passphrase)"
+    if age -d -o "$tmp" "$MASTER_KEY_ENC"; then
+      ok=1
       break
     fi
     [[ $attempt -lt 3 ]] && echo -e "${RED}Incorrect passphrase, try again ($attempt/3).${NC}" >&2
   done
-  if [[ $AGE_OK -ne 1 ]]; then
-    echo -e "${RED}Decryption failed after 3 attempts.${NC}" >&2
+  [[ $ok -eq 1 ]] || die "Decryption failed after 3 attempts."
+
+  activate_key "$tmp"
+  rm -f "$tmp"
+  trap - EXIT
+  echo -e "${GREEN}Master key active. Secrets decrypt now; no rebuild needed.${NC}"
+}
+
+rekey() {
+  is_unlocked || die "master key not unlocked. Run 'hydrix-sops-setup --unlock' first."
+  local pub f failed=0
+  pub=$(master_pubkey)
+
+  write_sops_yaml "$pub"
+  echo -e "${GREEN}$SOPS_YAML now lists only the master key.${NC}"
+
+  while read -r f; do
+    [[ -n "$f" ]] || continue
+    if ! grep -qF "$pub" "$f"; then
+      echo -e "${RED}  $(basename "$f"): not encrypted to the master key, cannot re-key here${NC}"
+      failed=1
+      continue
+    fi
+    (cd "$SECRETS_DIR" && sops updatekeys --yes "$(basename "$f")" >/dev/null) || true
+    if [[ "$(recipients_of "$f")" == "$pub" ]]; then
+      echo -e "${GREEN}  $(basename "$f"): master key only${NC}"
+    else
+      echo -e "${RED}  $(basename "$f"): still has other recipients${NC}"
+      failed=1
+    fi
+  done < <(secret_files)
+
+  echo ""
+  echo "Commit the result:"
+  echo -e "  ${BOLD}git -C $CONFIG_DIR add secrets/ && git -C $CONFIG_DIR commit -m 'chore(secrets): re-key to master key only'${NC}"
+  return $failed
+}
+
+check() {
+  if ! is_unlocked; then
+    echo -e "${YELLOW}Master key not unlocked on this machine.${NC}"
+    echo -e "Run: ${BOLD}hydrix-sops-setup --unlock${NC}"
     exit 1
   fi
 
-  sudo mkdir -p /var/lib/sops-nix
-  sudo chmod 700 /var/lib/sops-nix
-  sudo cp "$TMPUNLOCK" "$MASTER_KEY_DEST"
-  sudo chmod 600 "$MASTER_KEY_DEST"
-  rm -f "$TMPUNLOCK"
-  trap - EXIT
+  local pub f extra=0
+  pub=$(master_pubkey)
+  echo -e "${CYAN}Master public key:${NC} $pub"
 
-  echo ""
-  echo -e "${GREEN}Master key installed at $MASTER_KEY_DEST${NC}"
-  echo "Restarting sops decrypt services..."
-  sudo systemctl restart hydrix-sops-decrypt-*.service 2>/dev/null || true
-  echo -e "${GREEN}Done. Secrets are now available.${NC}"
-  echo ""
-  echo "The master key persists at $MASTER_KEY_DEST across reboots."
-  echo "It is not in the Nix store and survives rebuilds."
-  exit 0
-fi
-
-# ── Normal init / check mode ─────────────────────────────────────────────────
-
-if [[ -z "$HOST_PUBKEY" ]]; then
-  echo -e "${RED}Error: could not derive age public key.${NC}" >&2
-  echo "Run 'rebuild' first to generate the SSH host key and age key." >&2
-  exit 1
-fi
-
-echo -e "${CYAN}Host age public key:${NC} $HOST_PUBKEY"
-echo ""
-
-# ── Create secrets/ directory if needed ─────────────────────────────────────
-
-mkdir -p "$SECRETS_DIR"
-
-# ── Check / create .sops.yaml ────────────────────────────────────────────────
-
-if [[ -f "$SOPS_YAML" ]]; then
-  if grep -qF "$HOST_PUBKEY" "$SOPS_YAML"; then
-    echo -e "${GREEN}$SOPS_YAML already contains this machine's key.${NC}"
-  else
-    echo -e "${YELLOW}Warning: $SOPS_YAML exists but does not contain this machine's key.${NC}"
-    echo ""
-    echo "Add the following line under the 'age:' list in $SOPS_YAML:"
-    echo -e "  ${BOLD}- $HOST_PUBKEY${NC}"
-    echo ""
-    existing=$(find "$SECRETS_DIR" -name "*.yaml" ! -name ".sops.yaml" 2>/dev/null | head -5)
-    if [[ -n "$existing" ]]; then
-      echo "Then re-key existing secrets for this machine:"
-      echo -e "  ${BOLD}cd $CONFIG_DIR && sops updatekeys secrets/*.yaml${NC}"
-    fi
+  if [[ "$(recipients_of "$SOPS_YAML")" != "$pub" ]]; then
+    echo -e "${YELLOW}$SOPS_YAML lists recipients other than the master key.${NC}"
+    extra=1
   fi
-  exit 0
-fi
+  while read -r f; do
+    [[ -n "$f" ]] || continue
+    if [[ "$(recipients_of "$f")" != "$pub" ]]; then
+      echo -e "${YELLOW}$(basename "$f") is encrypted to recipients other than the master key.${NC}"
+      extra=1
+    fi
+  done < <(secret_files)
 
-# Offer a password-protected, portable master key up front so it's included
-# as a second recipient from the start -- lets new machines (or a reinstall)
-# decrypt secrets immediately on clone, no 'sops updatekeys' round-trip needed.
-MASTER_KEY_ENC="$SECRETS_DIR/master-age-key.age"
-MASTER_PUBKEY=""
-if [[ ! -f "$MASTER_KEY_ENC" ]]; then
+  if [[ $extra -eq 1 ]]; then
+    echo -e "Fix with: ${BOLD}hydrix-sops-setup --rekey${NC}"
+    exit 1
+  fi
+  echo -e "${GREEN}Master key is the only recipient everywhere.${NC}"
+}
+
+# FIDO2 enrollment only stores the identity. Swapping it in for the master
+# key is a deliberate, manual step: sops decrypt services run unattended at
+# boot, and a FIDO2 identity needs a touch for every decryption.
+enroll_fido2() {
+  command -v age-plugin-fido2-hmac &>/dev/null ||
+    die "age-plugin-fido2-hmac not found. Run 'rebuild' to install it."
+
+  echo -e "${CYAN}Enrolling FIDO2 key with age-plugin-fido2-hmac...${NC}"
+  echo "You will be asked to touch your key once to generate the credential."
   echo ""
-  echo -e "${CYAN}A master key lets new machines (or a reinstall) decrypt secrets"
-  echo -e "immediately on clone, no 'sops updatekeys' round-trip required.${NC}"
-  read -p "Generate a password-protected master key now? [Y/n]: " gen_master
-  if [[ "${gen_master:-y}" =~ ^[Yy] ]]; then
-    TMPMASTER=$(mktemp)
-    trap 'rm -f "$TMPMASTER"' EXIT
-    rm -f "$TMPMASTER"
-    age-keygen -o "$TMPMASTER" 2>/dev/null
-    MASTER_PUBKEY=$(age-keygen -y "$TMPMASTER" 2>/dev/null)
+  mkdir -p "$SOPS_AGE_DIR"
+  chmod 700 "$SOPS_AGE_DIR"
+
+  # The plugin mixes prompts and output on stdout; capture stdout only and
+  # let stderr reach the terminal for the interactive prompts.
+  local tmp identity pub
+  tmp=$(mktemp)
+  trap 'rm -f "$tmp"' EXIT
+  age-plugin-fido2-hmac --generate > "$tmp"
+  echo ""
+
+  identity=$(grep -E '^AGE-PLUGIN-FIDO2-HMAC-' "$tmp" | tr -d '\r' || true)
+  [[ -n "$identity" ]] || die "no identity produced (empty stdout)."
+  pub=$(grep -oP '(?<=# public key: )age1\S+' "$tmp" | tr -d '\r' | head -1 || true)
+  if [[ -z "$pub" ]]; then
+    echo -e "${CYAN}Could not parse the recipient; paste the age1... pubkey:${NC}"
+    read -r pub
+    pub="${pub// /}"
+  fi
+  [[ "$pub" == age1* ]] || die "no valid pubkey (expected 'age1...' prefix)."
+
+  if [[ -f "$PLUGIN_IDS" ]] && grep -qF "$pub" "$PLUGIN_IDS"; then
+    echo -e "${YELLOW}This FIDO2 key is already enrolled.${NC} Recipient: $pub"
+    exit 0
+  fi
+  {
     echo ""
-    echo "Set a passphrase to protect the master key."
-    echo ""
-    if age --passphrase -o "$MASTER_KEY_ENC" "$TMPMASTER"; then
-      # This machine just generated the key and already holds the plaintext --
-      # activate it directly instead of requiring a separate --unlock.
-      sudo mkdir -p /var/lib/sops-nix
-      sudo chmod 700 /var/lib/sops-nix
-      sudo cp "$TMPMASTER" /var/lib/sops-nix/master-age-key.txt
-      sudo chmod 600 /var/lib/sops-nix/master-age-key.txt
-      echo -e "${GREEN}Master key generated: $MASTER_KEY_ENC${NC}"
+    echo "# FIDO2 identity enrolled $(date -I)"
+    echo "# public key: $pub"
+    echo "$identity"
+  } >> "$PLUGIN_IDS"
+  chmod 600 "$PLUGIN_IDS"
+
+  echo -e "${GREEN}FIDO2 key enrolled.${NC} Recipient: ${BOLD}$pub${NC}"
+  echo ""
+  echo "Not added as a recipient: the master key stays the only key. To replace"
+  echo "the master key with this one later, make it the only recipient in"
+  echo "$SOPS_YAML, 'sops updatekeys' every secret, and remove"
+  echo "secrets/master-age-key.age. Boot-time decrypt services cannot touch a"
+  echo "FIDO2 key, so that switch needs its own design first."
+}
+
+case "${1:-}" in
+  "")
+    if [[ -f "$SOPS_YAML" ]]; then
+      check
+    elif [[ -f "$MASTER_KEY_ENC" ]]; then
+      is_unlocked || unlock
+      write_sops_yaml "$(master_pubkey)"
+      echo -e "${GREEN}Created $SOPS_YAML with the master key as the only recipient.${NC}"
     else
-      echo -e "${YELLOW}Master key encryption failed -- continuing with the SSH-derived key only${NC}"
-      MASTER_PUBKEY=""
-      rm -f "$MASTER_KEY_ENC"
+      gen_master_key
     fi
-    rm -f "$TMPMASTER"
-    trap - EXIT
-  fi
-fi
-
-# Create a new .sops.yaml covering all YAML files in secrets/
-{
-  echo "creation_rules:"
-  echo "  - path_regex: .*\\.yaml\$"
-  echo "    age:"
-  echo "      - $HOST_PUBKEY"
-  [[ -n "$MASTER_PUBKEY" ]] && echo "      - $MASTER_PUBKEY"
-} > "$SOPS_YAML"
-
-echo -e "${GREEN}Created $SOPS_YAML${NC}"
-echo ""
-echo "To also add a FIDO2 hardware key (Titan, Yubikey):"
-echo -e "  ${BOLD}hydrix-sops-setup --enroll-fido2${NC}"
-echo ""
-echo "Next steps:"
-echo -e "  Create a secret:  ${BOLD}sops $SECRETS_DIR/mysecret.yaml${NC}"
-if [[ -n "$MASTER_PUBKEY" ]]; then
-  echo -e "  Commit the config:  ${BOLD}git add $SOPS_YAML $MASTER_KEY_ENC && git commit${NC}"
-else
-  echo -e "  Commit the config:  ${BOLD}git add $SOPS_YAML && git commit${NC}"
-fi
-echo ""
-
-# Check for existing encrypted files that may need re-keying
-existing=$(find "$SECRETS_DIR" -name "*.yaml" ! -name ".sops.yaml" 2>/dev/null | head -5)
-if [[ -n "$existing" ]]; then
-  echo -e "${YELLOW}Existing secrets found — re-key them for this machine:${NC}"
-  echo -e "  ${BOLD}cd $CONFIG_DIR && sops updatekeys secrets/*.yaml${NC}"
-fi
+    ;;
+  --print-key)
+    is_unlocked || die "master key not unlocked. Run 'hydrix-sops-setup --unlock'."
+    master_pubkey
+    ;;
+  --unlock) unlock ;;
+  --gen-master-key) gen_master_key ;;
+  --rekey) rekey ;;
+  --enroll-fido2) enroll_fido2 ;;
+  *) sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
+esac

@@ -3038,73 +3038,33 @@ partition_and_mount() {
     success "Disk partitioned and mounted"
 }
 
-# Initialize sops during install:
-#   1. Generate SSH host key at /mnt/etc/ssh/ so it persists into the installed system
-#      and the activation-script-derived age key matches what we encrypt to here.
-#   2. Derive the age public key from that SSH host key.
-#   3. Write secrets/.sops.yaml with the host pubkey as recipient.
-#   4. If WiFi credentials were collected, encrypt them to secrets/wifi.yaml and
-#      update the machine config (enable sops, set wifiSecretsFile, add wifi to
-#      router VM secrets list). Clear plaintext credentials from modules/wifi.nix.
+# Initialize sops during install. The repo's master key is the only sops key,
+# on every machine:
+#   Fresh repo: generate it (passphrase-encrypted to secrets/master-age-key.age),
+#     activate it in /mnt/var/lib/sops-nix, write secrets/.sops.yaml with it as
+#     the only recipient, and encrypt any WiFi credentials / gitsync deploy key
+#     to it.
+#   Existing repo: wire this machine's config to the secrets already present;
+#     unlocking the committed master key (end of this function) is what lets
+#     them decrypt.
 #
-# Gracefully skipped (with a warning) if ssh-to-age or sops cannot be obtained,
-# or if the SSH key generation fails. In that case, sops can be initialized
-# post-boot with: hydrix-sops-setup && hydrix-sops-setup --gen-key
+# Gracefully skipped (with a warning) if the master key cannot be created. In
+# that case, sops can be initialized post-boot with: hydrix-sops-setup
 init_sops_during_install() {
     local config_dir="$1"
 
     log "Initializing sops secrets..."
 
-    # Generate SSH host key at target — persists into installed system.
-    # On first boot, the sops-nix activation script finds this key and derives
-    # the age key from it, matching the pubkey we encrypt to here.
-    mkdir -p /mnt/etc/ssh
-    chmod 755 /mnt/etc/ssh
-    if [[ ! -f /mnt/etc/ssh/ssh_host_ed25519_key ]]; then
-        ssh-keygen -t ed25519 -f /mnt/etc/ssh/ssh_host_ed25519_key -N "" -C "" -q
-        chmod 600 /mnt/etc/ssh/ssh_host_ed25519_key
-        chmod 644 /mnt/etc/ssh/ssh_host_ed25519_key.pub
-        log "  Generated SSH host key"
-    else
-        log "  SSH host key already exists"
-    fi
-
-    # Derive the age public key using ssh-to-age
-    local host_pubkey
-    host_pubkey=$(nix run --no-write-lock-file nixpkgs#ssh-to-age -- \
-        -i /mnt/etc/ssh/ssh_host_ed25519_key.pub 2>/dev/null) || true
-
-    if [[ -z "$host_pubkey" ]]; then
-        warn "  Could not derive age public key — run hydrix-sops-setup after first boot"
-        return 0
-    fi
-
-    log "  Host age public key: $host_pubkey"
-
     local sops_yaml="$config_dir/secrets/.sops.yaml"
     mkdir -p "$config_dir/secrets"
 
     if [[ -f "$sops_yaml" ]]; then
-        # Existing repo: .sops.yaml already has recipients from the original machine.
-        # Add this machine's key to the age list so it becomes a valid recipient.
-        # Do not touch existing encrypted files — the caller cannot decrypt them yet.
-        # The user must run 'sops updatekeys' from a machine that already has access.
-        awk -v key="$host_pubkey" '
-            /^[[:space:]]+-[[:space:]]+age1/ { last=NR; indent=$0; sub(/-[^-].*/, "", indent) }
-            { lines[NR]=$0 }
-            END {
-                for (i=1; i<=NR; i++) {
-                    print lines[i]
-                    if (i==last) print indent "- " key
-                }
-            }
-        ' "$sops_yaml" > "${sops_yaml}.tmp" && mv "${sops_yaml}.tmp" "$sops_yaml"
-
-        log "  Added this machine to existing secrets/.sops.yaml"
-
+        # Existing repo: secrets are encrypted to the repo's master key, which
+        # is unlocked at the end of this function. .sops.yaml stays as it is.
+        #
         # Wire this machine's config to secrets already present in the repo.
-        # Decryption capability itself depends on the master-key unlock below
-        # (or a later 'sops updatekeys'); without this, hydrix.secrets.enable
+        # Decryption itself depends on the master-key unlock below; without
+        # this wiring, hydrix.secrets.enable
         # and the per-VM secrets lists were left at template defaults for any
         # machine added into an existing repo, so the decrypt services never
         # got created at all.
@@ -3134,62 +3094,45 @@ init_sops_during_install() {
             log "  Wired existing secrets/github.yaml into ${CONFIG[serial]}.nix"
         fi
 
-        log ""
-        log "  IMPORTANT: existing secrets are not yet re-keyed for this machine."
-        log "  From your original machine, run:"
-        log "    cd ~/hydrix-config/secrets"
-        log "    sops updatekeys --yes wifi.yaml"
-        log "    sops updatekeys --yes github.yaml"
-        log "    git add secrets/ && git commit -m 'feat(secrets): add $(hostname) as recipient'"
-        log "    git push"
-        log "  Then on this machine: cd ~/hydrix-config && git pull && rebuild"
+        if [[ ! -f "$config_dir/secrets/master-age-key.age" ]]; then
+            warn "  Repo has no secrets/master-age-key.age: its secrets cannot be unlocked on this machine."
+        fi
     else
-        # Fresh repo: create .sops.yaml and encrypt WiFi/GitHub credentials from scratch
-        printf 'creation_rules:\n  - path_regex: .*\\.yaml$\n    age:\n      - %s\n' \
-            "$host_pubkey" > "$sops_yaml"
-        log "  Created secrets/.sops.yaml"
-
-        # Offer a password-protected, portable master key so this repo can be
-        # cloned onto new machines (or survive a reinstall) without needing an
-        # already-enrolled machine online to re-key secrets.
-        local master_pubkey=""
+        # Fresh repo: the master key is generated here and is the only recipient.
+        local master_pubkey="" master_tmp
         echo ""
-        log "  A master key lets new machines decrypt secrets immediately on clone,"
-        log "  no 'sops updatekeys' round-trip from an existing machine required."
-        read -p "  Generate a password-protected master key now? [Y/n]: " master_yn
-        if [[ "${master_yn:-y}" =~ ^[Yy] ]]; then
-            local master_tmp
-            master_tmp=$(mktemp)
-            rm -f "$master_tmp"
-            if nix shell --no-write-lock-file nixpkgs#age -c age-keygen -o "$master_tmp" 2>/dev/null; then
-                master_pubkey=$(nix shell --no-write-lock-file nixpkgs#age -c age-keygen -y "$master_tmp" 2>/dev/null)
-                echo ""
-                echo "  Set a passphrase to protect the master key."
-                echo "  You will need this passphrase when setting up new machines or reinstalling."
-                echo ""
-                if nix shell --no-write-lock-file nixpkgs#age -c age --passphrase \
-                       -o "$config_dir/secrets/master-age-key.age" "$master_tmp"; then
-                    # This machine generated the key and already holds the plaintext:
-                    # activate it directly instead of requiring a post-boot --unlock.
-                    mkdir -p /mnt/var/lib/sops-nix
-                    chmod 700 /mnt/var/lib/sops-nix
-                    cp "$master_tmp" /mnt/var/lib/sops-nix/master-age-key.txt
-                    chmod 600 /mnt/var/lib/sops-nix/master-age-key.txt
-                    printf '      - %s\n' "$master_pubkey" >> "$sops_yaml"
-                    SOPS_MASTER_PUBKEY="$master_pubkey"
-                    log "  Master key generated: secrets/master-age-key.age"
-                else
-                    warn "  Master key encryption failed, continuing with the SSH-derived key only"
-                    master_pubkey=""
-                fi
+        log "  Generating the master key: the one sops key for every secret, on every machine."
+        master_tmp=$(mktemp)
+        rm -f "$master_tmp"
+        if nix shell --no-write-lock-file nixpkgs#age -c age-keygen -o "$master_tmp" 2>/dev/null; then
+            master_pubkey=$(nix shell --no-write-lock-file nixpkgs#age -c age-keygen -y "$master_tmp" 2>/dev/null)
+            echo ""
+            echo "  Set a passphrase to protect the master key."
+            echo "  You will need it when installing new machines, reinstalling, or running --unlock."
+            echo ""
+            if nix shell --no-write-lock-file nixpkgs#age -c age --passphrase \
+                   -o "$config_dir/secrets/master-age-key.age" "$master_tmp"; then
+                mkdir -p /mnt/var/lib/sops-nix
+                chmod 700 /mnt/var/lib/sops-nix
+                cp "$master_tmp" /mnt/var/lib/sops-nix/master-age-key.txt
+                chmod 600 /mnt/var/lib/sops-nix/master-age-key.txt
+                printf 'creation_rules:\n  - path_regex: .*\\.(yaml|json)$\n    age:\n      - %s\n' \
+                    "$master_pubkey" > "$sops_yaml"
+                SOPS_MASTER_PUBKEY="$master_pubkey"
+                log "  Master key generated: secrets/master-age-key.age"
+                log "  Created secrets/.sops.yaml"
             else
-                warn "  Could not generate master key, continuing with the SSH-derived key only"
+                master_pubkey=""
+                rm -f "$config_dir/secrets/master-age-key.age"
             fi
-            rm -f "$master_tmp"
+        fi
+        rm -f "$master_tmp"
+        if [[ -z "$master_pubkey" ]]; then
+            warn "  Could not create the master key, skipping secrets. Run 'hydrix-sops-setup' after first boot."
+            return 0
         fi
 
-        local recipients="$host_pubkey"
-        [[ -n "$master_pubkey" ]] && recipients="$host_pubkey,$master_pubkey"
+        local recipients="$master_pubkey"
 
         # Encrypt WiFi credentials if available
         if [[ -n "${CONFIG[wifiSsid]:-}" ]] && [[ -n "${CONFIG[wifiPassword]:-}" ]]; then
@@ -3294,7 +3237,7 @@ init_sops_during_install() {
     # unlock step required.
     local master_enc="$config_dir/secrets/master-age-key.age"
     local master_dest="/mnt/var/lib/sops-nix/master-age-key.txt"
-    if [[ -f "$master_enc" ]]; then
+    if [[ -f "$master_enc" && ! -f "$master_dest" ]]; then
         echo ""
         log "  Found secrets/master-age-key.age in the repo."
         echo "  Unlocking it now means secrets will decrypt on first boot."
@@ -3374,7 +3317,7 @@ install_nixos() {
         fi
     )
 
-    # Initialize sops: generate SSH host key, write .sops.yaml, encrypt WiFi credentials
+    # Initialize sops: master key, .sops.yaml, encrypt WiFi credentials
     init_sops_during_install "$config_dir"
 
     # Create user home
@@ -4110,10 +4053,6 @@ access-tokens = github.com=$gh_token"
         echo "  GitHub yourself (github.com/settings/keys) so offline push/pull works:"
         echo "    $GITSYNC_DEPLOY_PUBKEY"
     fi
-    echo ""
-    echo "  After first boot, add a personal age key for cross-machine access:"
-    echo "    hydrix-sops-setup --gen-key"
-    echo "    (save the private key to your password manager)"
     echo "=========================================="
     echo ""
 }

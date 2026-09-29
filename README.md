@@ -186,16 +186,16 @@ with no compositor required at all.
 
 ## Secrets Management
 
-WiFi credentials and SSH keys are encrypted with [sops](https://github.com/getsops/sops) using an age key derived from each machine's SSH host key - encrypted files are safe to commit, only the machine that generated the key (or a portable key, see below) can decrypt them.
+WiFi credentials and SSH keys are encrypted with [sops](https://github.com/getsops/sops) to one key: the repo's master age key, committed passphrase-encrypted as `secrets/master-age-key.age` and unlocked onto each host. Encrypted files are safe to commit; the key never leaves the host, and VMs only receive decrypted files.
 
 ```bash
 # machines/<serial>.nix: hydrix.secrets.enable = true;
-rebuild
-hydrix-sops-setup                  # writes secrets/.sops.yaml with this machine's key
+hydrix-sops-setup                  # generates the master key + secrets/.sops.yaml
 sops secrets/wifi.yaml             # create/edit an encrypted secret
+hydrix-sops-setup --unlock         # on any other machine or reinstall
 ```
 
-Both installers (`install-hydrix.sh`, `setup-hydrix.sh`) drive this automatically during install, including an optional password-protected master key (`hydrix-sops-setup --gen-master-key` / `--unlock`) that lets new machines and reinstalls decrypt existing secrets immediately - no re-keying round-trip to another machine required.
+Both installers (`install-hydrix.sh`, `setup-hydrix.sh`) drive this automatically: a fresh install generates and activates the master key, an add-mode install or reinstall offers to unlock it.
 
 See [DOCUMENTATION.md § Secrets Management](DOCUMENTATION.md#secrets-management) for declaring secret files, per-VM delivery, and the full `hydrix-sops-setup` reference.
 

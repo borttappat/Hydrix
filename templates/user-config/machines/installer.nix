@@ -149,8 +149,9 @@
     # SECRETS (optional - for GitHub SSH keys, WiFi credentials, etc.)
     # ─────────────────────────────────────────────────────────────────────
     # Setup workflow:
-    #   1. Set enable = true, rebuild (generates age key automatically)
-    #   2. Run: hydrix-sops-setup        (creates secrets/.sops.yaml)
+    #   1. Set enable = true
+    #   2. Run: hydrix-sops-setup        (master key + secrets/.sops.yaml;
+    #                                     other machines: hydrix-sops-setup --unlock)
     #   3. Run: sops secrets/github.yaml (create and encrypt secrets file)
     #   4. Set githubSecretsFile below and rebuild
     #
@@ -334,7 +335,6 @@
   #   caption = { text = ""; x = 0; y = 0; };      # DEFAULT: "" (hidden)
   # };
 
-  # Required for sops age key derivation (SSH host key -> age key)
   services.openssh.enable = true;
 
   # Uncomment to enable libvirt/QEMU/virt-manager (pentest VMs, Windows VMs, etc.)

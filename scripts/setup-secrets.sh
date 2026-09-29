@@ -7,8 +7,8 @@
 #   ./scripts/setup-secrets.sh ~/.ssh/github_key  # Uses specific key
 #
 # This script:
-#   1. Gets your machine's age public key
-#   2. Creates secrets/.sops.yaml with your age key
+#   1. Gets the master key's public key (the only sops recipient)
+#   2. Creates secrets/.sops.yaml with the master key
 #   3. Creates secrets/github.yaml with your SSH key
 #   4. Encrypts it with sops
 #   5. Stages it for commit
@@ -91,16 +91,15 @@ check_age_key() {
     if [[ ! -f "$user_age_key" ]]; then
         error "Age key not found at $user_age_key"
         echo ""
-        echo "The age key is derived from your SSH host key during system activation."
-        echo "Make sure hydrix.secrets.enable = true and rebuild:"
-        echo "  rebuild"
+        echo "Unlock the master key first:"
+        echo "  hydrix-sops-setup --unlock"
         exit 1
     fi
 }
 
 # Get age public key
 get_age_pubkey() {
-    AGE_PUBKEY=$(sops-age-pubkey 2>/dev/null)
+    AGE_PUBKEY=$(sudo sops-age-pubkey 2>/dev/null)
     if [[ -z "$AGE_PUBKEY" ]]; then
         error "Failed to get age public key"
         exit 1
@@ -119,7 +118,7 @@ create_sops_config() {
 
     cat > "$sops_file" << EOF
 creation_rules:
-  - path_regex: .*\\.yaml\$
+  - path_regex: .*\\.(yaml|json)\$
     age:
       - $AGE_PUBKEY
 EOF
