@@ -28,7 +28,7 @@ Hydrix is an options-driven NixOS framework that provides complete network isola
 - [Stylix (Opt-in Theming)](#stylix-opt-in-theming)
 - [Font System](#font-system)
 - [MicroVM Management](#microvm-management)
-  - [Task Pentest VMs](#task-pentest-vms-per-engagement)
+  - [Task Slots](#task-slots-per-engagement-vms)
   - [Files VM (Encrypted Inter-VM Transfer)](#files-vm-encrypted-inter-vm-transfer)
   - [Hostsync VM (Host File Inbox)](#hostsync-vm-host-file-inbox)
   - [USB Sandbox](#usb-sandbox-microvm-usb-sandbox)
@@ -246,6 +246,10 @@ always the same regardless of machine. The `vmName` field is that machine's real
 resolves at runtime, and it's the only field here that varies by machine.
 
 **Convention: `vsockCid` = subnet last octet = workspace number.** All three use the same number. Custom profiles start at CID 107+. Reserved: 200 (router), 201 (router-stable), 209 (usb-sandbox), 210 (builder), 211 (gitsync), 212 (files), 213 (vault), 214 (hostsync).
+
+Task slot entries (keyed `<profile>-task<N>`, e.g. `"pentest-task1"`) also carry a
+`taskSlot` field (`"task1"`); it is `null` for every other VM. `shard` finds task slots by
+this field, not by name pattern.
 
 Each entry drives: compositor border rules, workspace-desc label, `hypr-ws-app`/`vm-select` workspace -> VM routing, focus menu, `vm-sync` profile targeting, and file transfer IP resolution.
 
@@ -789,10 +793,9 @@ When you have a working `hydrix-config` on one machine and want to bring a secon
 │   ├── hostsync/default.nix     # Hostsync: inbox path
 │   ├── vault/default.nix        # Vault: KeePassXC database path
 │   └── usb-sandbox/default.nix  # USB sandbox settings
-├── tasks/                       # Pentest task VM slots
-│   ├── task1/                   # CID 115, mv-task-1
-│   ├── task2/                   # CID 116, mv-task-2
-│   └── task3/                   # CID 117, mv-task-3
+├── tasks/                       # Task slots, generated from one block
+│   ├── default.nix              # count, baseCid, base profile, secrets, shared module
+│   └── slots.nix                # expands default.nix: CID, bridge, subnet per slot
 ├── colorschemes/                # Custom pywal colorschemes (JSON)
 ├── specialisations/
 │   ├── _base.nix                # Packages present in all modes
@@ -1920,6 +1923,9 @@ hydrix.microvmHost.vms."microvm-router-<serial>".secrets   = [ "wifi" ];
 hydrix.microvmHost.vms."microvm-dev-<serial>".secrets      = [ "github" ];
 ```
 
+Task slots get theirs from `secrets` in `tasks/default.nix` (applied with `mkDefault`, so a
+per-slot `microvmHost.vms` entry still overrides it).
+
 Each entry in `hydrix.secrets.files` auto-generates a `hydrix-sops-decrypt-<name>.service` on the host. Secrets are decrypted to `/run/secrets/<name>/` and provisioned to each VM's virtiofs share at `/run/hydrix-secrets/<vmname>/<vmDir>/`. Inside the VM they appear at `/mnt/vm-secrets/<vmDir>/`.
 
 #### Per-key extraction mode
@@ -2770,65 +2776,60 @@ hydrix-tui              # Interactive TUI for VM management
 # Or press Mod+m for the launcher
 ```
 
-The TUI's MicroVM menu includes task pentest slots. Task slots display their active engagement name and offer a **Snapshots** sub-menu when stopped.
+The TUI's MicroVM menu includes task slots. Task slots display their bound engagement name and offer a **Snapshots** sub-menu when stopped.
 
-### Task Pentest VMs (per-engagement)
+### Task Slots (per-engagement VMs)
 
-For work that benefits from isolation per target or engagement, Hydrix supports **task slots**: a fixed pool of pre-declared pentest VMs that can be assigned to named engagements without a host rebuild.
+For work that benefits from isolation per target or engagement, Hydrix supports **task slots**: a pool of generic VMs, built once, that named engagements are bound to at runtime without a host rebuild.
 
 **How it works:**
-- Three task slots (`task1`/`task2`/`task3`, CIDs 115–117) are declared permanently in the host config via `hydrix-config/tasks/task*.nix`. Like every other profile/task VM, each is actually a per-machine `microvm-pentest-task<N>-<serial>` nixosConfiguration (see [§ VM Naming and Machine Identity](#vm-naming-and-machine-identity)) - use the short form below, it always resolves correctly regardless of machine.
-- Service units, TAP interfaces, and bridges are created once during the initial rebuild
-- `shard pentest create <name>` assigns an engagement to a free slot and builds its closure - no rebuild needed
+- All slots come from one block in `hydrix-config/tasks/default.nix`, expanded by `tasks/slots.nix` (imported by both `flake.nix` and the files VM). Slot N gets CID = subnet last octet = `baseCid + N - 1`. Like every other profile/task VM, each slot is a per-machine `microvm-<profile>-task<N>-<serial>` nixosConfiguration (see [§ VM Naming and Machine Identity](#vm-naming-and-machine-identity)); use the short `taskN` form, it always resolves correctly.
+- Every slot is its own network: bridge `br-taskN`, subnet `192.168.<cid>.0/24`, router TAP `mv-router-taskN`, passed to the host and both routers as `extraNetworks`. The router's auto-generated inter-bridge drop rules therefore isolate each slot from every other VM network, including the other slots and the base profile VM.
+- An engagement is only a name bound to a slot. Bindings live in `~/.local/share/hydrix/engagements.json` and archived volumes in `/var/lib/microvms/.engagements/<name>/`, both outside the flake, so engagement names never reach git or the nix store.
 
-**One-time setup** (done during any normal rebuild window):
+**Declaring slots** (`hydrix-config/tasks/default.nix`):
 
-```bash
-# Add tasks/task1.nix, task2.nix, task3.nix to your hydrix-config
-# See hydrix-config/tasks/ for the slot configs
-rebuild    # Registers the slot service units permanently
+```nix
+{
+  count = 3;           # task1..task3, max 9 (TAP glob mv-taskN* and the 15-char interface limit)
+  baseCid = 115;       # task1 = 115, task2 = 116, task3 = 117
+  profile = "pentest"; # base profile every slot builds on; workspace and border follow it
+  secrets = [];        # hydrix secrets delivered to every slot, e.g. ["burp"]
+  module = {lib, ...}: {           # applied to every slot
+    hydrix.microvm.persistence.homeSize = 20480;
+    hydrix.microvm.encryption.enable = true;
+    # hydrix.vm.hostname = lib.mkForce "Win-aabbcc1122";  # mkForce: pentest sets it plainly
+  };
+  overrides = {};      # per-slot additions, e.g. task2 = {hydrix.microvm.persistence.homeSize = 51200;};
+}
 ```
+
+Changing `count` or `baseCid` needs `rebuild` (bridges, registry), then `shard -R router` and `shard -R files` (new subnets and TAPs), then `shard -b taskN` for new slots. To give slots VPN egress, add their `br-taskN` bridges to the router's Mullvad bridge map.
 
 **Engagement workflow:**
 
 ```bash
-# Start a new engagement
-shard pentest create google           # Assign 'google' to a free slot
-shard start task1                     # Service unit already exists
-shard snapshot create task1 google-clean  # Baseline
-shard app task1 alacritty
+shard pentest task1 google        # bind 'google' to slot 1 (no rebuild)
+shard pentest google              # or: first free slot (long form: shard pentest start google --slot 1)
+shard -b google                   # build; the first build sets up the encrypted volume
+shard -s google                   # the engagement name works anywhere a VM name does
+shard -a google alacritty
 
-# Between sessions (revert to known-good state)
-shard stop task1
-shard snapshot revert task1 google-clean
-shard start task1
-
-# Close engagement (volume and snapshots preserved, slot freed)
-shard pentest close google
-
-# Reopen from snapshot
-shard pentest create google --slot 1
-shard snapshot revert task1 google-clean
-shard start task1
-
-# Purge all data for an engagement
-shard pentest purge google
-
-# View all slots and their status
-shard pentest list
+shard pentest end google          # stop, archive the volume, free the slot
+shard pentest task2 google        # resume the archived data into any free slot
+shard pentest purge google        # delete an engagement's data, active or archived
+shard pentest list                # slots, bindings, archived engagements
 ```
 
-**Task slot table:**
+`end` moves the slot's home volume (qcow2, with its snapshots, or LUKS container) into the archive, so the slot starts empty for the next engagement. Binding refuses a slot that still holds an unbound volume: `--adopt` binds that volume to the new engagement instead, `shard -p taskN` deletes it. Engagement names are lowercase letters, digits, `-` and `_`, and cannot shadow a VM name or `shard pentest` subcommand.
 
-| Slot | Real per-machine name | CID | TAP | Bridge |
-|------|-----------------------|-----|-----|--------|
-| `task1` | `microvm-pentest-task1-<serial>` | 115 | `mv-task-1` | `br-pentest` |
-| `task2` | `microvm-pentest-task2-<serial>` | 116 | `mv-task-2` | `br-pentest` |
-| `task3` | `microvm-pentest-task3-<serial>` | 117 | `mv-task-3` | `br-pentest` |
+**Task slot table** (defaults):
 
-**Adding more slots:** Create `tasks/task4.nix` with CID 118 and `tapId = "mv-task-4"`, then rebuild once. The `shard pentest` command will discover it automatically.
-
-**Engagement registry:** `hydrix-config/tasks/.engagement-registry` is a JSON file mapping slot names to engagement names. Commit it to track which slot held which engagement.
+| Slot | Real per-machine name | CID | TAP | Bridge | Subnet |
+|------|-----------------------|-----|-----|--------|--------|
+| `task1` | `microvm-pentest-task1-<serial>` | 115 | `mv-task1` | `br-task1` | 192.168.115 |
+| `task2` | `microvm-pentest-task2-<serial>` | 116 | `mv-task2` | `br-task2` | 192.168.116 |
+| `task3` | `microvm-pentest-task3-<serial>` | 117 | `mv-task3` | `br-task3` | 192.168.117 |
 
 **When libvirt is better:**
 - Engagement needs elastic disk beyond the fixed qcow2 max size
@@ -2932,6 +2933,7 @@ Files VM (192.168.108.10 on br-files)
  ├── mv-files-dev  → br-dev         (192.168.105.2)
  ├── mv-files-comm → br-comms       (192.168.104.2)
  ├── mv-files-lurk → br-lurking     (192.168.106.2)
+ ├── mv-files-task1 → br-task1      (192.168.115.2)  [task slots, from tasks/slots.nix]
  ├── mv-files-usb  → br-usb-sandbox (192.168.209.2)  [usb-sandbox, explicit]
  └── mv-files-hsy  → br-hostsync    (192.168.214.2)  [hostsync, explicit]
 
@@ -4747,9 +4749,9 @@ hydrix.microvm.notifyForward.enable = meta.notifyForward;
 The same `meta.nix` value feeds both sides: the VM-side relay
 (`hydrix.microvm.notifyForward.enable`, default `false`) and the host registry
 (`/etc/hydrix/vm-registry.json`, `notifyForward` field, default `false`), which is what the
-host listener authorizes against. Task slots follow the pentest profile's value unless their
-own `tasks/<slot>/meta.nix` sets `notifyForward`; `flake.nix` threads that into both the task
-VM and its registry entry. If the two sides disagree, the host drops the notification and logs
+host listener authorizes against. Task slots follow their base profile's value unless
+`tasks/default.nix` sets `notifyForward`; `tasks/slots.nix` resolves it and `flake.nix` threads
+it into both the task VM and its registry entry. If the two sides disagree, the host drops the notification and logs
 a rejection.
 
 **Architecture:**
