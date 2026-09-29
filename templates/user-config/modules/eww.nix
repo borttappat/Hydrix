@@ -62,6 +62,11 @@
   # Matches gaps_in in modules/hyprland.nix: the inset toward a neighbouring
   # tiled window, as opposed to the full outer gap at the screen edge.
   gapsIn = (gaps + 1) / 2;
+  # Margin around the dashboard blocks so their box-shadow is not clipped at
+  # the window edge. The window grows by it and .dash-root pads it back, so
+  # block edges still line up with tiled windows. The shadow is offset 1px
+  # down, hence the extra px at the bottom.
+  shadowRoom = 4;
   fontFamily = config.hydrix.graphical.font.family or "Iosevka";
   fontSize = let
     base = config.hydrix.graphical.font.size or 10;
@@ -573,8 +578,8 @@
         jq -r '.[] ${lib.optionalString (dash.monitors == "internal") "| select(.name | test(\"^(eDP|LVDS|DSI)-\")) "}| "\(.name) \(.width / .scale | floor) \(.height / .scale | floor) \(.reserved[1]) \(.reserved[3])"' <<< "$mons" \
           | while read -r mon w h top bottom; do
               eww open dashboard --id "dashboard-$mon" --screen "$mon" \
-                --arg width="$(( w / 2 - ${toString gaps} - ${toString gapsIn} ))" \
-                --arg height="$(( h - top - bottom - ${toString gaps} ))" 2>/dev/null || true
+                --arg width="$(( w / 2 - ${toString gaps} - ${toString gapsIn} + ${toString (2 * shadowRoom)} ))" \
+                --arg height="$(( h - top - bottom - ${toString gaps} + ${toString (2 * shadowRoom + 1)} ))" 2>/dev/null || true
             done
       }
 
@@ -653,8 +658,8 @@
       (defwindow dashboard [width height]
         :monitor 0
         :geometry (geometry
-          :x "${toString gaps}px"
-          :y "0px"
+          :x "${toString (gaps - shadowRoom)}px"
+          :y "-${toString shadowRoom}px"
           :width "''${width}px"
           :height "''${height}px"
           :anchor "top left")
@@ -665,6 +670,7 @@
 
       (defwidget dashboard []
         (box
+          :class "dash-root"
           :orientation "h"
           :space-evenly true
           :spacing ${toString gaps}
@@ -1076,6 +1082,11 @@
         background-color: rgba($color0, ${panelOpacity});
         border-radius: ${panelRadius}px;
         padding: ${blockPadding};
+        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
+      }
+
+      .dash-root {
+        padding: ${toString shadowRoom}px ${toString shadowRoom}px ${toString (shadowRoom + 1)}px ${toString shadowRoom}px;
       }
 
       .title {
