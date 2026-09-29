@@ -35,12 +35,6 @@ in {
         default = ui.border;
       };
 
-      barHeight = lib.mkOption {
-        type = lib.types.int;
-        readOnly = true;
-        default = ui.barHeight;
-      };
-
       barPadding = lib.mkOption {
         type = lib.types.int;
         readOnly = true;
@@ -121,15 +115,6 @@ in {
         type = lib.types.int;
         readOnly = true;
         default = ui.rofiHeight;
-      };
-    };
-
-    # Base values for display-setup.nix fallback
-    base = {
-      barHeight = lib.mkOption {
-        type = lib.types.int;
-        readOnly = true;
-        default = ui.barHeight;
       };
     };
   };

@@ -261,7 +261,6 @@
 
       # ─── UI layout ─────────────────────────────────────────────────────
       # ui.gaps        = 15;          # DEFAULT: 15 - window gaps (px)
-      # ui.barHeight   = 23;          # DEFAULT: 23
       # ui.border      = 2;           # DEFAULT: 2  - window border width
       # ui.cornerRadius = 2;          # DEFAULT: 2  - corner rounding radius
       # ui.notifications.offsetCompensation.y = -1; # DEFAULT: {} (x=0,y=0) - per-machine

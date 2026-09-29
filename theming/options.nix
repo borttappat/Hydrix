@@ -668,12 +668,6 @@ in {
         description = "Multiplier applied to cornerRadius to get waybar pill radius when pillRadius is null";
       };
 
-      barHeight = lib.mkOption {
-        type = lib.types.int;
-        default = 23;
-        description = "Bar height (base value)";
-      };
-
       barPadding = lib.mkOption {
         type = lib.types.int;
         default = 2;

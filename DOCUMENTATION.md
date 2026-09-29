@@ -1489,7 +1489,6 @@ daemon's logic runs unaffected.
     ui = {
       gaps = 15;
       border = 2;
-      barHeight = 23;
       barPadding = 2;
       cornerRadius = 2;              # Windows; eww/wofi panels use cornerRadius + border - 1
 

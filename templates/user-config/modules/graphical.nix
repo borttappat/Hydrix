@@ -19,13 +19,13 @@
     # ui.cornerRadius = lib.mkDefault 2;     # Window corner radius (px); waybar pills = cornerRadius * pillRadiusScale, eww/wofi = cornerRadius + border - 1
 
     # ─── Shadows ───────────────────────────────────────────────────────
-    # One setting for window (Hyprland), eww, waybar pill and wofi shadows.
+    # One setting for window (Hyprland), eww, waybar pill, wofi and notification shadows.
     # ui.shadow.enable   = lib.mkDefault true;
     # ui.shadow.strength = lib.mkDefault 1.0;   # Multiplier on every shadow's opacity and size
 
     # ─── Waybar sizing (active bar stack) ───────────────────────────────
     # Bar content height and pill vertical padding are auto-derived from
-    # font.size and ui.gaps (see modules/waybar.nix). ui.barHeight has no effect here.
+    # font.size and ui.gaps (see modules/waybar.nix).
     # ui.barGaps         = lib.mkDefault null;  # Bar-to-edge margin (null = gaps/2)
     # ui.pillRadius      = lib.mkDefault null;  # Explicit pill radius (null = cornerRadius * pillRadiusScale)
     # ui.pillRadiusScale = lib.mkDefault 2.0;   # Scale factor applied to cornerRadius for pill radius
