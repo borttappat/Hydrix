@@ -1,0 +1,8 @@
+[SddmGreeterTheme]
+Name=Hydrix
+Description=Hydrix login, mirrors the hyprlock lockscreen
+Author=Hydrix
+Version=3.0
+MainScript=Main.qml
+ConfigFile=theme.conf
+QtVersion=6
