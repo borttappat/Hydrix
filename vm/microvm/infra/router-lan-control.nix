@@ -21,6 +21,10 @@
 #   LAN_STATUS                      Show current state
 #   PING                            Health check
 #
+# Standing forwards (e.g. a media server for LAN devices) are declared with
+# hydrix.router.lanControl.forwards and applied through the same PORT_ADD path
+# once the uplink is up.
+#
 # CID = subnet third octet by convention, which is how networks are looked up.
 {
   config,
@@ -185,30 +189,86 @@
     esac
   '';
 in {
-  environment.systemPackages = [lanControlBin];
-
-  # Re-grant LAN access whenever the router firewall (re)loads its table
-  systemd.services.router-lan-control = {
-    description = "Restore LAN access grants after a router firewall load";
-    wantedBy = ["multi-user.target" "router-firewall.service"];
-    after = ["router-firewall.service"];
-    partOf = ["router-firewall.service"];
-    serviceConfig = {
-      Type = "oneshot";
-      RemainAfterExit = true;
-    };
-    script = "echo SYNC | ${lanControlBin}/bin/router-lan-control";
+  options.hydrix.router.lanControl.forwards = lib.mkOption {
+    type = lib.types.listOf (lib.types.submodule {
+      options = {
+        cid = lib.mkOption {
+          type = lib.types.int;
+          description = "Network of the target VM (CID = subnet third octet).";
+        };
+        port = lib.mkOption {
+          type = lib.types.port;
+          description = "Uplink TCP port, forwarded to the same port on the VM.";
+        };
+        ip = lib.mkOption {
+          type = lib.types.nullOr lib.types.str;
+          default = null;
+          description = "Target address; null means the VM's static <subnet>.<cid>.";
+        };
+      };
+    });
+    default = [];
+    example = [
+      {
+        cid = 107;
+        port = 8096;
+      }
+    ];
+    description = ''
+      Uplink TCP ports forwarded to VMs from boot, so devices on the router
+      uplink's LAN can reach a service in a VM (e.g. a media server). Same
+      mechanism as `pentest-lan forward add`; replies route back via the main
+      table, so the target may be VPN-routed.
+    '';
   };
 
-  # Vsock server on port 14516
-  systemd.services.lan-control-server = {
-    description = "LAN control vsock server (port 14516)";
-    wantedBy = ["multi-user.target"];
-    after = ["router-lan-control.service"];
-    serviceConfig = {
-      Type = "simple";
-      ExecStart = "${pkgs.socat}/bin/socat VSOCK-LISTEN:${toString config.hydrix.networking.vsockPorts.lanControl},reuseaddr,fork EXEC:${lanControlBin}/bin/router-lan-control";
-      Restart = "always";
+  config = {
+    environment.systemPackages = [lanControlBin];
+
+    # Re-grant LAN access whenever the router firewall (re)loads its table
+    systemd.services.router-lan-control = {
+      description = "Restore LAN access grants after a router firewall load";
+      wantedBy = ["multi-user.target" "router-firewall.service"];
+      after = ["router-firewall.service"];
+      partOf = ["router-firewall.service"];
+      serviceConfig = {
+        Type = "oneshot";
+        RemainAfterExit = true;
+      };
+      script = "echo SYNC | ${lanControlBin}/bin/router-lan-control";
+    };
+
+    # Vsock server on port 14516
+    systemd.services.lan-control-server = {
+      description = "LAN control vsock server (port 14516)";
+      wantedBy = ["multi-user.target"];
+      after = ["router-lan-control.service"];
+      serviceConfig = {
+        Type = "simple";
+        ExecStart = "${pkgs.socat}/bin/socat VSOCK-LISTEN:${toString config.hydrix.networking.vsockPorts.lanControl},reuseaddr,fork EXEC:${lanControlBin}/bin/router-lan-control";
+        Restart = "always";
+      };
+    };
+
+    systemd.services.router-lan-forwards = lib.mkIf (config.hydrix.router.lanControl.forwards != []) {
+      description = "Apply declared uplink port forwards";
+      wantedBy = ["multi-user.target"];
+      wants = ["network-online.target"];
+      after = ["network-online.target" "router-lan-control.service"];
+      serviceConfig = {
+        Type = "oneshot";
+        RemainAfterExit = true;
+      };
+      # PORT_ADD needs the uplink; WiFi may still be associating after boot
+      script =
+        lib.concatMapStrings (f: ''
+          for _ in $(seq 60); do
+            echo "PORT_ADD ${toString f.cid} ${toString f.port} ${lib.optionalString (f.ip != null) f.ip}" \
+              | ${lanControlBin}/bin/router-lan-control | tee /dev/stderr | grep -q '^OK' && break
+            sleep 2
+          done
+        '')
+        config.hydrix.router.lanControl.forwards;
     };
   };
 }
