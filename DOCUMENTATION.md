@@ -599,21 +599,25 @@ The router VM is **untrusted infrastructure** it handles WiFi and NAT but has no
 | Console access | vsock (CID 200) + unix socket, host-only, not reachable from any VM or LAN |
 | Default firewall policy | `input: DROP`, `forward: DROP` |
 | What VMs can reach on the router | DNS (53), DHCP (67), ICMP (rate-limited)  |
+| WAN side (WiFi/ethernet) | No new inbound connections; only DHCP replies for the router's own lease and replies to connections the router made |
+| Source addresses | Each LAN interface only accepts its own subnet as source (anti-spoofing); isolation and VPN routing both rely on it |
+| Firewall load order | `router-firewall` runs before `network-pre.target`, so no interface is up without rules; a reload atomically replaces only `table inet router` |
 | Autologin | Safe, getty console is local-only, no network auth surface exists |
 
 The `router.hashedPassword` option exists only to lock down vsock console access from the host side (e.g., shared-host scenarios). It is not a network security control, VMs cannot reach the router console regardless.
 
 ### VM-to-VM Isolation
 
-Each VM subnet is isolated from all others at the router's `forward` chain. A compromised browsing VM cannot reach the pentest or dev VM's subnet, and vice versa. The only exception is `br-shared` (192.168.105.0/24), which all VMs can forward to and from.
+Each VM subnet is isolated from all others at the router's `forward` chain. A compromised browsing VM cannot reach the pentest or dev VM's subnet, and vice versa. Because each router LAN interface drops packets whose source is outside its own subnet, a VM also cannot pose as another network to get past these rules or to pick another network's VPN exit.
 
 ```
 pentest  -> browse:  BLOCKED
 pentest  -> comms:   BLOCKED
 browse   -> dev:     BLOCKED
-any VM   -> shared:  ALLOWED  (intentional shared services subnet)
-any VM   -> WAN:     ALLOWED  (via NAT through router)
+any VM   -> WAN:     ALLOWED  (via NAT through router, per-network route, see Mullvad VPN)
 ```
+
+Exceptions are explicit: `hydrix.router.microvm.firewall.sharedSubnets` (subnets open to all), `firewall.allowedAccessTo` (scoped IP/port pairs), and connections redirected by a DNAT rule on the router itself (`ct status dnat`, e.g. `router-lan-control` port forwards), which only root on the router can create.
 
 The files VM (`microvm-files`) bypasses this intentionally by connecting directly to bridges via dedicated TAP interfaces explicitly granted per-bridge via `microvmFiles.accessFrom`. Passphrases for encrypted file transfer travel exclusively over vsock, never over bridge networks.
 
@@ -3585,6 +3589,19 @@ Each VM bridge can route through a separate Mullvad WireGuard exit node. The rou
 
 At router boot, `vpn-boot-assign` brings up a `wg-<bridge>` WireGuard interface for each entry in the bridges map and routes that bridge's traffic through it. Bridges not in the map go direct. The router uses policy routing (one table per subnet, table ID = CID) so each bridge is fully isolated, a browsing VM and a pentest VM can exit through different countries simultaneously.
 
+**Fail closed.** `vpn-policy-init` installs every network's table before any interface comes up, each ending in an `unreachable` default. A network only reaches the WAN when its table says so:
+
+| Assignment | Table contents | Result |
+|------------|----------------|--------|
+| `wg-<name>` | `default dev wg-<name>` | Traffic through the tunnel |
+| tunnel down or deleted | only the `unreachable` fallback | Blocked, never direct |
+| `blocked` | only the `unreachable` fallback | Blocked |
+| `direct` | `throw default` | Handed to the main table, follows the router's current WAN route (survives WiFi roaming) |
+
+Mullvad networks stay blocked from boot until their tunnel is up, and a tunnel that fails to connect at boot leaves its network blocked. Traffic *to* a router LAN always uses the main table, so router replies and allowed inter-VM traffic never enter a tunnel table.
+
+**DNS follows the traffic.** VMs use the router (`.253`) as their resolver. For tunnelled and blocked networks the router DNATs those queries to the in-tunnel resolver (`hydrix.router.vpn.mullvad.dns`, default Mullvad's `10.64.0.1`), so lookups leave through the same tunnel as the traffic, or not at all while blocked. Direct networks use the router's own resolver. `vpn-assign` keeps this redirect in step with every reassignment.
+
 The `Table = off`, IPv6, and DNS lines are automatically stripped from downloaded `.conf` files at build time so they don't interfere with the router's own routing.
 
 New profiles are handled automatically: add the bridge entry to `mullvad.nix` and rebuild the router, no other changes needed.
@@ -3760,6 +3777,30 @@ VM /nix/.rw-store (qcow2) ──┘
 | `vm-config` | `/var/lib/microvms/<vm>/config` | `/mnt/vm-config` | 9p | VM config, live switch registration |
 | `hydrix-config` | `~/.config/hydrix` | `/mnt/hydrix-config` | 9p | Host config (scaling.json for DPI) |
 | `vm-secrets` | `/run/hydrix-secrets/<vm>` | `/mnt/vm-secrets` | virtiofs | GitHub SSH keys |
+| `repo-<name>` | `/run/hydrix-repos/<vm>/<name>` | same path as on the host | virtiofs | Host working tree, read-write except `readOnlyPaths` (only with `hostRepos`) |
+
+#### Host Repos (`hostRepos`)
+
+`hydrix.microvmHost.vms.<vm>.hostRepos` shares host working trees into a profile VM so it
+can edit them without being able to commit or push. The host service `hydrix-repos-<vm>`
+runs before the VM's virtiofsd and builds one view per repo:
+
+1. Bind-mounts the working tree at `/run/hydrix-repos/<vm>/<name>` and makes that mount
+   private, so nothing mounted inside it propagates back onto the real tree.
+2. Bind-mounts each `readOnlyPaths` entry (default `.git`) over itself and remounts it
+   read-only. Missing entries are created as empty directories first.
+3. virtiofsd serves the view, and the VM mounts it at the working tree's own absolute path
+   (`hydrix.microvm.hostRepos`, which the user flake sets from the same value).
+
+The read-only mounts live in the host's mount namespace, so root in the guest can't undo
+them. A guest-side read-only mount stacked over a read-write share could simply be unmounted.
+With `.git` read-only the VM cannot commit or change refs, hooks, or git config. Pair it
+with no `github` secret for that VM and it has no push path at all.
+
+The views are built on VM start, not on rebuild (`restartIfChanged = false`), so a changed
+`hostRepos` takes effect on the next restart. Inside the guest, read-only paths still pass
+`test -w`, since only the host knows they are read-only. VM-side scripts must attempt the
+write and handle `EROFS` rather than check first.
 
 ### Nix DB Registration
 
@@ -3848,6 +3889,25 @@ shard builder build browsing
 7. Host nix-daemon restarts
 8. Host builds packages instantly (all deps already in store)
 ```
+
+**Local flake inputs (`localInputs`):**
+
+The builder evaluates the user flake from `/mnt/hydrix` (a read-only share of
+`~/hydrix-config`). A local input such as `hydrix.url = "path:/home/<user>/Hydrix"` is
+locked by its absolute host path, so the builder needs that path too.
+`hydrix.builder.localInputs` shares each listed path read-only (enforced by the host
+virtiofsd) at the same absolute path, and adds it to the builder's git `safe.directory`:
+
+```nix
+# infra/builder/default.nix
+{config, ...}: {
+  hydrix.builder.localInputs = ["/home/${config.hydrix.builder.hostUsername}/Hydrix"];
+}
+```
+
+An offline build then resolves the input exactly as the host does. With `hydrix.url` on a
+remote the share is simply unused. Every listed path must exist on the host, or the
+builder's virtiofsd fails to start.
 
 **Builder shell access:**
 

@@ -489,6 +489,20 @@ Enable Mullvad VPN on the router VM. Requires WireGuard config files in `vpn/`.
 
 ---
 
+#### `hydrix.router.vpn.mullvad.dns`
+| | |
+|---|---|
+| Type | `str` |
+| Default | `"10.64.0.1"` |
+| Template | - |
+
+Resolver reached through the tunnel. DNS queries from tunnelled or blocked networks to
+the router are DNATed here, so lookups take the same path as the traffic. `10.64.0.1` is
+Mullvad's in-tunnel resolver; change it only for a different provider or a Mullvad
+content-blocking resolver.
+
+---
+
 ### Hardware
 
 #### `hydrix.hardware.platform`
@@ -834,6 +848,13 @@ value to the VM as `hydrix.microvm.hostRepos`.
 ```
 
 Leave `github` out of that VM's `secrets` if it should never be able to push.
+
+**Guest-side scripts cannot test for this with `test -w`.** The read-only flag lives in
+virtiofsd on the host; the guest mounts the share read-write, so `access(2)` (and `[ -w ]`)
+still reports read-only paths as writable. Writes fail only when they reach the host, with
+`EROFS`. Anything running in the VM that writes to a shared repo's `.git` (a home-manager
+activation step setting `git config --local`, for example) must attempt the write and treat
+failure as "skip", or the failure aborts the rest of that activation.
 
 ---
 
