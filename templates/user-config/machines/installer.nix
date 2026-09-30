@@ -30,6 +30,7 @@
     ./@SERIAL@-grub-entries.nix
     ../modules/usb-blocking.nix
     ../modules/eww.nix            # eww desktop dashboard (VMs, network, cpu, git, todo, weather)
+    "${hydrix}/host/pentest-lan.nix" # pentest-lan: grant VMs the router uplink's LAN, port forwards
   ];
 
   # =========================================================================
@@ -356,6 +357,7 @@
   # Uncomment to enable libvirt/QEMU/virt-manager (pentest VMs, Windows VMs, etc.)
   # hydrix.libvirt.enable = true;
   # hydrix.libvirt.grabKey = "65507,65513";  # Left Ctrl+Alt - find keysyms with `xev`
+  # hydrix.libvirt.defaultBridge = "br-libvirt"; # deploy-vm default; needs the "libvirt" network in flake.nix
 
   # ─── Elastic CPU/RAM per-machine overrides ──────────────────────────────
   # Every profile VM gets hydrix.vmElastic.vms.<profile> enabled automatically,

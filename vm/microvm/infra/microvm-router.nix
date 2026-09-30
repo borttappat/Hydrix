@@ -184,6 +184,13 @@
     };
 
   # ===== Router nftables ruleset (loaded by router-firewall) =====
+  # WAN-side private space: the local network the router's uplink sits on
+  # (home/hotel/office LAN, carrier NAT, link-local).
+  privateNets = "{ 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16, 100.64.0.0/10 }";
+  # Egress interfaces that are tunnels, not the physical uplink
+  tunnelIfaces = ["wg-*" "tun*" "mullvad-*" "tailscale0"];
+  # Mark on replies to connections a router DNAT created; routed via main
+  dnatReplyMark = "0x100";
   vmNetworks = "{ ${lib.concatMapStringsSep ", " (l: "${l.subnet}.0/24") allLans} }";
   routerLanIps = "{ ${lib.concatMapStringsSep ", " (l: "${l.subnet}.253") allLans} }";
   # Each LAN may only source its own subnet. Traffic isolation and the
@@ -206,6 +213,22 @@
       map vpn_dns {
         type ifname : ipv4_addr
         ${lib.optionalString (vpnDnsElements != "") "elements = { ${vpnDnsElements} }"}
+      }
+
+      # LAN taps allowed to reach private addresses on the WAN side (the
+      # physical LAN the router's uplink is on). router-lan-control adds and
+      # removes networks at runtime; the host's management network is always in.
+      set lan_access {
+        type ifname
+        elements = { "mv-router-mgmt" }
+      }
+
+      # Replies to connections a DNAT rule on the router created (port
+      # forwards, VPN DNS) are routed via the main table, i.e. back the way
+      # the connection came in, not into the VM network's tunnel table.
+      chain dnat_reply {
+        type filter hook prerouting priority mangle; policy accept;
+        ct direction reply ct status dnat meta mark set meta mark | ${dnatReplyMark}
       }
 
       chain prerouting {
@@ -280,6 +303,10 @@
       isolated}
         # User extra rules
         ${lib.concatStringsSep "\n    " cfg.router.microvm.firewall.extraRules}
+
+        # VM networks reach the router uplink's own LAN only when granted
+        # (router-lan-control); tunnels and the internet are unaffected
+        iifname != @lan_access oifname != ${lanTapSetNft} ${lib.concatMapStringsSep " " (t: "oifname != \"${t}\"") tunnelIfaces} ip daddr ${privateNets} drop
 
         # Allow forwarding out to WAN/VPN (any non-LAN egress)
         oifname != ${lanTapSetNft} accept
@@ -737,6 +764,7 @@ in {
         }
         ${lib.concatMapStrings (l: "rule to ${l.subnet}.0/24 lookup main priority 10
 ") allLans}
+        rule fwmark ${dnatReplyMark}/${dnatReplyMark} lookup main priority 20
         ${lib.concatMapStrings (n: ''
             rule from ${n.subnet}.0/24 lookup ${table n} priority ${table n}
             ip route replace unreachable default metric 4294967295 table ${table n}
