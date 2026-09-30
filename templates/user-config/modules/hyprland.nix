@@ -139,7 +139,10 @@
       # else (e.g. "invalid auto direction") is an error text on the same stdout.
       # Checked explicitly so a rejected command can never save/persist a stale
       # or unrelated position under the requested one.
-      _result=$(${hyprlandPkg}/bin/hyprctl keyword monitor "$_name,preferred,$_pos,1")
+      # Keep the monitor's current scale: a hardcoded 1 here would be saved into
+      # the desc: rule and override hyprInternalScale for the internal panel.
+      _cur_scale=$(_monitors_json | ${pkgs.jq}/bin/jq -r --arg n "$_name" '.[] | select(.name==$n) | .scale')
+      _result=$(${hyprlandPkg}/bin/hyprctl keyword monitor "$_name,preferred,$_pos,$_cur_scale")
       if [ "$_result" != "ok" ]; then
         echo "monitor-layout: hyprctl rejected '$_pos' for $_name: $_result" >&2
         exit 1
