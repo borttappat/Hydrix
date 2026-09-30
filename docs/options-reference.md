@@ -938,8 +938,22 @@ Enable lockdown-mode git push/pull via microvm-gitsync VM.
 | Default | `false` |
 | Template | — |
 
-Enable libvirt/QEMU virtualization stack. Only needed if still using libvirt VMs.
-The microvm router is the current standard; libvirt is being phased out.
+Enable libvirt/QEMU virtualization stack for standalone VMs (virt-manager, `deploy-vm`).
+Independent of the microVM fleet and the router.
+
+---
+
+#### `hydrix.libvirt.defaultBridge`
+| | |
+|---|---|
+| Type | `nullOr str` |
+| Default | `null` |
+| Template | ✓ commented example in `machines/installer.nix` |
+
+Bridge `deploy-vm` uses when `--bridge` is not given, for every `--type`. Point it at a
+router-served network for standalone VMs (e.g. a `standaloneNetworks` entry in `flake.nix`,
+bridge `br-<name>`); the host itself never routes, so VMs only get internet from the router.
+`null` keeps the per-type bridges.
 
 ---
 

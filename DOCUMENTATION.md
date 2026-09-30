@@ -339,27 +339,27 @@ machine-specific to isolate.
 
 ### VM Static IP Scheme
 
-Profile VMs use a static `.10` IP on their bridge for Files VM reachability. The IP is **automatically derived** from `hydrix.networking.vmSubnet`, which every profile sets from its own `meta.nix`:
+Profile VMs use a static `<subnet>.<CID>` IP on their bridge (e.g. `192.168.102.102`). Using the CID rather than a fixed last octet keeps VMs that share a subnet (pentest and its task slots) on distinct addresses. The IP is **automatically derived** from `hydrix.networking.vmSubnet`, which every profile sets from its own `meta.nix`:
 
 ```nix
 # In profiles/<name>/default.nix, this one line drives everything
 hydrix.networking.vmSubnet = meta.subnet;  # e.g. "192.168.102"
-# -> staticIp auto-set to "192.168.102.10" by microvm-base.nix
+# -> staticIp auto-set to "192.168.102.102" by microvm-profile-base.nix
 ```
 
-`microvm-base.nix` sets `hydrix.microvm.staticIp = lib.mkDefault "${vmSubnet}.10"` whenever `vmSubnet` is non-empty. No explicit `staticIp` declaration is needed in profile modules - the template includes the `vmSubnet` line and that is sufficient.
+`microvm-profile-base.nix` sets `hydrix.microvm.staticIp = lib.mkDefault "${vmSubnet}.${vsockCid}"` whenever `vmSubnet` is non-empty. No explicit `staticIp` declaration is needed in profile modules - the template includes the `vmSubnet` line and that is sufficient.
 
 The table below shows the Hydrix built-in profile **defaults**, your `meta.nix` values take precedence automatically:
 
 | VM | Default Bridge | Default Static IP |
 |----|---------------|------------------|
-| `pentest` | `br-pentest` | `<subnet>.10` |
-| `browsing` | `br-browse` | `<subnet>.10` |
-| `comms` | `br-comms` | `<subnet>.10` |
-| `dev` | `br-dev` | `<subnet>.10` |
-| `lurking` | `br-lurking` | `<subnet>.10` |
+| `pentest` | `br-pentest` | `<subnet>.<CID>` |
+| `browsing` | `br-browse` | `<subnet>.<CID>` |
+| `comms` | `br-comms` | `<subnet>.<CID>` |
+| `dev` | `br-dev` | `<subnet>.<CID>` |
+| `lurking` | `br-lurking` | `<subnet>.<CID>` |
 
-Each VM configures this IP on its main TAP interface via systemd-networkd. The Files VM derives the destination IP for each VM from the vm-registry (`subnet + ".10"`) at transfer time.
+Each VM configures this IP on its main TAP interface via systemd-networkd, with the router (`<subnet>.253`) as gateway and DNS server. `pentest-lan forward` targets this address.
 
 ### Files VM Cross-Bridge Wiring
 
@@ -621,12 +621,29 @@ Exceptions are explicit: `hydrix.router.microvm.firewall.sharedSubnets` (subnets
 
 The files VM (`microvm-files`) bypasses this intentionally by connecting directly to bridges via dedicated TAP interfaces explicitly granted per-bridge via `microvmFiles.accessFrom`. Passphrases for encrypted file transfer travel exclusively over vsock, never over bridge networks.
 
+### Uplink LAN Access (`pentest-lan`)
+
+VM networks cannot reach the physical LAN the router's uplink is on (the home, hotel or office network): the router drops traffic from a VM network to private addresses (`10/8`, `172.16/12`, `192.168/16`, `169.254/16`, `100.64/10`) leaving through the uplink. Tunnels and the internet are unaffected, and the host's management network is always allowed (captive portals, local printers in administrative mode).
+
+Access is granted per network at runtime from the host, through `router-lan-control` on the router (vsock 14516). Names are vm-registry keys:
+
+```bash
+pentest-lan enable pentest            # pentest's network may reach the uplink LAN
+pentest-lan disable pentest           # isolate it again
+pentest-lan forward add 8080 pentest  # uplink TCP 8080 -> pentest VM (<subnet>.<CID>):8080
+pentest-lan forward remove 8080 pentest
+pentest-lan status
+```
+
+- Grants are a firewall set (`lan_access`); `enable` also adds a policy rule so a tunnelled network's LAN traffic bypasses its tunnel. Grants survive a firewall reload (`router-lan-control.service` re-applies them), not a router restart.
+- Forwards are DNAT rules in the router's own `ip hydrix-lan` table. Replies to any connection the router DNATed are routed back via the main table, so forwards also work for VPN-routed VMs and without LAN access.
+
 ### Host Isolation
 
 The host has no L3 presence on VM bridges. All bridges exist as pure L2 plumbing:
 - No IPv4 addresses on any bridge in any mode
 - IPv6 link-local auto-assignment is disabled on all VM bridges via sysctl (`net.ipv6.conf.<br>.disable_ipv6`)
-- `br-shared` is VM-only in all modes - the host never holds an address there
+- The host never routes: `net.ipv4.ip_forward = 0`. libvirt's `default` network (`virbr0`) is isolated (no `<forward>`), so libvirt never switches forwarding back on; standalone libvirt VMs attach to router-served bridges (`deploy-vm` picks one per type) and get internet from the router
 
 The one exception is `br-mgmt` in **Administrative** mode, where the host needs `192.168.100.1/24` to route through the router VM as a gateway. That address is absent in Lockdown.
 
@@ -3965,7 +3982,29 @@ build-base --all
 deploy-vm --type browsing --name personal --user myuser
 deploy-vm --type pentest --name htb --vcpus 8 --memory 16384
 deploy-vm --type dev --name work --encrypt    # LUKS encrypted
+deploy-vm --type pentest --name win-target --bridge br-pentest   # next to the pentest VM
 ```
+
+**Networking.** The host never routes, so a libvirt VM gets internet only from a bridge the router serves. `virbr0` (libvirt's `default` network) is isolated and has no internet. deploy-vm picks the bridge in this order:
+
+1. `--bridge <br>` on the command line
+2. `hydrix.libvirt.defaultBridge`, for every type
+3. the type's own bridge (`pentest` -> `br-pentest`, `browsing` -> `br-browse`, ...)
+
+A dedicated network for standalone VMs keeps them out of your profile VMs' segments. Declare it in `flake.nix` (the router is a separate build and only sees networks passed there) and point deploy-vm at it:
+
+```nix
+# flake.nix
+standaloneNetworks = [
+  { name = "libvirt"; subnet = "192.168.130"; routerTap = "mv-router-libv"; }
+];
+extraNetworks = profileExtraNetworks ++ infraNetworks ++ taskNetworks ++ standaloneNetworks;
+
+# machines/<serial>.nix
+hydrix.libvirt.defaultBridge = "br-libvirt";
+```
+
+After `rebuild`, `br-libvirt` exists on the host and the router serves `192.168.130.0/24` (gateway and DNS `.253`, DHCP `.10`-`.200`), isolated from every other VM network and assignable to a Mullvad exit like any other. For VMs created by hand in virt-manager, set the NIC's network source to "Bridge device" `br-libvirt`; Windows needs the virtio-win drivers for a `virtio` NIC, or use `e1000e`. A test target on `br-pentest` shares the pentest VM's subnet, so the pentest VM reaches it directly, and it follows pentest's routing.
 
 ---
 
