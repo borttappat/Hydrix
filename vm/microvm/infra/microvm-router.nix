@@ -155,9 +155,30 @@
     })
     allNetworks;
 
-  # TAPs that need their own QEMU -netdev arg. The management TAP is declared
-  # explicitly in extraArgs below, so exclude it to avoid duplicates.
-  infraQemuTaps = lib.filter (l: l.tap != "mv-router-mgmt") infraLans;
+  # One record per LAN NIC (plus the ethernet WAN): the single source for QEMU
+  # args, .link renames, tap -> bridge wiring and the boot check.
+  routerNics = import ./router-nics.nix {inherit lib;};
+  wanMac = "02:00:00:06:ff:02";
+  infraBridges = {
+    "mv-router-mgmt" = "br-mgmt";
+    "mv-router-bldr" = "br-builder";
+  };
+  nics =
+    map (l: routerNics.mkNic "06" (l // {bridge = infraBridges.${l.tap} or null;}))
+    (lib.sort (a: b: a.tap == "mv-router-mgmt" && b.tap != "mv-router-mgmt") infraLans)
+    ++ map (n:
+      routerNics.mkNic "06" {
+        tap = n.routerTap;
+        inherit (n) subnet;
+        bridge = "br-${n.name}";
+      })
+    allNetworks
+    ++ lib.optional useEthernetWan {
+      tap = "mv-router-wan";
+      subnet = null;
+      bridge = "br-wan";
+      mac = wanMac;
+    };
 
   # Script run by QEMU *after* TUNSETIFF to bridge the TAP to its host bridge.
   # Using script= (not script=no) ensures QEMU holds the fd before bridge
@@ -167,9 +188,7 @@
   tapBridgeScript = pkgs.writeShellScript "router-tap-bridge" ''
     TAP="$1"
     case "$TAP" in
-      mv-router-mgmt)  BRIDGE="br-mgmt"    ;;
-      mv-router-bldr)  BRIDGE="br-builder" ;;
-      ${lib.optionalString useEthernetWan "mv-router-wan)   BRIDGE=\"br-wan\"   ;;\n      "}${lib.concatMapStrings (pn: "${pn.routerTap}) BRIDGE=\"br-${pn.name}\" ;;\n      ") profileNetworks}${lib.concatMapStrings (n: "${n.routerTap}) BRIDGE=\"br-${n.name}\" ;;\n      ") extraNetworks}# Unknown infra TAPs: udev catch-all bridges them after QEMU has the fd open
+      ${routerNics.bridgeCases nics}# Unknown infra TAPs: udev catch-all bridges them after QEMU has the fd open
       *)               exit 0 ;;
     esac
     # Wait for bridge (max 5s; should exist via network.target before QEMU starts)
@@ -193,25 +212,27 @@ in {
   ];
 
   config = {
-    assertions = [
-      {
-        assertion = wanMode != "pci-passthrough" || wifiPciAddress != "";
-        message = ''
-          hydrix.hardware.vfio.wifiPciAddress is empty - the router VM needs a WiFi PCI
-          address for VFIO passthrough when wan.mode = "pci-passthrough". Pass wifiPciAddress
-          to mkMicrovmRouter in your flake:
+    assertions =
+      [
+        {
+          assertion = wanMode != "pci-passthrough" || wifiPciAddress != "";
+          message = ''
+            hydrix.hardware.vfio.wifiPciAddress is empty - the router VM needs a WiFi PCI
+            address for VFIO passthrough when wan.mode = "pci-passthrough". Pass wifiPciAddress
+            to mkMicrovmRouter in your flake:
 
-            "microvm-router" = hydrix.lib.mkMicrovmRouter {
-              wifiPciAddress = "00:14.3";  # from: lspci -D | grep -i wireless
-            };
+              "microvm-router" = hydrix.lib.mkMicrovmRouter {
+                wifiPciAddress = "00:14.3";  # from: lspci -D | grep -i wireless
+              };
 
-          The address should be in XX:XX.X format (without the 0000: domain prefix).
+            The address should be in XX:XX.X format (without the 0000: domain prefix).
 
-          Alternative: use wan.mode = "auto" (auto-detects WiFi or falls back to macvtap)
-          or wan.mode = "macvtap" (uses ethernet instead of WiFi).
-        '';
-      }
-    ];
+            Alternative: use wan.mode = "auto" (auto-detects WiFi or falls back to macvtap)
+            or wan.mode = "macvtap" (uses ethernet instead of WiFi).
+          '';
+        }
+      ]
+      ++ routerNics.assertions nics;
 
     # ===== Basic Identity =====
     # storeName drives host-side paths (/var/lib/microvms/<storeName>, secrets,
@@ -278,12 +299,6 @@ in {
           "socket,id=console,path=/var/lib/microvms/${vmName}/console.sock,server=on,wait=off"
           "-serial"
           "chardev:console"
-
-          # Management TAP (br-mgmt) - created by QEMU, bridged by tapBridgeScript
-          "-netdev"
-          "tap,id=net-mgmt,ifname=mv-router-mgmt,script=${tapBridgeScript},downscript=no"
-          "-device"
-          "virtio-net-pci,netdev=net-mgmt,mac=02:00:00:01:00:01"
         ]
         # VFIO passthrough - only when using WiFi PCI passthrough as WAN
         ++ lib.optionals usePciPassthrough [
@@ -293,41 +308,8 @@ in {
           "-device"
           "vfio-pci,host=0000:${lib.removePrefix "0000:" wifiPciAddress},bus=pcie.1"
         ]
-        # Ethernet WAN TAP - only when using macvtap/ethernet as WAN
-        ++ lib.optionals useEthernetWan [
-          "-netdev"
-          "tap,id=net-wan,ifname=mv-router-wan,script=${tapBridgeScript},downscript=no"
-          "-device"
-          "virtio-net-pci,netdev=net-wan,mac=02:00:00:01:09:01"
-        ]
-        # Profile network TAPs - derived from profileNetworks (profiles/*/meta.nix).
-        # MACs: 02:00:00:01:XX:01, index+1 (index 0 = 01 avoids collision with mgmt=00).
-        # Order follows alphabetical profile directory discovery.
-        ++ lib.concatLists (lib.imap0 (i: pn: [
-            "-netdev"
-            "tap,id=net-${pn.name},ifname=${pn.routerTap},script=${tapBridgeScript},downscript=no"
-            "-device"
-            "virtio-net-pci,netdev=net-${pn.name},mac=02:00:00:01:${lib.fixedWidthString 2 "0" (builtins.toString (i + 1))}:01"
-          ])
-          profileNetworks)
-        # Builtin infra VM TAPs (builtinVm = true: builder, etc.) - mgmt excluded (see infraQemuTaps).
-        # MACs: 02:00:00:03:XX:01 - separate namespace from profiles (01) and extras (02).
-        ++ lib.concatLists (lib.imap0 (i: l: [
-            "-netdev"
-            "tap,id=net-infra-${builtins.toString i},ifname=${l.tap},script=${tapBridgeScript},downscript=no"
-            "-device"
-            "virtio-net-pci,netdev=net-infra-${builtins.toString i},mac=02:00:00:03:${lib.fixedWidthString 2 "0" (builtins.toString i)}:01"
-          ])
-          infraQemuTaps)
-        # Extra network TAPs (infra VMs not already covered by profileNetworks).
-        # MACs: 02:00:00:02:XX:01
-        ++ lib.concatLists (lib.imap0 (i: n: [
-            "-netdev"
-            "tap,id=net-extra-${n.name},ifname=${n.routerTap},script=${tapBridgeScript},downscript=no"
-            "-device"
-            "virtio-net-pci,netdev=net-extra-${n.name},mac=02:00:00:02:${lib.fixedWidthString 2 "0" (builtins.toString i)}:01"
-          ])
-          extraOnlyNetworks);
+        # LAN TAPs (and ethernet WAN), created by QEMU and bridged by tapBridgeScript
+        ++ routerNics.qemuArgs tapBridgeScript nics;
 
       # Limit virtiofsd threads: default spawns nproc threads per share, wasteful when idle
       virtiofsd.threadPoolSize = 1;
@@ -427,49 +409,12 @@ in {
     hardware.enableRedistributableFirmware = true;
 
     # ===== Predictable Interface Naming =====
-    # Inside the QEMU VM, virtio-net devices get kernel-assigned names (ens3, ens4, …),
+    # Inside the QEMU VM, virtio-net devices get kernel-assigned names (ens3, ens4, ...),
     # not the host-side TAP names. These .link files rename each interface by its
-    # known MAC address so that find_iface_by_name works in the setup scripts.
-    # Interface renaming: MAC → stable TAP name inside the VM.
-    # Matches the MAC assignments in qemu.extraArgs above so that
-    # find_iface_by_name and all network services see consistent names.
-    systemd.network.links =
-      {
-        "10-mv-router-mgmt" = {
-          matchConfig.MACAddress = "02:00:00:01:00:01";
-          linkConfig.Name = "mv-router-mgmt";
-        };
-      }
-      // lib.optionalAttrs useEthernetWan {
-        "10-mv-router-wan" = {
-          matchConfig.MACAddress = "02:00:00:01:09:01";
-          linkConfig.Name = "mv-router-wan";
-        };
-      }
-      // lib.listToAttrs (lib.imap0 (i: pn: {
-          name = "10-${pn.routerTap}";
-          value = {
-            matchConfig.MACAddress = "02:00:00:01:${lib.fixedWidthString 2 "0" (builtins.toString (i + 1))}:01";
-            linkConfig.Name = pn.routerTap;
-          };
-        })
-        profileNetworks)
-      // lib.listToAttrs (lib.imap0 (i: l: {
-          name = "10-${l.tap}";
-          value = {
-            matchConfig.MACAddress = "02:00:00:03:${lib.fixedWidthString 2 "0" (builtins.toString i)}:01";
-            linkConfig.Name = l.tap;
-          };
-        })
-        infraQemuTaps)
-      // lib.listToAttrs (lib.imap0 (i: n: {
-          name = "20-${n.routerTap}";
-          value = {
-            matchConfig.MACAddress = "02:00:00:02:${lib.fixedWidthString 2 "0" (builtins.toString i)}:01";
-            linkConfig.Name = n.routerTap;
-          };
-        })
-        extraNetworks);
+    # MAC to its TAP name, so networkd, nftables and the setup scripts can match
+    # on names known at build time. router-nic-check verifies this at boot.
+    systemd.network.links = routerNics.links nics;
+    systemd.services.router-nic-check = routerNics.checkService pkgs nics;
 
     # ===== LAN Interface Configuration (systemd-networkd) =====
     # Static IPs assigned at boot - no waiting for WiFi. Mirrors microvm-router-stable.
@@ -554,8 +499,13 @@ in {
       # "unavailable". Let NM's module own this value.
       firewall.enable = false; # We use nftables directly
 
-      # LAN TAPs managed by systemd-networkd - tell NM to leave them alone
-      networkmanager.unmanaged = map (l: l.tap) allLans;
+      # NM only manages the WAN. LAN TAPs belong to systemd-networkd, and any
+      # other NIC (e.g. one whose .link rename failed) stays down rather than
+      # getting a DHCP client on whatever bridge it is plugged into.
+      networkmanager.unmanaged =
+        ["*" "except:type:wifi"]
+        ++ lib.optional useEthernetWan "except:interface-name:mv-router-wan";
+      networkmanager.settings.main.no-auto-default = "*";
     };
 
     # ===== IP Forwarding and Kernel Hardening =====
@@ -680,7 +630,7 @@ in {
 
         detect_wan() {
           if [[ "$USE_ETHERNET_WAN" == "true" ]]; then
-            find_iface_by_mac "02:00:00:01:09:01"
+            find_iface_by_mac "${wanMac}"
           else
             for iface in $(ls /sys/class/net/ 2>/dev/null); do
               [[ "$iface" == wl* ]] && { echo "$iface"; return; }

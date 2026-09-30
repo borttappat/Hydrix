@@ -4,13 +4,12 @@
 # Serves all the same bridges and subnets as the main router using
 # separate TAP interfaces (mv-rts-*) so both can coexist in config.
 #
-# Fully declarative: no runtime bash services. Because systemd.network.links
+# Fully declarative: no runtime bash setup services. Because systemd.network.links
 # give predictable interface names at boot, all networking (static IPs,
 # dnsmasq, nftables) is generated from Nix at build time.
 #
 # TAP prefix:    mv-rts-* (router-stable)
-# Framework MACs 02:00:00:03:XX:01
-# Dynamic MACs   02:00:00:04:XX:01  (imap0 index across allNetworks)
+# NIC MACs:      02:00:00:07:<subnet octet>:01 (see router-nics.nix)
 # CID:           201
 # Hostname:      microvm-router-stable
 #
@@ -104,10 +103,27 @@
   # nftables - the host connects to the router via the management LAN).
   frameworkLans = map stableInfraLan cfg.router.microvm.infraLans;
 
-  # frameworkQemuTaps: infra TAPs that need their own QEMU -netdev arg.
-  # The management TAP is declared explicitly in qemu.extraArgs below, so
-  # exclude it here to avoid duplicates.
-  frameworkQemuTaps = lib.filter (l: l.tap != "mv-rts-mgmt") frameworkLans;
+  # One record per LAN NIC: the single source for QEMU args, .link renames,
+  # tap -> bridge wiring and the boot check.
+  routerNics = import ./router-nics.nix {inherit lib;};
+  frameworkBridges = {
+    "mv-rts-mgmt" = "br-mgmt";
+    "mv-rts-bldr" = "br-builder";
+  };
+  nics =
+    map (l:
+      routerNics.mkNic "07" {
+        inherit (l) tap subnet;
+        bridge = frameworkBridges.${l.tap} or null;
+      })
+    (lib.sort (a: b: a.tap == "mv-rts-mgmt" && b.tap != "mv-rts-mgmt") frameworkLans)
+    ++ map (n:
+      routerNics.mkNic "07" {
+        tap = stableRouterTap n;
+        inherit (n) subnet;
+        bridge = "br-${n.name}";
+      })
+    allNetworks;
 
   # Script run by QEMU *after* TUNSETIFF to bridge the TAP to its host bridge.
   # Using script= (not script=no) ensures QEMU holds the fd before bridge
@@ -115,20 +131,18 @@
   # TUNSETIFF (Linux rejects TUNSETIFF when an rx_handler is already registered).
   # TAPs are created on-demand by QEMU itself via TUNSETIFF; no pre-creation needed.
   tapBridgeScript = pkgs.writeShellScript "router-stable-tap-bridge" ''
-    TAP="$1"
-    case "$TAP" in
-      mv-rts-mgmt)  BRIDGE="br-mgmt"    ;;
-      mv-rts-bldr)  BRIDGE="br-builder" ;;
-      ${lib.concatMapStrings (pn: "${stableRouterTap pn}) BRIDGE=\"br-${pn.name}\" ;;\n      ") profileNetworks}${lib.concatMapStrings (n: "${stableRouterTap n}) BRIDGE=\"br-${n.name}\" ;;\n      ") extraOnlyNetworks}# Unknown infra TAPs: udev catch-all bridges them after QEMU has the fd open
-      *)               exit 0 ;;
-    esac
-    # Wait for bridge (max 5s; should exist via network.target before QEMU starts)
-    for i in $(seq 10); do
-      ${pkgs.iproute2}/bin/ip link show "$BRIDGE" > /dev/null 2>&1 && break
-      sleep 0.5
-    done
-    ${pkgs.iproute2}/bin/ip link set "$TAP" master "$BRIDGE" 2>/dev/null || true
-    ${pkgs.iproute2}/bin/ip link set "$TAP" up 2>/dev/null || true
+        TAP="$1"
+        case "$TAP" in
+    ${routerNics.bridgeCases nics}# Unknown infra TAPs: udev catch-all bridges them after QEMU has the fd open
+          *)               exit 0 ;;
+        esac
+        # Wait for bridge (max 5s; should exist via network.target before QEMU starts)
+        for i in $(seq 10); do
+          ${pkgs.iproute2}/bin/ip link show "$BRIDGE" > /dev/null 2>&1 && break
+          sleep 0.5
+        done
+        ${pkgs.iproute2}/bin/ip link set "$TAP" master "$BRIDGE" 2>/dev/null || true
+        ${pkgs.iproute2}/bin/ip link set "$TAP" up 2>/dev/null || true
   '';
 
   # All profile/extra network LAN interfaces - derived from meta.nix at build time.
@@ -159,6 +173,8 @@ in {
   ];
 
   config = {
+    assertions = routerNics.assertions nics;
+
     networking.hostName = lib.mkDefault "microvm-router-stable";
     system.stateVersion = "25.05";
     nixpkgs.config.allowUnfree = true;
@@ -211,40 +227,9 @@ in {
           "pcie-root-port,id=pcie.1,slot=1,chassis=1"
           "-device"
           "vfio-pci,host=0000:${lib.removePrefix "0000:" wifiPciAddress},bus=pcie.1"
-
-          # Management TAP (br-mgmt) - created by QEMU, bridged by tapBridgeScript
-          "-netdev"
-          "tap,id=net-mgmt,ifname=mv-rts-mgmt,script=${tapBridgeScript},downscript=no"
-          "-device"
-          "virtio-net-pci,netdev=net-mgmt,mac=02:00:00:03:00:01"
         ]
-        # Profile network TAPs - derived from profileNetworks (profiles/*/meta.nix).
-        # MACs: 02:00:00:03:XX:01, index+1 (avoids collision with mgmt=00).
-        ++ lib.concatLists (lib.imap0 (i: pn: [
-            "-netdev"
-            "tap,id=net-${pn.name},ifname=${stableRouterTap pn},script=${tapBridgeScript},downscript=no"
-            "-device"
-            "virtio-net-pci,netdev=net-${pn.name},mac=02:00:00:03:${lib.fixedWidthString 2 "0" (builtins.toString (i + 1))}:01"
-          ])
-          profileNetworks)
-        # Builtin infra VM TAPs (builtinVm = true: builder, etc.) - mgmt excluded (see frameworkQemuTaps).
-        # MACs: 02:00:00:05:XX:01 - separate namespace from profiles (03) and extras (04).
-        ++ lib.concatLists (lib.imap0 (i: l: [
-            "-netdev"
-            "tap,id=net-infra-${builtins.toString i},ifname=${l.tap},script=${tapBridgeScript},downscript=no"
-            "-device"
-            "virtio-net-pci,netdev=net-infra-${builtins.toString i},mac=02:00:00:05:${lib.fixedWidthString 2 "0" (builtins.toString i)}:01"
-          ])
-          frameworkQemuTaps)
-        # Extra user-defined network TAPs (custom profiles + non-builtin infra VMs).
-        # MACs: 02:00:00:04:XX:01
-        ++ lib.concatLists (lib.imap0 (i: n: [
-            "-netdev"
-            "tap,id=net-extra-${n.name},ifname=${stableRouterTap n},script=${tapBridgeScript},downscript=no"
-            "-device"
-            "virtio-net-pci,netdev=net-extra-${n.name},mac=02:00:00:04:${lib.fixedWidthString 2 "0" (builtins.toString i)}:01"
-          ])
-          extraOnlyNetworks);
+        # LAN TAPs, created by QEMU and bridged by tapBridgeScript
+        ++ routerNics.qemuArgs tapBridgeScript nics;
 
       shares = [
         {
@@ -308,37 +293,8 @@ in {
     # declarative networking below.
     # Interface renaming: MAC → stable TAP name inside the VM.
     # Matches the MAC assignments in qemu.extraArgs above.
-    systemd.network.links =
-      {
-        "10-mv-rts-mgmt" = {
-          matchConfig.MACAddress = "02:00:00:03:00:01";
-          linkConfig.Name = "mv-rts-mgmt";
-        };
-      }
-      // lib.listToAttrs (lib.imap0 (i: pn: {
-          name = "10-${stableRouterTap pn}";
-          value = {
-            matchConfig.MACAddress = "02:00:00:03:${lib.fixedWidthString 2 "0" (builtins.toString (i + 1))}:01";
-            linkConfig.Name = stableRouterTap pn;
-          };
-        })
-        profileNetworks)
-      // lib.listToAttrs (lib.imap0 (i: l: {
-          name = "10-${l.tap}";
-          value = {
-            matchConfig.MACAddress = "02:00:00:05:${lib.fixedWidthString 2 "0" (builtins.toString i)}:01";
-            linkConfig.Name = l.tap;
-          };
-        })
-        frameworkQemuTaps)
-      // lib.listToAttrs (lib.imap0 (i: n: {
-          name = "20-${stableRouterTap n}";
-          value = {
-            matchConfig.MACAddress = "02:00:00:04:${lib.fixedWidthString 2 "0" (builtins.toString i)}:01";
-            linkConfig.Name = stableRouterTap n;
-          };
-        })
-        extraOnlyNetworks);
+    systemd.network.links = routerNics.links nics;
+    systemd.services.router-nic-check = routerNics.checkService pkgs nics;
 
     # ===== Networking =====
     networking = {
@@ -346,13 +302,15 @@ in {
       enableIPv6 = false;
       firewall.enable = false;
 
-      # NetworkManager handles only the WiFi (WAN) interface.
-      # LAN interfaces (mv-rts-*) are managed by systemd-networkd below.
+      # NetworkManager handles only the WiFi (WAN) interface. LAN interfaces
+      # (mv-rts-*) are managed by systemd-networkd below, and any other NIC
+      # stays down rather than getting a DHCP client.
       networkmanager = {
         enable = true;
         wifi.powersave = false;
         settings.keyfile.path = "/var/lib/NetworkManager/system-connections";
-        unmanaged = ["interface-name:mv-rts-*"];
+        unmanaged = ["*" "except:type:wifi"];
+        settings.main.no-auto-default = "*";
         ensureProfiles = lib.mkIf hasWifiCredentials {
           profiles = builtins.listToAttrs (map (network: {
               name = network.ssid;
