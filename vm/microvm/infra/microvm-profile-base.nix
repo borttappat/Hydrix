@@ -207,7 +207,14 @@ in {
             proto = "virtiofs";
             readOnly = true;
           }
-        ];
+        ]
+        ++ lib.mapAttrsToList (name: path: {
+          tag = "repo-${name}";
+          source = "/run/hydrix-repos/${vmName}/${name}";
+          mountPoint = path;
+          proto = "virtiofs";
+        })
+        config.hydrix.microvm.hostRepos;
 
       # ===== Persistent Volumes =====
       # Home directory persistence (optional)

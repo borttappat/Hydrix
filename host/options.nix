@@ -806,6 +806,43 @@ in {
                 null (default): use the class default from vmClasses.
               '';
             };
+            hostRepos = lib.mkOption {
+              type = lib.types.attrsOf (lib.types.submodule {
+                options = {
+                  path = lib.mkOption {
+                    type = lib.types.str;
+                    description = "Absolute host path of the working tree. Mounted at the same path in the VM.";
+                  };
+                  readOnlyPaths = lib.mkOption {
+                    type = lib.types.listOf lib.types.str;
+                    default = [".git"];
+                    description = ''
+                      Paths relative to the repo root that the VM sees read-only.
+                      Missing entries are created as empty directories first, so
+                      the VM cannot create them either.
+                    '';
+                  };
+                };
+              });
+              default = {};
+              example = lib.literalExpression ''
+                {
+                  hydrix-config = {
+                    path = "/home/user/hydrix-config";
+                    readOnlyPaths = [".git" ".claude"];
+                  };
+                }
+              '';
+              description = ''
+                Host working trees shared read-write into this VM via virtiofs,
+                keyed by share name. The host serves a per-VM view from
+                /run/hydrix-repos/<vm>/<name> with readOnlyPaths remounted
+                read-only on the host side, so the guest (root included) can edit
+                files but cannot write .git: no commits, refs, hooks or git config.
+                The VM applies these through hydrix.microvm.hostRepos, which the
+                flake sets from the same value.
+              '';
+            };
           };
         });
         default = {};

@@ -542,7 +542,10 @@
                 {system.stateVersion = mc.config.system.stateVersion;}
               ]
               ++ nixpkgs.lib.optional (overrides ? ${m._profileName}) overrides.${m._profileName}
-              ++ nixpkgs.lib.optional (vmCfg.encryption or false) {hydrix.microvm.encryption.enable = true;};
+              ++ nixpkgs.lib.optional (vmCfg.encryption or false) {hydrix.microvm.encryption.enable = true;}
+              ++ nixpkgs.lib.optional ((vmCfg.hostRepos or {}) != {}) {
+                hydrix.microvm.hostRepos = builtins.mapAttrs (_: r: r.path) vmCfg.hostRepos;
+              };
             inherit userProfiles hostConfig userColorschemesDir;
           };
         })

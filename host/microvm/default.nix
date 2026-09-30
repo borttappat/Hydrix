@@ -650,6 +650,61 @@ in {
           })
         enabledVMs)
 
+        # Host repo views for microvmHost.vms.<name>.hostRepos. Each view is a
+        # private bind of the working tree with readOnlyPaths remounted read-only
+        # here on the host, so virtiofsd serves them read-only no matter what the
+        # guest does. --make-private keeps the read-only submounts from
+        # propagating back onto the real working tree.
+        (lib.mapAttrs' (name: vmCfg: let
+          base = "/run/hydrix-repos/${name}";
+          util = "${pkgs.util-linux}/bin";
+        in
+          lib.nameValuePair "hydrix-repos-${name}" {
+            description = "Host repo views for microVM ${name}";
+            wantedBy = ["microvm-virtiofsd@${name}.service" "microvm@${name}.service"];
+            before = ["microvm-virtiofsd@${name}.service" "microvm@${name}.service"];
+            after = ["local-fs.target"];
+            # Tearing views down under a running virtiofsd would leave the guest
+            # on stale mounts; changes apply on the next VM start instead.
+            restartIfChanged = false;
+            serviceConfig = {
+              Type = "oneshot";
+              RemainAfterExit = true;
+              ExecStop = pkgs.writeShellScript "hydrix-repos-${name}-stop" ''
+                ${util}/umount -R ${base}/* 2>/dev/null || true
+              '';
+            };
+            path = [pkgs.coreutils];
+            script = ''
+              set -eu
+              mkdir -p ${base}
+              chmod 755 ${base}
+              ${lib.concatStrings (lib.mapAttrsToList (repo: r: ''
+                  view=${base}/${repo}
+                  ${util}/mountpoint -q "$view" && ${util}/umount -R "$view"
+                  mkdir -p "$view"
+                  if [ ! -d ${lib.escapeShellArg r.path} ]; then
+                    echo "Warning: ${r.path} missing, ${repo} is shared as an empty directory"
+                  else
+                    ${util}/mount --bind ${lib.escapeShellArg r.path} "$view"
+                    ${util}/mount --make-private "$view"
+                    ${lib.concatMapStrings (p: ''
+                      t="$view/"${lib.escapeShellArg p}
+                      if [ ! -e "$t" ]; then
+                        mkdir -p "$t"
+                        chown --reference=${lib.escapeShellArg r.path} "$t"
+                      fi
+                      ${util}/mount --bind "$t" "$t"
+                      ${util}/mount -o remount,bind,ro "$t"
+                    '')
+                    r.readOnlyPaths}
+                  fi
+                '')
+                vmCfg.hostRepos)}
+            '';
+          })
+        (lib.filterAttrs (_: v: (v.hostRepos or {}) != {}) enabledVMs))
+
         # First-boot VM builder: builds coupled VMs (cheap - already part of the
         # host toplevel, this just links /var/lib/microvms/<name>/current for the
         # Hydrix CLI) and any decoupled VM explicitly opted into autostart. Decoupled

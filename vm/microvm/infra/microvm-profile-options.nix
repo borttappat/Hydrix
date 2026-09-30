@@ -93,6 +93,18 @@
       description = "Share host /nix/store via virtiofs (faster rebuilds, instant startup)";
     };
 
+    hostRepos = lib.mkOption {
+      type = lib.types.attrsOf lib.types.str;
+      default = {};
+      example = {hydrix-config = "/home/user/hydrix-config";};
+      description = ''
+        Host working trees to mount read-write, share name -> absolute path (the
+        same path on host and guest). Served from the host-side view built for
+        hydrix.microvmHost.vms.<vm>.hostRepos, whose readOnlyPaths (.git by
+        default) are read-only on the host. Set from that same value in flake.nix.
+      '';
+    };
+
     persistence = {
       enable = lib.mkOption {
         type = lib.types.bool;

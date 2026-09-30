@@ -207,12 +207,21 @@
         #   managed only via `shard build/start <name>`, not `rebuild`) so host
         #   rebuilds stay fast regardless of how many heavy desktop VMs are declared. Infra
         #   VMs stay coupled (always built with the host) by default. Override either way here.
+        # hostRepos: share host working trees read-write at the same path, with .git (and any
+        #   other readOnlyPaths) read-only on the host side, so the VM can edit but never commit
+        #   or push. Leave "github" out of that VM's secrets so it holds no push credential.
         #
         # Profile VMs (browsing/comms/pentest/dev/lurking) are per-machine nixosConfigurations
         # (like the router above), so their keys here carry @SERIAL@ too:
         # "microvm-pentest-@SERIAL@"  = { encryption = true; secrets = [ "github" ]; };
         # "microvm-browsing-@SERIAL@" = { secrets = [ "github" ]; };
         # "microvm-dev-@SERIAL@"      = { secrets = [ "github" ]; coupled = true; }; # e.g. keep always-fresh
+        # "microvm-dev-@SERIAL@" = {
+        #   hostRepos = {
+        #     hydrix-config = { path = "/home/${config.hydrix.username}/hydrix-config"; readOnlyPaths = [ ".git" ".claude" ]; };
+        #     Hydrix        = { path = "/home/${config.hydrix.username}/Hydrix"; readOnlyPaths = [ ".git" ".claude" ]; };
+        #   };
+        # };
         # "microvm-builder"  = { secrets = [ "github" ]; };
         # "microvm-gitsync"  = { secrets = [ "github" ]; };
       };
