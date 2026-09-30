@@ -192,11 +192,18 @@ fun status_is_failure(status) {
   return string_contains(status, "failed") || string_contains(status, "Failed") || string_contains(status, "FAILED");
 }
 
-fun status_cb(status) {
-  global.last_status;
-  if (status == last_status) return;
-  last_status = status;
+# The last line can be a "live" line (display-message): repeated messages
+# overwrite it in place and hide-message removes it, like the console's
+# "A start job is running for ..." ticker. Status updates append below it.
+global.live_line = false;
 
+fun line_image(text) {
+  if (status_is_failure(text))
+    return Image.Text(text, ${err.rs}, ${err.gs}, ${err.bs}, 1, msg_font);
+  return Image.Text(text, ${fg.rs}, ${fg.gs}, ${fg.bs}, 1, msg_font);
+}
+
+fun append_line(status) {
   if (global.msg_count >= max_messages) {
     oldest = msg_sprites[0];
     for (i = 0; i < max_messages - 1; i++)
@@ -213,21 +220,38 @@ fun status_cb(status) {
   }
 
   idx = global.msg_count - 1;
-  if (status_is_failure(status)) {
-    text_image = Image.Text(status, ${err.rs}, ${err.gs}, ${err.bs}, 1, msg_font);
-  } else {
-    text_image = Image.Text(status, ${fg.rs}, ${fg.gs}, ${fg.bs}, 1, msg_font);
-  }
-  msg_sprites[idx].SetImage(text_image);
+  msg_sprites[idx].SetImage(line_image(status));
   msg_sprites[idx].SetPosition(screen_w * 0.04, msg_area_top + idx * msg_line_height, 10);
   msg_sprites[idx].SetOpacity(0.85);
+}
+
+fun status_cb(status) {
+  global.last_status;
+  if (status == last_status) return;
+  last_status = status;
+  global.live_line = false;
+  append_line(status);
 }
 Plymouth.SetUpdateStatusFunction(status_cb);
 
 fun message_cb(text) {
-  status_cb(text);
+  if (global.live_line && global.msg_count > 0) {
+    idx = global.msg_count - 1;
+    msg_sprites[idx].SetImage(line_image(text));
+  } else {
+    append_line(text);
+    global.live_line = true;
+  }
 }
 Plymouth.SetMessageFunction(message_cb);
+
+fun hide_message_cb(text) {
+  if (global.live_line == false || global.msg_count == 0) return;
+  msg_sprites[global.msg_count - 1].SetImage(Image(""));
+  global.msg_count = global.msg_count - 1;
+  global.live_line = false;
+}
+Plymouth.SetHideMessageFunction(hide_message_cb);
 
 '' else ''
 fun message_cb(text) { }
@@ -266,6 +290,7 @@ fun display_normal_cb() {
     msg_sprites[i].SetImage(Image(""));
   global.msg_count = 0;
   global.last_status = "";
+  global.live_line = false;
   '' else ""}
 }
 Plymouth.SetDisplayNormalFunction(display_normal_cb);
@@ -387,6 +412,72 @@ SCRIPT
     done
   '';
 
+  # systemd itself only tells Plymouth which units are starting. Failures,
+  # timeouts and the "A start job is running for ..." ticker go to the text
+  # console, which the splash covers, so a hung unit looks like a frozen
+  # splash. This polls PID 1 (private socket, no D-Bus needed) once a second
+  # while plymouthd is up and forwards both: failed units as status lines,
+  # the oldest job running 5s or more as the live message line.
+  bootStatusScript = pkgs.writeShellScript "hydrix-plymouth-boot-status" ''
+    set -u
+    plymouth="${pkgs.plymouth}/bin/plymouth"
+    systemctl="${pkgs.systemd}/bin/systemctl"
+    declare -A first=() reported=()
+    shown=""
+
+    _dur() {
+      local s=$1
+      if [ "$s" -ge 60 ]; then echo "$((s / 60))min $((s % 60))s"; else echo "''${s}s"; fi
+    }
+
+    while "$plymouth" --ping 2>/dev/null; do
+      now=$(${pkgs.coreutils}/bin/date +%s)
+
+      while read -r unit _; do
+        [ -z "$unit" ] || [ -n "''${reported[$unit]:-}" ] && continue
+        reported[$unit]=1
+        desc=$("$systemctl" show -P Description "$unit")
+        result=$("$systemctl" show -P Result "$unit")
+        "$plymouth" update --status="FAILED: ''${desc:-$unit} (''${result:-failed})" 2>/dev/null
+      done < <("$systemctl" list-units --failed --plain --no-legend --no-pager 2>/dev/null)
+
+      declare -A running=()
+      oldest="" oldest_t=$now oldest_type=""
+      while read -r _ unit type state _; do
+        [ "$state" = running ] || continue
+        running[$unit]=1
+        : "''${first[$unit]:=$now}"
+        if [ "''${first[$unit]}" -le "$oldest_t" ]; then
+          oldest=$unit oldest_t=''${first[$unit]} oldest_type=$type
+        fi
+      done < <("$systemctl" list-jobs --no-legend --no-pager 2>/dev/null)
+      for u in "''${!first[@]}"; do
+        [ -n "''${running[$u]:-}" ] || unset "first[$u]"
+      done
+      unset running
+
+      msg=""
+      if [ -n "$oldest" ] && [ $((now - oldest_t)) -ge 5 ]; then
+        desc=$("$systemctl" show -P Description "$oldest")
+        case "$oldest" in
+          *.service) limit=$("$systemctl" show -P TimeoutStartUSec "$oldest") ;;
+          *) limit=$("$systemctl" show -P JobRunningTimeoutUSec "$oldest") ;;
+        esac
+        case "$limit" in ""|infinity) limit="no limit" ;; esac
+        msg="A $oldest_type job is running for ''${desc:-$oldest} ($(_dur $((now - oldest_t))) / $limit)"
+      fi
+
+      if [ -n "$msg" ]; then
+        "$plymouth" display-message --text="$msg" 2>/dev/null
+      elif [ -n "$shown" ]; then
+        "$plymouth" hide-message --text="$shown" 2>/dev/null
+      fi
+      shown=$msg
+
+      sleep 1
+    done
+  '';
+
 in {
   options.hydrix.plymouth = {
     enable = lib.mkEnableOption "Hydrix Plymouth boot animation";
@@ -479,6 +570,25 @@ in {
     boot.kernelParams = [ "quiet" ];
     boot.consoleLogLevel = 0;
     boot.initrd.verbose = false;
+
+    systemd.services.hydrix-plymouth-boot-status = lib.mkIf cfg.showMessages {
+      description = "Forward boot failures and stalled jobs to Plymouth";
+      unitConfig = {
+        # Early boot, before basic.target; exits on its own once plymouthd
+        # quits, so it never holds up plymouth-quit-wait or the greeter.
+        DefaultDependencies = false;
+        After = ["plymouth-start.service"];
+        Conflicts = ["shutdown.target"];
+        Before = ["shutdown.target"];
+        ConditionKernelCommandLine = "!plymouth.enable=0";
+        ConditionVirtualization = "!container";
+      };
+      serviceConfig = {
+        Type = "simple";
+        ExecStart = "${bootStatusScript}";
+      };
+      wantedBy = ["sysinit.target"];
+    };
 
     systemd.services.hydrix-plymouth-shutdown-status = lib.mkIf cfg.showShutdownMessages {
       description = "Forward systemd shutdown job status to Plymouth";
