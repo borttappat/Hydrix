@@ -12,6 +12,8 @@
   workspace = __WORKSPACE__;
   label     = "__LABEL__";
   notifyForward = false;  # true: forward VM notifications to host popups (vsock:14518)
+  # filesAccess = false;  # keep the files VM off this bridge (no transfers in/out);
+  #                        # the router then is the only way in (see allowedAccessTo)
 
   mem  = __MEM__;                       # ceiling, MB - balloon reclaims idle memory
   vcpu = __VCPU__;                      # ceiling

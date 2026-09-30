@@ -9,6 +9,7 @@
   workspace   = 6;
   label       = "LURKING";
   focusBorder = "red";
+  filesAccess = false;   # privacy: no files VM interface on this bridge; true to allow transfers
 
   mem  = 2304;             # ceiling, MB - balloon reclaims idle memory
   vcpu = 4;                # ceiling - generous headroom, balloons down properly when idle

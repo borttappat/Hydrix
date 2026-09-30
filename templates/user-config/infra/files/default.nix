@@ -17,17 +17,16 @@
 
   vmName = config.networking.hostName;
 
-  # Privacy VMs - intentionally excluded from file transfer
-  privacyVMs = ["lurking"];
-
   # Auto-discover profile VMs from profiles/ directory
   profilesDir = ../../profiles;
   profileNames = builtins.attrNames (builtins.readDir profilesDir);
+  # Profiles that opt out with `filesAccess = false;` in their meta.nix get no
+  # files VM interface (same filter as tapBridges in ./meta.nix, the host side)
   validProfiles =
     builtins.filter (
       n:
-        !(builtins.elem n privacyVMs)
-        && builtins.pathExists (profilesDir + "/${n}/meta.nix")
+        builtins.pathExists (profilesDir + "/${n}/meta.nix")
+        && (import (profilesDir + "/${n}/meta.nix")).filesAccess or true
     )
     profileNames;
 

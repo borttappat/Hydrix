@@ -15,8 +15,11 @@
     let
       profilesDir = ../../profiles;
 
+      # `filesAccess = false;` in a profile's meta.nix keeps the files VM off
+      # its bridge (same filter as validProfiles in ./default.nix)
       profileNames = builtins.filter
-        (n: builtins.pathExists (profilesDir + "/${n}/meta.nix"))
+        (n: builtins.pathExists (profilesDir + "/${n}/meta.nix")
+          && (import (profilesDir + "/${n}/meta.nix")).filesAccess or true)
         (builtins.attrNames (builtins.readDir profilesDir));
 
       abbrev4 = n: builtins.substring 0 4 n;
