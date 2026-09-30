@@ -197,7 +197,9 @@
       done
     } > "$out.tmp" && mv "$out.tmp" "$out"
 
-    ${client} --skip-wait --reload-css >/dev/null 2>&1 || true
+    # swaync-client waits forever for the daemon when it is not on the bus
+    # (--skip-wait does not cover that), e.g. during boot-time activation.
+    ${pkgs.coreutils}/bin/timeout 2 ${client} --skip-wait --reload-css >/dev/null 2>&1 || true
   '';
 in {
   config = lib.mkIf (cfg.enable && config.hydrix.hyprland.enable) {
@@ -223,7 +225,11 @@ in {
         Unit = {
           Description = "swaync notification daemon (Hydrix)";
           PartOf = ["graphical-session.target"];
-          After = ["graphical-session-pre.target"];
+          # Not graphical-session-pre: swaync queries the Settings portal on
+          # startup, the portal activates xdph, and xdph is ordered after
+          # graphical-session.target. Holding the target on swaync deadlocks
+          # until two 25s D-Bus timeouts expire, delaying waybar ~50s.
+          After = ["graphical-session.target"];
         };
         Service = {
           Type = "dbus";
