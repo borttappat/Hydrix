@@ -309,6 +309,18 @@ in {
               ''';
             '';
           };
+
+          dns = lib.mkOption {
+            type = lib.types.str;
+            default = "10.64.0.1";
+            description = ''
+              DNS server reached through the tunnel. The router DNATs DNS
+              queries from every network assigned to a tunnel (or blocked) to
+              this address, so lookups follow the same path as the traffic
+              instead of leaving through the router's own WAN resolver.
+              10.64.0.1 is Mullvad's in-tunnel resolver.
+            '';
+          };
         };
       };
     };

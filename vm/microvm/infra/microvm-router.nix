@@ -113,7 +113,10 @@
   processConfig = vpnCfg.mullvad.processConfig;
 
   # Named derivations so the boot-assign service can reference them in path
-  vpnAssign = pkgs.writeShellScriptBin "vpn-assign" (builtins.readFile ../../../scripts/vpn-assign.sh);
+  vpnAssign = pkgs.writeShellScriptBin "vpn-assign" (''
+      export PATH=${lib.makeBinPath (with pkgs; [iproute2 nftables wireguard-tools gawk gnugrep gnused coreutils])}:$PATH
+    ''
+    + builtins.readFile ../../../scripts/vpn-assign.sh);
   vpnStatus = pkgs.writeShellScriptBin "vpn-status" (builtins.readFile ../../../scripts/vpn-status.sh);
 
   vmName = cfg.vm.storeName;
@@ -179,6 +182,116 @@
       bridge = "br-wan";
       mac = wanMac;
     };
+
+  # ===== Router nftables ruleset (loaded by router-firewall) =====
+  vmNetworks = "{ ${lib.concatMapStringsSep ", " (l: "${l.subnet}.0/24") allLans} }";
+  routerLanIps = "{ ${lib.concatMapStringsSep ", " (l: "${l.subnet}.253") allLans} }";
+  # Each LAN may only source its own subnet. Traffic isolation and the
+  # per-network VPN tables both key on source address, so this is what makes
+  # them hold against a VM spoofing another network's addresses.
+  antiSpoof =
+    lib.concatMapStringsSep "\n    " (l: ''iifname "${l.tap}" ip saddr != ${l.subnet}.0/24 drop'')
+    allLans;
+  # Networks routed through a tunnel at boot start with their DNS redirected
+  # into it; vpn-assign keeps the map in step with runtime reassignments.
+  vpnDnsElements =
+    lib.concatMapStringsSep ", " (n: "\"${n.routerTap}\" : ${vpnCfg.mullvad.dns}")
+    (lib.filter (n: mullvadBridges ? ${n.name}) allNetworks);
+  firewallRules = pkgs.writeText "router-firewall.nft" ''
+    table inet router
+    delete table inet router
+    table inet router {
+      # LAN tap -> in-tunnel resolver, for networks whose traffic is tunnelled
+      # or blocked. Direct networks are absent and use the router's resolver.
+      map vpn_dns {
+        type ifname : ipv4_addr
+        ${lib.optionalString (vpnDnsElements != "") "elements = { ${vpnDnsElements} }"}
+      }
+
+      chain prerouting {
+        type nat hook prerouting priority dstnat; policy accept;
+        ip daddr ${routerLanIps} meta l4proto { tcp, udp } th dport 53 dnat ip to iifname map @vpn_dns
+      }
+
+      chain input {
+        type filter hook input priority filter; policy drop;
+
+        iif lo accept
+        ct state established,related accept
+        ct state invalid drop
+
+        # DHCP DISCOVER/REQUEST come from 0.0.0.0 (client has no IP yet)
+        iifname ${lanTapSetNft} udp dport 67 accept
+
+        ${antiSpoof}
+
+        # DNS and rate-limited ICMP from VMs; everything else from VMs is dropped
+        ip saddr ${vmNetworks} udp dport 53 accept
+        ip saddr ${vmNetworks} tcp dport 53 accept
+        ip saddr ${vmNetworks} ip protocol icmp limit rate 10/second accept
+        ip saddr ${vmNetworks} counter log prefix "ROUTER-BLOCKED: " drop
+
+        # WAN side: only DHCP replies for the router's own lease; replies to
+        # connections the router made are covered by the ct rule above
+        iifname != ${lanTapSetNft} udp sport 67 udp dport 68 accept
+      }
+
+      chain forward {
+        type filter hook forward priority filter; policy drop;
+
+        ct state established,related accept
+        ct state invalid drop
+
+        ${antiSpoof}
+
+        # Connections a DNAT rule on the router redirected on purpose (port
+        # forwards from router-lan-control or user services, VPN DNS). Only
+        # root on the router can create those, and this keeps them working
+        # across a firewall reload without inserting rules into this table.
+        ct status dnat accept
+
+        # Shared subnets: allow inter-VM traffic (user-configurable)
+        ${lib.concatMapStrings (sub: ''
+        ip saddr ${sub} accept
+            ip daddr ${sub} accept
+      '')
+      cfg.router.microvm.firewall.sharedSubnets}
+        # Allowed access: scoped exceptions to isolation (user-configurable)
+        ${lib.concatMapStrings (
+        a:
+          lib.concatMapStrings (port: ''
+            ip saddr ${a.from} ip daddr ${a.to} ${a.proto} dport ${toString port} accept
+          '')
+          a.ports
+      )
+      cfg.router.microvm.firewall.allowedAccessTo}
+        # Isolated bridges: block inter-bridge traffic (auto-generated from topology)
+        ${let
+      allSubnets = map (l: "${l.subnet}.0/24") allLans;
+      shared = cfg.router.microvm.firewall.sharedSubnets;
+      isolated = lib.filter (sub: !builtins.elem sub shared) allSubnets;
+    in
+      lib.concatMapStrings (
+        src: let
+          others = lib.filter (d: d != src) isolated;
+        in
+          lib.optionalString (others != []) "ip saddr ${src} ip daddr { ${lib.concatStringsSep ", " others} } drop\n    "
+      )
+      isolated}
+        # User extra rules
+        ${lib.concatStringsSep "\n    " cfg.router.microvm.firewall.extraRules}
+
+        # Allow forwarding out to WAN/VPN (any non-LAN egress)
+        oifname != ${lanTapSetNft} accept
+      }
+
+      chain postrouting {
+        type nat hook postrouting priority srcnat; policy accept;
+        # Masquerade on any non-LAN egress (WiFi WAN, ethernet WAN, VPN interfaces)
+        oifname != ${lanTapSetNft} masquerade
+      }
+    }
+  '';
 
   # Script run by QEMU *after* TUNSETIFF to bridge the TAP to its host bridge.
   # Using script= (not script=no) ensures QEMU holds the fd before bridge
@@ -563,6 +676,9 @@ in {
           )
           allNetworks;
 
+        # Resolver that tunnelled/blocked networks' DNS is DNATed to (vpn-assign)
+        "hydrix-router/vpn-dns".text = vpnCfg.mullvad.dns;
+
         # Static interface name map - generated at build time from known TAP names.
         # Consumed by dnsmasq-config; no runtime detection needed since names are
         # fixed by systemd.network.links above. Variable names match what
@@ -589,6 +705,51 @@ in {
         mullvadBridges
       ))
     ];
+
+    # ===== Fail-closed policy routing =====
+    # Installed before any interface comes up. Every network gets its own
+    # table (ID = subnet octet), selected by source address, holding an
+    # unreachable default as its last resort, so a network is never routed by
+    # the main table's WAN default unless vpn-assign says `direct` (a throw
+    # route). Mullvad networks stay blocked until vpn-boot-assign brings their
+    # tunnel up. Traffic *to* a router LAN always uses the main table, so
+    # router replies and inter-LAN traffic never enter a tunnel table (the
+    # firewall decides on inter-LAN traffic).
+    systemd.services.vpn-policy-init = {
+      description = "Install fail-closed per-network routing tables";
+      wantedBy = ["multi-user.target"];
+      wants = ["network-pre.target"];
+      before = ["network-pre.target"];
+      after = ["local-fs.target"];
+      unitConfig.DefaultDependencies = false;
+      restartIfChanged = false;
+      path = [pkgs.iproute2];
+      serviceConfig = {
+        Type = "oneshot";
+        RemainAfterExit = true;
+      };
+      script = let
+        table = n: lib.last (lib.splitString "." n.subnet);
+      in ''
+        rule() {
+          ip rule del "$@" 2>/dev/null || true
+          ip rule add "$@"
+        }
+        ${lib.concatMapStrings (l: "rule to ${l.subnet}.0/24 lookup main priority 10
+") allLans}
+        ${lib.concatMapStrings (n: ''
+            rule from ${n.subnet}.0/24 lookup ${table n} priority ${table n}
+            ip route replace unreachable default metric 4294967295 table ${table n}
+            ${lib.optionalString (!(mullvadBridges ? ${n.name})) "ip route add throw default table ${table n} 2>/dev/null || true"}
+          '')
+          allNetworks}
+      '';
+    };
+    # networkd must leave vpn-assign's rules and tables alone when it restarts
+    systemd.network.config.networkConfig = {
+      ManageForeignRoutingPolicyRules = false;
+      ManageForeignRoutes = false;
+    };
 
     # ===== WAN Detection Service =====
     # LAN IPs are now handled by systemd-networkd at boot (see allLans above).
@@ -753,117 +914,32 @@ in {
     # ===== Firewall Configuration =====
     # SECURITY: Router is hardened to only provide routing services
     # - VMs can only use DHCP (67-68) and DNS (53) on the router
+    # - Each LAN only accepts its own subnet as source (anti-spoofing)
+    # - No new connections from the WAN side reach the router
     # - SSH is disabled entirely (services.openssh.enable = false)
-    # - No other services are accessible from VM networks
     # - Host manages router via console only (vsock/serial)
+    #
+    # Loaded before any interface comes up. A reload atomically replaces only
+    # `table inet router`, so tables owned by others (router-lan-control's
+    # iptables rules, tailscaled) survive it; DNS redirects are then restored
+    # from vpn-assign's saved assignments.
     systemd.services.router-firewall = {
       description = "Configure router firewall";
-      after = ["sysinit.target"];
       wantedBy = ["multi-user.target"];
+      wants = ["network-pre.target"];
+      before = ["network-pre.target" "shutdown.target"];
+      after = ["local-fs.target" "systemd-modules-load.service"];
+      conflicts = ["shutdown.target"];
+      unitConfig.DefaultDependencies = false;
+      path = [pkgs.nftables vpnAssign];
       serviceConfig = {
         Type = "oneshot";
         RemainAfterExit = true;
       };
       script = ''
-        echo "Configuring hardened firewall (LAN negation, WAN-agnostic)"
-
-        ${pkgs.nftables}/bin/nft flush ruleset 2>/dev/null || true
-
-        # Define VM network ranges (profile subnets from meta.nix + infra fixed subnets)
-        VM_NETWORKS="{ ${lib.concatStringsSep ", " (map (l: "${l.subnet}.0/24") allLans)} }"
-
-        ${pkgs.nftables}/bin/nft -f - << EOF
-        table inet router {
-          chain input {
-            type filter hook input priority filter; policy drop;
-
-            # Loopback always allowed
-            iif lo accept
-
-            # Allow established/related connections
-            ct state established,related accept
-            ct state invalid drop
-
-            # ===== DHCP - Required for VM IP assignment =====
-            # DHCP DISCOVER/REQUEST come from 0.0.0.0 (client has no IP yet)
-            # so we can't filter by source IP - just allow DHCP on port 67
-            udp dport 67 accept
-
-            # ===== DNS - Required for name resolution =====
-            # DNS queries from VMs (UDP and TCP)
-            ip saddr $VM_NETWORKS udp dport 53 accept
-            ip saddr $VM_NETWORKS tcp dport 53 accept
-
-            # ===== ICMP - Rate limited for debugging =====
-            ip saddr $VM_NETWORKS ip protocol icmp limit rate 10/second accept
-
-            # ===== EVERYTHING ELSE FROM VMs IS DROPPED =====
-            # This includes: SSH (22), HTTP (80/443), or any other service
-            # VMs should only use router for routing, not as a server
-            # Log and count dropped packets for debugging
-            ip saddr $VM_NETWORKS counter log prefix "ROUTER-BLOCKED: " drop
-
-            # Allow non-LAN input (WAN, VPN interfaces - identified by negation)
-            iifname != ${lanTapSetNft} accept
-          }
-
-          chain forward {
-            type filter hook forward priority filter; policy drop;
-
-            # Allow established/related
-            ct state established,related accept
-            ct state invalid drop
-
-            # Shared subnets: allow inter-VM traffic (user-configurable)
-            ${let
-          shared = cfg.router.microvm.firewall.sharedSubnets;
-        in
-          lib.concatMapStrings (s: ''            ip saddr ${s} accept
-                        ip daddr ${s} accept
-          '')
-          shared}
-            # Allowed access: scoped exceptions to isolation (user-configurable)
-            ${lib.concatMapStrings (
-            a:
-              lib.concatMapStrings (port: ''                ip saddr ${a.from} ip daddr ${a.to} ${a.proto} dport ${toString port} accept
-              '')
-              a.ports
-          )
-          cfg.router.microvm.firewall.allowedAccessTo}
-            # Isolated bridges: block inter-bridge traffic (auto-generated from topology)
-            ${let
-          allSubnets = map (l: "${l.subnet}.0/24") allLans;
-          shared = cfg.router.microvm.firewall.sharedSubnets;
-          isolated = lib.filter (s: !builtins.elem s shared) allSubnets;
-        in
-          lib.concatMapStrings (
-            src: let
-              others = lib.filter (d: d != src) isolated;
-            in
-              if others == []
-              then ""
-              else "ip saddr ${src} ip daddr { ${lib.concatStringsSep ", " others} } drop\n            "
-          )
-          isolated}
-            # User extra rules
-            ${lib.concatStringsSep "\n            " cfg.router.microvm.firewall.extraRules}
-
-            # Allow forwarding out to WAN/VPN (any non-LAN egress)
-            oifname != ${lanTapSetNft} accept
-          }
-
-          chain postrouting {
-            type nat hook postrouting priority srcnat; policy accept;
-            # Masquerade on any non-LAN egress (WiFi WAN, ethernet WAN, VPN interfaces)
-            oifname != ${lanTapSetNft} masquerade
-          }
-        }
-        EOF
-
-        echo "Hardened firewall configured:"
-        echo "  - VMs can use: DHCP, DNS only"
-        echo "  - VMs cannot: SSH, HTTP, or access any router services"
-        echo "  - Inter-VM traffic: blocked (use router.microvm.firewall.sharedSubnets to allow)"
+        nft -f ${firewallRules}
+        vpn-assign sync-dns >/dev/null 2>&1 || true
+        echo "Router firewall loaded (DHCP/DNS only from VMs, inter-VM blocked, no WAN input)"
       '';
     };
 
@@ -875,15 +951,16 @@ in {
       after = ["network-online.target" "router-firewall.service"];
       wants = ["network-online.target"];
       wantedBy = ["multi-user.target"];
-      path = [pkgs.wireguard-tools pkgs.iproute2 pkgs.gawk vpnAssign];
+      path = [pkgs.wireguard-tools pkgs.iproute2 vpnAssign];
       serviceConfig = {
         Type = "oneshot";
         RemainAfterExit = true;
       };
       script =
-        # Connect each configured tunnel - fall back to direct if wg-quick fails
-        # so a failed tunnel never leaves a bridge with an empty routing table.
-        # If the interface already exists (service restarted after partial run),
+        # Connect each configured tunnel. A tunnel that fails to connect leaves
+        # its network blocked, never direct: its traffic must not leave
+        # outside the tunnel. If the interface already exists (service
+        # restarted after partial run),
         # skip wg-quick and re-apply routing from whatever state the tunnel is in.
         lib.concatMapStrings (bridge: ''
           echo "Connecting wg-${bridge}..."
@@ -893,8 +970,8 @@ in {
           elif wg-quick up wg-${bridge}; then
             vpn-assign ${bridge} wg-${bridge}
           else
-            echo "Warning: wg-${bridge} failed to connect, routing ${bridge} direct"
-            vpn-assign ${bridge} direct
+            echo "Warning: wg-${bridge} failed to connect, ${bridge} stays blocked"
+            vpn-assign ${bridge} blocked
           fi
         '') (lib.attrNames mullvadBridges)
         # All other known networks go direct
@@ -1138,7 +1215,7 @@ in {
       wantedBy = ["multi-user.target"];
       after = ["router-netlink-poller.service"];
       # VPNSET execs vpn-assign, which needs the same tools as vpn-boot-assign.
-      path = lib.optionals hasMullvad [pkgs.wireguard-tools pkgs.iproute2 pkgs.gawk vpnAssign];
+      path = lib.optionals hasMullvad [vpnAssign];
       serviceConfig = {
         Type = "simple";
         ExecStart = "${routerStatsServerBin}/bin/router-stats-server";

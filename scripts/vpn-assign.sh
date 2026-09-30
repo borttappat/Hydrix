@@ -37,6 +37,13 @@ NC='\033[0m'
 STATE_DIR="/var/lib/hydrix-vpn"
 PERSISTENT_FILE="$STATE_DIR/persistent.conf"
 NETWORK_MAP_FILE="/etc/hydrix-router/network-map"
+INTERFACES_FILE="/etc/hydrix-router/interfaces"
+VPN_DNS_FILE="/etc/hydrix-router/vpn-dns"
+
+# Every table carries this unreachable default at the lowest priority. A table
+# whose real default is missing (blocked, tunnel gone, never assigned) then
+# fails closed instead of falling through to the main table's WAN route.
+FALLBACK_METRIC=4294967295
 
 # Routing table IDs and subnets — loaded from network-map at runtime
 declare -A ROUTING_TABLES=()
@@ -56,6 +63,45 @@ load_network_map() {
 
 get_wan_interface() {
     ip route | awk '/^default/{print $5; exit}'
+}
+
+# Router-side TAP of a network, from the build-time map (IFACE_<NAME>=<tap>)
+get_net_iface() {
+    local var="IFACE_${1^^}"
+    var="${var//-/_}"
+    [ -f "$INTERFACES_FILE" ] || return 0
+    (
+        # shellcheck disable=SC1090
+        source "$INTERFACES_FILE"
+        echo "${!var:-}"
+    )
+}
+
+seal_table() {
+    ip route replace unreachable default metric "$FALLBACK_METRIC" table "$1"
+}
+
+# DNS for a network follows its traffic: tunnelled and blocked networks have
+# their queries to the router DNATed to the in-tunnel resolver (unreachable
+# while blocked), direct networks use the router's own resolver.
+set_dns() {
+    local network="$1" target="$2" iface dns
+    iface=$(get_net_iface "$network")
+    [ -n "$iface" ] || return 0
+    nft delete element inet router vpn_dns "{ \"$iface\" }" 2>/dev/null || true
+    if [ "$target" != "direct" ] && [ -f "$VPN_DNS_FILE" ]; then
+        dns=$(cat "$VPN_DNS_FILE")
+        nft add element inet router vpn_dns "{ \"$iface\" : $dns }" 2>/dev/null || true
+    fi
+}
+
+# Re-apply DNS redirects from saved assignments (after a firewall reload)
+sync_dns() {
+    local network
+    for network in "${!ROUTING_TABLES[@]}"; do
+        [ -f "$STATE_DIR/${network}.assignment" ] || continue
+        set_dns "$network" "$(cat "$STATE_DIR/${network}.assignment")"
+    done
 }
 
 vpn_interface_exists() {
@@ -80,6 +126,7 @@ ensure_ip_rules() {
         if ! ip rule show | grep -q "from $subnet lookup $table"; then
             ip rule add from "$subnet" lookup "$table" priority "$table" 2>/dev/null || true
         fi
+        seal_table "$table"
     done
 }
 
@@ -98,6 +145,7 @@ update_routing() {
     ensure_ip_rules
 
     ip route flush table "$table" 2>/dev/null || true
+    seal_table "$table"
 
     # Re-add the directly-connected subnet route so router services (dnsmasq, DHCP)
     # sourcing from the bridge IP are not routed into the VPN/policy table.
@@ -111,19 +159,13 @@ update_routing() {
             echo -e "${YELLOW}[$network]${NC} Blocked (kill switch)"
             ;;
         direct)
-            local wan gw
+            # throw hands the lookup on to the main table, so direct networks
+            # always follow the router's current WAN default (WiFi roaming,
+            # WAN not up yet) instead of a copy of it.
+            local wan
             wan=$(get_wan_interface)
-            if [ -z "$wan" ]; then
-                echo -e "${YELLOW}[$network]${NC} Direct WAN (WAN not ready yet — will route once up)"
-            else
-                gw=$(ip route | awk "/default.*$wan/{print \$3}")
-                if [ -n "$gw" ]; then
-                    ip route add default via "$gw" dev "$wan" table "$table"
-                else
-                    ip route add default dev "$wan" table "$table"
-                fi
-                echo -e "${GREEN}[$network]${NC} Direct WAN ($wan)"
-            fi
+            ip route add throw default table "$table"
+            echo -e "${GREEN}[$network]${NC} Direct WAN (${wan:-not up yet})"
             ;;
         *)
             local vpn_if
@@ -138,6 +180,7 @@ update_routing() {
             ;;
     esac
 
+    set_dns "$network" "$target"
     echo "$target" > "$STATE_DIR/${network}.assignment"
 }
 
@@ -149,14 +192,25 @@ connect_vpn() {
 
     if ip link show "$vpn_name" &>/dev/null; then
         echo -e "${YELLOW}$vpn_name already connected${NC}"
-        return 0
+    else
+        # Table=off means wg-quick only creates the interface + peer config.
+        # WAN default route handles endpoint reachability — no host route needed.
+        echo -e "${BLUE}Connecting $vpn_name...${NC}"
+        wg-quick up "$vpn_name"
+        echo -e "${GREEN}Connected: $vpn_name${NC}"
     fi
+    restore_assignments "$vpn_name"
+}
 
-    # Table=off means wg-quick only creates the interface + peer config.
-    # WAN default route handles endpoint reachability — no host route needed.
-    echo -e "${BLUE}Connecting $vpn_name...${NC}"
-    wg-quick up "$vpn_name"
-    echo -e "${GREEN}Connected: $vpn_name${NC}"
+# Networks still assigned to a tunnel were sealed when it went away; route
+# them through it again now that it is back.
+restore_assignments() {
+    local vpn_name="$1" network
+    for network in "${!ROUTING_TABLES[@]}"; do
+        [ -f "$STATE_DIR/${network}.assignment" ] || continue
+        [ "$(cat "$STATE_DIR/${network}.assignment")" = "$vpn_name" ] || continue
+        update_routing "$network" "$vpn_name"
+    done
 }
 
 disconnect_vpn() {
@@ -174,7 +228,8 @@ disconnect_vpn() {
         if [ "$assignment" = "$vpn_name" ]; then
             local table="${ROUTING_TABLES[$network]}"
             ip route flush table "$table" 2>/dev/null || true
-            echo -e "${YELLOW}Cleared routing for $network (was → $vpn_name)${NC}"
+            seal_table "$table"
+            echo -e "${YELLOW}Blocked $network until reassigned (was → $vpn_name)${NC}"
         fi
     done
 
@@ -227,11 +282,11 @@ show_status() {
     for network in "${!ROUTING_TABLES[@]}"; do
         local table="${ROUTING_TABLES[$network]}"
         local route
-        route=$(ip route show table "$table" 2>/dev/null | head -1)
+        route=$(ip route show table "$table" 2>/dev/null | grep '^\(throw \)\?default' | head -1 || true)
         if [ -n "$route" ]; then
             echo -e "  $network: ${GREEN}$route${NC}"
         else
-            echo -e "  $network: ${RED}(empty — blocked)${NC}"
+            echo -e "  $network: ${RED}blocked (unreachable)${NC}"
         fi
     done
 }
@@ -306,6 +361,7 @@ Usage: vpn-assign <command> [args]
   connect <vpn>               Bring up WireGuard tunnel
   disconnect <vpn>            Tear down tunnel
   list-mullvad                List configured Mullvad exit nodes
+  sync-dns                    Re-apply DNS redirects from saved assignments
   status                      Show assignments and active tunnels
   help                        This help
 
@@ -328,6 +384,7 @@ main() {
     case "${1:-}" in
         ""|status)    show_status ;;
         list-mullvad) list_mullvad ;;
+        sync-dns)     sync_dns ;;
         on)
             [ -z "${2:-}" ] && { echo -e "${RED}Network name required${NC}"; exit 1; }
             [[ -n "${ROUTING_TABLES[${2}]+_}" ]] || { echo -e "${RED}Unknown network '$2'${NC}"; exit 1; }
