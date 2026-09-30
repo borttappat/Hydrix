@@ -72,30 +72,29 @@ After installation, your configuration lives at `~/hydrix-config/`.
 |   - WiFi hardware passed to router VM via VFIO                      |
 |   - No L3 presence on any bridge (no IPv4 or IPv6 addresses)        |
 |   - Bridges exist as L2 plumbing only; host is invisible to VMs     |
-|   - Bridges: br-mgmt, br-pentest, br-comms, br-browse, br-dev,      |
-|              br-shared, br-builder, br-lurking, br-files            |
+|   - Bridges: br-mgmt, br-pentest, br-browse, br-comms, br-dev,      |
+|              br-lurking, br-builder, br-files, plus one per         |
+|              custom profile, infra VM with routerTap, or task slot  |
 +---------------------------------------------------------------------+
                             |
-        TAP Interfaces (Router VM connects to each bridge)
+     Router VM NICs (one QEMU TAP per bridge, router is .253 on each)
                             |
-         +---- br-mgmt (192.168.100.0/24) ------+
+         +---- br-mgmt     (192.168.100.0/24) ---+
          |         ^ mv-router-mgmt              |
-         +---- br-pentest (192.168.101.0/24) ---+
+         +---- br-pentest  (192.168.102.0/24) ---+
          |         ^ mv-router-pent              |
-         +---- br-comms (192.168.102.0/24) -----+
-         |         ^ mv-router-comm              |
-         +---- br-browse (192.168.103.0/24) ----+
+         +---- br-browse   (192.168.103.0/24) ---+
          |         ^ mv-router-brow              |--- Router VM (WiFi)
-         +---- br-dev (192.168.104.0/24) -------+
-         |         ^ mv-router-dev               |    CID: 200
-         +---- br-shared (192.168.105.0/24) ----+
-         |         ^ mv-router-shar              |    Subnets: 192.168.100-108.x
-         +---- br-builder (192.168.106.0/24) ---+
-         |         ^ mv-router-bldr              |
-         +---- br-lurking (192.168.107.0/24) ---+
+         +---- br-comms    (192.168.104.0/24) ---+
+         |         ^ mv-router-comm              |    CID: 200
+         +---- br-dev      (192.168.105.0/24) ---+
+         |         ^ mv-router-dev               |
+         +---- br-lurking  (192.168.106.0/24) ---+
          |         ^ mv-router-lurk              |
-         +---- br-files (192.168.108.0/24) ------+
-                         ^ mv-router-file        |
+         +---- br-files    (192.168.108.0/24) ---+
+         |         ^ mv-router-file              |
+         +---- br-builder  (192.168.210.0/24) ---+
+                   ^ mv-router-bldr              |
                          |                       |
               +----------+----------+------------+-----------+
               |          |          |            |           |
@@ -112,23 +111,63 @@ After installation, your configuration lives at `~/hydrix-config/`.
          +--------+  +--------+  +--------+
 ```
 
+Subnets shown are the template defaults from each `meta.nix`; gitsync shares `br-builder`.
+
 ### Router VM TAP Interfaces
 
-The router VM has **one TAP interface per bridge**, acting as the DHCP/DNS gateway for each subnet:
+The router VM has **one NIC per bridge**, acting as the DHCP/DNS gateway (`.253`) for each subnet. With the template defaults:
 
 | Router TAP | Bridge | Router IP | Subnet | Purpose |
 |------------|--------|-----------|--------|---------|
 | `mv-router-mgmt` | `br-mgmt` | 192.168.100.253 | 192.168.100.0/24 | Host management |
-| `mv-router-pent` | `br-pentest` | 192.168.101.253 | 192.168.101.0/24 | Pentest VMs |
-| `mv-router-comm` | `br-comms` | 192.168.102.253 | 192.168.102.0/24 | Comms VMs |
-| `mv-router-brow` | `br-browse` | 192.168.103.253 | 192.168.103.0/24 | Browsing VMs |
-| `mv-router-dev` | `br-dev` | 192.168.104.253 | 192.168.104.0/24 | Dev VMs |
-| `mv-router-shar` | `br-shared` | 192.168.105.253 | 192.168.105.0/24 | Shared services |
-| `mv-router-bldr` | `br-builder` | 192.168.106.253 | 192.168.106.0/24 | Builder VM |
-| `mv-router-lurk` | `br-lurking` | 192.168.107.253 | 192.168.107.0/24 | Lurking VM |
+| `mv-router-pent` | `br-pentest` | 192.168.102.253 | 192.168.102.0/24 | Pentest VM |
+| `mv-router-brow` | `br-browse` | 192.168.103.253 | 192.168.103.0/24 | Browsing VM |
+| `mv-router-comm` | `br-comms` | 192.168.104.253 | 192.168.104.0/24 | Comms VM |
+| `mv-router-dev` | `br-dev` | 192.168.105.253 | 192.168.105.0/24 | Dev VM |
+| `mv-router-lurk` | `br-lurking` | 192.168.106.253 | 192.168.106.0/24 | Lurking VM |
 | `mv-router-file` | `br-files` | 192.168.108.253 | 192.168.108.0/24 | Files VM |
+| `mv-router-bldr` | `br-builder` | 192.168.210.253 | 192.168.210.0/24 | Builder and gitsync VMs |
 
-Each TAP interface is created by the host before the router VM starts, then attached to its bridge via the TAP assignment system described below.
+Custom profiles, infra VMs with a `routerTap`, and task slots each add a row the same way.
+
+#### Router NIC table (`vm/microvm/infra/router-nics.nix`)
+
+Every router NIC is described three times in different layers, and the three must agree:
+
+1. **QEMU (host)** creates the NIC: a host-side TAP (`mv-router-file`) plus a MAC address.
+2. **The QEMU tap script (host)** attaches that TAP to its bridge (`br-files`).
+3. **systemd `.link` files (guest)** rename the NIC. Inside the VM the kernel only sees a generic name like `ens5`; the MAC is the one thing both sides share, so each `.link` file says "the NIC with MAC X is `mv-router-file`". networkd, dnsmasq, nftables and the VPN scripts then match on that name.
+
+Each router module builds **one list** of NIC records, `{ tap, subnet, bridge, mac }`, and generates all three layers from it with helpers in `router-nics.nix`, so they cannot drift apart:
+
+| Helper | Produces |
+|--------|----------|
+| `mkNic role { tap, subnet, bridge }` | One record; derives the MAC from the subnet |
+| `qemuArgs script nics` | `-netdev tap,...` and `-device virtio-net-pci,mac=...` per NIC |
+| `bridgeCases nics` | `<tap>) BRIDGE="<bridge>" ;;` arms for the tap script (`bridge = null` leaves the TAP to the udev catch-all) |
+| `links nics` | One `.link` file per NIC, MAC -> TAP name |
+| `assertions nics` | Eval-time checks: unique MACs, unique TAP names, TAP names <= 15 chars, well-formed subnets |
+| `checkService pkgs nics` | `router-nic-check` unit: at boot, fails if a declared NIC is missing or a virtio NIC kept a kernel name |
+
+**MAC plan** (`02:00:00:<role>:<id>:<n>`, locally administered):
+
+| Role byte | Used by | `<id>` |
+|-----------|---------|--------|
+| `00`, `02` | VM NICs (profile VMs hash-based, infra VMs from `meta.nix` `tapMac`) | per VM |
+| `06` | Main router LAN NICs (WAN NIC, when ethernet: `02:00:00:06:ff:02`) | third octet of the LAN's subnet, in hex |
+| `07` | Router-stable LAN NICs | third octet of the LAN's subnet, in hex |
+
+For example `br-files` (`192.168.108`) gets router NIC `02:00:00:06:6c:01`. Because the router owns `.253` on every LAN, subnets are unique per LAN and so are router MACs; adding or removing a network never changes another NIC's MAC, and the router role bytes never collide with a VM on the same bridge. Two LANs declared with the same subnet fail the build with `Router NICs share MAC(s) ...`.
+
+**Unknown NICs fail closed.** NetworkManager in the router manages only the WiFi device (and the ethernet WAN, when used) and never auto-creates wired DHCP profiles. A NIC that somehow misses its rename stays down instead of running a DHCP client on whatever bridge it is plugged into, and `router-nic-check` reports it:
+
+```bash
+# inside the router (shard -c router)
+systemctl status router-nic-check
+journalctl -u router-nic-check
+```
+
+TAPs are created by QEMU itself (TUNSETIFF), then bridged by the tap script QEMU runs once it holds the fd; the udev rule described below is a catch-all for any TAP the script does not name.
 
 **LAN IPs are assigned at VM boot via `systemd.network.networks`**, not after WiFi connects. `ConfigureWithoutCarrier = "yes"` means every LAN interface gets its static IP immediately when the VM starts, before any WiFi interaction. `dnsmasq` then provides DHCP and DNS to all subnets simultaneously.
 
@@ -184,8 +223,7 @@ A second router VM is always declared alongside the main router. It is a manual 
 | Name | `microvm-router` | `microvm-router-stable` |
 | CID | 200 | 201 |
 | TAP prefix | `mv-router-*` | `mv-rts-*` |
-| Framework MACs | `02:00:00:01:XX:01` | `02:00:00:03:XX:01` |
-| Extra profile MACs | `02:00:00:02:XX:01` | `02:00:00:04:XX:01` |
+| NIC MACs | `02:00:00:06:<subnet octet>:01` | `02:00:00:07:<subnet octet>:01` |
 | Autostart | configurable | `false` (manual only) |
 | VPN support | yes | no (intentionally minimal) |
 | LAN IP assignment | systemd-networkd at boot (build-time) | systemd-networkd at boot (build-time) |
@@ -334,9 +372,10 @@ Files VM (192.168.108.10 on br-files)
 ├── mv-files-brow (-> br-browse, if "browsing" in accessFrom)
 ├── mv-files-dev  (-> br-dev, if "dev" in accessFrom)
 ├── mv-files-comm (-> br-comms, if "comms" in accessFrom)
-├── mv-files-lurk (-> br-lurking, if "lurking" in accessFrom)
-└── mv-router-file (-> br-files, router leg)
+└── mv-files-lurk (-> br-lurking, if "lurking" in accessFrom)
 ```
+
+`br-files` also carries the router's own NIC for this subnet (`mv-router-file`, `192.168.108.253`); that TAP belongs to the router VM, not the Files VM.
 
 Configuration in your flake:
 ```nix
@@ -1198,6 +1237,8 @@ To add a custom bridge beyond the built-in set, use `extraNetworks`. Each entry 
 ```
 
 Profile and infra VMs that declare `routerTap` in their `meta.nix` are wired into `extraNetworks` automatically by the flake - you only need to set `extraNetworks` manually for bridges not tied to a profile or infra VM.
+
+Every router LAN needs its own subnet: the third octet also sets the router's NIC MAC on that bridge (see [§ Router NIC table](#router-nic-table-vmmicrovminfrarouter-nicsnix)), and a duplicate fails the build.
 
 Advanced networking options (rarely needed):
 
@@ -2763,7 +2804,7 @@ The `tor-hardening.nix` module provides Tor anonymity hardening for VMs. Import 
   vsockCid = 214;               # unique - avoid reserved CIDs above
   subnet   = "192.168.214";    # unique /24 prefix
   tapId    = "mv-myinfra";
-  tapMac   = "02:00:00:02:xx:01";  # unique MAC
+  tapMac   = "02:00:00:02:xx:01";  # unique; 06/07 role bytes are the routers' (see Router NIC table)
   tapBridges = { "mv-myinfra" = "br-myinfra"; };
   # routerTap = "mv-router-myinfra";  # add if the VM needs internet via the router
 }

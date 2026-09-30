@@ -256,6 +256,8 @@ Router VM's IP on the management bridge. Used as the host's default gateway in a
 
 Extra VM networks beyond the built-in 5. Each entry creates a host bridge, udev TAP rules, and a router subnet.
 Fields: `name` (e.g. `"office"`), `subnet` (e.g. `"192.168.109"`), `routerTap` (e.g. `"mv-router-offi"`).
+`subnet` must be unique across all router LANs: its third octet also sets the router's NIC
+MAC on that bridge, and a duplicate fails the build (see DOCUMENTATION.md, Router NIC table).
 
 ---
 
@@ -808,6 +810,30 @@ Per-VM configuration: `{ enable, autostart, secrets }`.
 - `enable`: whether the VM is declared (default `true` for knownVms)
 - `autostart`: start at boot (default `false`)
 - `secrets`: list of secret types to provision (e.g. `["github"]`)
+- `hostRepos`: host working trees shared read-write into the VM (see below)
+
+##### `hydrix.microvmHost.vms.<name>.hostRepos`
+| | |
+|---|---|
+| Type | `attrsOf { path : str; readOnlyPaths : listOf str }` |
+| Default | `{}` |
+| Template | ✓ commented example in `machines/installer.nix` |
+
+Shares host working trees into a profile VM at the same absolute path, keyed by share
+name. The host service `hydrix-repos-<vm>` builds a view per repo at
+`/run/hydrix-repos/<vm>/<name>`: a private bind of `path` with each `readOnlyPaths`
+entry (default `[".git"]`) remounted read-only on the host, so nothing in the guest,
+root included, can write them. Missing read-only paths are created as empty directories
+first. Views change on the next VM start, not on rebuild. The user flake passes the same
+value to the VM as `hydrix.microvm.hostRepos`.
+
+```nix
+"microvm-dev-<serial>".hostRepos = {
+  hydrix-config = { path = "/home/<user>/hydrix-config"; readOnlyPaths = [".git" ".claude"]; };
+};
+```
+
+Leave `github` out of that VM's `secrets` if it should never be able to push.
 
 ---
 
@@ -854,6 +880,20 @@ Multiple modules for the same profile (e.g. from a helper module and the machine
 | Template | ✓ `builder.enable = true` |
 
 Enable lockdown-mode nix builds via the microvm-builder VM. Enabled automatically by specialisations.nix.
+
+---
+
+#### `hydrix.builder.localInputs`
+| | |
+|---|---|
+| Type | `listOf str` |
+| Default | `[]` |
+| Template | ✓ commented example in `infra/builder/default.nix` |
+
+Absolute host paths of local flake inputs (`path:` or `git+file:`), shared read-only
+into the builder at the same path, so `hydrix.url = "path:/home/<user>/Hydrix"`
+resolves inside the builder exactly as on the host. Every listed path must exist on the
+host, or the builder's virtiofsd fails to start.
 
 ---
 
