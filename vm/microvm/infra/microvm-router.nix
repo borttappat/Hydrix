@@ -749,7 +749,8 @@ in {
       before = ["network-pre.target"];
       after = ["local-fs.target"];
       unitConfig.DefaultDependencies = false;
-      restartIfChanged = false;
+      # Idempotent, so a live switch re-runs it and picks up new rules.
+      # Assignments vpn-assign already made are left alone.
       path = [pkgs.iproute2];
       serviceConfig = {
         Type = "oneshot";
@@ -768,7 +769,7 @@ in {
         ${lib.concatMapStrings (n: ''
             rule from ${n.subnet}.0/24 lookup ${table n} priority ${table n}
             ip route replace unreachable default metric 4294967295 table ${table n}
-            ${lib.optionalString (!(mullvadBridges ? ${n.name})) "ip route add throw default table ${table n} 2>/dev/null || true"}
+            ${lib.optionalString (!(mullvadBridges ? ${n.name})) "[ -e /var/lib/hydrix-vpn/${n.name}.assignment ] || ip route add throw default table ${table n} 2>/dev/null || true"}
           '')
           allNetworks}
       '';
