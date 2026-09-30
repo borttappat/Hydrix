@@ -40,10 +40,15 @@
 # waybar's exclusive zone. screenWidth/screenHeight is the Hyprland logical
 # resolution (physical size / scale), see `hyprctl layers` if unsure.
 #
-# eww cannot make a window click-through, so the wallpaper layer takes input
-# over the whole screen. eww-dashboard-watch therefore always maps it first
-# and the dashboards after it, and re-maps the dashboards whenever Hyprland
-# reloads its config (which can reorder layer surfaces).
+# The dashboards sit on the layer above windows (`:stacking "fg"`, waybar's),
+# not below them. Hyprland gives the gaps around tiled windows to those
+# windows for pointer input, and the dashboard's half of the screen is kept
+# clear with a wide gaps_out, so a dashboard below windows never gets a click
+# while any window is tiled on its workspace. Above windows it always does.
+# Tiled windows stay out of that half anyway; a floating window moved into it
+# slides under the dashboard. eww cannot make a window click-through, so the
+# wallpaper layer, which stays below windows, takes input wherever nothing
+# else covers the screen; being a layer lower, it can never cover a dashboard.
 #
 # Gated on hydrix.hyprland.enable: host-only, no VM usage.
 #
@@ -178,12 +183,12 @@
     bashOptions = ["nounset" "pipefail"];
     text = ''
       vm="$1" action="$2"
-      resp=$(printf 'VPNSET\n%s %s\n' "$action" "$vm" | socat -T20 - VSOCK-CONNECT:200:14506 2>/dev/null || true)
+      resp=$(printf 'VPNSET\n%s %s\n' "$action" "$vm" | socat -t20 -T20 - VSOCK-CONNECT:200:14506 2>/dev/null || true)
       if ! jq -e '.ok' <<< "$resp" >/dev/null 2>&1; then
         err=$(jq -r '.error // "no response from router"' <<< "''${resp:-null}" 2>/dev/null)
         notify-send -u critical "VPN" "Failed to turn VPN $action for $vm: $err"
       fi
-      eww update router_stats="$(eww-router-stats)" wg_nodes="$(eww-wg-status)"
+      eww --no-daemonize update router_stats="$(eww-router-stats)" wg_nodes="$(eww-wg-status)"
     '';
   };
 
@@ -562,9 +567,8 @@
   # Opens the wallpaper layer (if enabled) and then one dashboard per
   # monitor (or per internal panel, see dashboard.monitors), sized to the
   # left half of that monitor below its reserved zones. Re-syncs on monitor
-  # hotplug and re-maps the dashboards on Hyprland config reloads so they stay
-  # above the wallpaper layer (see top). Debounced like waybarMonitorWatch in
-  # modules/hyprland.nix.
+  # hotplug and on Hyprland config reloads, which drop the runtime workspace
+  # rule below. Debounced like waybarMonitorWatch in modules/hyprland.nix.
   #
   # With dashboard.workspace set, every monitor gets a size entry and a
   # dashboard is open only on the monitor currently showing that workspace,
@@ -581,6 +585,21 @@
       # "<monitor> <width> <height>" per dashboard, written by sync_dashboards.
       _state="''${XDG_RUNTIME_DIR}/eww-dashboard-watch-monitors"
 
+      # The daemon is eww.service. Any client call that cannot reach it (it
+      # stops answering while reloading) otherwise starts a daemon of its own,
+      # which takes over the IPC socket and leaves the real daemon's windows
+      # stranded on screen, so no call here may start one.
+      eww() { command eww --no-daemonize "$@"; }
+
+      # Retries through a daemon reload instead of leaving the dashboard closed.
+      open_dashboard() {
+        for _ in 1 2 3 4 5 6; do
+          eww open dashboard --id "dashboard-$1" --screen "$1" \
+            --arg width="$2" --arg height="$3" 2>/dev/null && return 0
+          sleep 0.5
+        done
+      }
+
       # Opens each dashboard whose monitor shows the pinned workspace (or
       # always, when not pinned) and closes the rest. Idempotent.
       update_visibility() {
@@ -590,9 +609,8 @@
         while read -r mon width height; do
           active=$(jq -r --arg m "$mon" '.[] | select(.name == $m) | .activeWorkspace.id' <<< "$mons")
           if [ -z "$_ws" ] || [ "$active" = "$_ws" ]; then
-            if ! grep -q "^dashboard-$mon:" <<< "$open" && eww ping >/dev/null 2>&1; then
-              eww open dashboard --id "dashboard-$mon" --screen "$mon" \
-                --arg width="$width" --arg height="$height" 2>/dev/null || true
+            if ! grep -q "^dashboard-$mon:" <<< "$open"; then
+              open_dashboard "$mon" "$width" "$height" || true
             fi
           elif grep -q "^dashboard-$mon:" <<< "$open"; then
             eww close "dashboard-$mon" 2>/dev/null || true
@@ -617,10 +635,6 @@
         update_visibility
       }
 
-      # The daemon is eww.service. `eww open` starts a daemon of its own when
-      # it cannot reach one, and that stray keeps its windows when the real
-      # one comes back (stacked dashboards), so every open waits for or
-      # checks `eww ping` first.
       until eww ping >/dev/null 2>&1; do sleep 0.5; done
       eww close-all 2>/dev/null || true
       ${lib.optionalString wlEnabled ''eww open wallpaper-layer 2>/dev/null || true''}
@@ -705,7 +719,7 @@
           :height "''${height}px"
           :anchor "top left")
         :exclusive false
-        :stacking "bottom"
+        :stacking "fg" ;; above windows, see the header of modules/eww.nix
         :focusable false
         (dashboard))
 
@@ -747,15 +761,23 @@
           :space-evenly false
           :visible {arraylength(vm_status.running) > 0 || gc_status.count > 0}
           (block-title :text "VMS")
-          (label
-            :class {gc_status.count > 0 ? "vs-pending unsaved" : "vs-pending"}
-            :visible {gc_status.count > 0}
-            :text {"+" + gc_status.count + " orphaned (shard gc)"}
-            :halign "start")
-          (for vm in {vm_status.running}
-            (vm-row-running :vm vm))
-          (for vm in {vm_status.stopped}
-            (vm-row-stopped :vm vm))))
+          ;; Rows scroll inside the block instead of growing it past the screen.
+          (scroll
+            :vscroll true
+            :hscroll false
+            :vexpand true
+            (box
+              :orientation "v"
+              :space-evenly false
+              (label
+                :class {gc_status.count > 0 ? "vs-pending unsaved" : "vs-pending"}
+                :visible {gc_status.count > 0}
+                :text {"+" + gc_status.count + " orphaned (shard gc)"}
+                :halign "start")
+              (for vm in {vm_status.running}
+                (vm-row-running :vm vm))
+              (for vm in {vm_status.stopped}
+                (vm-row-stopped :vm vm))))))
 
       (defwidget vm-row-running [vm]
         (box
@@ -798,13 +820,21 @@
           :space-evenly false
           :visible {router_stats.current != "" || arraylength(vm_status.running) > 0 || gc_status.count > 0}
           (block-title :text "EXIT NODES")
-          (label
-            :class "node-meta"
-            :visible {arraylength(wg_nodes) == 0}
-            :text "none active"
-            :halign "start")
-          (for node in wg_nodes
-            (node-row :node node))))
+          ;; Rows scroll inside the block instead of growing it past the screen.
+          (scroll
+            :vscroll true
+            :hscroll false
+            :vexpand true
+            (box
+              :orientation "v"
+              :space-evenly false
+              (label
+                :class "node-meta"
+                :visible {arraylength(wg_nodes) == 0}
+                :text "none active"
+                :halign "start")
+              (for node in wg_nodes
+                (node-row :node node))))))
 
       ;; Click toggles the VM between its exit node and direct WAN routing.
       (defwidget node-row [node]
@@ -846,14 +876,22 @@
           (block-title
             :text "NETWORK"
             :aside {router_stats.current})
-          (label
-            :class {router_stats.pending > 0 ? "rs-pending unsaved" : "rs-pending"}
-            :visible {router_stats.pending > 0}
-            :text {"+" + router_stats.pending + " unsaved"}
-            :halign "start")
-          (net-wan-row :stats {net_stats.wan})
-          (for vm in {net_stats.vms}
-            (net-vm-row :vm vm))))
+          ;; Rows scroll inside the block instead of growing it past the screen.
+          (scroll
+            :vscroll true
+            :hscroll false
+            :vexpand true
+            (box
+              :orientation "v"
+              :space-evenly false
+              (label
+                :class {router_stats.pending > 0 ? "rs-pending unsaved" : "rs-pending"}
+                :visible {router_stats.pending > 0}
+                :text {"+" + router_stats.pending + " unsaved"}
+                :halign "start")
+              (net-wan-row :stats {net_stats.wan})
+              (for vm in {net_stats.vms}
+                (net-vm-row :vm vm))))))
 
       (defwidget net-wan-row [stats]
         (box
@@ -941,32 +979,40 @@
           (block-title
             :text "GIT"
             :aside {jq(git_repos, "map(select(.state != \"clean\")) | length") + " need attention"})
-          (for repo in git_repos
+          ;; Rows scroll inside the block instead of growing it past the screen.
+          (scroll
+            :vscroll true
+            :hscroll false
+            :vexpand true
             (box
-              :class "git-repo"
               :orientation "v"
               :space-evenly false
-              (box
-                :orientation "h"
-                :space-evenly false
-                :spacing 6
-                (label
-                  :class "git-dot ''${repo.state}"
-                  :text {repo.state == "clean" ? "●" : repo.state == "missing" ? "○" : "◆"})
-                (label
-                  :class "git-name ''${repo.state}"
-                  :text {repo.name}
-                  :hexpand true
-                  :halign "start")
-                (label
-                  :class "git-branch"
-                  :text {repo.branch}))
-              (label
-                :class "git-summary ''${repo.state}"
-                :halign "start"
-                :xalign 0
-                :wrap true
-                :text {repo.summary})))))
+              (for repo in git_repos
+                (box
+                  :class "git-repo"
+                  :orientation "v"
+                  :space-evenly false
+                  (box
+                    :orientation "h"
+                    :space-evenly false
+                    :spacing 6
+                    (label
+                      :class "git-dot ''${repo.state}"
+                      :text {repo.state == "clean" ? "●" : repo.state == "missing" ? "○" : "◆"})
+                    (label
+                      :class "git-name ''${repo.state}"
+                      :text {repo.name}
+                      :hexpand true
+                      :halign "start")
+                    (label
+                      :class "git-branch"
+                      :text {repo.branch}))
+                  (label
+                    :class "git-summary ''${repo.state}"
+                    :halign "start"
+                    :xalign 0
+                    :wrap true
+                    :text {repo.summary})))))))
 
       (defwidget todo-widget []
         (box
@@ -977,31 +1023,39 @@
           (block-title
             :text "TODO"
             :aside {arraylength(todos) == 0 ? "" : jq(todos, "map(select(.done | not)) | length") + " open"})
-          (label
-            :class "todo-empty"
-            :visible {arraylength(todos) == 0}
-            :halign "start"
-            :text "nothing to do")
-          (for item in todos
-            (eventbox
-              :class "todo-item"
-              :cursor "pointer"
-              :onclick "todo toggle ''${item.i}"
-              (box
-                :orientation "h"
-                :space-evenly false
-                :spacing 6
-                (label
-                  :class "todo-box ''${item.done ? 'done' : '''}"
-                  :valign "start"
-                  :text {item.done ? "●" : "○"})
-                (label
-                  :class "todo-text ''${item.done ? 'done' : '''}"
-                  :halign "start"
-                  :hexpand true
-                  :xalign 0
-                  :wrap true
-                  :text {item.text}))))))
+          ;; Rows scroll inside the block instead of growing it past the screen.
+          (scroll
+            :vscroll true
+            :hscroll false
+            :vexpand true
+            (box
+              :orientation "v"
+              :space-evenly false
+              (label
+                :class "todo-empty"
+                :visible {arraylength(todos) == 0}
+                :halign "start"
+                :text "nothing to do")
+              (for item in todos
+                (eventbox
+                  :class "todo-item"
+                  :cursor "pointer"
+                  :onclick "todo toggle ''${item.i}"
+                  (box
+                    :orientation "h"
+                    :space-evenly false
+                    :spacing 6
+                    (label
+                      :class "todo-box ''${item.done ? 'done' : '''}"
+                      :valign "start"
+                      :text {item.done ? "●" : "○"})
+                    (label
+                      :class "todo-text ''${item.done ? 'done' : '''}"
+                      :halign "start"
+                      :hexpand true
+                      :xalign 0
+                      :wrap true
+                      :text {item.text}))))))))
 
       (defwidget weather-widget []
         (box
@@ -1013,53 +1067,61 @@
           (block-title
             :text "WEATHER"
             :aside {weather.stale ? "offline" : ""})
-          (for loc in {weather.locations}
+          ;; Rows scroll inside the block instead of growing it past the screen.
+          (scroll
+            :vscroll true
+            :hscroll false
+            :vexpand true
             (box
-              :class "wx-loc"
               :orientation "v"
               :space-evenly false
-              (box
-                :orientation "h"
-                :space-evenly false
-                :spacing 6
-                (label
-                  :class "wx-name"
-                  :text {loc.name}
-                  :hexpand true
-                  :halign "start")
-                (label
-                  :class "wx-desc"
-                  :text {loc.desc})
-                (label
-                  :class "wx-icon ''${loc.class}"
-                  :text {loc.icon})
-                (label
-                  :class "wx-temp"
-                  :text {loc.temp}))
-              (box
-                :class "wx-days"
-                :orientation "h"
-                :space-evenly true
-                (for day in {loc.days}
+              (for loc in {weather.locations}
+                (box
+                  :class "wx-loc"
+                  :orientation "v"
+                  :space-evenly false
                   (box
-                    :orientation "v"
+                    :orientation "h"
                     :space-evenly false
-                    :halign {day.align}
+                    :spacing 6
                     (label
-                      :class "wx-day"
-                      :halign {day.align}
-                      :text {day.day})
-                    (box
-                      :orientation "h"
-                      :space-evenly false
-                      :halign {day.align}
-                      :spacing 4
-                      (label
-                        :class "wx-icon ''${day.class}"
-                        :text {day.icon})
-                      (label
-                        :class "wx-range"
-                        :text {day.hi + "/" + day.lo})))))))))
+                      :class "wx-name"
+                      :text {loc.name}
+                      :hexpand true
+                      :halign "start")
+                    (label
+                      :class "wx-desc"
+                      :text {loc.desc})
+                    (label
+                      :class "wx-icon ''${loc.class}"
+                      :text {loc.icon})
+                    (label
+                      :class "wx-temp"
+                      :text {loc.temp}))
+                  (box
+                    :class "wx-days"
+                    :orientation "h"
+                    :space-evenly true
+                    (for day in {loc.days}
+                      (box
+                        :orientation "v"
+                        :space-evenly false
+                        :halign {day.align}
+                        (label
+                          :class "wx-day"
+                          :halign {day.align}
+                          :text {day.day})
+                        (box
+                          :orientation "h"
+                          :space-evenly false
+                          :halign {day.align}
+                          :spacing 4
+                          (label
+                            :class "wx-icon ''${day.class}"
+                            :text {day.icon})
+                          (label
+                            :class "wx-range"
+                            :text {day.hi + "/" + day.lo})))))))))))
     ''
     + lib.optionalString wlEnabled ''
 
@@ -1551,7 +1613,7 @@ in {
         Service = {
           Type = "oneshot";
           # No daemon, nothing to reload (and `eww reload` must not start one).
-          ExecStart = "${pkgs.bash}/bin/sh -c '${pkgs.eww}/bin/eww ping >/dev/null 2>&1 && ${pkgs.eww}/bin/eww reload || true'";
+          ExecStart = "-${pkgs.eww}/bin/eww --no-daemonize reload";
         };
       };
 
