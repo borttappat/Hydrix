@@ -162,6 +162,11 @@
   # Comma-separated list of LAN taps for nftables set literals
   lanTapSet = lib.concatMapStringsSep ", " (t: "\"${t}\"") (["lo"] ++ allLanTaps);
 
+  # Each LAN may only source its own subnet (see microvm-router.nix)
+  antiSpoof =
+    lib.concatMapStringsSep "\n            " (l: ''iifname "${l.tap}" ip saddr != ${l.subnet}.0/24 drop'')
+    allLans;
+
   # Comma-separated list of VM subnets for nftables
   vmNetSet = lib.concatMapStringsSep ", " (l: "${l.subnet}.0/24") allLans;
 in {
@@ -420,7 +425,8 @@ in {
             ct state established,related accept
             ct state invalid drop
             # DHCP - source is 0.0.0.0, must allow before IP filtering
-            udp dport 67 accept
+            iifname $LAN_IFACES udp dport 67 accept
+            ${antiSpoof}
             # DNS from VMs
             ip saddr $VM_NETS udp dport 53 accept
             ip saddr $VM_NETS tcp dport 53 accept
@@ -428,14 +434,16 @@ in {
             ip saddr $VM_NETS ip protocol icmp limit rate 10/second accept
             # Block everything else from VM networks
             ip saddr $VM_NETS counter drop
-            # Allow WAN replies (established handled above; this accepts new WAN input)
-            accept
+            # WAN side: only DHCP replies for the router's own lease; replies
+            # to connections the router made are covered by the ct rule above
+            iifname != $LAN_IFACES udp sport 67 udp dport 68 accept
           }
 
           chain forward {
             type filter hook forward priority filter; policy drop;
             ct state established,related accept
             ct state invalid drop
+            ${antiSpoof}
             # Files VM - allow HTTP file transfers between VMs
             ip saddr ${filesSubnet}.0/24 tcp dport 8888 accept
             ip saddr ${filesSubnet}.0/24 ip daddr ${filesSubnet}.0/24 accept
