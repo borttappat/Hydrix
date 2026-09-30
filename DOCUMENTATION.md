@@ -363,29 +363,32 @@ Each VM configures this IP on its main TAP interface via systemd-networkd, with 
 
 ### Files VM Cross-Bridge Wiring
 
-The Files VM (`microvm-files`, CID 212) has **multiple TAP interfaces** - one per allowed bridge - enabling direct L2 access for encrypted file transfers:
+The Files VM (`microvm-files`, CID 212) has **multiple TAP interfaces**, one per profile bridge, task slot and file-capable infra VM, for direct L2 access during encrypted file transfers:
 
 ```
 Files VM (192.168.108.10 on br-files)
-├── mv-files (always -> br-files)
-├── mv-files-pent (-> br-pentest, if "pentest" in accessFrom)
-├── mv-files-brow (-> br-browse, if "browsing" in accessFrom)
-├── mv-files-dev  (-> br-dev, if "dev" in accessFrom)
-├── mv-files-comm (-> br-comms, if "comms" in accessFrom)
-└── mv-files-lurk (-> br-lurking, if "lurking" in accessFrom)
+├── mv-files      (-> br-files, home)
+├── mv-files-pent (-> br-pentest)
+├── mv-files-brow (-> br-browse)
+├── mv-files-comm (-> br-comms)
+├── mv-files-dev  (-> br-dev)
+├── mv-files-task1..N (-> br-taskN)
+├── mv-files-usb  (-> br-usb-sandbox)
+└── mv-files-hsy  (-> br-hostsync)
 ```
 
 `br-files` also carries the router's own NIC for this subnet (`mv-router-file`, `192.168.108.253`); that TAP belongs to the router VM, not the Files VM.
 
-Configuration in your flake:
+**Opting a profile out.** Every discovered profile gets a TAP unless its `meta.nix` says otherwise:
+
 ```nix
-"microvm-files" = hydrix.lib.mkMicrovmFiles {
-  # Bridges the Files VM gets direct TAP access to
-  accessFrom = [ "pentest" "browsing" "dev" "comms" ];
-};
+# profiles/<name>/meta.nix
+filesAccess = false;   # no files VM interface on this bridge, no transfers in or out
 ```
 
-Per-bridge IPs (derived from vm-registry): Files VM gets `.2` on each bridge (e.g., `192.168.103.2` on `br-browse`). The Files VM is **fully isolated** from the router - it communicates directly via TAP interfaces, bypassing router forwarding rules.
+Both sides read the same flag: `infra/files/meta.nix` (host-side TAP to bridge wiring) and `infra/files/default.nix` (the VM's own interfaces). The lurking template sets it. Use it for any VM that should only be reachable through the router, then `rebuild` and `shard -R files`.
+
+Per-bridge IPs: the Files VM gets `.2` on each bridge (e.g. `192.168.103.2` on `br-browse`). It communicates directly over these TAPs, bypassing router forwarding rules, and does not forward between them (`ip_forward = 0`, forward chain drops everything), so it is not a path between VM networks. While it runs, though, it can reach every VM whose bridge it sits on.
 
 ---
 
@@ -606,6 +609,33 @@ The router VM is **untrusted infrastructure** it handles WiFi and NAT but has no
 
 The `router.hashedPassword` option exists only to lock down vsock console access from the host side (e.g., shared-host scenarios). It is not a network security control, VMs cannot reach the router console regardless.
 
+### Router Console
+
+```bash
+shard -c router            # serial console (router-stable: shard -c router-stable)
+```
+
+| | |
+|---|---|
+| User | `hydrix.router.username`, default: your main `hydrix.username` |
+| Login | Automatic on the console (getty autologin) |
+| Password | `hydrix.router.hashedPassword` if set, otherwise the literal `router` |
+| Root | `sudo` without a password (the user is in `wheel`, `wheelNeedsPassword = false`) |
+
+Use `sudo` for anything privileged: `sudo systemctl restart router-firewall`, `sudo nft list ruleset`. A plain `systemctl restart ...` asks polkit for the user's password instead, which is `router` unless you set one. `vpn-assign` re-runs itself under `sudo`.
+
+Useful checks from the console:
+
+```bash
+vpn-assign status                                    # assignments, tunnels, per-network tables
+ip rule                                              # 10: to <LAN> main, 20: DNAT replies, <octet>: per network
+sudo nft list table inet router                      # firewall, lan_access set, vpn_dns map
+sudo nft list table ip hydrix-lan                    # port forwards (pentest-lan, lanControl.forwards)
+systemctl status router-firewall vpn-policy-init router-nic-check router-lan-forwards
+```
+
+To set a real password: `mkpasswd -m sha-512`, then `hydrix.router.hashedPassword = "<hash>";` in the machine config, `rebuild`.
+
 ### VM-to-VM Isolation
 
 Each VM subnet is isolated from all others at the router's `forward` chain. A compromised browsing VM cannot reach the pentest or dev VM's subnet, and vice versa. Because each router LAN interface drops packets whose source is outside its own subnet, a VM also cannot pose as another network to get past these rules or to pick another network's VPN exit.
@@ -637,6 +667,12 @@ pentest-lan status
 
 - Grants are a firewall set (`lan_access`); `enable` also adds a policy rule so a tunnelled network's LAN traffic bypasses its tunnel. Grants survive a firewall reload (`router-lan-control.service` re-applies them), not a router restart.
 - Forwards are DNAT rules in the router's own `ip hydrix-lan` table. Replies to any connection the router DNATed are routed back via the main table, so forwards also work for VPN-routed VMs and without LAN access.
+- Standing forwards (e.g. a media server for a TV on the LAN) are declared in the router config instead, and applied the same way once the uplink is up:
+
+  ```nix
+  # infra/router/default.nix
+  hydrix.router.lanControl.forwards = [ { cid = 107; port = 8096; } ];
+  ```
 
 ### Host Isolation
 

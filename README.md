@@ -59,9 +59,11 @@ Things being actively worked on or not yet verified. Checked off once resolved a
 
 - **Task pentest slots** - pre-declared isolated VM slots (task1-3) assignable to named engagements without a host rebuild
 
-- **Per-VM Mullvad VPN** - each profile VM can exit through a different Mullvad server
+- **Per-VM Mullvad VPN, fail-closed** - each VM network can exit through a different Mullvad server; a network whose tunnel is down, never connected, or explicitly blocked has no route out at all, and its DNS goes through the same tunnel (never the uplink)
+- **Network isolation by default** - VM networks cannot reach each other, the host, or the physical LAN the router is connected to; source addresses are pinned per network (anti-spoofing) and the host never routes. `pentest-lan` grants a network LAN access or forwards an uplink port to a VM at runtime, scoped exceptions (`allowedAccessTo`, `lanControl.forwards`) are declared in config
 
-- **Encrypted inter-VM file transfer** - files VM with per-bridge TAP access and vsock passphrase delivery
+- **Encrypted inter-VM file transfer** - files VM with per-bridge TAP access and vsock passphrase delivery; profiles opt out with `filesAccess = false`
+- **Standalone libvirt VMs** (Windows etc.) - attached to router-served bridges (`hydrix.libvirt.defaultBridge`), so they get the same DHCP, isolation and VPN options as microVMs
 
 - **Builder VM** - builds host and VM closures from inside a locked-down nix environment with internet via router VM
 - **Gitsync VM** - push and pull git repos from lockdown mode without host internet
@@ -181,6 +183,11 @@ either.) Each is usable from a plain terminal with no window manager at all:
 inside it and forwards its window via waypipe to *any* running Wayland compositor; it
 has no Hyprland dependency. `shard console <name>` gives a real serial-console login
 with no compositor required at all.
+
+The router's console (`shard console router`) logs in automatically as your user with
+passwordless `sudo`; use `sudo` for privileged commands. The account password, only asked
+by polkit for a plain `systemctl`, is `router` unless you set `hydrix.router.hashedPassword`.
+See [DOCUMENTATION.md § Router Console](DOCUMENTATION.md#router-console).
 
 ---
 

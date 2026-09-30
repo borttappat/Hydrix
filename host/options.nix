@@ -64,7 +64,12 @@ in {
       hashedPassword = lib.mkOption {
         type = lib.types.nullOr lib.types.str;
         default = null;
-        description = "Hashed password for router VM user (mkpasswd -m sha-512)";
+        description = ''
+          Hashed password for the router VM user (mkpasswd -m sha-512). null
+          means the literal password "router". The console logs in
+          automatically and sudo needs no password, so this only matters for
+          polkit prompts (plain systemctl) and anyone else with console access.
+        '';
       };
 
       wifi = {

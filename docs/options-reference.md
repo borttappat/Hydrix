@@ -489,6 +489,19 @@ Enable Mullvad VPN on the router VM. Requires WireGuard config files in `vpn/`.
 
 ---
 
+#### `hydrix.router.lanControl.forwards`
+| | |
+|---|---|
+| Type | `listOf { cid : int; port : port; ip : nullOr str }` |
+| Default | `[]` |
+| Template | - |
+
+Uplink TCP ports forwarded to VMs from boot (router config, e.g. `infra/router/default.nix`;
+declared by `router-lan-control.nix`). `ip = null` targets the VM's static `<subnet>.<cid>`.
+Same mechanism as `pentest-lan forward add`, so the target may be VPN-routed.
+
+---
+
 #### `hydrix.router.vpn.mullvad.dns`
 | | |
 |---|---|

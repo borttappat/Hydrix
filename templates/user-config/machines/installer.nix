@@ -359,6 +359,10 @@
   # hydrix.libvirt.grabKey = "65507,65513";  # Left Ctrl+Alt - find keysyms with `xev`
   # hydrix.libvirt.defaultBridge = "br-libvirt"; # deploy-vm default; needs the "libvirt" network in flake.nix
 
+  # Router console (`shard -c router`): autologin, passwordless sudo. The user's
+  # password (polkit prompts, plain `systemctl`) is "router" unless set here.
+  # hydrix.router.hashedPassword = "$6$...";  # mkpasswd -m sha-512
+
   # ─── Elastic CPU/RAM per-machine overrides ──────────────────────────────
   # Every profile VM gets hydrix.vmElastic.vms.<profile> enabled automatically,
   # with mem/vcpu ceilings and floor values read straight from that profile's
