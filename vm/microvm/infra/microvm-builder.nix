@@ -49,6 +49,16 @@ in {
       type = lib.types.str;
       description = "Username on the host machine (for mounting ~/hydrix-config)";
     };
+    localInputs = lib.mkOption {
+      type = lib.types.listOf lib.types.str;
+      default = [];
+      example = ["/home/user/Hydrix"];
+      description = ''
+        Absolute host paths of local flake inputs (path: or git+file:), shared
+        read-only at the same path so the flake at /mnt/hydrix resolves them
+        exactly as the host does. Every listed path must exist on the host.
+      '';
+    };
   };
 
   # Builder uses "builder" username by default
@@ -101,31 +111,40 @@ in {
       # ===== Shared Filesystems =====
       # CRITICAL: These are R/W mounts to host's actual nix store
       # Host nix-daemon MUST be stopped while builder is running
-      shares = [
-        # Host /nix/store - R/W access for building
-        {
-          tag = "host-nix-store";
-          source = "/nix/store";
-          mountPoint = "/nix/store";
+      shares =
+        [
+          # Host /nix/store - R/W access for building
+          {
+            tag = "host-nix-store";
+            source = "/nix/store";
+            mountPoint = "/nix/store";
+            proto = "virtiofs";
+          }
+          # Host /nix/var/nix - R/W access for nix database
+          {
+            tag = "host-nix-var";
+            source = "/nix/var/nix";
+            mountPoint = "/nix/var/nix";
+            proto = "virtiofs";
+          }
+          # User's hydrix-config - READ-ONLY for security
+          # Builder can evaluate flakes but cannot modify source code
+          # Uses hostUsername passed from mkMicrovmBuilder
+          {
+            tag = "hydrix-config";
+            source = "/home/${hostUsername}/hydrix-config";
+            mountPoint = "/mnt/hydrix";
+            proto = "virtiofs";
+          }
+        ]
+        ++ map (path: {
+          tag = "input-${baseNameOf path}";
+          source = path;
+          mountPoint = path;
           proto = "virtiofs";
-        }
-        # Host /nix/var/nix - R/W access for nix database
-        {
-          tag = "host-nix-var";
-          source = "/nix/var/nix";
-          mountPoint = "/nix/var/nix";
-          proto = "virtiofs";
-        }
-        # User's hydrix-config - READ-ONLY for security
-        # Builder can evaluate flakes but cannot modify source code
-        # Uses hostUsername passed from mkMicrovmBuilder
-        {
-          tag = "hydrix-config";
-          source = "/home/${hostUsername}/hydrix-config";
-          mountPoint = "/mnt/hydrix";
-          proto = "virtiofs";
-        }
-      ];
+          readOnly = true;
+        })
+        config.hydrix.builder.localInputs;
 
       # ===== EXCEPTION: intentional persistent volume =====
       # Everything else about this VM is ephemeral (tmpfs root; host /nix/store
@@ -287,7 +306,7 @@ in {
     environment.etc."gitconfig".text = ''
       [safe]
         directory = /mnt/hydrix
-    '';
+      ${lib.concatMapStrings (path: "  directory = ${path}\n") config.hydrix.builder.localInputs}'';
 
     # ===== Read-Only Mounts for Security =====
     # Builder can evaluate flakes but cannot modify source code
