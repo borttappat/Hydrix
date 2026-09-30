@@ -720,6 +720,7 @@
           :anchor "top left")
         :exclusive false
         :stacking "fg" ;; above windows, see the header of modules/eww.nix
+        :namespace "eww-dashboard" ;; target of the layer blur rule in modules/hyprland.nix
         :focusable false
         (dashboard))
 

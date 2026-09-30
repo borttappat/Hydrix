@@ -39,6 +39,23 @@
   shadowOn = ui.shadow.enable && ui.shadow.strength > 0;
   shadowRange = toString (builtins.floor (2 * ui.shadow.strength + 0.5));
   shadowAlpha = lib.fixedWidthString 2 "0" (lib.toHexString (lib.min 255 (builtins.floor (179 * ui.shadow.strength + 0.5))));
+  # Layer-shell surfaces (eww, waybar, wofi, swaync) are only blurred when a
+  # layerrule asks for it. ignore_alpha just below each app's overlay opacity
+  # confines the blur to the panel fill, leaving transparent padding and
+  # box-shadow halos unblurred.
+  layerBlur = lib.concatStrings (lib.mapAttrsToList (app: namespaces: let
+    o = ui.opacity.overlayOverrides.${app} or ui.opacity.overlay;
+  in
+    lib.optionalString (o < 1.0) (lib.concatMapStrings (ns: ''
+        layerrule = blur 1, match:namespace ^(${ns})$
+        layerrule = ignore_alpha ${toString (o - 0.05)}, match:namespace ^(${ns})$
+      '')
+      namespaces)) {
+    eww = ["eww-dashboard"];
+    waybar = ["waybar"];
+    wofi = ["wofi"];
+    notifications = ["swaync-notification-window" "swaync-control-center"];
+  });
   gaps = ui.gaps or 10;
   barType = config.hydrix.graphical.waybar.barType or "monobar";
   # Bottom gap: dualbar's bottom bar provides it via exclusive zone, monobar needs gaps_out.
@@ -594,6 +611,7 @@
     windowrule = rounding ${lkRounding}, match:class ^(wofi)$
     windowrule = no_anim 1,             match:class ^(wofi)$
     layerrule = no_anim 1, match:namespace ^(wofi)$
+    ${layerBlur}
 
     ${lib.optionalString config.hydrix.hyprland.hideBorderOnSingleWindow ''
       # Hide the border when a workspace has exactly one tiled window.

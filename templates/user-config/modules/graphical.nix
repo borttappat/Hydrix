@@ -7,12 +7,8 @@
 # Bar style and module layout -> modules/waybar.nix
 # Font packages and mappings  -> modules/fonts.nix
 # Font family/size/relations  -> modules/fonts.nix (or machines/<serial>.nix)
-
-{ lib, ... }:
-
-{
+{lib, ...}: {
   hydrix.graphical = {
-
     # ─── Layout ────────────────────────────────────────────────────────
     # ui.gaps         = lib.mkDefault 10;    # Gap size everywhere (px): screen-to-bar, bar-to-window, window-to-window
     # ui.border       = lib.mkDefault 2;     # Window border width (px)
@@ -31,12 +27,13 @@
     # ui.pillRadiusScale = lib.mkDefault 2.0;   # Scale factor applied to cornerRadius for pill radius
 
     # ─── Opacity ───────────────────────────────────────────────────────
-    # overlay: background opacity for alacritty, waybar, wofi, eww, notifications
+    # overlay: background opacity for alacritty, waybar, wofi, eww, notifications;
+    # layer blur (modules/hyprland.nix) follows it. Override per machine.
     # ui.opacity.overlay          = lib.mkDefault 0.85;
     # ui.opacity.overlayOverrides = lib.mkDefault { };  # Per-app exceptions, e.g. { alacritty = 0.95; }
     # active/inactive: whole-window opacity (text included) for non-excluded Hyprland windows
-    ui.opacity.active           = lib.mkDefault 0.95;
-    ui.opacity.inactive         = lib.mkDefault 0.95;
+    ui.opacity.active = lib.mkDefault 0.95;
+    ui.opacity.inactive = lib.mkDefault 0.95;
     # ui.opacity.exclude          = lib.mkDefault [ "Alacritty" "feh" "Feh" "firefox" "Firefox" "mpv" "vlc" ];
 
     # ─── Keyboard remapping ────────────────────────────────────────────

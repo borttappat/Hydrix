@@ -761,7 +761,7 @@ in {
         overlay = lib.mkOption {
           type = lib.types.float;
           default = 0.85;
-          description = "Background opacity shared by alacritty, waybar, wofi, eww and notifications. Text stays opaque.";
+          description = "Background opacity shared by alacritty, waybar, wofi, eww and notifications. Text stays opaque. Also sets the layer blur cutoff for the layer-shell surfaces.";
         };
 
         overlayOverrides = lib.mkOption {
