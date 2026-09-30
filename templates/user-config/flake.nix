@@ -401,8 +401,15 @@
       builtins.foldl' (acc: m: acc // m.tapBridges)
       {} (builtins.filter (m: m ? tapBridges) discoveredInfra);
 
+    # Router-served networks for standalone (libvirt) VMs, which get DHCP, DNS and
+    # internet from the router like microVMs; the host never routes. Pair with
+    # hydrix.libvirt.defaultBridge = "br-<name>" so deploy-vm uses it.
+    standaloneNetworks = [
+      # { name = "libvirt"; subnet = "192.168.130"; routerTap = "mv-router-libv"; }
+    ];
+
     # One isolated network per task slot, after profile and infra networks
-    extraNetworks = profileExtraNetworks ++ infraNetworks ++ taskNetworks;
+    extraNetworks = profileExtraNetworks ++ infraNetworks ++ taskNetworks ++ standaloneNetworks;
 
     # Only non-builtin infra VMs: router/builder use specialized mk functions below
     infraVMConfigs = builtins.listToAttrs (map (m: {

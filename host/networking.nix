@@ -83,7 +83,11 @@ in {
         (netCfg.bridges
          ++ lib.unique (lib.attrValues netCfg.infraTapBridges)
          ++ map (n: "br-${n.name}") netCfg.extraNetworks))
-      (_: 1);
+      (_: 1) // {
+      # The host never routes: VM traffic goes through the router VM, and
+      # standalone libvirt VMs attach to router-served bridges.
+      "net.ipv4.ip_forward" = lib.mkDefault 0;
+    };
 
     # Explicit DROP for all VM bridge interfaces in the INPUT chain.
     # Belt-and-suspenders beyond the empty allowedTCPPorts — ensures no VM can

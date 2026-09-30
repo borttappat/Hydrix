@@ -469,6 +469,19 @@ in {
           Example: "65515" = Super_L.
         '';
       };
+
+      defaultBridge = lib.mkOption {
+        type = lib.types.nullOr lib.types.str;
+        default = null;
+        example = "br-libvirt";
+        description = ''
+          Bridge deploy-vm attaches new VMs to when --bridge is not given, for
+          every --type. Point it at a router-served network declared for
+          standalone VMs (an extraNetworks entry), so they get DHCP, DNS and
+          internet from the router like any microVM. The host itself never
+          routes. null keeps the per-type bridges (pentest -> br-pentest, ...).
+        '';
+      };
     };
 
     # =========================================================================

@@ -306,7 +306,11 @@ let
         [[ -z "$VM_NAME" ]] && error "Missing --name"
         [[ -z "''${TYPE_BRIDGES[$VM_TYPE]:-}" ]] \
             && error "Invalid type: $VM_TYPE (valid: ''${!TYPE_BRIDGES[*]})"
-        if [[ -z "$VM_BRIDGE" ]]; then VM_BRIDGE="''${TYPE_BRIDGES[$VM_TYPE]}"; fi
+        if [[ -z "$VM_BRIDGE" ]]; then VM_BRIDGE="${
+          if config.hydrix.libvirt.defaultBridge != null
+          then config.hydrix.libvirt.defaultBridge
+          else "\${TYPE_BRIDGES[$VM_TYPE]}"
+        }"; fi
     }
 
     check_base_image() {
@@ -371,13 +375,7 @@ let
 
     check_bridge() {
         if ! ip link show "$VM_BRIDGE" &>/dev/null; then
-            log "Warning: bridge $VM_BRIDGE not found"
-            if ip link show "virbr0" &>/dev/null; then
-                log "  Falling back to virbr0"
-                VM_BRIDGE="virbr0"
-            else
-                error "No valid bridge found. Create $VM_BRIDGE or start libvirtd default network."
-            fi
+            error "Bridge $VM_BRIDGE not found (virbr0 has no internet). Rebuild the host so the bridge exists, or pass --bridge."
         fi
     }
 
@@ -682,11 +680,6 @@ in
           iifname "virbr0" drop
         '';
       };
-
-      nat = {
-        enable = true;
-        internalInterfaces = [ "virbr0" ];
-      };
     };
 
     # libvirt nftables backend — consistent with host firewall.
@@ -697,8 +690,6 @@ in
 
     # Kernel parameters for virtualization
     boot.kernel.sysctl = {
-      "net.ipv4.ip_forward" = 1;
-      "net.ipv4.conf.all.forwarding" = 1;
       "net.ipv4.conf.all.rp_filter" = 0;
       "net.ipv4.conf.default.rp_filter" = 0;
       "vm.max_map_count" = 2147483647;
@@ -743,30 +734,45 @@ in
       '';
     };
 
-    # Default libvirt network
-    environment.etc."libvirt/qemu/networks/default.xml".text = ''
-      <?xml version="1.0" encoding="UTF-8"?>
-      <network>
-        <name>default</name>
-        <forward mode="nat">
-          <nat>
-            <port start='1024' end='65535'/>
-          </nat>
-        </forward>
-        <bridge name="virbr0" stp='on' delay='0'/>
-        <dns enable="yes">
-          <forwarder addr="1.1.1.1"/>
-          <forwarder addr="8.8.8.8"/>
-          <forwarder addr="9.9.9.9"/>
-        </dns>
-        <ip address="192.168.122.1" netmask="255.255.255.0">
-          <dhcp>
-            <range start="192.168.122.10" end="192.168.122.200"/>
-            <lease expiry="24" unit="hours"/>
-          </dhcp>
-        </ip>
-      </network>
-    '';
+    # libvirt's default network, isolated: guests on virbr0 get DHCP/DNS from
+    # the host but no route anywhere, and libvirt never switches on host IP
+    # forwarding (it does for any NAT or routed network). Standalone VMs get
+    # internet from a router-served bridge instead (deploy-vm --bridge/type).
+    # NixOS seeds /var/lib/libvirt with libvirt's stock NAT definition once,
+    # so an existing one is redefined here.
+    systemd.services.libvirt-default-network = let
+      virsh = "${config.virtualisation.libvirtd.package}/bin/virsh -c qemu:///system";
+      isolated = pkgs.writeText "libvirt-default-network.xml" ''
+        <network>
+          <name>default</name>
+          <bridge name="virbr0" stp="on" delay="0"/>
+          <ip address="192.168.122.1" netmask="255.255.255.0">
+            <dhcp>
+              <range start="192.168.122.10" end="192.168.122.200"/>
+            </dhcp>
+          </ip>
+        </network>
+      '';
+    in {
+      description = "Keep libvirt's default network isolated";
+      after = [ "libvirtd.service" ];
+      requires = [ "libvirtd.service" ];
+      wantedBy = [ "multi-user.target" ];
+      serviceConfig = {
+        Type = "oneshot";
+        RemainAfterExit = true;
+      };
+      script = ''
+        if ${virsh} net-dumpxml default 2>/dev/null | grep -q "<forward"; then
+          ${virsh} net-destroy default 2>/dev/null || true
+          ${virsh} net-undefine default
+          ${virsh} net-define ${isolated}
+          ${virsh} net-autostart default
+          ${virsh} net-start default
+          echo "libvirt default network redefined as isolated"
+        fi
+      '';
+    };
 
     # virt-manager grab/release key — set per-machine via hydrix.libvirt.grabKey
     home-manager.users.${config.hydrix.username}.dconf.settings = {
