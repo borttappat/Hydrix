@@ -71,7 +71,7 @@
   # tiled window, as opposed to the full outer gap at the screen edge.
   gapsIn = (gaps + 1) / 2;
   blockShadow = sc.shadow {
-    blur = 4;
+    blur = 3;
     alpha = 0.8;
   };
   # Margin around the dashboard blocks so their box-shadow is not clipped at

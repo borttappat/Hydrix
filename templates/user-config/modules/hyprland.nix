@@ -35,10 +35,12 @@
   username = config.hydrix.username;
   sc = config.hydrix.graphical.scaling.computed;
   ui = config.hydrix.graphical.ui;
-  # Window shadow at ui.shadow.strength 1.0: range 2, 70% black (0xb3).
+  # Window shadow at ui.shadow.strength 1.0: range 4, 25% black (0x40), power 2.
+  # Hyprland starts at full alpha at the window edge where a GTK box-shadow
+  # starts at half, so this approximates the waybar pill and eww block falloff.
   shadowOn = ui.shadow.enable && ui.shadow.strength > 0;
-  shadowRange = toString (builtins.floor (2 * ui.shadow.strength + 0.5));
-  shadowAlpha = lib.fixedWidthString 2 "0" (lib.toHexString (lib.min 255 (builtins.floor (179 * ui.shadow.strength + 0.5))));
+  shadowRange = toString (builtins.floor (4 * ui.shadow.strength + 0.5));
+  shadowAlpha = lib.fixedWidthString 2 "0" (lib.toHexString (lib.min 255 (builtins.floor (64 * ui.shadow.strength + 0.5))));
   # Layer-shell surfaces (eww, waybar, wofi, swaync) are only blurred when a
   # layerrule asks for it. ignore_alpha just below each app's overlay opacity
   # confines the blur to the panel fill, leaving transparent padding and
@@ -379,7 +381,7 @@
       shadow {
         enabled      = ${lib.boolToString shadowOn}
         range        = ${shadowRange}
-        render_power = 4
+        render_power = 2
         color        = rgba(000000${shadowAlpha})
       }
     }
