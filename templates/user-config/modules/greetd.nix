@@ -1,18 +1,25 @@
-# Hydrix greetd login manager — Wayland-native replacement for a bare TTY login.
+# Hydrix greetd login manager, the backup to SDDM (modules/sddm.nix).
 # Option declarations + implementation live in the framework
-# (theming/dm/greetd.nix) — this file just sets values.
+# (theming/dm/greetd.nix); this file just sets values.
 #
-# Two interchangeable frontends — switch `frontend` to compare:
+# The two are mutually exclusive: to switch, set greetd.enable = true and
+# sddm.enable = false.
+#
+# Two interchangeable frontends, switch `frontend` to compare:
 #   - tuigreet (default): minimal TUI, colors only, no known open issues
 #   - regreet: GTK greeter with background image + CSS theming, nicer visual
 #     ceiling but has rough edges (oversized default font, incomplete CSS
-#     coverage on some widgets) — worth revisiting, not yet as solid as tuigreet.
-{ config, lib, pkgs, ... }:
+#     coverage on some widgets), not yet as solid as tuigreet.
 {
+  config,
+  lib,
+  pkgs,
+  ...
+}: {
   hydrix.greetd = {
-    enable = lib.mkDefault true;
+    enable = lib.mkDefault false;
     frontend = lib.mkDefault "tuigreet";
-    # fontSize = lib.mkDefault 16;  # DEFAULT: 16 — regreet only (tuigreet has no font control)
+    # fontSize = lib.mkDefault 16;  # DEFAULT: 16, regreet only (tuigreet has no font control)
 
     # Wallpaper for the regreet background. Ignored by tuigreet.
     # background = "${hydrix}/theming/wallpapers/Hydrix.png";

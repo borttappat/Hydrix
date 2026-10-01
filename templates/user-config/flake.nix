@@ -189,7 +189,8 @@
               ./modules/waybar.nix # Waybar layout and modules (user-customizable)
               ./modules/grub-theme.nix # Hydrix-themed GRUB bootloader
               ./modules/plymouth.nix # Hydrix boot animation
-              ./modules/greetd.nix # greetd login manager (tuigreet/regreet)
+              ./modules/sddm.nix # SDDM login manager (hyprlock-matched theme)
+              ./modules/greetd.nix # greetd login manager, backup to SDDM (tuigreet/regreet)
               vmThemeSyncModule # VM theme sync (host-side)
               {
                 hydrix.vmThemeSync.enable = true;
