@@ -15,7 +15,12 @@
     #   accent       = "#05AF5A";
     #   accentBright = "#00FF80";
     #   fg           = "#dfdfdf";
-    #   error        = "#FF4444";
+    #   error        = "#FF4444";  # fixed red, not colorscheme-derived
+    #   # Boot message colors, DEFAULT: from the colorscheme
+    #   ok           = "#08B860";  # [  OK  ] tag (color2)
+    #   warn         = "#02D66C";  # [DEPEND] tag, [ *** ] ticker (color3)
+    #   highlight    = "#00FA7D";  # unit descriptions (color4)
+    #   dim          = "#9c9c9c";  # Starting lines, durations (color8)
     # };
   };
 }

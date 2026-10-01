@@ -4,7 +4,10 @@
 # same color scheme, same visual structure.
 #
 # Layout:
-#   - Systemd boot messages scrolling from top (~5% down)
+#   - Systemd boot messages scrolling from top (~5% down), colored like
+#     the plain console: [  OK  ]/[FAILED]/[ TIME ]/[DEPEND] tags, unit
+#     descriptions highlighted, a bouncing [ *** ] on running jobs. All
+#     colors come from hydrix.plymouth.colors (colorscheme-derived).
 #   - "HYDRIX" title at bottom (~85%, matching GRUB)
 #   - Grey progress bar below title
 #
@@ -59,6 +62,11 @@ let
   acc = hexToRgb cfg.colors.accent;
   fg  = hexToRgb cfg.colors.fg;
   err = hexToRgb cfg.colors.error;
+  ok  = hexToRgb cfg.colors.ok;
+  wrn = hexToRgb cfg.colors.warn;
+  hl  = hexToRgb cfg.colors.highlight;
+  dim = hexToRgb cfg.colors.dim;
+  rgb = c: "${c.rs}, ${c.gs}, ${c.bs}";
 
   maxLines = 30;
 
@@ -80,6 +88,8 @@ title_ratio = ${builtins.toString titleRatio};
 msg_px = Math.Int(screen_h * font_ratio);
 msg_font = "Iosevka " + msg_px + "px";
 msg_line_height = Math.Int(msg_px * 1.8);
+# Width of the console's "[  OK  ] " tag column (Iosevka is monospace).
+tag_w = Image.Text("[  OK  ]_", 1, 1, 1, 1, msg_font).GetWidth();
 
 # ── Title image (pre-rendered: Iosevka Bold; scaled to match GRUB) ─
 title_image = Image("title.png");
@@ -101,14 +111,7 @@ bar_sprite.SetPosition(cx - bar_max_width / 2, bar_y, 10);
 # ── Message area (top of screen, scrolling down) ───────────────────
 msg_area_top = screen_h * 0.04;
 max_messages = ${toString maxLines};
-
-fun init_messages() {
-  global.msg_sprites;
-  global.msg_count = 0;
-  for (i = 0; i < max_messages; i++)
-    msg_sprites[i] = Sprite();
-}
-init_messages();
+global.msg_count = 0;
 
 # ── Boot progress callback ──────────────────────────────────────────
 # progress is reliable during boot (calibrated against boot.json), but
@@ -141,6 +144,7 @@ fun boot_progress_cb(time, progress) {
 Plymouth.SetBootProgressFunction(boot_progress_cb);
 
 # ── Adaptive resize ──────────────────────────────────────────────────
+# Also drives the running-job ticker animation (ticker_cb, below).
 # Re-anchor on every refresh tick in case Plymouth's reported resolution
 # ever changes mid-session (e.g. a different renderer handoff on other
 # hardware). Cheap no-op when it doesn't.
@@ -148,7 +152,9 @@ fun resize_cb() {
   global.screen_w; global.screen_h; global.cx;
   global.msg_px; global.msg_font; global.msg_line_height;
   global.title_w; global.title_h;
-  global.bar_max_width; global.bar_y; global.msg_area_top;
+  global.bar_max_width; global.bar_y; global.msg_area_top; global.tag_w;
+
+  ticker_cb();
 
   new_w = Window.GetWidth();
   new_h = Window.GetHeight();
@@ -161,6 +167,7 @@ fun resize_cb() {
   msg_px = Math.Int(screen_h * font_ratio);
   msg_font = "Iosevka " + msg_px + "px";
   msg_line_height = Math.Int(msg_px * 1.8);
+  tag_w = Image.Text("[  OK  ]_", 1, 1, 1, 1, msg_font).GetWidth();
 
   title_h = Math.Int(screen_h * title_ratio);
   title_w = Math.Int(title_orig_w * title_h / title_orig_h);
@@ -177,67 +184,236 @@ Plymouth.SetRefreshFunction(resize_cb);
 ${if cfg.showMessages then ''
 global.last_status = "";
 
-# Plymouth script's String lib has no built-in Find/Contains — only
-# SubString/Length/CharAt — so scan manually.
-fun string_contains(haystack, needle) {
+fun rgb_color(r, g, b) {
+  c.r = r; c.g = g; c.b = b;
+  return c;
+}
+global.c_fg   = rgb_color(${rgb fg});
+global.c_err  = rgb_color(${rgb err});
+global.c_ok   = rgb_color(${rgb ok});
+global.c_warn = rgb_color(${rgb wrn});
+global.c_hl   = rgb_color(${rgb hl});
+global.c_dim  = rgb_color(${rgb dim});
+
+# Plymouth script's String lib has no built-in Find/Contains, only
+# SubString/Length/CharAt, so scan manually.
+fun string_find(haystack, needle, from) {
   h_len = haystack.Length();
   n_len = needle.Length();
-  if (n_len > h_len) return false;
-  for (i = 0; i <= h_len - n_len; i++)
-    if (haystack.SubString(i, i + n_len) == needle) return true;
-  return false;
+  for (i = from; i <= h_len - n_len; i++)
+    if (haystack.SubString(i, i + n_len) == needle) return i;
+  return -1;
+}
+
+fun string_contains(haystack, needle) {
+  return string_find(haystack, needle, 0) >= 0;
 }
 
 fun status_is_failure(status) {
   return string_contains(status, "failed") || string_contains(status, "Failed") || string_contains(status, "FAILED");
 }
 
-# The last line can be a "live" line (display-message): repeated messages
-# overwrite it in place and hide-message removes it, like the console's
-# "A start job is running for ..." ticker. Status updates append below it.
-global.live_line = false;
-
-fun line_image(text) {
-  if (status_is_failure(text))
-    return Image.Text(text, ${err.rs}, ${err.gs}, ${err.bs}, 1, msg_font);
-  return Image.Text(text, ${fg.rs}, ${fg.gs}, ${fg.bs}, 1, msg_font);
+fun is_tagged(text) {
+  return text.Length() >= 8 && text.CharAt(0) == "[" && text.CharAt(7) == "]";
 }
 
-fun append_line(status) {
+# Bare unit names ("foo.service"), as sent by systemd itself and by the
+# shutdown watcher.
+fun is_unit_id(text) {
+  if (text == "" || string_contains(text, " ")) return false;
+  return string_contains(text, ".");
+}
+
+# Line format, matching the systemd console: "[TAG...] verb|subject|suffix".
+# The 8-char tag and every segment are optional; a blank tag keeps the tag
+# column empty (console's indented "Starting ..." lines).
+fun parse_line(text) {
+  p.tagged = false; p.tag = ""; p.verb = ""; p.subj = ""; p.suf = ""; p.unit = false;
+  rest = text;
+  if (is_tagged(text)) {
+    p.tagged = true;
+    p.tag = text.SubString(1, 7);
+    rest = text.SubString(8, text.Length());
+    if (rest.Length() > 0 && rest.CharAt(0) == " ")
+      rest = rest.SubString(1, rest.Length());
+  } else if (is_unit_id(text)) {
+    p.unit = true;
+    mode = Plymouth.GetMode();
+    if (mode == "shutdown" || mode == "reboot") p.verb = "Stopping";
+    else p.verb = "Starting";
+    dot = text.Length() - 1;
+    while (dot > 0 && text.CharAt(dot) != ".") dot--;
+    p.subj = text.SubString(0, dot);
+    p.suf = text.SubString(dot, text.Length());
+    return p;
+  }
+
+  a = string_find(rest, "|", 0);
+  if (a < 0) {
+    p.verb = rest;
+    return p;
+  }
+  p.verb = rest.SubString(0, a);
+  b = string_find(rest, "|", a + 1);
+  if (b < 0) {
+    p.subj = rest.SubString(a + 1, rest.Length());
+    return p;
+  }
+  p.subj = rest.SubString(a + 1, b);
+  p.suf = rest.SubString(b + 1, rest.Length());
+  return p;
+}
+
+fun tag_color(tag) {
+  if (tag == "  OK  ") return c_ok;
+  if (tag == "FAILED" || tag == " TIME ") return c_err;
+  if (tag == "DEPEND" || string_contains(tag, "*")) return c_warn;
+  return c_fg;
+}
+
+# systemd's bouncing 3-star "cylon" for jobs that are still running.
+global.cylon_frames = 14;
+global.cylon[0]  = "*     "; global.cylon[1]  = "**    "; global.cylon[2]  = "***   ";
+global.cylon[3]  = " ***  "; global.cylon[4]  = "  *** "; global.cylon[5]  = "   ***";
+global.cylon[6]  = "    **"; global.cylon[7]  = "     *"; global.cylon[8]  = "    **";
+global.cylon[9]  = "   ***"; global.cylon[10] = "  *** "; global.cylon[11] = " ***  ";
+global.cylon[12] = "***   "; global.cylon[13] = "**    ";
+global.cylon_frame = 0;
+global.cylon_tick = 0;
+
+# Each line is a slot of sprites laid out left to right, one per color.
+fun new_slot() {
+  s.lb = Sprite(); s.tag = Sprite(); s.rb = Sprite();
+  s.verb = Sprite(); s.subj = Sprite(); s.suf = Sprite();
+  s.ticker = false;
+  return s;
+}
+
+fun slot_set_y(slot, y) {
+  slot.lb.SetPosition(slot.lb.GetX(), y, 10);
+  slot.tag.SetPosition(slot.tag.GetX(), y, 10);
+  slot.rb.SetPosition(slot.rb.GetX(), y, 10);
+  slot.verb.SetPosition(slot.verb.GetX(), y, 10);
+  slot.subj.SetPosition(slot.subj.GetX(), y, 10);
+  slot.suf.SetPosition(slot.suf.GetX(), y, 10);
+}
+
+# Empty segments are hidden by opacity: SetImage with a null image (the
+# Image("") idiom) leaves the previous image in place, so reused slots would
+# keep stale segments drawn under the new ones.
+fun put(spr, text, c, x) {
+  if (text == "") {
+    spr.SetOpacity(0);
+    return x;
+  }
+  img = Image.Text(text, c.r, c.g, c.b, 1, msg_font);
+  spr.SetImage(img);
+  spr.SetX(x);
+  spr.SetOpacity(0.85);
+  return x + img.GetWidth();
+}
+
+fun render_line(slot, text) {
+  p = parse_line(text);
+  x0 = screen_w * 0.04;
+  blank = p.tag == "      ";
+  slot.ticker = p.tagged && string_contains(p.tag, "*");
+
+  if (p.tagged && !blank) {
+    tag = p.tag;
+    if (slot.ticker) tag = cylon[global.cylon_frame];
+    x = put(slot.lb, "[", c_fg, x0);
+    x = put(slot.tag, tag, tag_color(p.tag), x);
+    put(slot.rb, "]", c_fg, x);
+  } else {
+    put(slot.lb, "", c_fg, x0);
+    put(slot.tag, "", c_fg, x0);
+    put(slot.rb, "", c_fg, x0);
+  }
+
+  verb_c = c_fg;
+  subj_c = c_hl;
+  if (blank || p.unit) {
+    verb_c = c_dim;
+    subj_c = c_fg;
+  }
+  if (!p.tagged && status_is_failure(text)) verb_c = c_err;
+
+  sep = "";
+  if (p.verb != "" && p.subj != "") sep = " ";
+
+  x = put(slot.verb, p.verb, verb_c, x0 + tag_w);
+  x = put(slot.subj, sep + p.subj, subj_c, x);
+  put(slot.suf, p.suf, c_dim, x);
+}
+
+fun init_messages() {
+  global.msg_lines;
+  global.msg_count = 0;
+  for (i = 0; i < max_messages; i++)
+    msg_lines[i] = new_slot();
+}
+init_messages();
+
+# The last line can be a "live" line (display-message): repeated messages
+# overwrite it in place and hide-message removes it, like the console's
+# "A start job is running for ..." ticker. Status updates are inserted
+# above it, so it stays pinned to the bottom.
+global.live_line = false;
+
+fun append_line(text) {
   if (global.msg_count >= max_messages) {
-    oldest = msg_sprites[0];
+    oldest = msg_lines[0];
     for (i = 0; i < max_messages - 1; i++)
-      msg_sprites[i] = msg_sprites[i + 1];
-    msg_sprites[max_messages - 1] = oldest;
+      msg_lines[i] = msg_lines[i + 1];
+    msg_lines[max_messages - 1] = oldest;
     global.msg_count = max_messages;
   } else {
     global.msg_count = global.msg_count + 1;
   }
 
-  for (i = 0; i < global.msg_count; i++) {
-    line_y = msg_area_top + i * msg_line_height;
-    msg_sprites[i].SetPosition(screen_w * 0.04, line_y, 10);
+  idx = global.msg_count - 1;
+  if (global.live_line && idx > 0) {
+    live = msg_lines[idx - 1];
+    msg_lines[idx - 1] = msg_lines[idx];
+    msg_lines[idx] = live;
+    idx = idx - 1;
   }
 
-  idx = global.msg_count - 1;
-  msg_sprites[idx].SetImage(line_image(status));
-  msg_sprites[idx].SetPosition(screen_w * 0.04, msg_area_top + idx * msg_line_height, 10);
-  msg_sprites[idx].SetOpacity(0.85);
+  render_line(msg_lines[idx], text);
+  for (i = 0; i < global.msg_count; i++)
+    slot_set_y(msg_lines[i], msg_area_top + i * msg_line_height);
 }
 
+fun ticker_cb() {
+  if (global.live_line == false || global.msg_count == 0) return;
+  slot = msg_lines[global.msg_count - 1];
+  if (slot.ticker == false) return;
+  global.cylon_tick = global.cylon_tick + 1;
+  if (global.cylon_tick < 6) return;
+  global.cylon_tick = 0;
+  global.cylon_frame = global.cylon_frame + 1;
+  if (global.cylon_frame >= cylon_frames) global.cylon_frame = 0;
+  slot.tag.SetImage(Image.Text(cylon[global.cylon_frame], c_warn.r, c_warn.g, c_warn.b, 1, msg_font));
+}
+
+# Once tagged lines arrive (journal feed from hydrix-plymouth-boot-status),
+# they carry unit descriptions, so systemd's own bare unit names would only
+# duplicate them during boot.
+global.journal_feed = false;
+
 fun status_cb(status) {
-  global.last_status;
-  if (status == last_status) return;
-  last_status = status;
-  global.live_line = false;
+  if (status == global.last_status) return;
+  global.last_status = status;
+  if (is_tagged(status)) global.journal_feed = true;
+  else if (global.journal_feed && Plymouth.GetMode() == "boot" && is_unit_id(status)) return;
   append_line(status);
 }
 Plymouth.SetUpdateStatusFunction(status_cb);
 
 fun message_cb(text) {
   if (global.live_line && global.msg_count > 0) {
-    idx = global.msg_count - 1;
-    msg_sprites[idx].SetImage(line_image(text));
+    render_line(msg_lines[global.msg_count - 1], text);
   } else {
     append_line(text);
     global.live_line = true;
@@ -247,13 +423,14 @@ Plymouth.SetMessageFunction(message_cb);
 
 fun hide_message_cb(text) {
   if (global.live_line == false || global.msg_count == 0) return;
-  msg_sprites[global.msg_count - 1].SetImage(Image(""));
+  render_line(msg_lines[global.msg_count - 1], "");
   global.msg_count = global.msg_count - 1;
   global.live_line = false;
 }
 Plymouth.SetHideMessageFunction(hide_message_cb);
 
 '' else ''
+fun ticker_cb() { }
 fun message_cb(text) { }
 Plymouth.SetMessageFunction(message_cb);
 ''}
@@ -287,7 +464,7 @@ fun display_normal_cb() {
   global.bar_sprite.SetOpacity(1);
   ${if cfg.showMessages then ''
   for (i = 0; i < max_messages; i++)
-    msg_sprites[i].SetImage(Image(""));
+    render_line(msg_lines[i], "");
   global.msg_count = 0;
   global.last_status = "";
   global.live_line = false;
@@ -412,18 +589,47 @@ SCRIPT
     done
   '';
 
-  # systemd itself only tells Plymouth which units are starting. Failures,
-  # timeouts and the "A start job is running for ..." ticker go to the text
-  # console, which the splash covers, so a hung unit looks like a frozen
-  # splash. This polls PID 1 (private socket, no D-Bus needed) once a second
-  # while plymouthd is up and forwards both: failed units as status lines,
-  # the oldest job running 5s or more as the live message line.
+  # Maps PID 1's job journal entries to console-style status lines
+  # ("[  OK  ] Finished|Description"), see parse_line in the script above.
+  # Condition-skipped units are dropped, like the console does. Failures are
+  # left to the list-units poller in bootStatusScript, which also catches
+  # units that die after starting.
+  jobLineFilter = pkgs.writeText "hydrix-plymouth-job-lines.jq" ''
+    (.MESSAGE // "" | if type == "array" then implode else . end) as $m
+    | select($m | test(" skipped, |being skipped\\.$") | not)
+    | (.JOB_RESULT // "") as $r
+    | (if $r == "done" then "  OK  "
+       elif $r == "timeout" then " TIME "
+       elif $r == "dependency" then "DEPEND"
+       elif $r == "" and ($m | startswith("Starting ")) then "      "
+       else empty end) as $tag
+    | (($m | capture("^(?<v>Started|Finished|Reached target|Mounted|Found device|Listening on|Created slice|Activated swap|Set up automount|Starting|Timed out starting|Dependency failed for) (?<s>.*?)(\\.\\.\\.|\\.)?$"))
+       // {v: "", s: $m}) as $p
+    | "[\($tag)] \($p.v)|\($p.s | gsub("\\|"; "/"))"
+  '';
+
+  # systemd itself only tells Plymouth which units are starting. Completions,
+  # failures, timeouts and the "A start job is running for ..." ticker go to
+  # the text console, which the splash covers, so a hung unit looks like a
+  # frozen splash. This follows PID 1's job journal entries for [  OK  ]
+  # style lines (the -n all backlog replays initrd too), and polls PID 1
+  # (private socket, no D-Bus needed) once a second while plymouthd is up:
+  # failed units as status lines, the oldest job running 5s or more as the
+  # live message line. The journal follower needs no cleanup: systemd kills
+  # the rest of the cgroup once this main process exits.
   bootStatusScript = pkgs.writeShellScript "hydrix-plymouth-boot-status" ''
     set -u
     plymouth="${pkgs.plymouth}/bin/plymouth"
     systemctl="${pkgs.systemd}/bin/systemctl"
     declare -A first=() reported=()
     shown=""
+
+    ${pkgs.systemd}/bin/journalctl -b -f -n all -o json \
+      --output-fields=MESSAGE,JOB_RESULT _PID=1 JOB_TYPE=start 2>/dev/null \
+    | ${pkgs.jq}/bin/jq --unbuffered -r -f ${jobLineFilter} 2>/dev/null \
+    | while IFS= read -r line; do
+        "$plymouth" update --status="$line" 2>/dev/null
+      done &
 
     _dur() {
       local s=$1
@@ -438,7 +644,8 @@ SCRIPT
         reported[$unit]=1
         desc=$("$systemctl" show -P Description "$unit")
         result=$("$systemctl" show -P Result "$unit")
-        "$plymouth" update --status="FAILED: ''${desc:-$unit} (''${result:-failed})" 2>/dev/null
+        desc=''${desc:-$unit}
+        "$plymouth" update --status="[FAILED] Failed|''${desc//"|"/"/"}| (''${result:-failed})" 2>/dev/null
       done < <("$systemctl" list-units --failed --plain --no-legend --no-pager 2>/dev/null)
 
       declare -A running=()
@@ -464,7 +671,8 @@ SCRIPT
           *) limit=$("$systemctl" show -P JobRunningTimeoutUSec "$oldest") ;;
         esac
         case "$limit" in ""|infinity) limit="no limit" ;; esac
-        msg="A $oldest_type job is running for ''${desc:-$oldest} ($(_dur $((now - oldest_t))) / $limit)"
+        desc=''${desc:-$oldest}
+        msg="[  *** ] A $oldest_type job is running for|''${desc//"|"/"/"}| ($(_dur $((now - oldest_t))) / $limit)"
       fi
 
       if [ -n "$msg" ]; then
@@ -539,6 +747,13 @@ in {
       # recognizable red regardless of colorscheme, not reinterpret whatever
       # hue happens to occupy the accent slot for a given scheme.
       error        = lib.mkOption { type = lib.types.str; default = "#FF4444"; };
+      # Boot message colors, console style: [  OK  ] tag, [DEPEND] tag and the
+      # "A start job is running" stars, unit descriptions, and secondary text
+      # (Starting lines, durations, unit type suffixes).
+      ok           = lib.mkOption { type = lib.types.str; default = "#${scheme.base0B}"; };
+      warn         = lib.mkOption { type = lib.types.str; default = "#${scheme.base0A}"; };
+      highlight    = lib.mkOption { type = lib.types.str; default = "#${scheme.base0D}"; };
+      dim          = lib.mkOption { type = lib.types.str; default = "#${scheme.base03}"; };
     };
   };
 
