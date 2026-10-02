@@ -647,11 +647,6 @@
         update_visibility
       }
 
-      until eww ping >/dev/null 2>&1; do sleep 0.5; done
-      eww close-all 2>/dev/null || true
-      ${lib.optionalString wlEnabled ''eww open wallpaper-layer 2>/dev/null || true''}
-      sync_dashboards
-
       _sock="''${XDG_RUNTIME_DIR}/hypr/''${HYPRLAND_INSTANCE_SIGNATURE}/.socket2.sock"
       [ -S "$_sock" ] || exit 1
       _seq="''${XDG_RUNTIME_DIR}/eww-dashboard-watch-seq"
@@ -675,7 +670,16 @@
         ) &
       }
 
-      socat -u "UNIX-CONNECT:$_sock" - | while IFS= read -r line; do
+      # Subscribed before the first sync, so a waybar that comes up while it
+      # runs still gets its openlayer event handled below.
+      exec 3< <(socat -u "UNIX-CONNECT:$_sock" -)
+
+      until eww ping >/dev/null 2>&1; do sleep 0.5; done
+      eww close-all 2>/dev/null || true
+      ${lib.optionalString wlEnabled ''eww open wallpaper-layer 2>/dev/null || true''}
+      sync_dashboards
+
+      while IFS= read -r line <&3; do
         case "$line" in
           monitoradded*|monitorremoved*|configreloaded*)
             touch "$_force"
