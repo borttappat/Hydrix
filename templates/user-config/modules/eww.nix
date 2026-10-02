@@ -92,6 +92,7 @@
 
   panelRadius = toString sc.panelRadius;
   panelOpacity = toString (ui.opacity.overlayOverrides.eww or ui.opacity.overlay);
+  lockAlpha = toString (builtins.floor ((ui.opacity.overlayOverrides.eww or ui.opacity.overlay) * 100));
   blockPadding = let
     p = ui.padding or 8;
   in "${toString (p + 6)}px ${toString (p + 10)}px";
@@ -277,6 +278,67 @@
            vms: [.vms[] | {vm: .vm, down: (.tx | fmt), up: (.rx | fmt)}],
            total: $total, total_fmt: ($total | fmt)}
       ' <<< "$raw" 2>/dev/null || echo "$empty"
+    '';
+  };
+
+  # Lockscreen copies of the VMS and NETWORK blocks (`hyprlock-dashboard
+  # vms|net`), printed as pango markup for hyprlock labels: the session lock
+  # hides every layer-shell surface, eww included. Reuses the dashboard
+  # fetchers. Labels have no background of their own, so every line is padded
+  # to the same width and the whole block sits in one translucent background
+  # span. Only single-width glyphs: Iosevka draws arrows and large circles
+  # double-width, which would break the padding. Lines are joined with real newlines: hyprlock expands <br/> only in
+  # static label text, and pango rejects it as markup in cmd output.
+  hyprlockDashboard = pkgs.writeShellApplication {
+    name = "hyprlock-dashboard";
+    runtimeInputs = [pkgs.jq ewwMvmStatus ewwRouterStats ewwNetStats];
+    text = ''
+      case "''${1:-}" in
+        vms)
+          data=$(eww-mvm-status 2>/dev/null) || data='{"running":[],"stopped":[]}' ;;
+        net)
+          router=$(eww-router-stats 2>/dev/null) || router='{"current":"","pending":0}'
+          net=$(eww-net-stats 2>/dev/null) || net='{"wan":{"iface":"","down":"","up":""},"vms":[]}'
+          data=$(jq -nc --argjson r "$router" --argjson n "$net" '{router: $r, net: $n}') ;;
+        *)
+          echo "usage: hyprlock-dashboard vms|net" >&2
+          exit 1 ;;
+      esac
+      colors=$(jq -c '{bg: .special.background, fg: .special.foreground, title: .colors.color4,
+                       on: .colors.color2, dim: .colors.color8, warn: .colors.color1}' "$HOME/.cache/wal/colors.json" 2>/dev/null) \
+        || colors='{"bg":"#101010","fg":"#dfdfdf","title":"#7aa2f7","on":"#9ece6a","dim":"#808080","warn":"#f7768e"}'
+
+      jq -rn --arg s "$1" --argjson d "$data" --argjson c "$colors" --argjson w 32 --arg alpha "${lockAlpha}%" '
+        def esc: gsub("&"; "&amp;") | gsub("<"; "&lt;") | gsub(">"; "&gt;");
+        def pad($n): if length < $n then . + (" " * ($n - length)) else . end;
+        def lpad($n): if length < $n then (" " * ($n - length)) + . else . end;
+        def color($col): "<span color=\"\($col)\">\(.)</span>";
+        def title($t; $aside):
+          "<b>" + ($t | color($c.title))
+          + (" " * ([$w - ($t | length) - ($aside | length), 1] | max)) + ($aside | esc | color($c.fg))
+          + "</b>";
+        def rates: (.down | lpad(9)) + " " + (.up | lpad(9));
+        def netrow($name): ($name | pad($w - 19) | esc | color($c.fg)) + (rates | color($c.dim));
+
+        (if $s == "vms" then
+          if ($d.running + $d.stopped | length) > 0 then
+            [ title("VMS"; "") ]
+            + [ $d.running[] | .ip as $ip | ("• " | color($c.on)) + "<b>" + (.name | pad($w - 2 - ($ip | length)) | esc | color($c.fg)) + "</b>" + ($ip | color($c.dim)) ]
+            + [ $d.stopped[] | "◦ " + (.name | pad($w - 2)) | esc | color($c.dim) ]
+          else [] end
+        else
+          if ($d.router.current // "") != "" then
+            [ title("NETWORK"; $d.router.current) ]
+            + (if ($d.router.pending // 0) > 0 then [ "+\($d.router.pending) unsaved" | pad($w) | color($c.warn) ] else [] end)
+            + [ {down: "down", up: "up"} | netrow("") ]
+            + [ "<b>" + ($d.net.wan | netrow(.iface)) + "</b>" ]
+            + [ $d.net.vms[] | netrow(.vm) ]
+          else [] end
+        end) as $lines
+        | if $lines == [] then "" else
+            ([" " * $w] + $lines + [" " * $w]) | map(" " + . + " ") | join("\n")
+            | "<span background=\"\($c.bg)\" bgalpha=\"\($alpha)\">\(.)</span>"
+          end'
     '';
   };
 
@@ -1507,6 +1569,18 @@ in {
           behind windows, with nothing reserved.
         '';
       };
+      lockscreen = {
+        enable = lib.mkEnableOption ''
+          the VMS and NETWORK blocks on the hyprlock lockscreen, left and right
+          of the clock on every monitor. Anyone at the locked machine can read
+          them: VM names, IPs, SSID and per-bridge rates'';
+        fontSize = lib.mkOption {
+          type = lib.types.ints.positive;
+          default = fontSize * 3 / 2;
+          defaultText = lib.literalExpression "eww font size * 1.5";
+          description = "Font size of the lockscreen blocks, in hyprlock's logical px.";
+        };
+      };
       git.extraRepos = lib.mkOption {
         type = lib.types.attrsOf lib.types.str;
         default = {};
@@ -1598,6 +1672,31 @@ in {
   };
 
   config = lib.mkIf config.hydrix.hyprland.enable {
+    # Centered in the left and right halves, beside the clock.
+    hydrix.hyprland.hyprlockExtraConfig = lib.mkIf dash.lockscreen.enable ''
+      label {
+        monitor =
+        text = cmd[update:5000] ${hyprlockDashboard}/bin/hyprlock-dashboard vms
+        color = $lockFg
+        font_size = ${toString dash.lockscreen.fontSize}
+        font_family = ${fontFamily}
+        position = -25%, 0
+        halign = center
+        valign = center
+      }
+
+      label {
+        monitor =
+        text = cmd[update:5000] ${hyprlockDashboard}/bin/hyprlock-dashboard net
+        color = $lockFg
+        font_size = ${toString dash.lockscreen.fontSize}
+        font_family = ${fontFamily}
+        position = 25%, 0
+        halign = center
+        valign = center
+      }
+    '';
+
     home-manager.users.${username} = {lib, ...}: {
       home.packages = [
         pkgs.eww

@@ -688,9 +688,17 @@
       halign = center
       valign = center
     }
+
+    ${config.hydrix.hyprland.hyprlockExtraConfig}
   '';
-in
-  lib.mkIf config.hydrix.hyprland.enable {
+in {
+  options.hydrix.hyprland.hyprlockExtraConfig = lib.mkOption {
+    type = lib.types.lines;
+    default = "";
+    description = "Extra hyprlock.conf sections (labels, shapes) appended after the clock, for other modules to add lockscreen widgets.";
+  };
+
+  config = lib.mkIf config.hydrix.hyprland.enable {
     # No-op by default (hyprlandPkg falls back to pkgs.hyprland above). Pins
     # to a specific Hyprland release instead if you uncomment the `hyprland`
     # input in flake.nix -- handy to freeze on a known-good version ahead of
@@ -809,4 +817,5 @@ in
         Install.WantedBy = ["hyprland-session.target"];
       };
     };
-  }
+  };
+}
