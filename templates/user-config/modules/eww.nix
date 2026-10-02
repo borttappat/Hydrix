@@ -568,7 +568,9 @@
   # monitor (or per internal panel, see dashboard.monitors), sized to the
   # left half of that monitor below its reserved zones. Re-syncs on monitor
   # hotplug and on Hyprland config reloads, which drop the runtime workspace
-  # rule below. Debounced like waybarMonitorWatch in modules/hyprland.nix.
+  # rule below, and resizes when waybar's layer opens or closes, since its
+  # exclusive zone is part of that size. Debounced like waybarMonitorWatch in
+  # modules/hyprland.nix.
   #
   # With dashboard.workspace set, every monitor gets a size entry and a
   # dashboard is open only on the monitor currently showing that workspace,
@@ -618,20 +620,30 @@
         done < "$_state"
       }
 
+      # With "if-changed", leaves open dashboards alone when no size changed.
       sync_dashboards() {
+        local mons rows new
         mons=$(hyprctl monitors -j)
+        rows=$(jq -r --arg ws "$_ws" '.[] ${lib.optionalString (dash.monitors == "internal") "| select($ws != \"\" or (.name | test(\"^(eDP|LVDS|DSI)-\"))) "}| "\(.name) \(.width / .scale | floor) \(.height / .scale | floor) \(.reserved[1]) \(.reserved[3])"' <<< "$mons")
+        new=$(while read -r mon w h top bottom; do
+          [ -n "$mon" ] || continue
+          echo "$mon $(( w / 2 - ${toString gaps} - ${toString gapsIn} + ${toString (2 * shadowRoom)} )) $(( h - top - bottom - ${toString gaps} + ${toString (shadowRoom + shadowRoomBottom)} ))"
+        done <<< "$rows")
+        if [ "''${1:-}" = "if-changed" ] && [ "$new" = "$(cat "$_state" 2>/dev/null)" ]; then
+          return 0
+        fi
         eww active-windows 2>/dev/null | grep '^dashboard-' | while IFS=: read -r wid _; do
           eww close "$wid" 2>/dev/null || true
         done || true
-        read -r gt gr gb _ <<< "$(hyprctl getoption general:gaps_out -j | jq -r '.custom')"
         : > "$_state"
-        jq -r --arg ws "$_ws" '.[] ${lib.optionalString (dash.monitors == "internal") "| select($ws != \"\" or (.name | test(\"^(eDP|LVDS|DSI)-\"))) "}| "\(.name) \(.width / .scale | floor) \(.height / .scale | floor) \(.reserved[1]) \(.reserved[3])"' <<< "$mons" \
-          | while read -r mon w h top bottom; do
-              echo "$mon $(( w / 2 - ${toString gaps} - ${toString gapsIn} + ${toString (2 * shadowRoom)} )) $(( h - top - bottom - ${toString gaps} + ${toString (shadowRoom + shadowRoomBottom)} ))" >> "$_state"
-              if [ -n "$_ws" ]; then
-                hyprctl keyword workspace "r[$_ws-$_ws]m[$mon],gapsout:$gt $gr $gb $(( w / 2 + ${toString gapsIn} ))" > /dev/null
-              fi
-            done
+        if [ -n "$new" ]; then echo "$new" > "$_state"; fi
+        if [ -n "$_ws" ]; then
+          read -r gt gr gb _ <<< "$(hyprctl getoption general:gaps_out -j | jq -r '.custom')"
+          while read -r mon w _; do
+            [ -n "$mon" ] || continue
+            hyprctl keyword workspace "r[$_ws-$_ws]m[$mon],gapsout:$gt $gr $gb $(( w / 2 + ${toString gapsIn} ))" > /dev/null
+          done <<< "$rows"
+        fi
         update_visibility
       }
 
@@ -644,16 +656,35 @@
       [ -S "$_sock" ] || exit 1
       _seq="''${XDG_RUNTIME_DIR}/eww-dashboard-watch-seq"
       echo 0 > "$_seq"
+      # Set by any event in a debounce window that needs a full resync.
+      _force="''${XDG_RUNTIME_DIR}/eww-dashboard-watch-force"
+      rm -f "$_force"
+      # Bursts of events collapse into one sync, 1s after the last.
+      debounced_sync() {
+        _n=$(( $(cat "$_seq") + 1 ))
+        echo "$_n" > "$_seq"
+        _my=$_n
+        ( sleep 1
+          [ "$(cat "$_seq" 2>/dev/null)" = "$_my" ] || exit 0
+          if [ -e "$_force" ]; then
+            rm -f "$_force"
+            sync_dashboards
+          else
+            sync_dashboards if-changed
+          fi
+        ) &
+      }
+
       socat -u "UNIX-CONNECT:$_sock" - | while IFS= read -r line; do
         case "$line" in
           monitoradded*|monitorremoved*|configreloaded*)
-            _n=$(( $(cat "$_seq") + 1 ))
-            echo "$_n" > "$_seq"
-            _my=$_n
-            ( sleep 1
-              [ "$(cat "$_seq" 2>/dev/null)" = "$_my" ] || exit 0
-              sync_dashboards
-            ) &
+            touch "$_force"
+            debounced_sync
+            ;;
+          # waybar's exclusive zone sets the dashboard height. It may come up
+          # after the first sync, and restarts on monitor and color changes.
+          "openlayer>>waybar"|"closelayer>>waybar")
+            debounced_sync
             ;;
           workspacev2*|focusedmonv2*|moveworkspacev2*)
             if [ -n "$_ws" ]; then update_visibility; fi
