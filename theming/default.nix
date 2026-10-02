@@ -9,6 +9,7 @@
     ./graphical
     ./boot/grub-theme.nix
     ./boot/plymouth.nix
+    ./boot/runtime-colors.nix
     ./dm/greetd.nix
     ./dm/sddm.nix
   ];

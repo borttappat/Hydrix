@@ -106,6 +106,11 @@
     cp ${./sddm/Main.qml} $dir/Main.qml
     cp ${./sddm/metadata.desktop} $dir/metadata.desktop
     cp ${themeConf} $dir/theme.conf
+    ${lib.optionalString cfg.followWal ''
+      # SDDM reads <ConfigFile>.user over theme.conf; theming/boot/runtime-colors.nix
+      # writes the wal colors there while a wal scheme is active.
+      ln -s /var/lib/hydrix-boot-theme/sddm/theme.conf.user $dir/theme.conf.user
+    ''}
   '';
 
   # Runs the built theme in a window (Main.qml divides out the window's
@@ -176,6 +181,17 @@ in {
       type = lib.types.int;
       default = 55;
       description = "Input field height, mirrors hyprlock's input-field size.";
+    };
+
+    followWal = lib.mkOption {
+      type = lib.types.bool;
+      default = false;
+      description = ''
+        Recolor the greeter from the runtime wal colors while a wal scheme is
+        active (walrgb, apply-colorscheme), back to the declared colors on
+        restore-colorscheme, without a rebuild (theming/boot/runtime-colors.nix).
+        Colors pinned explicitly in hydrix.sddm.colors stay pinned.
+      '';
     };
 
     # Defaults resolve from the active hydrix.colorscheme (theming/lib.nix),

@@ -12,6 +12,7 @@
   hydrix.sddm = {
     enable = lib.mkDefault true;
     # preview = lib.mkDefault false;  # DEFAULT: false - adds hydrix-sddm-preview (windowed test mode, Esc quits)
+    # followWal = lib.mkDefault true;  # DEFAULT: false - follow runtime wal colors, restore-colorscheme reverts
 
     # background = ./wallpapers/login.png;  # DEFAULT: hydrix.grub.theme.background, null = solid bg color
     # scale = 1.5;                          # DEFAULT: hydrix.graphical.scaling.hyprInternalScale (or 1.0)

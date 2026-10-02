@@ -25,45 +25,42 @@ let
   titleSize = builtins.floor (cfg.fontSize * 1.6);
   hintSize  = builtins.floor (cfg.fontSize * 0.75);
 
-  hydrixGrubTheme = pkgs.runCommand "hydrix-grub-theme" {
-    nativeBuildInputs = [ pkgs.imagemagick pkgs.grub2 ];
-  } ''
-    dir=$out/grub/themes/hydrix
-    mkdir -p $dir
-
-    # ── Fonts (TTF → PF2) ─────────────────────────────────────────────
-    grub-mkfont --output=$dir/iosevka_regular_${toString menuSize}.pf2  --size=${toString menuSize}  ${fontRegular}
-    grub-mkfont --output=$dir/iosevka_bold_${toString menuSize}.pf2    --size=${toString menuSize}  ${fontBold}
-    grub-mkfont --output=$dir/iosevka_bold_${toString titleSize}.pf2   --size=${toString titleSize} ${fontBold}
-    grub-mkfont --output=$dir/iosevka_regular_${toString hintSize}.pf2 --size=${toString hintSize}  ${fontRegular}
+  # Renders the colored parts of the theme (images, theme.txt) into $1, with
+  # colors from the environment. Shared by the build below and by the runtime
+  # wal override (runtime-colors.nix), so both always produce the same layout.
+  renderGrub = pkgs.writeShellScript "hydrix-grub-render" ''
+    set -eu
+    PATH=${lib.makeBinPath [ pkgs.imagemagick pkgs.coreutils ]}
+    dir=$1
+    mkdir -p "$dir"
 
     # ── Background ─────────────────────────────────────────────────────
     ${if cfg.background != null then ''
-      magick "${cfg.background}" -resize 1920x1200^ -gravity center -extent 1920x1200 PNG24:$dir/background.png
+      magick "${cfg.background}" -resize 1920x1200^ -gravity center -extent 1920x1200 PNG24:"$dir/background.png"
     '' else ''
-      magick -size 1920x1200 "xc:${cfg.colors.bg}" PNG24:$dir/background.png
+      magick -size 1920x1200 "xc:$BG" PNG24:"$dir/background.png"
     ''}
 
     # ── Selection highlight (no alpha — GRUB PNG parser is limited) ────
-    magick -size 64x64 "xc:${cfg.colors.bg}" \
-      -fill "${cfg.colors.accent}" -draw "color 0,0 reset" \
+    magick -size 64x64 "xc:$BG" \
+      -fill "$ACCENT" -draw "color 0,0 reset" \
       -evaluate multiply 0.3 \
-      PNG24:$dir/select_c.png
+      PNG24:"$dir/select_c.png"
     for piece in n s w e nw ne sw se; do
-      magick -size 4x4 "xc:${cfg.colors.accent}" PNG24:"$dir/select_$piece.png"
+      magick -size 4x4 "xc:$ACCENT" PNG24:"$dir/select_$piece.png"
     done
 
     # ── Terminal box (styles GRUB terminal/console between menus) ──────
     # Must be large enough to tile properly across the full screen
     for piece in c n s w e nw ne sw se; do
-      magick -size 32x32 "xc:${cfg.colors.bg}" PNG24:"$dir/terminal_box_$piece.png"
+      magick -size 32x32 "xc:$BG" PNG24:"$dir/terminal_box_$piece.png"
     done
 
     # ── theme.txt ──────────────────────────────────────────────────────
-    cat > $dir/theme.txt << THEME
+    cat > "$dir/theme.txt" << THEME
 title-text: ""
 desktop-image: "background.png"
-desktop-color: "${cfg.colors.bg}"
+desktop-color: "$BG"
 terminal-font: "Iosevka Regular ${toString menuSize}"
 terminal-left: "0"
 terminal-top: "0"
@@ -78,9 +75,9 @@ terminal-box: "terminal_box_*.png"
   width = 38%
   height = 45%
   item_font = "Iosevka Regular ${toString menuSize}"
-  item_color = "${cfg.colors.fg}"
+  item_color = "$FG"
   selected_item_font = "Iosevka Bold ${toString menuSize}"
-  selected_item_color = "${cfg.colors.accentBright}"
+  selected_item_color = "$ACCENT_BRIGHT"
   item_height = ${toString (builtins.floor (menuSize * 2.2))}
   item_padding = ${toString (builtins.floor (menuSize * 0.5))}
   item_spacing = ${toString (builtins.floor (menuSize * 0.5))}
@@ -94,7 +91,7 @@ terminal-box: "terminal_box_*.png"
   width = 100%
   text = "HYDRIX"
   font = "Iosevka Bold ${toString titleSize}"
-  color = "${cfg.colors.accent}"
+  color = "$ACCENT"
   align = "center"
 }
 
@@ -104,10 +101,31 @@ terminal-box: "terminal_box_*.png"
   width = 100%
   text = "Use arrow keys to select, Enter to boot"
   font = "Iosevka Regular ${toString hintSize}"
-  color = "${cfg.colors.muted}"
+  color = "$MUTED"
   align = "center"
 }
 THEME
+  '';
+
+  hydrixGrubTheme = pkgs.runCommand "hydrix-grub-theme" {
+    nativeBuildInputs = [ pkgs.grub2 ];
+    BG = cfg.colors.bg;
+    FG = cfg.colors.fg;
+    ACCENT = cfg.colors.accent;
+    ACCENT_BRIGHT = cfg.colors.accentBright;
+    MUTED = cfg.colors.muted;
+  } ''
+    dir=$out/grub/themes/hydrix
+    mkdir -p $dir
+
+    # ── Fonts (TTF → PF2) ─────────────────────────────────────────────
+    # Loaded once from /theme by grub.cfg, so the runtime override reuses them.
+    grub-mkfont --output=$dir/iosevka_regular_${toString menuSize}.pf2  --size=${toString menuSize}  ${fontRegular}
+    grub-mkfont --output=$dir/iosevka_bold_${toString menuSize}.pf2    --size=${toString menuSize}  ${fontBold}
+    grub-mkfont --output=$dir/iosevka_bold_${toString titleSize}.pf2   --size=${toString titleSize} ${fontBold}
+    grub-mkfont --output=$dir/iosevka_regular_${toString hintSize}.pf2 --size=${toString hintSize}  ${fontRegular}
+
+    ${renderGrub} $dir
   '';
 
 in {
@@ -135,6 +153,25 @@ in {
         deliberate identity choice independent of hydrix.graphical.font.family,
         not auto-derived from it.
       '';
+    };
+
+    followWal = lib.mkOption {
+      type = lib.types.bool;
+      default = false;
+      description = ''
+        Recolor GRUB from the runtime wal colors while a wal scheme is active
+        (walrgb, apply-colorscheme), back to the declared colors on
+        restore-colorscheme. Applied without a rebuild through an override
+        theme on the ESP (theming/boot/runtime-colors.nix). Colors pinned
+        explicitly in hydrix.grub.theme.colors stay pinned.
+      '';
+    };
+
+    renderer = lib.mkOption {
+      type = lib.types.package;
+      internal = true;
+      readOnly = true;
+      default = renderGrub;
     };
 
     # Defaults resolve from the active hydrix.colorscheme (theming/lib.nix) —

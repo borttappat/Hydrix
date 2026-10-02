@@ -10,6 +10,10 @@
     # Wallpaper for the GRUB background. Comment out for a solid color instead.
     background = lib.mkDefault "${hydrix}/theming/wallpapers/Hydrix.png";
 
+    # Follow runtime wal colors (walrgb, apply-colorscheme) without a rebuild;
+    # restore-colorscheme returns to the declared colors.
+    # followWal = lib.mkDefault true;  # DEFAULT: false
+
     # colors = {
     #   bg           = "#000000";
     #   fg           = "#dfdfdf";

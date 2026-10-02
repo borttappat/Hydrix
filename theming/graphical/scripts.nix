@@ -187,6 +187,12 @@
         fi
     fi
 
+    ${lib.optionalString (!isVM) ''
+      # === Boot theme (GRUB/Plymouth, theming/boot/runtime-colors.nix) ===
+      # A root path unit watches this file and re-renders from the wal cache.
+      mkdir -p "$HOME/.cache/hydrix"
+      date +%s%N > "$HOME/.cache/hydrix/boot-theme.trigger"
+    ''}
     echo "Colors refreshed!"
   '';
 
@@ -564,15 +570,17 @@
     # handles live color updates. wal-sync would overwrite pushed colors with stale
     # 9p data. init-wal-cache just generates initial wal cache from VM's colorscheme.
 
-    # Skip wal cache regeneration if it's recent and the colorscheme hasn't changed.
+    # Skip wal cache regeneration if it's recent or a runtime scheme is active
+    # (walrgb/apply-colorscheme, kept until restore-colorscheme), and the
+    # declared colorscheme hasn't changed.
     # Still run per-app generators: their output files (gtk-wal.css, swaync,
     # etc.) live outside the wal cache and must exist after every rebuild.
     # Zathura needs no generator here -- it reads the wal cache fresh at
     # every launch (see theming/programs/zathura.nix) -- but already-open
     # windows still get pushed an update for consistency with the others.
     if [ "$FORCE_REGEN" = "false" ] && [ -f "$WAL_CACHE/colors.json" ]; then
-        if [ "$(find "$WAL_CACHE/colors.json" -mtime -1 2>/dev/null)" ]; then
-            echo "Wal cache exists and is recent, generating per-app color files..."
+        if [ -f "$WAL_CACHE/.active" ] || [ "$(find "$WAL_CACHE/colors.json" -mtime -1 2>/dev/null)" ]; then
+            echo "Wal cache exists and is recent or active, generating per-app color files..."
             if command -v generate-gtk-colors >/dev/null 2>&1; then generate-gtk-colors; fi
             if command -v swaync-apply-colors >/dev/null 2>&1; then swaync-apply-colors; fi
             if command -v write-alacritty-colors >/dev/null 2>&1; then write-alacritty-colors; fi

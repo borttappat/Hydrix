@@ -4,12 +4,15 @@
 # same color scheme, same visual structure.
 #
 # Layout:
-#   - Systemd boot messages scrolling from top (~5% down), colored like
-#     the plain console: [  OK  ]/[FAILED]/[ TIME ]/[DEPEND] tags, unit
+#   - Systemd boot messages from the top, one line per message across
+#     the full width (hydrix.plymouth.messageMargin from each edge),
+#     colored like the plain console: [  OK  ]/[FAILED]/[ TIME ]/[DEPEND] tags, unit
 #     descriptions highlighted, a bouncing [ *** ] on running jobs. All
 #     colors come from hydrix.plymouth.colors (colorscheme-derived).
-#   - "HYDRIX" title at bottom (~85%, matching GRUB)
-#   - Grey progress bar below title
+#     They use every row the screen height allows.
+#   - Progress bar: a thin vertical strip along the right edge, filling
+#     top to bottom (accent gradient, matching GRUB)
+#   - "HYDRIX" title in the bottom-right corner, left of the bar
 #
 # Enable with: hydrix.plymouth.enable = true
 #
@@ -42,38 +45,13 @@ let
   fontRatio = cfg.fontSize * 1.0 / refHeight;
   titleRatio = titleSize * 1.0 / refHeight;
 
-  # Convert hex "#RRGGBB" to normalized R,G,B (0.0-1.0) for Plymouth script
-  hexDigit = c: {
-    "0" = 0; "1" = 1; "2" = 2; "3" = 3; "4" = 4;
-    "5" = 5; "6" = 6; "7" = 7; "8" = 8; "9" = 9;
-    "a" = 10; "b" = 11; "c" = 12; "d" = 13; "e" = 14; "f" = 15;
-    "A" = 10; "B" = 11; "C" = 12; "D" = 13; "E" = 14; "F" = 15;
-  }.${c};
-  hexByte = s: hexDigit (builtins.substring 0 1 s) * 16 + hexDigit (builtins.substring 1 1 s);
-  hexToRgb = hex: let
-    h = lib.removePrefix "#" hex;
-    r = hexByte (builtins.substring 0 2 h);
-    g = hexByte (builtins.substring 2 2 h);
-    b = hexByte (builtins.substring 4 2 h);
-    fmt = v: builtins.toString (v / 255.0);
-  in { rs = fmt r; gs = fmt g; bs = fmt b; };
-
-  bg  = hexToRgb cfg.colors.bg;
-  acc = hexToRgb cfg.colors.accent;
-  fg  = hexToRgb cfg.colors.fg;
-  err = hexToRgb cfg.colors.error;
-  ok  = hexToRgb cfg.colors.ok;
-  wrn = hexToRgb cfg.colors.warn;
-  hl  = hexToRgb cfg.colors.highlight;
-  dim = hexToRgb cfg.colors.dim;
-  rgb = c: "${c.rs}, ${c.gs}, ${c.bs}";
-
-  maxLines = 30;
-
   plymouthScript = ''
+# Plymouth script has no boolean literals: an undefined name such as true
+# evaluates to NULL, so flags are plain 1/0.
+
 # ── Background ──────────────────────────────────────────────────────
-Window.SetBackgroundTopColor(${bg.rs}, ${bg.gs}, ${bg.bs});
-Window.SetBackgroundBottomColor(${bg.rs}, ${bg.gs}, ${bg.bs});
+Window.SetBackgroundTopColor(@BG_RGB@);
+Window.SetBackgroundBottomColor(@BG_RGB@);
 
 # ── Screen geometry ─────────────────────────────────────────────────
 screen_w = Window.GetWidth();
@@ -91,26 +69,45 @@ msg_line_height = Math.Int(msg_px * 1.8);
 # Width of the console's "[  OK  ] " tag column (Iosevka is monospace).
 tag_w = Image.Text("[  OK  ]_", 1, 1, 1, 1, msg_font).GetWidth();
 
-# ── Title image (pre-rendered: Iosevka Bold; scaled to match GRUB) ─
+# ── Title, progress bar and message area ─────────────────────────────
+# The progress bar is a thin vertical strip along the right edge, filling
+# top to bottom, with the title in the bottom-right corner just left of it.
+# Messages get the rest: every row the height allows, cut short before the
+# title's left edge so nothing overlaps.
+msg_margin = ${toString cfg.messageMargin};
 title_image = Image("title.png");
 title_orig_w = title_image.GetWidth();
 title_orig_h = title_image.GetHeight();
-title_h = Math.Int(screen_h * title_ratio);
-title_w = Math.Int(title_orig_w * title_h / title_orig_h);
-title_sprite = Sprite(title_image.Scale(title_w, title_h));
-title_sprite.SetPosition(cx - title_w / 2, screen_h * 0.85 - title_h / 2, 10);
-
-# ── Progress bar ────────────────────────────────────────────────────
+title_sprite = Sprite();
 bar_image = Image("progress.png");
-bar_max_width = Math.Int(screen_w * 0.25);
-bar_height = 3;
-bar_y = screen_h * 0.85 + title_h / 2 + 12;
 bar_sprite = Sprite();
-bar_sprite.SetPosition(cx - bar_max_width / 2, bar_y, 10);
 
-# ── Message area (top of screen, scrolling down) ───────────────────
-msg_area_top = screen_h * 0.04;
-max_messages = ${toString maxLines};
+fun layout_chrome() {
+  global.margin_px = Math.Int(screen_h * msg_margin);
+  global.gap_px = Math.Int(msg_line_height / 2);
+
+  global.title_h = Math.Int(screen_h * title_ratio);
+  global.title_w = Math.Int(title_orig_w * title_h / title_orig_h);
+
+  global.bar_thick = Math.Int(msg_px / 6);
+  if (bar_thick < 3) global.bar_thick = 3;
+  global.bar_x = screen_w - margin_px - bar_thick;
+  global.bar_top = margin_px;
+  global.bar_max_height = screen_h - 2 * margin_px;
+
+  global.title_x = bar_x - gap_px - title_w;
+  title_sprite.SetImage(title_image.Scale(title_w, title_h));
+  title_sprite.SetPosition(title_x, screen_h - margin_px - title_h, 10);
+  bar_sprite.SetPosition(bar_x, bar_top, 10);
+
+  global.msg_area_top = margin_px;
+  global.msg_rows = Math.Int((screen_h - 2 * margin_px) / msg_line_height);
+}
+layout_chrome();
+
+# Slots are allocated once; msg_rows (from the current height) decides how
+# many are shown, capped here in case a later resize grows the screen.
+max_messages = msg_rows;
 global.msg_count = 0;
 
 # ── Boot progress callback ──────────────────────────────────────────
@@ -123,7 +120,7 @@ global.msg_count = 0;
 # sprite outright (opacity 0) - freezing the value alone still left a
 # faint sub-pixel jitter on some renderers, since SetImage(Scale(...))
 # keeps re-issuing every tick even when bar_w is unchanged.
-global.awaiting_password = false;
+global.awaiting_password = 0;
 global.frozen_progress = 0;
 
 fun boot_progress_cb(time, progress) {
@@ -137,9 +134,9 @@ fun boot_progress_cb(time, progress) {
     display_progress = progress;
     frozen_progress = progress;
   }
-  bar_w = Math.Int(display_progress * bar_max_width);
-  if (bar_w < 1) bar_w = 1;
-  bar_sprite.SetImage(bar_image.Scale(bar_w, bar_height));
+  bar_h = Math.Int(display_progress * bar_max_height);
+  if (bar_h < 1) bar_h = 1;
+  bar_sprite.SetImage(bar_image.Scale(bar_thick, bar_h));
 }
 Plymouth.SetBootProgressFunction(boot_progress_cb);
 
@@ -149,35 +146,25 @@ Plymouth.SetBootProgressFunction(boot_progress_cb);
 # ever changes mid-session (e.g. a different renderer handoff on other
 # hardware). Cheap no-op when it doesn't.
 fun resize_cb() {
-  global.screen_w; global.screen_h; global.cx;
-  global.msg_px; global.msg_font; global.msg_line_height;
-  global.title_w; global.title_h;
-  global.bar_max_width; global.bar_y; global.msg_area_top; global.tag_w;
-
   ticker_cb();
 
   new_w = Window.GetWidth();
   new_h = Window.GetHeight();
   if (new_w == screen_w && new_h == screen_h) return;
 
-  screen_w = new_w;
-  screen_h = new_h;
-  cx = screen_w / 2;
+  global.screen_w = new_w;
+  global.screen_h = new_h;
+  global.cx = screen_w / 2;
 
-  msg_px = Math.Int(screen_h * font_ratio);
-  msg_font = "Iosevka " + msg_px + "px";
-  msg_line_height = Math.Int(msg_px * 1.8);
-  tag_w = Image.Text("[  OK  ]_", 1, 1, 1, 1, msg_font).GetWidth();
+  global.msg_px = Math.Int(screen_h * font_ratio);
+  global.msg_font = "Iosevka " + msg_px + "px";
+  global.msg_line_height = Math.Int(msg_px * 1.8);
+  global.tag_w = Image.Text("[  OK  ]_", 1, 1, 1, 1, msg_font).GetWidth();
 
-  title_h = Math.Int(screen_h * title_ratio);
-  title_w = Math.Int(title_orig_w * title_h / title_orig_h);
-  title_sprite.SetImage(title_image.Scale(title_w, title_h));
-  title_sprite.SetPosition(cx - title_w / 2, screen_h * 0.85 - title_h / 2, 10);
-
-  bar_max_width = Math.Int(screen_w * 0.25);
-  bar_y = screen_h * 0.85 + title_h / 2 + 12;
-  bar_sprite.SetPosition(cx - bar_max_width / 2, bar_y, 10);
-  msg_area_top = screen_h * 0.04;
+  layout_chrome();
+  if (msg_rows > max_messages) global.msg_rows = max_messages;
+  layout_width();
+  layout_messages();
 }
 Plymouth.SetRefreshFunction(resize_cb);
 
@@ -188,12 +175,12 @@ fun rgb_color(r, g, b) {
   c.r = r; c.g = g; c.b = b;
   return c;
 }
-global.c_fg   = rgb_color(${rgb fg});
-global.c_err  = rgb_color(${rgb err});
-global.c_ok   = rgb_color(${rgb ok});
-global.c_warn = rgb_color(${rgb wrn});
-global.c_hl   = rgb_color(${rgb hl});
-global.c_dim  = rgb_color(${rgb dim});
+global.c_fg   = rgb_color(@FG_RGB@);
+global.c_err  = rgb_color(@ERROR_RGB@);
+global.c_ok   = rgb_color(@OK_RGB@);
+global.c_warn = rgb_color(@WARN_RGB@);
+global.c_hl   = rgb_color(@HIGHLIGHT_RGB@);
+global.c_dim  = rgb_color(@DIM_RGB@);
 
 # Plymouth script's String lib has no built-in Find/Contains, only
 # SubString/Length/CharAt, so scan manually.
@@ -220,7 +207,7 @@ fun is_tagged(text) {
 # Bare unit names ("foo.service"), as sent by systemd itself and by the
 # shutdown watcher.
 fun is_unit_id(text) {
-  if (text == "" || string_contains(text, " ")) return false;
+  if (text == "" || string_contains(text, " ")) return 0;
   return string_contains(text, ".");
 }
 
@@ -228,16 +215,16 @@ fun is_unit_id(text) {
 # The 8-char tag and every segment are optional; a blank tag keeps the tag
 # column empty (console's indented "Starting ..." lines).
 fun parse_line(text) {
-  p.tagged = false; p.tag = ""; p.verb = ""; p.subj = ""; p.suf = ""; p.unit = false;
+  p.tagged = 0; p.tag = ""; p.verb = ""; p.subj = ""; p.suf = ""; p.unit = 0;
   rest = text;
   if (is_tagged(text)) {
-    p.tagged = true;
+    p.tagged = 1;
     p.tag = text.SubString(1, 7);
     rest = text.SubString(8, text.Length());
     if (rest.Length() > 0 && rest.CharAt(0) == " ")
       rest = rest.SubString(1, rest.Length());
   } else if (is_unit_id(text)) {
-    p.unit = true;
+    p.unit = 1;
     mode = Plymouth.GetMode();
     if (mode == "shutdown" || mode == "reboot") p.verb = "Stopping";
     else p.verb = "Starting";
@@ -285,50 +272,79 @@ global.cylon_tick = 0;
 fun new_slot() {
   s.lb = Sprite(); s.tag = Sprite(); s.rb = Sprite();
   s.verb = Sprite(); s.subj = Sprite(); s.suf = Sprite();
-  s.ticker = false;
+  s.ticker = 0;
+  s.dx_tag = 0; s.dx_rb = 0; s.dx_verb = 0; s.dx_subj = 0; s.dx_suf = 0;
   return s;
 }
 
-fun slot_set_y(slot, y) {
-  slot.lb.SetPosition(slot.lb.GetX(), y, 10);
-  slot.tag.SetPosition(slot.tag.GetX(), y, 10);
-  slot.rb.SetPosition(slot.rb.GetX(), y, 10);
-  slot.verb.SetPosition(slot.verb.GetX(), y, 10);
-  slot.subj.SetPosition(slot.subj.GetX(), y, 10);
-  slot.suf.SetPosition(slot.suf.GetX(), y, 10);
+# Each segment's x offset from the slot's left edge, set by render_line;
+# place_slot positions the whole line when it moves up a row.
+fun place_slot(slot, x, y) {
+  slot.lb.SetPosition(x, y, 10);
+  slot.tag.SetPosition(x + slot.dx_tag, y, 10);
+  slot.rb.SetPosition(x + slot.dx_rb, y, 10);
+  slot.verb.SetPosition(x + slot.dx_verb, y, 10);
+  slot.subj.SetPosition(x + slot.dx_subj, y, 10);
+  slot.suf.SetPosition(x + slot.dx_suf, y, 10);
 }
 
 # Empty segments are hidden by opacity: SetImage with a null image (the
 # Image("") idiom) leaves the previous image in place, so reused slots would
-# keep stale segments drawn under the new ones.
-fun put(spr, text, c, x) {
+# keep stale segments drawn under the new ones. Returns the drawn width.
+fun put(spr, text, c) {
   if (text == "") {
     spr.SetOpacity(0);
-    return x;
+    return 0;
   }
   img = Image.Text(text, c.r, c.g, c.b, 1, msg_font);
   spr.SetImage(img);
-  spr.SetX(x);
   spr.SetOpacity(0.85);
-  return x + img.GetWidth();
+  return img.GetWidth();
+}
+
+# Lines run from the left margin to just before the title; msg_chars is how
+# many characters fit (Iosevka is monospace, so the tag column's width gives
+# an exact per-character width).
+fun layout_width() {
+  global.msg_x0 = margin_px;
+  global.msg_chars = Math.Int((title_x - gap_px - margin_px) / (tag_w / 9));
+}
+layout_width();
+
+# Shortens a parsed line to avail characters after the tag column: the
+# subject first (keeping a suffix such as a running job's durations), then
+# the verb on its own for lines without one.
+fun fit_line(p, avail) {
+  sep = 0;
+  if (p.verb != "" && p.subj != "") sep = 1;
+  over = p.verb.Length() + sep + p.subj.Length() + p.suf.Length() - avail;
+  if (over <= 0) return p;
+  if (p.subj.Length() > over + 1) {
+    p.subj = p.subj.SubString(0, p.subj.Length() - over - 1) + "…";
+    return p;
+  }
+  p.subj = "";
+  p.suf = "";
+  if (p.verb.Length() > avail) p.verb = p.verb.SubString(0, avail - 1) + "…";
+  return p;
 }
 
 fun render_line(slot, text) {
-  p = parse_line(text);
-  x0 = screen_w * 0.04;
+  p = fit_line(parse_line(text), msg_chars - 9);
   blank = p.tag == "      ";
   slot.ticker = p.tagged && string_contains(p.tag, "*");
+  slot.dx_tag = 0; slot.dx_rb = 0;
 
   if (p.tagged && !blank) {
     tag = p.tag;
     if (slot.ticker) tag = cylon[global.cylon_frame];
-    x = put(slot.lb, "[", c_fg, x0);
-    x = put(slot.tag, tag, tag_color(p.tag), x);
-    put(slot.rb, "]", c_fg, x);
+    slot.dx_tag = put(slot.lb, "[", c_fg);
+    slot.dx_rb = slot.dx_tag + put(slot.tag, tag, tag_color(p.tag));
+    put(slot.rb, "]", c_fg);
   } else {
-    put(slot.lb, "", c_fg, x0);
-    put(slot.tag, "", c_fg, x0);
-    put(slot.rb, "", c_fg, x0);
+    put(slot.lb, "", c_fg);
+    put(slot.tag, "", c_fg);
+    put(slot.rb, "", c_fg);
   }
 
   verb_c = c_fg;
@@ -342,9 +358,10 @@ fun render_line(slot, text) {
   sep = "";
   if (p.verb != "" && p.subj != "") sep = " ";
 
-  x = put(slot.verb, p.verb, verb_c, x0 + tag_w);
-  x = put(slot.subj, sep + p.subj, subj_c, x);
-  put(slot.suf, p.suf, c_dim, x);
+  slot.dx_verb = tag_w;
+  slot.dx_subj = slot.dx_verb + put(slot.verb, p.verb, verb_c);
+  slot.dx_suf = slot.dx_subj + put(slot.subj, sep + p.subj, subj_c);
+  put(slot.suf, p.suf, c_dim);
 }
 
 fun init_messages() {
@@ -359,15 +376,32 @@ init_messages();
 # overwrite it in place and hide-message removes it, like the console's
 # "A start job is running for ..." ticker. Status updates are inserted
 # above it, so it stays pinned to the bottom.
-global.live_line = false;
+global.live_line = 0;
+
+fun layout_messages() {
+  while (global.msg_count > msg_rows) {
+    render_line(msg_lines[0], "");
+    drop_oldest();
+  }
+  for (i = 0; i < global.msg_count; i++)
+    place_slot(msg_lines[i], msg_x0, msg_area_top + i * msg_line_height);
+}
+
+fun drop_oldest() {
+  oldest = msg_lines[0];
+  for (i = 0; i < max_messages - 1; i++)
+    msg_lines[i] = msg_lines[i + 1];
+  msg_lines[max_messages - 1] = oldest;
+  global.msg_count = global.msg_count - 1;
+}
 
 fun append_line(text) {
-  if (global.msg_count >= max_messages) {
-    oldest = msg_lines[0];
-    for (i = 0; i < max_messages - 1; i++)
-      msg_lines[i] = msg_lines[i + 1];
-    msg_lines[max_messages - 1] = oldest;
-    global.msg_count = max_messages;
+  if (global.msg_count >= msg_rows) {
+    while (global.msg_count >= msg_rows) {
+      render_line(msg_lines[0], "");
+      drop_oldest();
+    }
+    global.msg_count = global.msg_count + 1;
   } else {
     global.msg_count = global.msg_count + 1;
   }
@@ -381,14 +415,13 @@ fun append_line(text) {
   }
 
   render_line(msg_lines[idx], text);
-  for (i = 0; i < global.msg_count; i++)
-    slot_set_y(msg_lines[i], msg_area_top + i * msg_line_height);
+  layout_messages();
 }
 
 fun ticker_cb() {
-  if (global.live_line == false || global.msg_count == 0) return;
+  if (global.live_line == 0 || global.msg_count == 0) return;
   slot = msg_lines[global.msg_count - 1];
-  if (slot.ticker == false) return;
+  if (slot.ticker == 0) return;
   global.cylon_tick = global.cylon_tick + 1;
   if (global.cylon_tick < 6) return;
   global.cylon_tick = 0;
@@ -397,16 +430,16 @@ fun ticker_cb() {
   slot.tag.SetImage(Image.Text(cylon[global.cylon_frame], c_warn.r, c_warn.g, c_warn.b, 1, msg_font));
 }
 
-# Once tagged lines arrive (journal feed from hydrix-plymouth-boot-status),
-# they carry unit descriptions, so systemd's own bare unit names would only
-# duplicate them during boot.
-global.journal_feed = false;
+# Once tagged lines arrive (the journal feed from the boot and shutdown
+# status services), they carry unit descriptions, so systemd's own bare unit
+# names would only duplicate them.
+global.journal_feed = 0;
 
 fun status_cb(status) {
   if (status == global.last_status) return;
   global.last_status = status;
-  if (is_tagged(status)) global.journal_feed = true;
-  else if (global.journal_feed && Plymouth.GetMode() == "boot" && is_unit_id(status)) return;
+  if (is_tagged(status)) global.journal_feed = 1;
+  else if (global.journal_feed && is_unit_id(status)) return;
   append_line(status);
 }
 Plymouth.SetUpdateStatusFunction(status_cb);
@@ -414,23 +447,26 @@ Plymouth.SetUpdateStatusFunction(status_cb);
 fun message_cb(text) {
   if (global.live_line && global.msg_count > 0) {
     render_line(msg_lines[global.msg_count - 1], text);
+    layout_messages();
   } else {
     append_line(text);
-    global.live_line = true;
+    global.live_line = 1;
   }
 }
 Plymouth.SetMessageFunction(message_cb);
 
 fun hide_message_cb(text) {
-  if (global.live_line == false || global.msg_count == 0) return;
+  if (global.live_line == 0 || global.msg_count == 0) return;
   render_line(msg_lines[global.msg_count - 1], "");
   global.msg_count = global.msg_count - 1;
-  global.live_line = false;
+  global.live_line = 0;
 }
 Plymouth.SetHideMessageFunction(hide_message_cb);
 
 '' else ''
 fun ticker_cb() { }
+fun layout_width() { }
+fun layout_messages() { }
 fun message_cb(text) { }
 Plymouth.SetMessageFunction(message_cb);
 ''}
@@ -440,19 +476,19 @@ global.prompt_sprite = Sprite();
 global.bullet_sprite = Sprite();
 
 fun password_cb(prompt, bullets) {
-  global.awaiting_password = true;
+  global.awaiting_password = 1;
   global.bar_sprite.SetOpacity(0);
 
   bullet_string = "";
   for (i = 0; i < bullets; i++)
     bullet_string = bullet_string + "●";
 
-  prompt_image = Image.Text(prompt, ${fg.rs}, ${fg.gs}, ${fg.bs}, 1, msg_font);
+  prompt_image = Image.Text(prompt, @FG_RGB@, 1, msg_font);
   global.prompt_sprite.SetImage(prompt_image);
   global.prompt_sprite.SetPosition(cx - prompt_image.GetWidth() / 2, screen_h * 0.55, 10);
 
   if (bullets > 0) {
-    bullet_image = Image.Text(bullet_string, ${acc.rs}, ${acc.gs}, ${acc.bs}, 1, msg_font);
+    bullet_image = Image.Text(bullet_string, @ACCENT_RGB@, 1, msg_font);
     global.bullet_sprite.SetImage(bullet_image);
     global.bullet_sprite.SetPosition(cx - bullet_image.GetWidth() / 2, screen_h * 0.60, 10);
   }
@@ -460,40 +496,84 @@ fun password_cb(prompt, bullets) {
 Plymouth.SetDisplayPasswordFunction(password_cb);
 
 fun display_normal_cb() {
-  global.awaiting_password = false;
+  global.awaiting_password = 0;
   global.bar_sprite.SetOpacity(1);
   ${if cfg.showMessages then ''
   for (i = 0; i < max_messages; i++)
     render_line(msg_lines[i], "");
   global.msg_count = 0;
   global.last_status = "";
-  global.live_line = false;
+  global.live_line = 0;
   '' else ""}
 }
 Plymouth.SetDisplayNormalFunction(display_normal_cb);
   '';
 
-  hydrixPlymouthTheme = pkgs.runCommand "plymouth-theme-hydrix" {
-    nativeBuildInputs = [ pkgs.imagemagick ];
-  } ''
-    dir=$out/share/plymouth/themes/hydrix
-    mkdir -p $dir
+  # Colors are @NAME_RGB@ placeholders ("r, g, b" floats), filled in by
+  # renderPlymouth from the environment.
+  scriptTemplate = pkgs.writeText "hydrix.script.in" plymouthScript;
+
+  # Renders the theme files (script, title, progress bar) into $1, with colors
+  # from the environment. Shared by the build below and by the runtime wal
+  # override (runtime-colors.nix), so both always produce the same theme.
+  renderPlymouth = pkgs.writeShellScript "hydrix-plymouth-render" ''
+    set -eu
+    PATH=${lib.makeBinPath [ pkgs.imagemagick pkgs.coreutils pkgs.gnused pkgs.gawk ]}
+    dir=$1
+    mkdir -p "$dir"
+
+    rgb() {
+      local h=''${1#"#"}
+      awk -v r=$((16#''${h:0:2})) -v g=$((16#''${h:2:2})) -v b=$((16#''${h:4:2})) \
+        'BEGIN { printf "%.6g, %.6g, %.6g", r / 255, g / 255, b / 255 }'
+    }
 
     # ── Title image (Iosevka Bold at titleSize — matches GRUB exactly) ─
     magick -background transparent \
-      -fill "${cfg.colors.accent}" \
+      -fill "$ACCENT" \
       -font ${fontBold} \
       -pointsize ${toString titleSize} \
       -kerning 6 \
-      label:"${cfg.title}" \
-      $dir/title.png
+      label:${lib.escapeShellArg cfg.title} \
+      "$dir/title.png"
 
-    # ── Progress bar base image (matches GRUB's accent gradient) ───────
-    magick -size 400x3 -define gradient:direction=east \
-      gradient:"${cfg.colors.accent}"-"${cfg.colors.accentBright}" \
-      $dir/progress.png
+    # ── Progress bar base image (vertical, matches GRUB's accent gradient)
+    magick -size 3x400 -define gradient:direction=south \
+      gradient:"$ACCENT"-"$ACCENT_BRIGHT" \
+      "$dir/progress.png"
 
-    # ── Theme metadata ─────────────────────────────────────────────────
+    sed -e "s/@BG_RGB@/$(rgb "$BG")/g" \
+        -e "s/@FG_RGB@/$(rgb "$FG")/g" \
+        -e "s/@ACCENT_RGB@/$(rgb "$ACCENT")/g" \
+        -e "s/@ERROR_RGB@/$(rgb "$ERROR")/g" \
+        -e "s/@OK_RGB@/$(rgb "$OK")/g" \
+        -e "s/@WARN_RGB@/$(rgb "$WARN")/g" \
+        -e "s/@HIGHLIGHT_RGB@/$(rgb "$HIGHLIGHT")/g" \
+        -e "s/@DIM_RGB@/$(rgb "$DIM")/g" \
+        ${scriptTemplate} > "$dir/hydrix.script"
+  '';
+
+  # Theme files live at a fixed non-store path, so a runtime override can
+  # replace them: in the initrd, an extra cpio loaded by GRUB after the main
+  # one; in stage 2, whatever /etc/hydrix-plymouth points at (config below).
+  themeDir = "/etc/hydrix-plymouth";
+  themeFiles = [ "hydrix.script" "title.png" "progress.png" ];
+
+  declaredFiles = pkgs.runCommand "hydrix-plymouth-files" {
+    BG = cfg.colors.bg;
+    FG = cfg.colors.fg;
+    ACCENT = cfg.colors.accent;
+    ACCENT_BRIGHT = cfg.colors.accentBright;
+    ERROR = cfg.colors.error;
+    OK = cfg.colors.ok;
+    WARN = cfg.colors.warn;
+    HIGHLIGHT = cfg.colors.highlight;
+    DIM = cfg.colors.dim;
+  } "${renderPlymouth} $out";
+
+  hydrixPlymouthTheme = pkgs.runCommand "plymouth-theme-hydrix" { } ''
+    dir=$out/share/plymouth/themes/hydrix
+    mkdir -p $dir
     cat > $dir/hydrix.plymouth << EOF
 [Plymouth Theme]
 Name=Hydrix
@@ -501,35 +581,122 @@ Description=Hydrix boot animation
 ModuleName=script
 
 [script]
-ImageDir=$dir
-ScriptFile=$dir/hydrix.script
+ImageDir=${themeDir}
+ScriptFile=${themeDir}/hydrix.script
 EOF
+  '';
 
-    cat > $dir/hydrix.script << 'SCRIPT'
-${plymouthScript}
-SCRIPT
+  # Runs a theme in an X11 window (XWayland) through Plymouth's x11 renderer,
+  # without root or a TTY: a user namespace satisfies plymouthd's uid check,
+  # and a private mount namespace binds the theme dir over ${themeDir}.
+  # Feeds sample boot (or, with --shutdown, shutdown) lines covering every
+  # tag style and the live "start/stop job" line, then quits after $HOLD
+  # seconds (default 15).
+  previewInner = pkgs.writeShellScript "hydrix-plymouth-preview-inner" ''
+    set -eu
+    PATH=${lib.makeBinPath [ pkgs.util-linux pkgs.coreutils ]}
+    ply=${config.boot.plymouth.package}/bin/plymouth
+    mount --bind "$1" ${themeDir}
+    run=$(mktemp -d)
+    trap 'rm -rf "$run"' EXIT
+
+    ${config.boot.plymouth.package}/bin/plymouthd --no-daemon --mode="$3" --pid-file="$run/pid" \
+      --kernel-command-line="splash plymouth.ignore-udev" &
+    for _ in $(seq 50); do "$ply" --ping 2>/dev/null && break; sleep 0.1; done
+    "$ply" show-splash
+
+    if [ "$3" = shutdown ]; then
+      for unit in "Network Manager" "User Login Management" "Journal Service"; do
+        "$ply" update --status="[      ] Stopping|$unit|..."
+        "$ply" update --status="[  OK  ] Stopped|$unit|."
+      done
+      "$ply" update --status="[  OK  ] Stopped target|Local File Systems|."
+      "$ply" update --status="[      ] Unmounting|/boot|..."
+      "$ply" update --status="[  OK  ] Unmounted|/boot|."
+      "$ply" update --status="[  OK  ] Deactivated swap|/dev/zram0|."
+      "$ply" update --status="[  OK  ] Reached target|System Shutdown|."
+    else
+      for unit in "Journal Service" "Network Manager" "User Login Management" \
+        "Load Kernel Modules" "Remount Root and Kernel File Systems"; do
+        "$ply" update --status="[      ] Starting|$unit|..."
+        "$ply" update --status="[  OK  ] Started|$unit|."
+      done
+      "$ply" update --status="[  OK  ] Reached target|Local File Systems|."
+    fi
+    "$ply" update --status="[DEPEND] Dependency failed for|Some Mount|."
+    "$ply" update --status="[ TIME ] Timed out starting|Slow Device|."
+    "$ply" update --status="[FAILED] Failed|Broken Service| (exit-code)"
+    "$ply" update --status="[  OK  ] Finished|A unit with a very long description that runs past the right margin of the screen to show how truncation looks at full width|."
+    job=start
+    [ "$3" = shutdown ] && job=stop
+    "$ply" display-message --text="[  *** ] A $job job is running for|Preview stall| (6s / 1min 30s)"
+
+    sleep "$2"
+    "$ply" quit
+    wait
+  '';
+
+  previewScript = pkgs.writeShellScriptBin "hydrix-plymouth-preview" ''
+    # Usage: hydrix-plymouth-preview [--shutdown] [theme-dir]   (HOLD=<seconds> to change duration)
+    # theme-dir defaults to the active theme (${themeDir}); point it at a
+    # copy of that folder to try script edits before a rebuild.
+    set -eu
+    if [ -z "''${DISPLAY:-}" ]; then
+      echo "hydrix-plymouth-preview: needs an X display (XWayland)" >&2
+      exit 1
+    fi
+    mode=boot
+    if [ "''${1:-}" = --shutdown ]; then mode=shutdown; shift; fi
+    dir=$(${pkgs.coreutils}/bin/realpath "''${1:-${themeDir}}")
+    exec ${pkgs.util-linux}/bin/unshare -rm ${previewInner} "$dir" "''${HOLD:-15}" "$mode"
   '';
 
   # Runs for the whole uptime (started at boot, DefaultDependencies=false
-  # below keeps it alive through the shutdown.target wave), subscribed to
-  # systemd's JobNew signal the entire time. Stays silent until a /run flag
-  # is set, then queues events until plymouthd (mode=shutdown) answers
-  # --ping, flushing the queue paced with a small sleep between updates so
-  # it reads as a scroll rather than one static block.
-  #
-  # The flag is set by whichever fires first: a background watcher on
-  # logind's PrepareForShutdown(true) signal, or the JobNew watcher itself
-  # seeing one of the shutdown/reboot/poweroff/halt/kexec target units go
-  # by. Both busctl monitor invocations run inside a retry loop with a
-  # journal line on every restart, so a dead subprocess can't silently
-  # disable forwarding for the rest of the boot.
+  # below keeps it alive through the shutdown.target wave). Idle until
+  # shutdown is detected, by whichever fires first: logind's
+  # PrepareForShutdown(true) signal, or systemd's JobNew signal for one of
+  # the shutdown/reboot/poweroff/halt/kexec targets. Then it follows PID 1's
+  # journal from that moment, the same console-style lines as boot
+  # ("[  OK  ] Stopped ...", "Unmounting ...", failures and timeouts),
+  # queued until plymouthd (mode=shutdown) answers --ping and flushed paced
+  # so they read as a scroll. Once the splash is up it also starts the
+  # "A stop job is running for ..." ticker (statusPollScript --shutdown).
+  # journald runs until the final kill spree, so this covers nearly all of
+  # shutdown. Both busctl monitors run in a retry loop with a journal line
+  # on every restart, so a dead subprocess can't silently disable detection.
   shutdownStatusScript = pkgs.writeShellScript "hydrix-plymouth-shutdown-status" ''
     set -u
     plymouth="${pkgs.plymouth}/bin/plymouth"
     busctl="${pkgs.systemd}/bin/busctl"
     jq="${pkgs.jq}/bin/jq"
-    flag=/run/hydrix-plymouth-shutdown-active
+    lock=/run/hydrix-plymouth-shutdown-follow
     tag=hydrix-plymouth-shutdown-status
+
+    follow() {
+      mkdir "$lock" 2>/dev/null || return 0
+      (
+        ready=0
+        declare -a queue=()
+        ${pkgs.systemd}/bin/journalctl -f -n 0 -o json \
+          --output-fields=MESSAGE,JOB_RESULT,JOB_TYPE _PID=1 2>/dev/null \
+        | "$jq" --unbuffered -r --argjson failures true -f ${jobLineFilter} 2>/dev/null \
+        | while IFS= read -r line; do
+            if [ "$ready" = 1 ]; then
+              "$plymouth" update --status="$line" 2>/dev/null
+            elif "$plymouth" --ping 2>/dev/null; then
+              ready=1
+              ${statusPollScript} --shutdown &
+              for q in "''${queue[@]}" "$line"; do
+                "$plymouth" update --status="$q" 2>/dev/null
+                sleep 0.03
+              done
+              queue=()
+            else
+              queue+=("$line")
+            fi
+          done
+      ) &
+    }
 
     (
       while :; do
@@ -539,7 +706,7 @@ SCRIPT
         | "$jq" --unbuffered -r \
             'select(.type=="signal" and .member=="PrepareForShutdown" and .payload.data[0]==true) | "1"' \
         | while IFS= read -r _; do
-            touch "$flag"
+            follow
           done
         echo "$tag: login1 watcher exited, restarting" >&2
         sleep 1
@@ -547,89 +714,75 @@ SCRIPT
     ) &
 
     while :; do
-      ready=0
-      declare -a queue=()
-
       "$busctl" monitor --system --json=short \
         --match="type='signal',interface='org.freedesktop.systemd1.Manager',member='JobNew'" \
         org.freedesktop.systemd1 2>/dev/null \
       | "$jq" --unbuffered -r \
           'select(.type=="signal" and .member=="JobNew") | .payload.data[2]' \
       | while IFS= read -r unit; do
-          [ -z "$unit" ] && continue
-
           case "$unit" in
-            shutdown.target|reboot.target|poweroff.target|halt.target|kexec.target)
-              touch "$flag"
-              ;;
+            shutdown.target|reboot.target|poweroff.target|halt.target|kexec.target) follow ;;
           esac
-          [ -e "$flag" ] || continue
-
-          if [ "$ready" = 0 ]; then
-            if "$plymouth" --ping 2>/dev/null; then
-              ready=1
-              for q in "''${queue[@]:-}"; do
-                if [ -n "$q" ]; then
-                  "$plymouth" --update="$q" 2>/dev/null
-                  sleep 0.03
-                fi
-              done
-              queue=()
-              "$plymouth" --update="$unit" 2>/dev/null
-            else
-              queue+=("$unit")
-            fi
-          else
-            "$plymouth" --update="$unit" 2>/dev/null
-          fi
         done
-
       echo "$tag: job watcher exited, restarting" >&2
       sleep 1
     done
   '';
 
   # Maps PID 1's job journal entries to console-style status lines
-  # ("[  OK  ] Finished|Description"), see parse_line in the script above.
-  # Condition-skipped units are dropped, like the console does. Failures are
-  # left to the list-units poller in bootStatusScript, which also catches
-  # units that die after starting.
+  # ("[  OK  ] Finished|Description", "[  OK  ] Stopped|Description",
+  # "      Unmounting|/home|..."), see parse_line in the script above.
+  # Condition-skipped units are dropped, like the console does. $failures
+  # adds [FAILED] lines for failed jobs: shutdown has no other source for
+  # them, while boot leaves them to the list-units poller in
+  # statusPollScript, which also catches units that die after starting.
+  # Verb alternatives are ordered longest first ("Stopped target" before
+  # "Stopped"), since the first match wins.
   jobLineFilter = pkgs.writeText "hydrix-plymouth-job-lines.jq" ''
-    (.MESSAGE // "" | if type == "array" then implode else . end) as $m
+    select(.JOB_TYPE != null)
+    | (.MESSAGE // "" | if type == "array" then implode else . end) as $m
     | select($m | test(" skipped, |being skipped\\.$") | not)
     | (.JOB_RESULT // "") as $r
     | (if $r == "done" then "  OK  "
        elif $r == "timeout" then " TIME "
        elif $r == "dependency" then "DEPEND"
-       elif $r == "" and ($m | startswith("Starting ")) then "      "
+       elif $r == "failed" and $failures then "FAILED"
+       elif $r == "" and ($m | test("^(Starting|Stopping|Reloading|Unmounting|Deactivating) ")) then "      "
        else empty end) as $tag
-    | (($m | capture("^(?<v>Started|Finished|Reached target|Mounted|Found device|Listening on|Created slice|Activated swap|Set up automount|Starting|Timed out starting|Dependency failed for) (?<s>.*?)(\\.\\.\\.|\\.)?$"))
+    | (($m | capture("^(?<v>Started|Finished|Reached target|Stopped target|Stopped|Stopping|Mounted|Unmounted|Unmounting|Found device|Listening on|Closed|Created slice|Removed slice|Activated swap|Deactivated swap|Deactivating swap|Set up automount|Unset automount|Reloaded|Reloading|Starting|Timed out starting|Timed out stopping|Dependency failed for|Failed to start|Failed to stop|Failed unmounting|Failed deactivating swap) (?<s>.*?)(\\.\\.\\.|\\.)?$"))
        // {v: "", s: $m}) as $p
     | "[\($tag)] \($p.v)|\($p.s | gsub("\\|"; "/"))"
   '';
 
-  # systemd itself only tells Plymouth which units are starting. Completions,
-  # failures, timeouts and the "A start job is running for ..." ticker go to
-  # the text console, which the splash covers, so a hung unit looks like a
-  # frozen splash. This follows PID 1's job journal entries for [  OK  ]
-  # style lines (the -n all backlog replays initrd too), and polls PID 1
-  # (private socket, no D-Bus needed) once a second while plymouthd is up:
-  # failed units as status lines, the oldest job running 5s or more as the
-  # live message line. The journal follower needs no cleanup: systemd kills
-  # the rest of the cgroup once this main process exits.
-  bootStatusScript = pkgs.writeShellScript "hydrix-plymouth-boot-status" ''
+  # systemd itself only tells Plymouth which units are starting or stopping.
+  # Completions, failures, timeouts and the "A start job is running for ..."
+  # ticker go to the text console, which the splash covers, so a hung unit
+  # looks like a frozen splash. At boot this follows PID 1's job journal
+  # entries for [  OK  ] style lines (the -n all backlog replays initrd too).
+  # Either way it polls PID 1 (private socket, no D-Bus needed) once a
+  # second while plymouthd is up: the oldest job running 5s or more as the
+  # live message line, and at boot failed units as status lines (--shutdown
+  # skips both the journal, which shutdownStatusScript follows itself, and
+  # failed units, which at shutdown would be stale ones from the session).
+  # The journal follower needs no cleanup: systemd kills the rest of the
+  # cgroup once this main process exits.
+  statusPollScript = pkgs.writeShellScript "hydrix-plymouth-status-poll" ''
     set -u
     plymouth="${pkgs.plymouth}/bin/plymouth"
     systemctl="${pkgs.systemd}/bin/systemctl"
     declare -A first=() reported=()
     shown=""
+    boot=1
+    [ "''${1:-}" = --shutdown ] && boot=0
 
-    ${pkgs.systemd}/bin/journalctl -b -f -n all -o json \
-      --output-fields=MESSAGE,JOB_RESULT _PID=1 JOB_TYPE=start 2>/dev/null \
-    | ${pkgs.jq}/bin/jq --unbuffered -r -f ${jobLineFilter} 2>/dev/null \
-    | while IFS= read -r line; do
-        "$plymouth" update --status="$line" 2>/dev/null
-      done &
+    if [ "$boot" = 1 ]; then
+      ${pkgs.systemd}/bin/journalctl -b -f -n all -o json \
+        --output-fields=MESSAGE,JOB_RESULT,JOB_TYPE _PID=1 JOB_TYPE=start 2>/dev/null \
+      | ${pkgs.jq}/bin/jq --unbuffered -r --argjson failures false -f ${jobLineFilter} 2>/dev/null \
+      | while IFS= read -r line; do
+          "$plymouth" update --status="$line" 2>/dev/null
+        done &
+    fi
 
     _dur() {
       local s=$1
@@ -639,7 +792,7 @@ SCRIPT
     while "$plymouth" --ping 2>/dev/null; do
       now=$(${pkgs.coreutils}/bin/date +%s)
 
-      while read -r unit _; do
+      [ "$boot" = 1 ] && while read -r unit _; do
         [ -z "$unit" ] || [ -n "''${reported[$unit]:-}" ] && continue
         reported[$unit]=1
         desc=$("$systemctl" show -P Description "$unit")
@@ -666,8 +819,9 @@ SCRIPT
       msg=""
       if [ -n "$oldest" ] && [ $((now - oldest_t)) -ge 5 ]; then
         desc=$("$systemctl" show -P Description "$oldest")
-        case "$oldest" in
-          *.service) limit=$("$systemctl" show -P TimeoutStartUSec "$oldest") ;;
+        case "$oldest_type:$oldest" in
+          start:*.service) limit=$("$systemctl" show -P TimeoutStartUSec "$oldest") ;;
+          stop:*.service) limit=$("$systemctl" show -P TimeoutStopUSec "$oldest") ;;
           *) limit=$("$systemctl" show -P JobRunningTimeoutUSec "$oldest") ;;
         esac
         case "$limit" in ""|infinity) limit="no limit" ;; esac
@@ -701,6 +855,10 @@ in {
       description = "Show systemd boot messages during boot";
     };
 
+    preview = lib.mkEnableOption ''
+      the hydrix-plymouth-preview command, which runs the splash in a window
+      (Plymouth's x11 renderer, no root or TTY needed) with sample boot lines'';
+
     showShutdownMessages = lib.mkOption {
       type    = lib.types.bool;
       default = cfg.showMessages;
@@ -709,6 +867,16 @@ in {
         dedicated D-Bus watcher (upstream Plymouth's own shutdown status
         rarely has anything to show, since plymouth-poweroff/halt/reboot.service
         only start once most of shutdown.target's own jobs are already done).
+      '';
+    };
+
+    messageMargin = lib.mkOption {
+      type = lib.types.numbers.between 0 0.25;
+      default = 0.01;
+      description = ''
+        Gap between the boot messages and the left, right and top screen
+        edges, as a fraction of the screen height (the same pixel gap on
+        every side). 0 starts at the very edge, like the plain console.
       '';
     };
 
@@ -736,6 +904,32 @@ in {
       '';
     };
 
+    followWal = lib.mkOption {
+      type = lib.types.bool;
+      default = false;
+      description = ''
+        Recolor the splash from the runtime wal colors while a wal scheme is
+        active (walrgb, apply-colorscheme), back to the declared colors on
+        restore-colorscheme. Applied without a rebuild through an extra initrd
+        on the ESP (theming/boot/runtime-colors.nix). Colors pinned explicitly
+        in hydrix.plymouth.colors stay pinned; error is never wal-derived.
+      '';
+    };
+
+    renderer = lib.mkOption {
+      type = lib.types.package;
+      internal = true;
+      readOnly = true;
+      default = renderPlymouth;
+    };
+
+    declaredFiles = lib.mkOption {
+      type = lib.types.package;
+      internal = true;
+      readOnly = true;
+      default = declaredFiles;
+    };
+
     # Defaults resolve from the active hydrix.colorscheme (theming/lib.nix) —
     # override any of these to pin a specific color regardless of colorscheme.
     colors = {
@@ -758,6 +952,8 @@ in {
   };
 
   config = lib.mkIf cfg.enable {
+    environment.systemPackages = lib.optional cfg.preview previewScript;
+
     boot.plymouth = {
       enable = true;
       theme  = "hydrix";
@@ -773,6 +969,16 @@ in {
     };
 
     boot.initrd.systemd.enable = true;
+
+    # Per file rather than one directory symlink, so the runtime overlay cpio
+    # replaces each file instead of writing through a symlink into the store.
+    boot.initrd.systemd.contents = lib.genAttrs (map (f: "${themeDir}/${f}") themeFiles)
+      (path: { source = "${declaredFiles}/${baseNameOf path}"; });
+
+    # Stage 2 (shutdown/reboot splash): runtime-colors.nix keeps
+    # /var/lib/hydrix-boot-theme/plymouth filled with the declared or the wal theme.
+    environment.etc."hydrix-plymouth".source =
+      if cfg.followWal then "/var/lib/hydrix-boot-theme/plymouth" else declaredFiles;
 
     # show_status=auto (systemd's default) suppresses raw console status
     # printing once Plymouth owns the display, falling back to it only for
@@ -800,7 +1006,7 @@ in {
       };
       serviceConfig = {
         Type = "simple";
-        ExecStart = "${bootStatusScript}";
+        ExecStart = "${statusPollScript}";
       };
       wantedBy = ["sysinit.target"];
     };

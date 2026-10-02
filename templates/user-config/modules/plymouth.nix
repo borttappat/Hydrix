@@ -6,8 +6,11 @@
   hydrix.plymouth = {
     enable = lib.mkDefault true;
     showMessages = lib.mkDefault true;  # Show systemd boot messages scrolling during boot
+    # followWal = lib.mkDefault true;  # DEFAULT: false - follow runtime wal colors, restore-colorscheme reverts
     # showShutdownMessages = lib.mkDefault true;  # DEFAULT: follows showMessages
+    # preview = lib.mkDefault false;  # DEFAULT: false - adds hydrix-plymouth-preview (splash in an XWayland window, no root/TTY)
     # fontSize = lib.mkDefault 18;  # DEFAULT: 18 — match hydrix.grub.theme.fontSize
+    # messageMargin = lib.mkDefault 0.01;  # DEFAULT: 0.01 - message gap from left/right/top edges (fraction of screen height)
 
     # title = "HYDRIX";
     # colors = {
