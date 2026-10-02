@@ -3,11 +3,13 @@
 # Theme sources live in ./sddm (Main.qml, metadata.desktop); theme.conf is
 # generated here from the same values hyprlock uses:
 #   - text/font/clock size/blur   hydrix.graphical.lockscreen.*
-#   - border width                hydrix.graphical.scaling.computed.border
+#   - outline width               hydrix.graphical.scaling.computed.border
 #   - rounding                    hydrix.graphical.ui.cornerRadius (x2, min 2)
 #   - colors                      colorscheme slots matching colors-lock.conf
 #                                 (color0 bg, color7 fg, color4 accent, color1 wrong)
 # The background defaults to the GRUB theme's image, so boot and login match.
+# The session and power pills at the bottom use the waybar island-pill
+# values (bar font, gaps, pill radius/padding/opacity, shared shadow).
 #
 # metadata.desktop must carry QtVersion=6: without it SDDM assumes a Qt5
 # greeter, which this build does not ship, and silently falls back to its
@@ -23,9 +25,31 @@
   ...
 }: let
   cfg = config.hydrix.sddm;
-  lk = config.hydrix.graphical.lockscreen;
-  sc = config.hydrix.graphical.scaling.computed;
-  ui = config.hydrix.graphical.ui;
+  gfx = config.hydrix.graphical;
+  lk = gfx.lockscreen;
+  sc = gfx.scaling.computed;
+  ui = gfx.ui;
+
+  # Same derivation as the waybar module's island pills.
+  pill = let
+    fontSize = lib.max 11 (builtins.floor (gfx.font.size * (gfx.font.relations.waybar or 1.0)));
+    padBottom = builtins.ceil (ui.gaps * 0.3);
+  in {
+    font = gfx.font.family;
+    inherit fontSize padBottom;
+    padTop = padBottom + 1;
+    height = builtins.ceil (fontSize * 1.5) + 2 * padBottom + 1;
+    radius =
+      if ui.pillRadius != null
+      then ui.pillRadius
+      else builtins.floor (ui.cornerRadius * ui.pillRadiusScale);
+    opacity = ui.opacity.overlayOverrides.waybar or ui.opacity.overlay;
+    shadow = sc.shadow {
+      blur = 4;
+      alpha = 0.5;
+    };
+    shadowAlpha = lib.min 1.0 (0.5 * ui.shadow.strength);
+  };
 
   scheme = (import ../lib.nix {inherit lib pkgs;}).resolveScheme config;
 
@@ -65,7 +89,15 @@
 
     text=${q lk.text}
     wrongText=${q lk.wrongText}
-    verifyText=${q lk.verifyText}
+
+    gaps=${toString ui.gaps}
+    pillFont=${q pill.font}
+    pillFontSize=${toString pill.fontSize}
+    pillHeight=${toString pill.height}
+    pillRadius=${toString pill.radius}
+    pillOpacity=${toString pill.opacity}
+    pillShadow=${toString pill.shadow.room}
+    pillShadowAlpha=${toString pill.shadowAlpha}
   '';
 
   theme = pkgs.runCommand "hydrix-sddm-theme" {} ''
@@ -121,16 +153,16 @@ in {
     scale = lib.mkOption {
       type = lib.types.either lib.types.int lib.types.float;
       default = let
-        s = config.hydrix.graphical.scaling.hyprInternalScale;
+        s = gfx.scaling.hyprInternalScale;
       in
         if s == null
         then 1.0
         else s;
       defaultText = lib.literalExpression "config.hydrix.graphical.scaling.hyprInternalScale (or 1.0)";
       description = ''
-        Physical pixels per hyprlock unit. hyprlock sizes are logical pixels,
-        so matching it means using the output scale Hyprland runs at; the
-        greeter itself (Weston kiosk) runs unscaled.
+        Physical pixels per logical pixel, the output scale Hyprland runs at,
+        so the greeter matches hyprlock and waybar; the greeter itself
+        (Weston kiosk) runs unscaled.
       '';
     };
 

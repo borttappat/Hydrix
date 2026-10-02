@@ -656,7 +656,8 @@
       placeholder_text = ${lk.text}
       fail_text = ${lk.wrongText}
       rounding = ${lkRounding}
-      border_size = ${borderSize}
+      outline_thickness = ${borderSize}
+      font_family = ${lk.font}
       outer_color = $lockAccent
       inner_color = $lockBg
       font_color = $lockFg
