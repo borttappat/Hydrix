@@ -1,10 +1,10 @@
 # Router VM user settings
 # DNS servers, firewall, extra packages, VPN config goes in vpn/mullvad.nix
 #
-# WiFi/WireGuard sampling is Hydrix's router-netlink-poller; throughput is
-# measured per request by router-stats-server. See
-# hydrix.router.polling.{interval,enableNetStats,enableWgStatus} to tune
-# the sample rate or disable a piece of it.
+# No timers on the router: WiFi state follows nl80211/NetworkManager events
+# (router-netlink-poller), throughput and WireGuard are read per request by
+# router-stats-server. hydrix.router.polling.{enableNetStats,enableWgStatus}
+# turn either piece off.
 { pkgs, ... }: {
   hydrix.router.microvm = {
     # Extra packages available inside the router VM

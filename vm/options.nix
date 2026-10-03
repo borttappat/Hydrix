@@ -10,6 +10,11 @@
 }: let
   cfg = config.hydrix;
 in {
+  imports = [
+    (lib.mkRemovedOptionModule ["hydrix" "router" "polling" "interval"]
+      "The router no longer samples on a timer: WiFi state follows nl80211/NetworkManager events, throughput and WireGuard are read per request.")
+  ];
+
   options.hydrix = {
     # =========================================================================
     # VM IDENTITY
@@ -20,7 +25,7 @@ in {
       storeName = lib.mkOption {
         type = lib.types.str;
         default = "unknown-vm";
-        description = "NixOS configuration key for this VM (e.g. microvm-lurking). Used for host-side paths and service names. Set by the flake — do not override in user configs.";
+        description = "NixOS configuration key for this VM (e.g. microvm-lurking). Used for host-side paths and service names. Set by the flake - do not override in user configs.";
       };
       hostname = lib.mkOption {
         type = lib.types.str;
@@ -167,18 +172,6 @@ in {
   };
 
   options.hydrix.router.polling = {
-    interval = lib.mkOption {
-      type = lib.types.int;
-      default = 10;
-      description = ''
-        Interval (seconds) of router-netlink-poller, which samples WiFi/NM
-        state and WireGuard status each tick. Network throughput is not
-        sampled on a timer (see enableNetStats). Raise on weaker machines,
-        none of this data needs sub-10s freshness. Set with lib.mkDefault in
-        modules, plain assignment in machine configs to override.
-      '';
-      example = 30;
-    };
     enableNetStats = lib.mkOption {
       type = lib.types.bool;
       default = true;
@@ -187,7 +180,7 @@ in {
     enableWgStatus = lib.mkOption {
       type = lib.types.bool;
       default = true;
-      description = "Include WireGuard tunnel status sampling in router-netlink-poller.";
+      description = "Serve WireGuard peer status (WG, and the wg part of ALL) from router-stats-server, read per request, plus endpoint geo-lookup.";
     };
   };
 }

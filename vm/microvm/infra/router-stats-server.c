@@ -1,18 +1,18 @@
 /*
- * router-stats-server.c — persistent vsock server for router polled data
+ * router-stats-server.c - persistent vsock server for router polled data
  *
  * Replaces three `socat VSOCK-LISTEN:PORT,fork EXEC:handler` listeners
  * (wifi-sync, net-stats-vsock, wg-status-vsock) with one long-lived process
  * that holds a single vsock listener open and answers every connection with
  * no new process ever forked or exec'd.
  *
- * WiFi and WireGuard state come from cache files written by
- * router-netlink-poller. Network throughput is measured here, on request:
- * each NET/ALL compares /proc/net/dev against the counters kept from the
- * previous request, so nothing samples while no one is asking.
+ * WiFi state comes from the cache file router-netlink-poller rewrites on
+ * WiFi/NetworkManager events. Network throughput and WireGuard peers are
+ * read here, on request: NET/WG/ALL query /proc/net/dev and WireGuard's
+ * genl family directly, so nothing samples while no one is asking.
  *
  * Build:
- *   gcc -O2 -o router-stats-server router-stats-server.c
+ *   gcc -O2 -I. -o router-stats-server router-stats-server.c -lmnl
  *
  * Protocol: client connects, sends one command line (ADD/REMOVE send two
  * more lines after), gets one response, connection closes.
@@ -21,7 +21,8 @@
  *   POLL | STATUS   -> contents of /tmp/wifi-sync-status.json
  *   NET             -> {"wan":{"iface","rx","tx"},"vms":[{"vm","rx","tx"}]}, bytes/s
  *                      since the previous NET/ALL (zeros on the first request)
- *   WG              -> contents of /tmp/wg-status.json
+ *   WG              -> [{"iface","endpoint","handshake","rx","tx","server","location"}]
+ *                      (handshake = seconds since, -1 never), queried on request
  *   ALL             -> {"wifi":<wifi>,"net":<net>,"wg":<wg>,"vpn":<vpn>}
  *   VPN             -> {"<network>":"<wg-iface|direct|blocked>",...} from
  *                      vpn-assign's state dir
@@ -45,6 +46,10 @@
 #include <fcntl.h>
 #include <dirent.h>
 #include <time.h>
+#include <arpa/inet.h>
+#include <net/if.h>
+#include <linux/wireguard.h>
+#include "router-netlink.h"
 
 #ifndef AF_VSOCK
 #define AF_VSOCK 40
@@ -61,7 +66,6 @@ struct sockaddr_vm {
 };
 
 #define WIFI_CACHE "/tmp/wifi-sync-status.json"
-#define WG_CACHE   "/tmp/wg-status.json"
 #define WX_CACHE   "/tmp/weather.json"
 #define WX_REQUEST "/tmp/weather-request"
 #define VPN_STATE  "/var/lib/hydrix-vpn"
@@ -242,6 +246,243 @@ static void net_stats(char *out, size_t outsz) {
     net_prev_ns = now;
     net_json_ns = now;
     snprintf(out, outsz, "%s", net_json);
+}
+
+/* ── WireGuard peers, queried per request ───────────────────────────────
+ * WG_CMD_GET_DEVICE identifies a device by WGDEVICE_A_IFNAME and there is no
+ * "all devices" dump, so each interface in /etc/wireguard (one .conf per
+ * interface) is queried in turn. */
+
+#ifndef WG_CONF_DIR
+#define WG_CONF_DIR  "/etc/wireguard"
+#endif
+/* Sorted, de-duplicated endpoint IPs, rewritten only when the set changes;
+ * router-geo-refresh's path unit watches it to resolve new locations. */
+#ifndef WG_ENDPOINTS
+#define WG_ENDPOINTS "/tmp/wg-endpoints"
+#endif
+#define WG_MAX_PEERS 32
+
+static int wg_enabled = 1;
+static struct mnl_socket *wg_nl;
+static int wg_id = -1;
+static char wg_json[16384];
+static long long wg_json_ns = -1;
+static char wg_endpoints_last[4096];
+
+struct wg_peer {
+    char endpoint[64];
+    long long handshake; /* unix seconds, 0 = never */
+    unsigned long long rx, tx;
+};
+
+struct wg_dump_ctx {
+    struct wg_peer peers[WG_MAX_PEERS];
+    int count;
+};
+
+static void parse_peer_nested(struct nlattr *peer_attr, struct wg_peer *p) {
+    struct nlattr *attr;
+    memset(p, 0, sizeof(*p));
+    mnl_attr_for_each_nested(attr, peer_attr) {
+        switch (mnl_attr_get_type(attr)) {
+        case WGPEER_A_ENDPOINT: {
+            const struct sockaddr *sa = mnl_attr_get_payload(attr);
+            if (sa->sa_family == AF_INET)
+                inet_ntop(AF_INET, &((const struct sockaddr_in *)sa)->sin_addr,
+                          p->endpoint, sizeof(p->endpoint));
+            else if (sa->sa_family == AF_INET6)
+                inet_ntop(AF_INET6, &((const struct sockaddr_in6 *)sa)->sin6_addr,
+                          p->endpoint, sizeof(p->endpoint));
+            break;
+        }
+        case WGPEER_A_LAST_HANDSHAKE_TIME:
+            /* struct { __s64 tv_sec; __s64 tv_nsec; } */
+            p->handshake = ((const long long *)mnl_attr_get_payload(attr))[0];
+            break;
+        case WGPEER_A_RX_BYTES:
+            p->rx = mnl_attr_get_u64(attr);
+            break;
+        case WGPEER_A_TX_BYTES:
+            p->tx = mnl_attr_get_u64(attr);
+            break;
+        }
+    }
+}
+
+static int wg_device_attr_cb(const struct nlattr *attr, void *data) {
+    struct wg_dump_ctx *ctx = data;
+    if (mnl_attr_get_type(attr) == WGDEVICE_A_PEERS) {
+        struct nlattr *peer;
+        mnl_attr_for_each_nested(peer, attr) {
+            if (ctx->count >= WG_MAX_PEERS) break;
+            parse_peer_nested(peer, &ctx->peers[ctx->count++]);
+        }
+    }
+    return MNL_CB_OK;
+}
+
+static int wg_device_msg_cb(const struct nlmsghdr *nlh, void *data) {
+    mnl_attr_parse(nlh, sizeof(struct genlmsghdr), wg_device_attr_cb, data);
+    return MNL_CB_OK;
+}
+
+/* Always drains the whole dump: the socket is reused for every request. */
+static int wg_get_device_peers(const char *ifname, struct wg_dump_ctx *ctx) {
+    char buf[NL_BUF_SIZE];
+    unsigned int seq = time(NULL);
+    unsigned int portid = mnl_socket_get_portid(wg_nl);
+
+    struct nlmsghdr *nlh = mnl_nlmsg_put_header(buf);
+    nlh->nlmsg_type = wg_id;
+    nlh->nlmsg_flags = NLM_F_REQUEST | NLM_F_DUMP;
+    nlh->nlmsg_seq = seq;
+    struct genlmsghdr *genl = mnl_nlmsg_put_extra_header(nlh, sizeof(*genl));
+    genl->cmd = WG_CMD_GET_DEVICE;
+    genl->version = 1;
+    mnl_attr_put_strz(nlh, WGDEVICE_A_IFNAME, ifname);
+
+    ctx->count = 0;
+    if (mnl_socket_sendto(wg_nl, nlh, nlh->nlmsg_len) < 0) return -1;
+    int ret = mnl_socket_recvfrom(wg_nl, buf, sizeof(buf));
+    while (ret > 0) {
+        ret = mnl_cb_run(buf, ret, seq, portid, wg_device_msg_cb, ctx);
+        if (ret <= 0) break;
+        ret = mnl_socket_recvfrom(wg_nl, buf, sizeof(buf));
+    }
+    return 0;
+}
+
+/* "# Server: <name>" comment in the interface's .conf, else the fallback. */
+static void read_server_comment(const char *ifname, const char *fallback, char *out, size_t outlen) {
+    char path[300], line[256];
+    snprintf(path, sizeof(path), "%s/%s.conf", WG_CONF_DIR, ifname);
+    snprintf(out, outlen, "%s", fallback);
+    FILE *f = fopen(path, "r");
+    if (!f) return;
+    while (fgets(line, sizeof(line), f)) {
+        if (!strncmp(line, "# Server: ", 10)) {
+            line[10 + strcspn(line + 10, "\r\n")] = 0;
+            snprintf(out, outlen, "%.*s", (int)outlen - 1, line + 10);
+            break;
+        }
+    }
+    fclose(f);
+}
+
+/* /tmp/wg-loc-<ip>, written by router-geo-refresh; "" until resolved. */
+static void read_location(const char *ip, char *out, size_t outlen) {
+    char path[300];
+    snprintf(path, sizeof(path), "/tmp/wg-loc-%s", ip);
+    read_cache(path, "", out, outlen);
+    out[strcspn(out, "\r\n")] = 0;
+}
+
+/* Appends s to buf at *off as a JSON string body (backslash, quote, newline
+ * escaped). Leaves *off unchanged past the end of buf. */
+static void json_put(char *buf, size_t bufsz, size_t *off, const char *s) {
+    for (; *s && *off + 3 < bufsz; s++) {
+        if (*s == '\\' || *s == '"') buf[(*off)++] = '\\';
+        if (*s == '\n') { buf[(*off)++] = '\\'; buf[(*off)++] = 'n'; continue; }
+        buf[(*off)++] = *s;
+    }
+    buf[*off] = 0;
+}
+
+static int cmp_str(const void *a, const void *b) {
+    return strcmp((const char *)a, (const char *)b);
+}
+
+static void publish_endpoints(char eps[][64], int n) {
+    qsort(eps, (size_t)n, 64, cmp_str);
+    char list[sizeof(wg_endpoints_last)];
+    size_t off = 0;
+    list[0] = 0;
+    for (int i = 0; i < n; i++) {
+        if (i && !strcmp(eps[i], eps[i - 1])) continue;
+        int w = snprintf(list + off, sizeof(list) - off, "%s\n", eps[i]);
+        if (w < 0 || (size_t)w >= sizeof(list) - off) break;
+        off += (size_t)w;
+    }
+    if (!strcmp(list, wg_endpoints_last)) return;
+    FILE *f = fopen(WG_ENDPOINTS ".tmp", "w");
+    if (!f) return;
+    fputs(list, f);
+    fclose(f);
+    if (rename(WG_ENDPOINTS ".tmp", WG_ENDPOINTS) == 0)
+        snprintf(wg_endpoints_last, sizeof(wg_endpoints_last), "%s", list);
+}
+
+static void wg_status(char *out, size_t outsz) {
+    long long now_ns = mono_ns();
+    if (!wg_enabled) {
+        snprintf(out, outsz, "%s", WG_DEFAULT);
+        return;
+    }
+    if (wg_json_ns >= 0 && now_ns - wg_json_ns < NET_REUSE_NS) {
+        snprintf(out, outsz, "%s", wg_json);
+        return;
+    }
+    if (!wg_nl) {
+        wg_nl = mnl_socket_open(NETLINK_GENERIC);
+        if (wg_nl && mnl_socket_bind(wg_nl, 0, MNL_SOCKET_AUTOPID) < 0) {
+            mnl_socket_close(wg_nl);
+            wg_nl = NULL;
+        }
+    }
+    /* The wireguard module loads with the first tunnel, possibly after us. */
+    if (wg_nl && wg_id < 0) {
+        struct family_result fam = {.ngroups = 0};
+        wg_id = resolve_family(wg_nl, WG_GENL_NAME, &fam);
+    }
+
+    size_t off = 1;
+    snprintf(wg_json, sizeof(wg_json), "[");
+    char eps[WG_MAX_PEERS * 4][64];
+    int neps = 0;
+    time_t now = time(NULL);
+    DIR *d = (wg_nl && wg_id >= 0) ? opendir(WG_CONF_DIR) : NULL;
+    if (d) {
+        struct dirent *e;
+        while ((e = readdir(d))) {
+            size_t nlen = strlen(e->d_name);
+            if (nlen < 6 || nlen - 5 >= IFNAMSIZ || strcmp(e->d_name + nlen - 5, ".conf")) continue;
+            char ifname[IFNAMSIZ];
+            snprintf(ifname, sizeof(ifname), "%.*s", (int)(nlen - 5), e->d_name);
+
+            struct wg_dump_ctx ctx;
+            if (wg_get_device_peers(ifname, &ctx) < 0) continue;
+            for (int i = 0; i < ctx.count; i++) {
+                struct wg_peer *p = &ctx.peers[i];
+                if (!p->endpoint[0]) continue;
+                if (neps < (int)(sizeof(eps) / sizeof(eps[0])))
+                    snprintf(eps[neps++], 64, "%s", p->endpoint);
+                char server[128], location[128];
+                read_server_comment(ifname, p->endpoint, server, sizeof(server));
+                read_location(p->endpoint, location, sizeof(location));
+                long long age = p->handshake > 0 ? (long long)now - p->handshake : -1;
+                int w = snprintf(wg_json + off, sizeof(wg_json) - off,
+                    "%s{\"iface\":\"%s\",\"endpoint\":\"%s\",\"handshake\":%lld,"
+                    "\"rx\":%llu,\"tx\":%llu,\"server\":\"",
+                    off > 1 ? "," : "", ifname, p->endpoint, age, p->rx, p->tx);
+                if (w < 0 || (size_t)w >= sizeof(wg_json) - off) break;
+                off += (size_t)w;
+                json_put(wg_json, sizeof(wg_json), &off, server);
+                if (off + 16 < sizeof(wg_json)) off += (size_t)sprintf(wg_json + off, "\",\"location\":\"");
+                json_put(wg_json, sizeof(wg_json), &off, location);
+                if (off + 3 < sizeof(wg_json)) off += (size_t)sprintf(wg_json + off, "\"}");
+            }
+        }
+        closedir(d);
+    }
+    if (off + 2 <= sizeof(wg_json)) {
+        memcpy(wg_json + off, "]", 2);
+    } else {
+        snprintf(wg_json, sizeof(wg_json), "%s", WG_DEFAULT);
+    }
+    publish_endpoints(eps, neps);
+    wg_json_ns = now_ns;
+    snprintf(out, outsz, "%s", wg_json);
 }
 
 /* Runs argv[0] directly via fork/execvp (argv array, no shell) so ssid/psk
@@ -470,13 +711,13 @@ static void handle_conn(int cfd) {
         net_stats(out, sizeof(out));
         send_all(cfd, out, strlen(out));
     } else if (!strcmp(lines[0], "WG")) {
-        size_t n = read_cache(WG_CACHE, WG_DEFAULT, out, sizeof(out));
-        send_all(cfd, out, n);
+        wg_status(out, sizeof(out));
+        send_all(cfd, out, strlen(out));
     } else if (!strcmp(lines[0], "ALL")) {
         char wifi[BUF_MAX / 4], net[BUF_MAX / 4], wg[BUF_MAX / 4], vpn[4096];
         read_cache(WIFI_CACHE, WIFI_DEFAULT, wifi, sizeof(wifi));
         net_stats(net, sizeof(net));
-        read_cache(WG_CACHE, WG_DEFAULT, wg, sizeof(wg));
+        wg_status(wg, sizeof(wg));
         read_assignments(vpn, sizeof(vpn));
         int n = snprintf(out, sizeof(out), "{\"wifi\":%s,\"net\":%s,\"wg\":%s,\"vpn\":%s}",
                          wifi, net, wg, vpn);
@@ -506,6 +747,7 @@ static void handle_conn(int cfd) {
 int main(int argc, char **argv) {
     for (int i = 1; i < argc; i++)
         if (!strcmp(argv[i], "--no-net")) net_enabled = 0;
+        else if (!strcmp(argv[i], "--no-wg")) wg_enabled = 0;
 
     int lfd = socket(AF_VSOCK, SOCK_STREAM, 0);
     if (lfd < 0) { perror("vsock socket"); return 1; }

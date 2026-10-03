@@ -41,28 +41,25 @@
   routerStatsServerBin =
     pkgs.runCommand "router-stats-server" {
       nativeBuildInputs = [pkgs.gcc];
+      buildInputs = [pkgs.libmnl];
     } ''
       mkdir -p $out/bin
-      gcc -O2 -o $out/bin/router-stats-server ${./router-stats-server.c}
+      cp ${./router-netlink.h} router-netlink.h
+      gcc -O2 -I. -o $out/bin/router-stats-server ${./router-stats-server.c} -lmnl
     '';
 
-  # Queries nl80211 (WiFi SSID) and WireGuard genl (peer stats) directly via
-  # libmnl, with no exec of `iw`/`wg` - a new process on this VM's single
-  # vCPU means resolving an ELF binary and its shared libraries over a
-  # virtiofs-backed /nix/store, a real CPU cost the netlink call itself
-  # doesn't pay. Source lives alongside this file as router-netlink-poller.c.
-  # Writes /tmp/wifi-sync-status.json and /tmp/wg-status.json, the same
-  # cache files router-stats-server reads to answer host queries.
+  # Keeps /tmp/wifi-sync-status.json current from nl80211 events and inotify
+  # on NetworkManager's connection files, with no timer and no exec of `iw`.
+  # See router-netlink-poller.c.
   routerNetlinkPollerBin =
     pkgs.runCommand "router-netlink-poller" {
       nativeBuildInputs = [pkgs.gcc];
       buildInputs = [pkgs.libmnl];
     } ''
       mkdir -p $out/bin
-      gcc -O2 -o $out/bin/router-netlink-poller ${./router-netlink-poller.c} -lmnl
+      cp ${./router-netlink.h} router-netlink.h
+      gcc -O2 -I. -o $out/bin/router-netlink-poller ${./router-netlink-poller.c} -lmnl
     '';
-
-  routerPollInterval = toString cfg.router.polling.interval;
 
   # Router user from options
   routerUser = routerCfg.username;
@@ -1045,106 +1042,59 @@ in {
     };
 
     # ===== Router Stats =====
-    # WiFi/NM state and WireGuard peer status are sampled by
-    # router-netlink-poller (router-netlink-poller.c); geo-lookup runs in
-    # router-geo-refresh. Network throughput has no sampler: router-stats-server
-    # measures it per NET/ALL request from /proc/net/dev.
-
-    # See routerNetlinkPollerBin's comment above and router-netlink-poller.c
-    # for what this queries and writes.
+    # Nothing here runs on a timer. router-netlink-poller rewrites the WiFi
+    # cache on nl80211/NetworkManager events; router-stats-server reads
+    # throughput and WireGuard peers when the host asks; router-geo-refresh
+    # runs when the set of WireGuard endpoints changes.
     systemd.services.router-netlink-poller = {
-      description = "Router WiFi/WireGuard native-netlink poller";
+      description = "Router WiFi state watcher (nl80211 events, NM connections)";
       wantedBy = ["multi-user.target"];
-      after = ["NetworkManager.service" "network.target"];
+      after = ["NetworkManager.service" "hydrix-wifi-from-sops.service" "network.target"];
       serviceConfig = {
         Type = "simple";
-        ExecStart = "${routerNetlinkPollerBin}/bin/router-netlink-poller ${routerPollInterval} ${
-          if cfg.router.polling.enableWgStatus
-          then "1"
-          else "0"
-        }";
+        ExecStart = "${routerNetlinkPollerBin}/bin/router-netlink-poller";
         Restart = "always";
         RestartSec = 5;
       };
     };
 
-    # Resolves WireGuard peer endpoint IPs to city/country via the Mullvad
-    # relay list, falling back to ipinfo.io, and caches each result at
-    # /tmp/wg-loc-<ip>. Reads endpoint IPs from wg-status.json
-    # (router-netlink-poller writes that file and only ever reads this
-    # cache, never populates it). The 300s interval is fine since a peer's
-    # location only changes if its endpoint IP does, and lookup_location
-    # skips any IP already cached.
-    systemd.services.router-geo-refresh = lib.mkIf cfg.router.polling.enableWgStatus {
-      description = "WireGuard peer geo-location cache refresh";
+    # Resolves WireGuard endpoint IPs to "City, CC" via Mullvad's relay list,
+    # falling back to ipinfo.io, cached per IP at /tmp/wg-loc-<ip> for
+    # router-stats-server to read. Triggered by router-stats-server rewriting
+    # /tmp/wg-endpoints, which it only does when the endpoint set changes.
+    systemd.paths.router-geo-refresh = lib.mkIf cfg.router.polling.enableWgStatus {
       wantedBy = ["multi-user.target"];
-      after = ["router-netlink-poller.service"];
-      serviceConfig = {
-        Type = "simple";
-        ExecStart = let
-          refresher = pkgs.writeShellScript "router-geo-refresh" ''
-            relay_cache="/tmp/wg-mullvad-relays.json"
+      pathConfig.PathChanged = "/tmp/wg-endpoints";
+    };
 
-            refresh_relay_cache() {
-              local now relay_age
-              now=$(date +%s)
-              relay_age=0
-              [ -f "$relay_cache" ] && relay_age=$(( now - $(stat -c %Y "$relay_cache" 2>/dev/null || echo 0) ))
-              if [ ! -f "$relay_cache" ] || [ "$relay_age" -gt 3600 ]; then
-                ${pkgs.curl}/bin/curl -sf --max-time 15 "https://api.mullvad.net/www/relays/all/" 2>/dev/null \
-                  > "$relay_cache.tmp" && mv "$relay_cache.tmp" "$relay_cache" || true
-              fi
-            }
+    systemd.services.router-geo-refresh = lib.mkIf cfg.router.polling.enableWgStatus {
+      description = "WireGuard endpoint geo-location lookup";
+      unitConfig.ConditionPathExists = "/tmp/wg-endpoints";
+      serviceConfig.Type = "oneshot";
+      script = ''
+        relay_cache=/tmp/wg-mullvad-relays.json
+        if [ ! -s "$relay_cache" ] || [ -n "$(find "$relay_cache" -mmin +60)" ]; then
+          ${pkgs.curl}/bin/curl -sf --max-time 15 "https://api.mullvad.net/www/relays/all/" \
+            > "$relay_cache.tmp" && mv "$relay_cache.tmp" "$relay_cache" || true
+        fi
 
-            lookup_location() {
-              local ip="$1" cache loc city country result
-              cache="/tmp/wg-loc-''${ip}"
-              if [ -f "$cache" ]; then
-                return
-              fi
-
-              city=""; country=""
-
-              # Try Mullvad relay list first
-              if [ -f "$relay_cache" ]; then
-                city=$(${pkgs.jq}/bin/jq -r --arg ip "$ip" \
-                  '.[] | select(.ipv4_addr_in == $ip) | .city_name // empty' \
-                  "$relay_cache" 2>/dev/null | head -1 || true)
-                country=$(${pkgs.jq}/bin/jq -r --arg ip "$ip" \
-                  '.[] | select(.ipv4_addr_in == $ip) | .country_code // empty' \
-                  "$relay_cache" 2>/dev/null | head -1 | tr '[:lower:]' '[:upper:]' || true)
-              fi
-
-              # Fall back to ipinfo.io
-              if [ -z "$city" ] || [ -z "$country" ]; then
-                result=$(${pkgs.curl}/bin/curl -sf --max-time 10 "https://ipinfo.io/''${ip}/json" 2>/dev/null || true)
-                city=$(echo    "$result" | ${pkgs.jq}/bin/jq -r '.city    // empty' 2>/dev/null || true)
-                country=$(echo "$result" | ${pkgs.jq}/bin/jq -r '.country // empty' 2>/dev/null || true)
-              fi
-
-              if [ -n "$city" ] && [ -n "$country" ]; then
-                loc="''${city}, ''${country}"
-              else
-                loc="$ip"
-              fi
-              echo "$loc" > "$cache"
-            }
-
-            while true; do
-              refresh_relay_cache
-              if [ -f /tmp/wg-status.json ]; then
-                while IFS= read -r ip; do
-                  [ -n "$ip" ] || continue
-                  lookup_location "$ip"
-                done < <(${pkgs.jq}/bin/jq -r '.[].endpoint' /tmp/wg-status.json 2>/dev/null | sort -u)
-              fi
-              sleep 300
-            done
-          '';
-        in "${refresher}";
-        Restart = "always";
-        RestartSec = 5;
-      };
+        while IFS= read -r ip; do
+          case "$ip" in ""|*[!0-9a-fA-F.:]*) continue ;; esac
+          cache="/tmp/wg-loc-$ip"
+          [ -f "$cache" ] && continue
+          loc=""
+          if [ -s "$relay_cache" ]; then
+            loc=$(${pkgs.jq}/bin/jq -r --arg ip "$ip" \
+              'first(.[] | select(.ipv4_addr_in == $ip and .city_name and .country_code) | "\(.city_name), \(.country_code | ascii_upcase)") // empty' \
+              "$relay_cache" 2>/dev/null || true)
+          fi
+          if [ -z "$loc" ]; then
+            loc=$(${pkgs.curl}/bin/curl -sf --max-time 10 "https://ipinfo.io/$ip/json" 2>/dev/null \
+              | ${pkgs.jq}/bin/jq -r 'select(.city and .country) | "\(.city), \(.country)"' 2>/dev/null || true)
+          fi
+          echo "''${loc:-$ip}" > "$cache"
+        done < /tmp/wg-endpoints
+      '';
     };
 
     # Persistent no-fork vsock server (port 14506). Handles POLL/STATUS/ADD/
@@ -1160,7 +1110,9 @@ in {
       path = lib.optionals hasMullvad [vpnAssign];
       serviceConfig = {
         Type = "simple";
-        ExecStart = "${routerStatsServerBin}/bin/router-stats-server${lib.optionalString (!cfg.router.polling.enableNetStats) " --no-net"}";
+        ExecStart = lib.concatStringsSep " " (["${routerStatsServerBin}/bin/router-stats-server"]
+          ++ lib.optional (!cfg.router.polling.enableNetStats) "--no-net"
+          ++ lib.optional (!cfg.router.polling.enableWgStatus) "--no-wg");
         Restart = "always";
         RestartSec = 5;
       };
