@@ -40,7 +40,7 @@ in {
             Persist /var/lib/NetworkManager across router VM restarts, via a small
             qcow2 volume. By default the router's /var/lib is fully ephemeral
             (tmpfs), so WiFi networks added at runtime via nmcli/NetworkManager's own
-            UI are lost on every restart — declaratively-managed networks
+            UI are lost on every restart - declaratively-managed networks
             (hydrix.router.wifi.networks / modules/wifi.nix) are unaffected either
             way, since those are baked into the build. Enable this if the router is
             meant to be an everyday network gateway where ad-hoc connections should
@@ -179,7 +179,7 @@ in {
             Defaults to just the management LAN, derived from hydrix.networking.hostIp,
             so the router is reachable from the host out of the box. hydrix-config's
             flake.nix extends this with additional entries from infra/*/meta.nix entries
-            that declare routerTap + subnet (builder, etc.) — those are appended on top
+            that declare routerTap + subnet (builder, etc.) - those are appended on top
             of this default, not a replacement for it.
             These subnets get static IPs, DHCP ranges, and firewall rules in the router VM.
           '';
@@ -391,7 +391,7 @@ in {
           default = [];
           description = ''
             PCI vendor:device IDs to bind to vfio-pci (drives boot.kernelParams).
-            Not derived from wifiPciAddress below — the two must be set together for
+            Not derived from wifiPciAddress below - the two must be set together for
             VFIO WiFi passthrough to work: this identifies the device (find with
             `lspci -nn | grep -i network`), wifiPciAddress identifies its PCI slot
             (used to pass the device into the router VM). setup-hydrix's
@@ -407,7 +407,7 @@ in {
           description = ''
             PCI address of WiFi card for passthrough (without domain), e.g. from
             `lspci -D | grep -i wireless`. Paired with pciIds above (vendor:device for
-            the same card) — both must be set for VFIO WiFi passthrough to work; this
+            the same card) - both must be set for VFIO WiFi passthrough to work; this
             option alone does not bind the device to vfio-pci.
           '';
           example = "00:14.3";
@@ -545,7 +545,7 @@ in {
         type = lib.types.str;
         default = "nixos";
         description = ''
-          EFI bootloader ID — sets the directory under /boot/EFI/ and the UEFI boot
+          EFI bootloader ID - sets the directory under /boot/EFI/ and the UEFI boot
           entry label. Use a unique value per install (e.g. "hydrix-<serial>") so that
           multiple Hydrix installs on the same EFI partition each get their own UEFI
           entry and EFI binary, and a second install cannot clobber the first.
@@ -605,18 +605,18 @@ in {
           Battery charge resume threshold percentage. Charging resumes when battery
           drops below this value. Must be less than chargeLimit.
 
-          Applied via sysfs (charge_control_start_threshold) — only effective on
+          Applied via sysfs (charge_control_start_threshold) - only effective on
           hardware that exposes this node (check: ls /sys/class/power_supply/BAT0/).
           Silently ignored if the node is absent.
 
-          Example: chargeLimit = 60; chargeStartLimit = 40; — charges 40-60% range.
+          Example: chargeLimit = 60; chargeStartLimit = 40; - charges 40-60% range.
         '';
         example = 40;
       };
 
       autoCpuFreq = lib.mkOption {
         type = lib.types.bool;
-        default = false; # HWP (balance_power EPP) handles scaling — no polling daemon needed
+        default = false; # HWP (balance_power EPP) handles scaling - no polling daemon needed
         description = "Enable auto-cpufreq service for dynamic CPU frequency management";
       };
     };
@@ -676,7 +676,7 @@ in {
           secrets provisioning, vm-registry.json) with zero hydrix-config customization.
           hydrix-config's flake.nix normally populates this explicitly instead (plain
           assignment from profiles/*/meta.nix discovery), which fully supersedes this
-          default whenever it applies — do not set manually if using that convention.
+          default whenever it applies - do not set manually if using that convention.
         '';
       };
 
@@ -748,7 +748,7 @@ in {
         default = {};
         description = ''
           Per-machine NixOS module overrides for profile VMs, keyed by profile name.
-          Applied only to that VM's config on this machine — not on other machines in the flake.
+          Applied only to that VM's config on this machine - not on other machines in the flake.
           Useful for machine-specific VM tuning: USB passthrough, virtiofsd thread counts, etc.
 
           Example:

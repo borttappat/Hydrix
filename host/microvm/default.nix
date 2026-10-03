@@ -84,12 +84,12 @@
   # from config.hydrix.networking.profileNetworks (populated by flake.nix from
   # profiles/*/meta.nix) so new profiles are covered without editing this file.
   routerTaps =
-    # Infrastructure TAPs — always present, not user-configurable
+    # Infrastructure TAPs - always present, not user-configurable
     {
       "mv-router-mgmt" = "br-mgmt";
       "mv-router-bldr" = "br-builder";
     }
-    # Profile TAPs — generated from discovered profileNetworks.
+    # Profile TAPs - generated from discovered profileNetworks.
     # profileNetworks has { name, subnet, routerTap } for every profile.
     # The bridge comes from vmRegistry[name].bridge when available;
     # falls back to "br-<name>" for robustness during initial bootstrap.
@@ -118,7 +118,7 @@
     MAX_RETRIES=30
     RETRY_DELAY=0.5
 
-    # Exit early if already attached to the correct bridge —
+    # Exit early if already attached to the correct bridge -
     # ip link set master fails with EBUSY on already-attached TAPs,
     # which would cause the retry loop to spin for 15s per TAP.
     current_master=$(${pkgs.iproute2}/bin/ip -o link show "$TAP" 2>/dev/null \
@@ -143,7 +143,7 @@
   '';
 
   # Lookup the correct bridge for any mv-* TAP.
-  # Generated at build time from all known mappings — exact matches first, then globs.
+  # Generated at build time from all known mappings - exact matches first, then globs.
   # Returns empty string for unknown TAPs (no assignment).
   tapLookupScript = pkgs.writeShellScript "tap-bridge-lookup" ''
     case "$1" in
@@ -154,7 +154,7 @@
       mv-rts-bldr)    echo "br-builder" ;;
       # Stable-router management TAP
       mv-rts-mgmt) echo "br-mgmt" ;;
-      # --- Profile router TAPs — generated from profileNetworks ---
+      # --- Profile router TAPs - generated from profileNetworks ---
       # Each entry covers both the primary router (mv-router-*) and the
       # stable-router counterpart (mv-rts-*).
       ${lib.concatMapStrings (pn: let
@@ -224,11 +224,11 @@ in {
   imports = [./vm-elastic.nix];
 
   config = lib.mkMerge [
-    # Always available — fallback mode and fresh installs need these to manage VMs
+    # Always available - fallback mode and fresh installs need these to manage VMs
     {
       environment.systemPackages = [shardPkg];
 
-      # Machine identity for scripts — present in all modes (fallback, administrative, lockdown)
+      # Machine identity for scripts - present in all modes (fallback, administrative, lockdown)
       # so 'shard build router' resolves the correct per-machine VM name everywhere.
       environment.etc."hydrix/host-config.json" = {
         text = builtins.toJSON {
@@ -250,7 +250,7 @@ in {
         "${routerVmName}" = {
           enable = lib.mkDefault true;
         };
-        # Stable router: always declared, never autostarts — manual "break glass" fallback only
+        # Stable router: always declared, never autostarts - manual "break glass" fallback only
         "${stableRouterVmName}" = {
           enable = lib.mkDefault true;
           autostart = lib.mkDefault false;
@@ -277,7 +277,7 @@ in {
       # Single catch-all udev rule: assign every mv-* TAP to its bridge at creation time.
       # tapAssignScript looks up the correct bridge from tapLookupScript (generated at build
       # time from all known router/infra/profile/extra-network mappings) and attaches with
-      # retry. Covers new profiles automatically — no per-interface rules to maintain.
+      # retry. Covers new profiles automatically - no per-interface rules to maintain.
       services.udev.extraRules = ''
         ACTION=="add", SUBSYSTEM=="net", KERNEL=="mv-*", RUN+="${tapAssignScript} %k"
         SUBSYSTEM=="vfio", MODE="0666"
@@ -298,7 +298,7 @@ in {
           mode = "0644";
         };
 
-      # vsock port assignments — scripts read from here instead of hardcoding
+      # vsock port assignments - scripts read from here instead of hardcoding
       environment.etc."hydrix/ports.json" = {
         text = builtins.toJSON config.hydrix.networking.vsockPorts;
         mode = "0644";
@@ -310,7 +310,7 @@ in {
         pkgs.virtiofsd
         pkgs.socat # For microvm-router console access
         pkgs.openssl # For shard files passphrase generation
-        # TAP→bridge lookup — wraps the build-time generated tapLookupScript so it
+        # TAP→bridge lookup - wraps the build-time generated tapLookupScript so it
         # is on PATH. Dynamic: covers router, infra, profile, and extra-network TAPs.
         # Used by hydrix-switch for post-mode-switch TAP reattachment.
         (pkgs.writeShellScriptBin "microvm-tap-lookup" "exec ${tapLookupScript} \"$@\"")
@@ -371,7 +371,7 @@ in {
       '';
 
       # Reattach existing mv-* TAPs to their correct bridges after every rebuild.
-      # The udev rule only fires on TAP creation — VMs that were already running
+      # The udev rule only fires on TAP creation - VMs that were already running
       # during a host rebuild keep their old (possibly wrong) bridge assignment.
       # This activation script re-runs tapAssignScript for every live mv-* interface
       # so TAP→bridge mapping stays correct without restarting VMs.
@@ -398,7 +398,7 @@ in {
           # Must exist before microVMs start, otherwise QEMU fails to mount
           "d /home/${username}/.config/hydrix 0755 ${username} users -"
         ]
-        # hostsync virtiofs source — virtiofsd crashes if source path is missing at start.
+        # hostsync virtiofs source - virtiofsd crashes if source path is missing at start.
         # Create unconditionally when hostsync VM is enabled so first boot always works.
         ++ lib.optionals (cfg.vms ? "microvm-hostsync" && cfg.vms."microvm-hostsync".enable) [
           "d /home/${username}/vm-inbox 0755 ${username} users -"
@@ -412,10 +412,10 @@ in {
         # stay root:root.
         ++ (lib.mapAttrsToList (name: _: "z /var/lib/microvms/${name} 0755 microvm kvm -")
           enabledVMs)
-        # Parent dir per enabled VM — virtiofsd needs this path to exist at start.
+        # Parent dir per enabled VM - virtiofsd needs this path to exist at start.
         ++ (lib.mapAttrsToList (name: _: "d /run/hydrix-secrets/${name} 0700 root root -")
           (lib.filterAttrs (_: v: v.enable) cfg.vms))
-        # Subdir per (vm, secretType) pair — provisioning target for each secret.
+        # Subdir per (vm, secretType) pair - provisioning target for each secret.
         ++ (lib.concatLists (lib.mapAttrsToList (
             name: vmCfg:
               map (secretName: let
@@ -486,7 +486,7 @@ in {
         })
 
         # Stable router: root for VFIO, conflicts with main router (can't share WiFi card).
-        # Never auto-starts — launch manually with: shard start router-stable
+        # Never auto-starts - launch manually with: shard start router-stable
         (lib.mkIf stableRouterEnabled {
           "microvm@${stableRouterVmName}" = {
             overrideStrategy = "asDropin";
@@ -575,10 +575,10 @@ in {
         # Secrets Provisioning for MicroVMs
         # Generated for ALL enabled VMs, not just those with secrets.
         # This guarantees /run/hydrix-secrets/<name>/ssh exists before virtiofsd
-        # starts — virtiofsd crashes if its source path is missing and tmpfiles
+        # starts - virtiofsd crashes if its source path is missing and tmpfiles
         # has no strict ordering guarantee relative to virtiofsd.
         # For VMs with secrets: also copies decrypted keys.
-        # For VMs without secrets: mkdir only — VM starts cleanly, just no SSH keys.
+        # For VMs without secrets: mkdir only - VM starts cleanly, just no SSH keys.
         # Key copy is guarded per-file, so machines without sops configured are safe.
         (lib.mapAttrs' (name: vmCfg:
           lib.nameValuePair "hydrix-secrets-${name}" {
@@ -613,7 +613,7 @@ in {
                   in
                     if fileCfg == null
                     then ''
-                      echo "Warning: unknown secret type '${secretName}' — not in hydrix.secrets.files"
+                      echo "Warning: unknown secret type '${secretName}' - not in hydrix.secrets.files"
                     ''
                     else if wholeFile
                     then ''

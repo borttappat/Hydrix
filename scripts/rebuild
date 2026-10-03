@@ -50,7 +50,7 @@ Options:
   -i, --ignore-activation  Continue even if activation fails (exit code 4)
   -v, --verbose         Show verbose output
   --test                Activate without writing a boot entry (nixos-rebuild test
-                        equivalent) — stage untested changes before -> switch
+                        equivalent) - stage untested changes before -> switch
   -t, --tag TAG         Tag this build for easier identification in the GRUB menu
                         (letters, numbers, ':', '_', '.', '-' only)
   --dev [path]          Override hydrix input with local path (for testing unpushed changes)
@@ -218,7 +218,7 @@ restore_network() {
     # Re-attach all mv-* TAPs to their correct bridges.
     # microvm-tap-lookup is generated at build time from all known TAP→bridge
     # mappings (router infra, profile router TAPs, infra VM TAPs, profile VM
-    # TAP globs) — covers every TAP type without manual maintenance here.
+    # TAP globs) - covers every TAP type without manual maintenance here.
     for tap in $(ip -o link show 2>/dev/null | grep -oP 'mv-[a-z0-9-]+(?=[@:])' | sort -u); do
         local bridge
         bridge=$(microvm-tap-lookup "$tap" 2>/dev/null || true)
@@ -629,7 +629,7 @@ post_build() {
         sudo systemctl restart hydrix-colorscheme.service 2>/dev/null || true
     fi
 
-    # Restart tailscaled once activation has fully settled — a restart mid-activation
+    # Restart tailscaled once activation has fully settled - a restart mid-activation
     # (even correctly ordered) can still race the bridge coming up and cache a dead DNS upstream.
     if systemctl list-units --type=service 2>/dev/null | grep -q "tailscaled.service"; then
         log "Restarting tailscaled..."
@@ -707,7 +707,7 @@ main() {
 
         # Check if builder VM is running (it stops nix-daemon, blocking host builds)
         if systemctl is-active --quiet microvm@microvm-builder.service 2>/dev/null; then
-            err "Builder VM is running — host nix-daemon is stopped"
+            err "Builder VM is running - host nix-daemon is stopped"
             err "Stop it first: shard stop microvm-builder"
             exit 1
         fi
