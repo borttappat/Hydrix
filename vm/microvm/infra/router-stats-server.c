@@ -6,9 +6,10 @@
  * that holds a single vsock listener open and answers every connection with
  * no new process ever forked or exec'd.
  *
- * Serves cached JSON written by three unchanged background sampler services
- * (wifi-sync-poller, net-stats-poller, wg-status-poller) - this binary is
- * the serving side only, not the sampling side.
+ * WiFi and WireGuard state come from cache files written by
+ * router-netlink-poller. Network throughput is measured here, on request:
+ * each NET/ALL compares /proc/net/dev against the counters kept from the
+ * previous request, so nothing samples while no one is asking.
  *
  * Build:
  *   gcc -O2 -o router-stats-server router-stats-server.c
@@ -18,7 +19,8 @@
  *
  *   PING            -> "PONG"
  *   POLL | STATUS   -> contents of /tmp/wifi-sync-status.json
- *   NET             -> contents of /tmp/net-stats.json
+ *   NET             -> {"wan":{"iface","rx","tx"},"vms":[{"vm","rx","tx"}]}, bytes/s
+ *                      since the previous NET/ALL (zeros on the first request)
  *   WG              -> contents of /tmp/wg-status.json
  *   ALL             -> {"wifi":<wifi>,"net":<net>,"wg":<wg>,"vpn":<vpn>}
  *   VPN             -> {"<network>":"<wg-iface|direct|blocked>",...} from
@@ -42,6 +44,7 @@
 #include <sys/wait.h>
 #include <fcntl.h>
 #include <dirent.h>
+#include <time.h>
 
 #ifndef AF_VSOCK
 #define AF_VSOCK 40
@@ -58,7 +61,6 @@ struct sockaddr_vm {
 };
 
 #define WIFI_CACHE "/tmp/wifi-sync-status.json"
-#define NET_CACHE  "/tmp/net-stats.json"
 #define WG_CACHE   "/tmp/wg-status.json"
 #define WX_CACHE   "/tmp/weather.json"
 #define WX_REQUEST "/tmp/weather-request"
@@ -70,6 +72,18 @@ struct sockaddr_vm {
 #define WX_DEFAULT   "{}"
 
 #define BUF_MAX 65536
+
+#ifndef PROC_NET_DEV
+#define PROC_NET_DEV "/proc/net/dev"
+#endif
+#ifndef PROC_NET_ROUTE
+#define PROC_NET_ROUTE "/proc/net/route"
+#endif
+#define NET_MAX_IFACES 64
+/* NET/ALL arriving this soon after the last measurement reuse it: rates
+ * over a sub-second window are mostly noise, and several host consumers
+ * poll within a second of each other. */
+#define NET_REUSE_NS 2000000000LL
 
 /* Reads a whole file into buf (NUL-terminated), falls back to def if the
  * file is missing/empty. Returns the length written into buf. */
@@ -99,6 +113,135 @@ static void send_all(int fd, const char *data, size_t len) {
         if (w <= 0) return;
         off += (size_t)w;
     }
+}
+
+/* ── Network throughput, measured per request ─────────────────────────── */
+
+struct iface_ctr {
+    char name[32];
+    unsigned long long rx, tx;
+};
+
+static int net_enabled = 1;
+static struct iface_ctr net_prev[NET_MAX_IFACES];
+static int net_prev_n = -1;              /* -1: no previous measurement yet */
+static long long net_prev_ns;
+static char net_json[8192];
+static long long net_json_ns = -1;
+
+static long long mono_ns(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (long long)ts.tv_sec * 1000000000LL + ts.tv_nsec;
+}
+
+/* "  eth0: rx_bytes rx_packets ... (8 rx fields) tx_bytes ..." */
+static int read_net_dev(struct iface_ctr *out, int max) {
+    FILE *f = fopen(PROC_NET_DEV, "r");
+    if (!f) return -1;
+    char line[512];
+    int n = 0;
+    while (n < max && fgets(line, sizeof(line), f)) {
+        char *colon = strchr(line, ':');
+        if (!colon) continue;
+        *colon = 0;
+        char *name = line;
+        while (*name == ' ' || *name == '\t') name++;
+        unsigned long long v[9];
+        if (sscanf(colon + 1, "%llu %llu %llu %llu %llu %llu %llu %llu %llu",
+                   &v[0], &v[1], &v[2], &v[3], &v[4], &v[5], &v[6], &v[7], &v[8]) != 9)
+            continue;
+        snprintf(out[n].name, sizeof(out[n].name), "%.31s", name);
+        out[n].rx = v[0];
+        out[n].tx = v[8];
+        n++;
+    }
+    fclose(f);
+    return n;
+}
+
+/* Interface of the default route: Destination column "00000000". */
+static void default_iface(char *buf, size_t bufsz) {
+    buf[0] = 0;
+    FILE *f = fopen(PROC_NET_ROUTE, "r");
+    if (!f) return;
+    char line[512], iface[32], dest[16];
+    while (fgets(line, sizeof(line), f)) {
+        if (sscanf(line, "%31s %15s", iface, dest) == 2 && !strcmp(dest, "00000000")) {
+            snprintf(buf, bufsz, "%s", iface);
+            break;
+        }
+    }
+    fclose(f);
+}
+
+static unsigned long long rate(unsigned long long cur, const char *name, int is_tx,
+                               long long dt_ns) {
+    if (net_prev_n < 0 || dt_ns <= 0) return 0;
+    for (int i = 0; i < net_prev_n; i++) {
+        if (strcmp(net_prev[i].name, name)) continue;
+        unsigned long long prev = is_tx ? net_prev[i].tx : net_prev[i].rx;
+        if (cur < prev) return 0;   /* counter reset (interface recreated) */
+        return (unsigned long long)((double)(cur - prev) * 1e9 / (double)dt_ns);
+    }
+    return 0;
+}
+
+/* Writes the NET JSON into out. The rate window is the time since the
+ * previous measurement, so after a long idle gap the first answer is the
+ * average over that gap. */
+static void net_stats(char *out, size_t outsz) {
+    long long now = mono_ns();
+    if (!net_enabled) {
+        snprintf(out, outsz, "%s", NET_DEFAULT);
+        return;
+    }
+    if (net_json_ns >= 0 && now - net_json_ns < NET_REUSE_NS) {
+        snprintf(out, outsz, "%s", net_json);
+        return;
+    }
+
+    struct iface_ctr cur[NET_MAX_IFACES];
+    int n = read_net_dev(cur, NET_MAX_IFACES);
+    if (n < 0) {
+        snprintf(out, outsz, "%s", NET_DEFAULT);
+        return;
+    }
+    long long dt = now - net_prev_ns;
+
+    char wan[32];
+    default_iface(wan, sizeof(wan));
+    unsigned long long wan_rx = 0, wan_tx = 0;
+    for (int i = 0; i < n; i++) {
+        if (wan[0] && !strcmp(cur[i].name, wan)) {
+            wan_rx = rate(cur[i].rx, cur[i].name, 0, dt);
+            wan_tx = rate(cur[i].tx, cur[i].name, 1, dt);
+        }
+    }
+
+    size_t off = (size_t)snprintf(net_json, sizeof(net_json),
+        "{\"wan\":{\"iface\":\"%s\",\"rx\":%llu,\"tx\":%llu},\"vms\":[", wan, wan_rx, wan_tx);
+    const char *sep = "";
+    for (int i = 0; i < n && off < sizeof(net_json); i++) {
+        if (strncmp(cur[i].name, "mv-router-", 10)) continue;
+        int w = snprintf(net_json + off, sizeof(net_json) - off,
+                         "%s{\"vm\":\"%s\",\"rx\":%llu,\"tx\":%llu}", sep, cur[i].name + 10,
+                         rate(cur[i].rx, cur[i].name, 0, dt), rate(cur[i].tx, cur[i].name, 1, dt));
+        if (w < 0 || (size_t)w >= sizeof(net_json) - off) break;
+        off += (size_t)w;
+        sep = ",";
+    }
+    if (off + 3 <= sizeof(net_json)) {
+        memcpy(net_json + off, "]}", 3);
+    } else {
+        snprintf(net_json, sizeof(net_json), "%s", NET_DEFAULT);
+    }
+
+    memcpy(net_prev, cur, sizeof(cur[0]) * (size_t)n);
+    net_prev_n = n;
+    net_prev_ns = now;
+    net_json_ns = now;
+    snprintf(out, outsz, "%s", net_json);
 }
 
 /* Runs argv[0] directly via fork/execvp (argv array, no shell) so ssid/psk
@@ -324,15 +467,15 @@ static void handle_conn(int cfd) {
         size_t n = read_cache(WIFI_CACHE, WIFI_DEFAULT, out, sizeof(out));
         send_all(cfd, out, n);
     } else if (!strcmp(lines[0], "NET")) {
-        size_t n = read_cache(NET_CACHE, NET_DEFAULT, out, sizeof(out));
-        send_all(cfd, out, n);
+        net_stats(out, sizeof(out));
+        send_all(cfd, out, strlen(out));
     } else if (!strcmp(lines[0], "WG")) {
         size_t n = read_cache(WG_CACHE, WG_DEFAULT, out, sizeof(out));
         send_all(cfd, out, n);
     } else if (!strcmp(lines[0], "ALL")) {
         char wifi[BUF_MAX / 4], net[BUF_MAX / 4], wg[BUF_MAX / 4], vpn[4096];
         read_cache(WIFI_CACHE, WIFI_DEFAULT, wifi, sizeof(wifi));
-        read_cache(NET_CACHE, NET_DEFAULT, net, sizeof(net));
+        net_stats(net, sizeof(net));
         read_cache(WG_CACHE, WG_DEFAULT, wg, sizeof(wg));
         read_assignments(vpn, sizeof(vpn));
         int n = snprintf(out, sizeof(out), "{\"wifi\":%s,\"net\":%s,\"wg\":%s,\"vpn\":%s}",
@@ -360,7 +503,10 @@ static void handle_conn(int cfd) {
     close(cfd);
 }
 
-int main(void) {
+int main(int argc, char **argv) {
+    for (int i = 1; i < argc; i++)
+        if (!strcmp(argv[i], "--no-net")) net_enabled = 0;
+
     int lfd = socket(AF_VSOCK, SOCK_STREAM, 0);
     if (lfd < 0) { perror("vsock socket"); return 1; }
 

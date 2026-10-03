@@ -1044,98 +1044,11 @@ in {
         cfg.router.microvm.firewall.allowedAccessTo;
     };
 
-    # ===== Router Stats Sampling =====
-    # Samples network throughput from /proc/net/dev and /proc/net/route for
-    # router-stats-server (below) to serve. WiFi/NM state and WireGuard peer
-    # status are sampled separately by router-netlink-poller
-    # (router-netlink-poller.c); geo-lookup runs in router-geo-refresh.
-    # Parsing here uses plain bash (read + word-splitting/parameter
-    # expansion) rather than awk/ip: each forked external process on this
-    # VM's single vCPU costs a real, measurable amount of CPU (fork, execve,
-    # resolving the binary and its shared libraries against a
-    # virtiofs-backed /nix/store).
-    systemd.services.router-stats-poller = lib.mkIf cfg.router.polling.enableNetStats {
-      description = "Router net-stats background poller";
-      wantedBy = ["multi-user.target"];
-      after = ["NetworkManager.service" "network.target"];
-      serviceConfig = {
-        Type = "simple";
-        ExecStart = let
-          poller = pkgs.writeShellScript "router-stats-poller" ''
-            # Reads interface -> "rx tx" pairs from /proc/net/dev, no awk fork.
-            # Each line looks like "  eth0: 123 0 0 0 0 0 0 0 456 0 0 0 0 0 0 0" -
-            # read -ra word-splits on whitespace, which also trims the leading
-            # padding spaces, so f[0] is "eth0:" with no separate trim step needed.
-            sample_dev() {
-              local line f iface
-              while IFS= read -r line; do
-                case "$line" in *:*) ;; *) continue ;; esac
-                read -ra f <<< "$line"
-                [ "''${#f[@]}" -ge 10 ] || continue
-                iface="''${f[0]%:}"
-                printf '%s %s %s\n' "$iface" "''${f[1]}" "''${f[9]}"
-              done < /proc/net/dev
-            }
-
-            # Default route's interface from /proc/net/route, no ip(8) fork.
-            # Destination "00000000" (hex) marks the default route; header line
-            # never matches since its Destination column reads "Destination".
-            default_iface() {
-              local line f
-              while IFS= read -r line; do
-                read -ra f <<< "$line"
-                if [ "''${f[1]:-}" = "00000000" ]; then
-                  printf '%s' "''${f[0]}"
-                  return
-                fi
-              done < /proc/net/route
-            }
-
-            clamp_rate() {
-              local v=$(( ($1 - $2) / SAMPLE_INTERVAL ))
-              [ "$v" -lt 0 ] && echo 0 || echo "$v"
-            }
-
-            SAMPLE_INTERVAL=${routerPollInterval}
-            while true; do
-              declare -A rx1 tx1
-              while read -r iface rx tx; do
-                rx1["$iface"]=$rx; tx1["$iface"]=$tx
-              done < <(sample_dev)
-
-              sleep "$SAMPLE_INTERVAL"
-
-              declare -A rx2 tx2
-              while read -r iface rx tx; do
-                rx2["$iface"]=$rx; tx2["$iface"]=$tx
-              done < <(sample_dev)
-
-              wan=$(default_iface)
-              wan_rx=$(clamp_rate "''${rx2[$wan]:-0}" "''${rx1[$wan]:-0}")
-              wan_tx=$(clamp_rate "''${tx2[$wan]:-0}" "''${tx1[$wan]:-0}")
-
-              net_result="{\"wan\":{\"iface\":\"''${wan}\",\"rx\":''${wan_rx},\"tx\":''${wan_tx}},\"vms\":["
-              sep=""
-              for iface in "''${!rx2[@]}"; do
-                case "$iface" in mv-router-*) ;; *) continue ;; esac
-                vm="''${iface#mv-router-}"
-                rx=$(clamp_rate "''${rx2[$iface]:-0}" "''${rx1[$iface]:-0}")
-                tx=$(clamp_rate "''${tx2[$iface]:-0}" "''${tx1[$iface]:-0}")
-                net_result+="''${sep}{\"vm\":\"''${vm}\",\"rx\":''${rx},\"tx\":''${tx}}"
-                sep=","
-              done
-              net_result+="]}"
-              printf '%s\n' "''${net_result}" > /tmp/net-stats.json.tmp \
-                && mv /tmp/net-stats.json.tmp /tmp/net-stats.json
-
-              unset rx1 tx1 rx2 tx2
-            done
-          '';
-        in "${poller}";
-        Restart = "always";
-        RestartSec = 5;
-      };
-    };
+    # ===== Router Stats =====
+    # WiFi/NM state and WireGuard peer status are sampled by
+    # router-netlink-poller (router-netlink-poller.c); geo-lookup runs in
+    # router-geo-refresh. Network throughput has no sampler: router-stats-server
+    # measures it per NET/ALL request from /proc/net/dev.
 
     # See routerNetlinkPollerBin's comment above and router-netlink-poller.c
     # for what this queries and writes.
@@ -1247,7 +1160,7 @@ in {
       path = lib.optionals hasMullvad [vpnAssign];
       serviceConfig = {
         Type = "simple";
-        ExecStart = "${routerStatsServerBin}/bin/router-stats-server";
+        ExecStart = "${routerStatsServerBin}/bin/router-stats-server${lib.optionalString (!cfg.router.polling.enableNetStats) " --no-net"}";
         Restart = "always";
         RestartSec = 5;
       };

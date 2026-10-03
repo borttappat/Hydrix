@@ -171,10 +171,10 @@ in {
       type = lib.types.int;
       default = 10;
       description = ''
-        Single canonical interval (seconds) for the router's one background
-        sampling loop, which gathers WiFi/NM state, network throughput, and
-        WireGuard status together each tick. Raise on weaker machines - none
-        of this data needs sub-10s freshness. Set with lib.mkDefault in
+        Interval (seconds) of router-netlink-poller, which samples WiFi/NM
+        state and WireGuard status each tick. Network throughput is not
+        sampled on a timer (see enableNetStats). Raise on weaker machines,
+        none of this data needs sub-10s freshness. Set with lib.mkDefault in
         modules, plain assignment in machine configs to override.
       '';
       example = 30;
@@ -182,12 +182,12 @@ in {
     enableNetStats = lib.mkOption {
       type = lib.types.bool;
       default = true;
-      description = "Include network throughput sampling in the router's stats loop.";
+      description = "Serve network throughput (NET, and the net part of ALL) from router-stats-server, measured per request.";
     };
     enableWgStatus = lib.mkOption {
       type = lib.types.bool;
       default = true;
-      description = "Include WireGuard tunnel status sampling in the router's stats loop.";
+      description = "Include WireGuard tunnel status sampling in router-netlink-poller.";
     };
   };
 }

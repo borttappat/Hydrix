@@ -20,9 +20,8 @@
  * alongside "current" by one process rather than two.
  *
  * Not handled here: geo-lookup (curl to ipinfo.io/Mullvad's relay list,
- * cache-miss-only) and net-stats sampling (/proc/net/dev) - both stay as
- * separate services (router-geo-refresh, router-stats-poller); this binary
- * only covers the two netlink queries.
+ * cache-miss-only, router-geo-refresh) and network throughput, which
+ * router-stats-server measures per request from /proc/net/dev.
  *
  * Build:
  *   gcc -O2 -o router-netlink-poller router-netlink-poller.c -lmnl
