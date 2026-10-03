@@ -16,7 +16,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Defaults
 UPDATE_FLAKE=false
 UPDATE_ALL_FLAKE=false
-PREBUILD_MICROVMS=false
+BUILD_INFRA=false
 CHECK_BASES=false
 CHECK_MICROVMS=false
 REBUILD_STALE=false
@@ -42,7 +42,8 @@ Modes:
 Options:
   -u, --update          Update hydrix flake input before build
   -U, --update-all      Update all flake inputs before build
-  -a, -m, --prebuild-microvms  Pre-build microVM runners after host rebuild
+  -a, --all             Also build infra VMs already built on this machine
+                        (shard -b), then list running VMs needing a restart
   -c, --check-bases     Check base image status after build
   --check-microvms      Show microVM status (running/outdated)
   -r, --rebuild-stale   Rebuild stale base images
@@ -64,7 +65,7 @@ while [[ $# -gt 0 ]]; do
     case $1 in
         -u|--update) UPDATE_FLAKE=true; shift ;;
         -U|--update-all) UPDATE_ALL_FLAKE=true; shift ;;
-        -a|-m|--prebuild-microvms) PREBUILD_MICROVMS=true; shift ;;
+        -a|--all) BUILD_INFRA=true; shift ;;
         -c|--check-bases) CHECK_BASES=true; shift ;;
         --check-microvms) CHECK_MICROVMS=true; shift ;;
         -r|--rebuild-stale) REBUILD_STALE=true; shift ;;
@@ -482,30 +483,36 @@ do_build() {
 # POST-BUILD
 # =========================================================================
 
-# Pre-build microVM runners
-prebuild_microvms() {
-    log "Pre-building microVM runners..."
-    local configs
-    configs=$(nix eval "$FLAKE_DIR#nixosConfigurations" --apply 'builtins.attrNames' --json 2>/dev/null | \
-        jq -r '.[]' | grep -E '^microvm-' || true)
+# Build infra VMs (router, builder, files, ...) that have been built on this
+# machine before, i.e. have a /var/lib/microvms/<vm>/current runner. shard -b
+# builds, relinks current, and goes through the builder VM in lockdown mode.
+build_infra_vms() {
+    local vms=()
+    while IFS= read -r vm; do
+        [[ -n "$vm" && -e "/var/lib/microvms/${vm}/current" ]] && vms+=("$vm")
+    done < <(jq -r '.infraVms // [] | .[]' /etc/hydrix/host-config.json 2>/dev/null)
 
-    if [[ -z "$configs" ]]; then
-        log "No microVM configs found"
+    if [[ ${#vms[@]} -eq 0 ]]; then
+        log "No previously built infra VMs to rebuild"
         return
     fi
+    log "Building infra VMs: ${vms[*]}"
+    shard -b "${vms[@]}" || err "Some infra VM builds failed"
+}
 
-    local ok=0 total=0
-    while IFS= read -r cfg; do
-        [[ -z "$cfg" ]] && continue
-        ((total++)) || true
-        if $VERBOSE; then
-            log "  Building $cfg..."
-        fi
-        if nix build "$FLAKE_DIR#nixosConfigurations.${cfg}.config.microvm.declaredRunner" --no-link 2>/dev/null; then
-            ((ok++)) || true
-        fi
-    done <<< "$configs"
-    log "MicroVM cache: $ok/$total"
+# Running VMs whose current runner differs from the one they booted.
+report_outdated_vms() {
+    local outdated=() dir vm
+    for dir in /var/lib/microvms/*/; do
+        vm=$(basename "$dir")
+        [[ -L "$dir/current" && -L "$dir/booted" ]] || continue
+        systemctl is-active --quiet "microvm@${vm}.service" 2>/dev/null || continue
+        [[ "$(readlink "$dir/current")" != "$(readlink "$dir/booted")" ]] && outdated+=("$vm")
+    done
+    if [[ ${#outdated[@]} -gt 0 ]]; then
+        log "Running VMs on an older build: ${outdated[*]}"
+        log "  restart to apply: shard -R ${outdated[*]}"
+    fi
 }
 
 # Check microVM status
@@ -638,9 +645,10 @@ post_build() {
         fi
     fi
 
-    if $PREBUILD_MICROVMS; then
-        prebuild_microvms
+    if $BUILD_INFRA; then
+        build_infra_vms
     fi
+    report_outdated_vms
     if $CHECK_BASES || $REBUILD_STALE; then
         check_bases
     fi

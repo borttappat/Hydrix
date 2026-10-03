@@ -652,12 +652,11 @@ in {
         type = lib.types.bool;
         default = false;
         description = ''
-          When true, profile and task VMs are coupled to the host build by
-          default (pre-decoupling behavior: every `rebuild` builds their full
-          toplevel and restarts them on config changes), same as infra VMs.
-          When false (default), profile/task VMs are decoupled: built and
-          managed only via `shard build/start <name>`, keeping host
-          rebuilds fast. Per-VM `vms.<name>.coupled` always overrides this.
+          When true, profile and task VMs are coupled to the host build:
+          every `rebuild` builds them and relinks their `current` runner.
+          When false (default), they are built only via `shard -b <name>`,
+          keeping host rebuilds fast. Per-VM `vms.<name>.coupled` always
+          overrides this.
         '';
       };
 
@@ -688,11 +687,10 @@ in {
           Maps each known VM name to its category (infra / profile / task).
           Populated automatically by the flake from profiles/*/meta.nix,
           infra/*/meta.nix, and tasks/task*/meta.nix discovery, do not set
-          manually. Drives host-build coupling: profile/task VMs are excluded
-          from microvm.vms by default (built and managed only via the
-          `shard` CLI); infra VMs, or any name absent from this map
-          (covers router/router-stable/builder, wired outside knownVms),
-          stay coupled to the host build.
+          manually. Selects which VMs coupleProfiles applies to (profile/
+          task) and which `rebuild -a` builds (infra, which also covers any
+          name absent from this map: router/router-stable/builder, wired
+          outside knownVms).
         '';
       };
 
@@ -827,13 +825,13 @@ in {
               type = lib.types.nullOr lib.types.bool;
               default = null;
               description = ''
-                Force this VM's coupling to the host build closure, overriding
-                the class default (infra = coupled, profile/task = decoupled).
-                true: build with `rebuild` (host toplevel depends on this VM's
-                nixosSystem toplevel, current framework behavior for all VMs).
-                false: exclude from microvm.vms even if classed as infra;
-                manage exclusively via `shard build/start <name>`.
-                null (default): use the class default from vmClasses.
+                Force this VM's coupling to the host build closure.
+                true: built by every `rebuild` (host toplevel depends on this
+                VM's runner) and `current` relinked on activation.
+                false: never coupled, even with coupleProfiles.
+                null (default): decoupled, except profile/task VMs when
+                coupleProfiles is set. Decoupled VMs are built with
+                `shard -b <name>`, infra VMs also by `rebuild -a`.
               '';
             };
             hostRepos = lib.mkOption {

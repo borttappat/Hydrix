@@ -5,7 +5,7 @@
 # Slot N gets CID = subnet octet = baseCid + N - 1 and its own bridge
 # br-taskN / subnet 192.168.<cid>.0/24, so the router isolates every slot from
 # every other VM network. Changing count or baseCid needs a `rebuild` and a
-# router restart (shard -R router) to create the new bridges and subnets.
+# router build + restart (shard -bR router) to create the new bridges and subnets.
 {
   count = 3; # task1..task3, max 9
   baseCid = 115; # task1 = 115, task2 = 116, task3 = 117

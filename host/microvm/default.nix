@@ -14,17 +14,15 @@
 #   5. Or enable autostart: hydrix.microvmHost.vms."microvm-browsing".autostart = true;
 #
 # Coupled vs decoupled VMs:
-#   Only "coupled" VMs are placed in config.microvm.vms, which is what makes
-#   upstream microvm.nix build a VM's full nixosSystem toplevel as part of the
-#   host's own system.build.toplevel. Infra VMs (router, builder, etc.) are
-#   coupled by default so they're always built and reliably autostarted with
-#   the host. Profile and task VMs are decoupled by default: they're built
-#   and managed only via the `shard` CLI (-b/-s/-r/-R/switch/...), never
-#   as a side effect of `rebuild`. This keeps host rebuild times independent of
-#   how many heavy desktop profile VMs are declared. Flip the default for all
-#   profile/task VMs at once with hydrix.microvmHost.coupleProfiles = true, or
-#   override a single VM with hydrix.microvmHost.vms.<name>.coupled = true/false
-#   (always wins over coupleProfiles). See vmClass/isCoupled below.
+#   Only "coupled" VMs are placed in config.microvm.vms, which builds the VM's
+#   runner as part of the host's system.build.toplevel and relinks
+#   /var/lib/microvms/<name>/current to it on every activation. Every VM is
+#   decoupled by default: `rebuild` builds the host only, VMs are built with
+#   `shard -b` (or `rebuild -a` for infra VMs) and autostarted through
+#   hydrix-microvm-autostart-<name>. Couple every profile/task VM with
+#   hydrix.microvmHost.coupleProfiles = true, or a single VM with
+#   hydrix.microvmHost.vms.<name>.coupled = true (always wins). See
+#   vmClass/isCoupled below.
 #
 {
   config,
@@ -54,8 +52,8 @@
   enabledVMs = lib.filterAttrs (_: v: v.enable) allVms;
 
   # Coupled vs decoupled split (see header comment). Names absent from
-  # vmClasses (router/router-stable/builder, wired outside knownVms) default
-  # to "infra" so they stay coupled with no special-casing here.
+  # vmClasses (router/router-stable/builder, wired outside knownVms) count
+  # as "infra".
   vmClass = name: cfg.vmClasses.${name} or "infra";
   isCoupled = name: vmCfg:
   # allVms merges plain-attrset knownVms defaults with cfg.vms submodule
@@ -64,12 +62,11 @@
   # the `or null` rather than assuming the field is always present.
     if (vmCfg.coupled or null) != null
     then vmCfg.coupled
-    else if builtins.elem (vmClass name) ["profile" "task"]
-    then cfg.coupleProfiles
-    else true;
+    else builtins.elem (vmClass name) ["profile" "task"] && cfg.coupleProfiles;
   coupledVMs = lib.filterAttrs isCoupled enabledVMs;
   decoupledVMs = lib.filterAttrs (name: vmCfg: !(isCoupled name vmCfg)) enabledVMs;
   decoupledAutostartVMs = lib.filterAttrs (_: v: v.autostart) decoupledVMs;
+  infraVMs = lib.filterAttrs (name: _: vmClass name == "infra") enabledVMs;
 
   # Filter VMs that have any secrets to provision
   vmsWithSecrets = lib.filterAttrs (_: v: v.enable && v.secrets != []) allVms;
@@ -239,6 +236,8 @@ in {
           hostPrefix = 24;
           routerVmName = routerVmName;
           stableRouterVmName = stableRouterVmName;
+          # Built by `rebuild -a` (those already built once on this machine).
+          infraVms = lib.attrNames infraVMs;
         };
         mode = "0644";
       };
@@ -404,17 +403,13 @@ in {
         ++ lib.optionals (cfg.vms ? "microvm-hostsync" && cfg.vms."microvm-hostsync".enable) [
           "d /home/${username}/vm-inbox 0755 ${username} users -"
         ]
-        # NOTE: Do NOT create /var/lib/microvms/<name> or subdirectories via tmpfiles.
-        # The upstream microvm.nix install-microvm-<name> service uses
-        # ConditionPathExists=!/var/lib/microvms/<name> to gate first-install
-        # symlink creation. Pre-creating the directory (even implicitly via a
-        # subdirectory) causes the condition to always fail, preventing the runner
-        # symlink from being created on first boot.
-        # The config subdirectory is created by hydrix-microvm-config-dirs below.
+        # /var/lib/microvms/<name> is created by `shard -b`, hydrix-firstboot-vms
+        # or install-microvm-<name>, never by tmpfiles, so an existing directory
+        # always comes with its config/ subdirectory set up.
         # Re-asserts microvm:kvm ownership of /var/lib/microvms/<name> itself on
         # every activation. `z` (non-recursive, existing-path-only) so it can't
-        # create the directory (preserving the ConditionPathExists=! gate above)
-        # and can't touch config/ underneath, which must stay root:root.
+        # create the directory and can't touch config/ underneath, which must
+        # stay root:root.
         ++ (lib.mapAttrsToList (name: _: "z /var/lib/microvms/${name} 0755 microvm kvm -")
           enabledVMs)
         # Parent dir per enabled VM — virtiofsd needs this path to exist at start.
@@ -439,34 +434,31 @@ in {
       # toplevel as part of the host's own system.build.toplevel. Decoupled
       # VMs (profile/task, by default) are managed exclusively via the
       # `shard` CLI, see header comment.
+      # No updateFlake: upstream then runs install-microvm-<name> on every
+      # rebuild instead of first install only, which keeps `current` on the
+      # runner this host build produced.
       microvm.vms =
         lib.mapAttrs (name: vmCfg: {
           inherit (vmCfg) autostart;
-          # Use the Hydrix flake itself as the source
           flake = self;
-          # Allow updates via `microvm -u <name>` (uses user's hydrix-config)
-          updateFlake = "path:${config.hydrix.paths.configDir}";
         })
         coupledVMs;
 
       # ===== Systemd Services =====
       # Combines router TAP setup and secrets provisioning
       systemd.services = lib.mkMerge [
-        # Upstream gates first install on the VM's state dir not existing, but
-        # upstream's own tmpfiles rule for the vm-config share source creates
-        # that dir (root-owned) before install-microvm-* runs. Gate on the
-        # `current` runner symlink instead; the install script is idempotent
-        # and also chowns the dir to microvm:kvm.
+        # Upstream's install-microvm-<name> is a plain oneshot: inactive once
+        # it has run, so switch-to-configuration never restarts it when the
+        # runner changes. RemainAfterExit keeps it active, so a changed unit
+        # is restarted on activation and relinks `current`.
         (lib.mapAttrs' (name: _:
           lib.nameValuePair "install-microvm-${name}" {
-            unitConfig.ConditionPathExists = lib.mkForce "!${config.microvm.stateDir}/${name}/current";
+            serviceConfig.RemainAfterExit = true;
           })
         coupledVMs)
 
-        # Create config directories for microVMs after install-microvm-* has run.
-        # Cannot use tmpfiles because creating /var/lib/microvms/<name>/config
-        # would implicitly create the parent directory, which blocks the upstream
-        # install-microvm-<name> ConditionPathExists=!/var/lib/microvms/<name>.
+        # Create config directories for coupled microVMs after install-microvm-*
+        # has run (decoupled VMs get theirs from `shard -b`).
         (lib.listToAttrs (lib.mapAttrsToList (name: _:
           lib.nameValuePair "hydrix-microvm-config-dir-${name}" {
             description = "Create config directory for ${name}";
@@ -480,9 +472,12 @@ in {
             '';
           }) (lib.filterAttrs (_: v: v.enable) cfg.vms)))
 
-        # Router MicroVM needs to run as root for VFIO PCI passthrough
+        # Router MicroVM needs to run as root for VFIO PCI passthrough.
+        # asDropin: these extend upstream's microvm@.service template; as full
+        # units they would shadow it and have no ExecStart.
         (lib.mkIf routerEnabled {
           "microvm@${routerVmName}" = {
+            overrideStrategy = "asDropin";
             serviceConfig = {
               User = lib.mkForce "root";
               Group = lib.mkForce "root";
@@ -494,6 +489,7 @@ in {
         # Never auto-starts — launch manually with: shard start router-stable
         (lib.mkIf stableRouterEnabled {
           "microvm@${stableRouterVmName}" = {
+            overrideStrategy = "asDropin";
             serviceConfig = {
               User = lib.mkForce "root";
               Group = lib.mkForce "root";
@@ -705,11 +701,10 @@ in {
           })
         (lib.filterAttrs (_: v: (v.hostRepos or {}) != {}) enabledVMs))
 
-        # First-boot VM builder: builds coupled VMs (cheap - already part of the
-        # host toplevel, this just links /var/lib/microvms/<name>/current for the
-        # Hydrix CLI) and any decoupled VM explicitly opted into autostart. Decoupled
-        # VMs without autostart (e.g. microvm-pentest by default) are intentionally
-        # left unbuilt - they only get built via an explicit `shard build <name>`.
+        # First-boot VM builder: builds every infra VM, coupled VM and autostart
+        # VM, and links /var/lib/microvms/<name>/current for the Hydrix CLI.
+        # Other profile/task VMs (e.g. microvm-pentest by default) are left
+        # unbuilt until an explicit `shard -b <name>`.
         # Runs once per install, gated by /var/lib/hydrix/.firstboot-vms-done.
         {
           hydrix-firstboot-vms = {
@@ -763,7 +758,7 @@ in {
                     fi
                   ''}
                 '')
-                (coupledVMs // decoupledAutostartVMs))}
+                (coupledVMs // infraVMs // decoupledAutostartVMs))}
 
               mkdir -p /var/lib/hydrix
               touch /var/lib/hydrix/.firstboot-vms-done
@@ -786,7 +781,8 @@ in {
             wantedBy = ["multi-user.target"];
             after = ["network.target" "microvms.target"];
             unitConfig.ConditionPathExists = "/var/lib/microvms/${name}/current";
-            path = [pkgs.systemd];
+            # shard calls sudo; root needs the setuid wrapper on PATH too.
+            path = [pkgs.systemd "/run/wrappers"];
             serviceConfig = {
               Type = "oneshot";
               RemainAfterExit = true;

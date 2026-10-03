@@ -386,7 +386,7 @@ Files VM (192.168.108.10 on br-files)
 filesAccess = false;   # no files VM interface on this bridge, no transfers in or out
 ```
 
-Both sides read the same flag: `infra/files/meta.nix` (host-side TAP to bridge wiring) and `infra/files/default.nix` (the VM's own interfaces). The lurking template sets it. Use it for any VM that should only be reachable through the router, then `rebuild` and `shard -R files`.
+Both sides read the same flag: `infra/files/meta.nix` (host-side TAP to bridge wiring) and `infra/files/default.nix` (the VM's own interfaces). The lurking template sets it. Use it for any VM that should only be reachable through the router, then `rebuild` and `shard -bR files`.
 
 Per-bridge IPs: the Files VM gets `.2` on each bridge (e.g. `192.168.103.2` on `br-browse`). It communicates directly over these TAPs, bypassing router forwarding rules, and does not forward between them (`ip_forward = 0`, forward chain drops everything), so it is not a path between VM networks. While it runs, though, it can reach every VM whose bridge it sits on.
 
@@ -1341,24 +1341,24 @@ them.
 
 #### Coupled vs Decoupled VMs
 
-Not every declared VM is built as part of the host's own `system.build.toplevel`. Infra
-VMs (router, router-stable, builder, files, gitsync, hostsync, usb-sandbox, vault) are
-**coupled**: they're placed in `config.microvm.vms`, so a host rebuild builds their full
-`nixosSystem` toplevel and restarts the running VM whenever its config changes. Profile
-VMs and task VMs are **decoupled** by default: excluded from `config.microvm.vms`, built
-and managed only via `shard build/start/restart <name>`. This keeps host rebuild
-time independent of how many heavy desktop profile VMs are declared, since only the
-lightweight infra VMs are ever built as part of the host closure.
+`rebuild` builds the host only. Every VM is **decoupled** by default: excluded from
+`config.microvm.vms` and built with `shard -b <name>`, which builds the runner and relinks
+`/var/lib/microvms/<name>/current` (the image `microvm@<name>` boots). `rebuild -a` also
+runs `shard -b` on every infra VM that has been built on the machine before, and every
+`rebuild` lists running VMs whose `current` differs from the image they booted. Nothing is
+restarted automatically. A fresh install builds all infra VMs once (`hydrix-firstboot-vms`),
+and autostart goes through `hydrix-microvm-autostart-<name>`.
 
-Each VM's class (infra, profile, or task) is populated automatically by the consuming
-flake into `hydrix.microvmHost.vmClasses`, do not set this manually. Two ways to change
-the default:
+A **coupled** VM is placed in `config.microvm.vms`: the host build includes its runner and
+activation relinks its `current`. Each VM's class (infra, profile, or task) is populated
+automatically by the consuming flake into `hydrix.microvmHost.vmClasses`, do not set this
+manually.
 
 ```nix
-# Per VM, in a machine config: overrides the class default either direction.
+# Per VM, in a machine config: overrides the default either direction.
 hydrix.microvmHost.vms."microvm-dev-<serial>".coupled = true;
 
-# Repo-wide, in the user flake: flips the default for ALL profile/task VMs at once.
+# Repo-wide, in the user flake: couples ALL profile/task VMs at once.
 # A per-VM `coupled` override above still wins over this either way.
 hydrix.microvmHost.coupleProfiles = true;
 ```
@@ -2919,7 +2919,7 @@ For work that benefits from isolation per target or engagement, Hydrix supports 
 }
 ```
 
-Changing `count` or `baseCid` needs `rebuild` (bridges, registry), then `shard -R router` and `shard -R files` (new subnets and TAPs), then `shard -b taskN` for new slots. To give slots VPN egress, add their `br-taskN` bridges to the router's Mullvad bridge map.
+Changing `count` or `baseCid` needs `rebuild` (bridges, registry), then `shard -bR router files` (new subnets and TAPs), then `shard -b taskN` for new slots. To give slots VPN egress, add their `br-taskN` bridges to the router's Mullvad bridge map.
 
 **Engagement workflow:**
 
@@ -3877,7 +3877,7 @@ rebuild fallback
 # Options
 rebuild -u              # Update flake inputs first
 rebuild -p              # Pre-build VM configs after
-rebuild -m              # Pre-build microVM runners
+rebuild -a              # Also build infra VMs already built on this machine
 rebuild -v              # Verbose output
 
 # Backwards-compat alias
