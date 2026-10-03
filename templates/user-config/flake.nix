@@ -187,6 +187,7 @@
               ./modules/fonts.nix # Font packages and profiles
               ./modules/hyprland.nix # Hyprland keybindings + config (user-customizable)
               ./modules/waybar.nix # Waybar layout and modules (user-customizable)
+              ./modules/audio.nix # `audio` CLI (waybar audio pills, volume keys)
               ./modules/grub-theme.nix # Hydrix-themed GRUB bootloader
               ./modules/plymouth.nix # Hydrix boot animation
               ./modules/sddm.nix # SDDM login manager (hyprlock-matched theme)
@@ -265,6 +266,7 @@
               ./modules/user.nix # Username, colorscheme; shared across machines
               ./modules/graphical.nix # UI preferences (opacity, bluelight, etc.)
               ./modules/waybar.nix # Waybar module
+              ./modules/audio.nix # `audio` CLI (waybar audio pills, volume keys)
               ./modules/fish.nix # Shell abbreviations + functions (user additions)
               ./modules/alacritty.nix # Terminal cursor, keyboard overrides
               ./modules/notifications.nix # Notification sound + size preferences

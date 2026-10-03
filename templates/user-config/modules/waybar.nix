@@ -1,4 +1,4 @@
-# Waybar Configuration — Island style
+# Waybar Configuration - Island style
 #
 # Top LEFT:  workspaces  workspace-desc  focus
 # Top RIGHT: pomo  sync  git  shards  vms  volume  temp  cpu  ram  fs  uptime  clock
@@ -13,11 +13,11 @@
 #   gaps_out = gaps    (from screen edge / exclusive zone to window)
 #   exclusive-zone = barHeight + gaps  (Hyprland sees bar bottom as usable-area boundary)
 #   margin-* = gaps    (screen edge to bar visual edge)
-#   Result: uniform gaps px everywhere — screen-to-bar, bar-to-window, window-to-window
+#   Result: uniform gaps px everywhere - screen-to-bar, bar-to-window, window-to-window
 #
-# To add machine-specific modules (e.g. zenaudio for ASUS ZenBook):
-#   Add script + module config to topBar in machines/<serial>.nix using lib.mkAfter,
-#   or simply edit this file directly and add them to modules-right.
+# To add modules, edit this file directly and add them to modules-right.
+# Audio pills call the `audio` command; hardware that needs its own handling
+# replaces it per machine via hydrix.audio.cli (modules/audio.nix).
 #
 {
   config,
@@ -43,7 +43,7 @@
   pillPaddingH = 10;
   # Pill content height scales with font size (1.5 line-height factor solved to reproduce
   # the previous hardcoded 23px at the previous default fontSize=11, pillPaddingV=3).
-  # Island modules float with pillVMargin on each side — bar height scales accordingly
+  # Island modules float with pillVMargin on each side - bar height scales accordingly
   barHeight = builtins.ceil (fontSizeNum * 1.5) + 2 * pillPaddingV + 2 * pillVMargin;
   pillRadius = let
     ui = config.hydrix.graphical.ui;
@@ -87,53 +87,92 @@
   # ── Scripts ───────────────────────────────────────────────────────────────
   # Use pkgs.writeShellScript → clean nix store paths in JSON, no inline escaping.
 
+  # Persistent modules (no `interval`): each prints a line when its value
+  # changes and otherwise blocks on an event source, so nothing forks while
+  # idle. `restart-interval` brings one back if its event source goes away.
+  # `read -t` on a pipe nobody writes to is a fork-free sleep.
+
+  # Active workspace label, on Hyprland workspace/monitor events and on
+  # `ws-name` renames (files in /tmp/ws-names).
   workspaceDescScript = pkgs.writeShellScript "waybar-workspace-desc" ''
-    ws=$(hyprctl activeworkspace -j 2>/dev/null | jq -r '.id // empty')
-    [ -z "$ws" ] && exit 0
     VM_REGISTRY="/etc/hydrix/vm-registry.json"
-    desc=""
-    if [ -f "/tmp/ws-names/$ws" ]; then
-      desc=$(cat "/tmp/ws-names/$ws")
-    else
-      case "$ws" in
-        1)  desc="HOST"   ;;
-        10) desc="ROUTER" ;;
-        *)
-          [ -f "$VM_REGISTRY" ] && desc=$(jq -r --argjson w "$ws" \
-            'to_entries[] | select(.value.workspace == $w) | .value.label // ""' \
-            "$VM_REGISTRY" 2>/dev/null | head -1)
-          ;;
-      esac
+    NAMES=/tmp/ws-names
+    mkdir -p "$NAMES"
+    declare -A labels
+    if [ -f "$VM_REGISTRY" ]; then
+      while IFS=$'\t' read -r w l; do
+        [ -n "$w" ] && [ -z "''${labels[$w]+set}" ] && labels[$w]=$l
+      done < <(${pkgs.jq}/bin/jq -r 'to_entries[] | select(.value.workspace != null)
+        | "\(.value.workspace)\t\(.value.label // "")"' "$VM_REGISTRY")
     fi
-    [ -n "$desc" ] && echo "$desc"
+    emit() {
+      local ws desc=""
+      ws=$(hyprctl activeworkspace -j 2>/dev/null | ${pkgs.jq}/bin/jq -r '.id // empty')
+      if [ -n "$ws" ] && [ -f "$NAMES/$ws" ]; then
+        read -r desc < "$NAMES/$ws" || true
+      else
+        case "$ws" in
+          1) desc="HOST" ;;
+          10) desc="ROUTER" ;;
+          "") ;;
+          *) desc=''${labels[$ws]:-} ;;
+        esac
+      fi
+      echo "$desc"
+    }
+    emit
+    sock="$XDG_RUNTIME_DIR/hypr/$HYPRLAND_INSTANCE_SIGNATURE/.socket2.sock"
+    { ${pkgs.socat}/bin/socat -u "UNIX-CONNECT:$sock" - &
+      ${pkgs.inotify-tools}/bin/inotifywait -mq -e close_write,delete,moved_to "$NAMES" &
+      wait; } | while read -r line; do
+      case "$line" in "workspace>>"* | "focusedmon>>"* | "$NAMES"*) emit ;; esac
+    done
   '';
 
   focusScript = pkgs.writeShellScript "waybar-focus" ''
-    FOCUS_FILE="$HOME/.cache/hydrix/focus-mode"
-    [ -f "$FOCUS_FILE" ] || exit 0
-    profile=$(cat "$FOCUS_FILE" | tr '[:lower:]' '[:upper:]')
-    [ -n "$profile" ] && echo "FOCUS $profile"
+    DIR="$HOME/.cache/hydrix"
+    mkdir -p "$DIR"
+    emit() {
+      local profile=""
+      [ -f "$DIR/focus-mode" ] && read -r profile < "$DIR/focus-mode"
+      if [ -n "$profile" ]; then echo "FOCUS ''${profile^^}"; else echo; fi
+    }
+    emit
+    ${pkgs.inotify-tools}/bin/inotifywait -mq -e close_write,create,delete,moved_to,moved_from --format %f "$DIR" \
+      | while read -r f; do [ "$f" = focus-mode ] && emit; done
   '';
 
+  # Ticks once a second only while a timer counts down; otherwise waits for
+  # the state file to appear or change.
   pomoScript = pkgs.writeShellScript "waybar-pomo" ''
     STATE_FILE="/tmp/pomodoro_state"
-    [ -f "$STATE_FILE" ] || exit 0
-    read -r state start_time < "$STATE_FILE"
-    now=$(date +%s)
-    if [[ "$state" == PAUSED_* ]]; then
-      remaining="$start_time"
-      orig="''${state#PAUSED_}"
-      echo "POMO $orig $(printf '%02d:%02d' $((remaining/60)) $((remaining%60))) ⏸"
-      exit 0
-    fi
-    [ "$state" = "WORK" ] && duration=1500 || duration=300
-    remaining=$((duration - (now - start_time)))
-    if [ "$remaining" -le 0 ]; then
-      next="WORK"; [ "$state" = "WORK" ] && next="PAUSE"
-      echo "POMO ''${next}!"
-    else
-      echo "POMO $state $(printf '%02d:%02d' $((remaining/60)) $((remaining%60)))"
-    fi
+    exec {tick}<> <(:)
+    while :; do
+      if [ ! -f "$STATE_FILE" ]; then
+        echo
+        ${pkgs.inotify-tools}/bin/inotifywait -qq -e create,close_write,moved_to --include 'pomodoro_state$' /tmp
+        continue
+      fi
+      read -r state start_time < "$STATE_FILE"
+      printf -v now '%(%s)T' -1
+      if [[ "$state" == PAUSED_* ]]; then
+        remaining="$start_time"
+        printf 'POMO %s %02d:%02d ⏸\n' "''${state#PAUSED_}" $((remaining / 60)) $((remaining % 60))
+      else
+        [ "$state" = "WORK" ] && duration=1500 || duration=300
+        remaining=$((duration - (now - start_time)))
+        if [ "$remaining" -gt 0 ]; then
+          printf 'POMO %s %02d:%02d\n' "$state" $((remaining / 60)) $((remaining % 60))
+          read -rt 1 -u "$tick" || true
+          continue
+        fi
+        next="WORK"
+        [ "$state" = "WORK" ] && next="PAUSE"
+        echo "POMO ''${next}!"
+      fi
+      # Paused or expired: nothing changes until the state file does.
+      ${pkgs.inotify-tools}/bin/inotifywait -qq -e close_write,delete_self,move_self "$STATE_FILE" || true
+    done
   '';
 
   syncScript = pkgs.writeShellScript "waybar-sync" ''
@@ -271,7 +310,7 @@
     [ -n "$up" ] && echo "UP $up"
   '';
 
-  # VM metrics poller — polls current workspace VM every hostPollInterval seconds.
+  # VM metrics poller - polls current workspace VM every hostPollInterval seconds.
   # Writes per-VM files to /tmp/hydrix-metrics-<profile> and maintains a
   # /tmp/hydrix-metrics-current symlink that all VM modules read from.
   vmPollerScript = pkgs.writeShellScript "hydrix-vm-poller" ''
@@ -378,7 +417,7 @@
     if [ "$pending" -gt 0 ]; then
       ${pkgs.jq}/bin/jq -cn \
         --arg t "WIFI +$pending" \
-        --arg tt "$pending unsaved network(s) — run: wifi-sync pull" \
+        --arg tt "$pending unsaved network(s) - run: wifi-sync pull" \
         --arg c "unsaved" \
         '{"text":$t,"tooltip":$tt,"class":$c}'
     else
@@ -389,7 +428,7 @@
   '';
 
   # Reads the cache /tmp/hydrix-gc-status, refreshed every 30min by the
-  # hydrix-gc-check user timer (see host/microvm/default.nix) — never runs
+  # hydrix-gc-check user timer (see host/microvm/default.nix) - never runs
   # `nix eval` itself, that would be too expensive for a UI poll interval.
   gcStatusScript = pkgs.writeShellScript "waybar-gc-status" ''
     CACHE="/tmp/hydrix-gc-status"
@@ -399,7 +438,7 @@
     names=$(${pkgs.jq}/bin/jq -r '.names | join(", ")' "$CACHE" 2>/dev/null)
     ${pkgs.jq}/bin/jq -cn \
       --arg t "GC +$count" \
-      --arg tt "$count orphaned VM dir(s): $names — run: shard gc" \
+      --arg tt "$count orphaned VM dir(s): $names - run: shard gc" \
       --arg c "unsaved" \
       '{"text":$t,"tooltip":$tt,"class":$c}'
   '';
@@ -451,6 +490,23 @@
     ${pkgs.jq}/bin/jq -cn --arg t "CPU $cpu%" --arg c "$class" '{"text":$t,"class":$c}'
   '';
 
+  # Waybar audio pills: print `audio <cmd>` (level or output) on start and
+  # whenever PipeWire reports a sink/default change or an ALSA mixer control
+  # changes (hardware volume set outside PipeWire). Machine-specific audio
+  # handling lives behind the `audio` command (hydrix.audio.cli), not here.
+  audioCmd = "${config.hydrix.audio.cli}/bin/audio";
+  audioWatchScript = pkgs.writeShellScript "waybar-audio-watch" ''
+    ${audioCmd} "$1"
+    { ${pkgs.pulseaudio}/bin/pactl subscribe & ${pkgs.alsa-utils}/bin/alsactl monitor 2>/dev/null & wait; } \
+      | while read -r line; do
+        case "$line" in
+          "Event '"*) case "$line" in *" on sink "* | *" on server "* | *" on card "*) ;; *) continue ;; esac ;;
+        esac
+        while read -rt 0.2 _; do :; done
+        ${audioCmd} "$1"
+      done
+  '';
+
   hostMemScript = pkgs.writeShellScript "waybar-host-mem" ''
     pct=$(awk '/^MemTotal/{t=$2} /^MemAvailable/{a=$2} END{printf "%.0f", (t-a)*100/t}' /proc/meminfo)
     if [ "$pct" -ge 50 ]; then class="high"; else class=""; fi
@@ -475,27 +531,11 @@
     echo "UP $up"
   '';
 
-  clockScript = pkgs.writeShellScript "waybar-clock" ''
-    echo "DATE $(${pkgs.coreutils}/bin/date +'%H:%M:%S %d/%m')"
-  '';
-
   wlsunsetToggleScript = pkgs.writeShellScript "waybar-wlsunset-toggle" ''
     if ${pkgs.systemd}/bin/systemctl --user is-active --quiet wlsunset.service; then
       ${pkgs.systemd}/bin/systemctl --user stop wlsunset.service
     else
       ${pkgs.systemd}/bin/systemctl --user start wlsunset.service
-    fi
-  '';
-
-  volumeScript = pkgs.writeShellScript "waybar-volume" ''
-    vol=$(${pkgs.pulseaudio}/bin/pactl get-sink-volume @DEFAULT_SINK@ 2>/dev/null \
-      | ${pkgs.gnugrep}/bin/grep -oP '\d+(?=%)' | head -1)
-    [ -z "$vol" ] && exit 0
-    if ${pkgs.pulseaudio}/bin/pactl get-sink-mute @DEFAULT_SINK@ 2>/dev/null \
-         | ${pkgs.gnugrep}/bin/grep -q 'yes'; then
-      echo "VOL MUTED"
-    else
-      echo "VOL $vol%"
     fi
   '';
 
@@ -526,7 +566,7 @@
   '';
 
   # ── Monobar conditional variants ─────────────────────────────────────────
-  # These scripts gate output on thresholds — waybar hides the pill when silent.
+  # These scripts gate output on thresholds - waybar hides the pill when silent.
 
   monoGitScript = pkgs.writeShellScript "waybar-mono-git" ''
     count=$(git -C ${configDir} status --porcelain 2>/dev/null | wc -l) || count=0
@@ -607,6 +647,7 @@
       "custom/vms"
       "custom/sep"
       "custom/volume"
+      "custom/audio"
       "custom/sep"
       "custom/temp"
       "custom/sep"
@@ -616,7 +657,7 @@
       "custom/disk"
       "custom/uptime"
       "custom/sep"
-      "custom/clock"
+      "clock"
     ];
 
     "hyprland/workspaces" = {
@@ -628,7 +669,7 @@
 
     "custom/workspace-desc" = {
       exec = "${workspaceDescScript}";
-      interval = 1;
+      "restart-interval" = 5;
       format = "{}";
       tooltip = false;
       escape = false;
@@ -641,14 +682,14 @@
     };
     "custom/focus" = {
       exec = "${focusScript}";
-      interval = 1;
+      "restart-interval" = 5;
       format = "{}";
       tooltip = false;
       escape = false;
     };
     "custom/pomo" = {
       exec = "${pomoScript}";
-      interval = 1;
+      "restart-interval" = 5;
       format = "{}";
       tooltip = false;
       escape = false;
@@ -691,14 +732,22 @@
     };
 
     "custom/volume" = {
-      exec = "${volumeScript}";
-      interval = 5;
+      exec = "${audioWatchScript} level";
+      "restart-interval" = 5;
       format = "{}";
       tooltip = false;
       escape = false;
-      "on-click" = "pavucontrol";
-      "on-scroll-up" = "${pkgs.pulseaudio}/bin/pactl set-sink-volume @DEFAULT_SINK@ +5%";
-      "on-scroll-down" = "${pkgs.pulseaudio}/bin/pactl set-sink-volume @DEFAULT_SINK@ -5%";
+      "on-click" = "${audioCmd} toggle";
+      "on-scroll-up" = "${audioCmd} volume +";
+      "on-scroll-down" = "${audioCmd} volume -";
+    };
+    "custom/audio" = {
+      exec = "${audioWatchScript} output";
+      "restart-interval" = 5;
+      format = "{}";
+      tooltip = false;
+      escape = false;
+      "on-click" = "${audioCmd} toggle";
     };
     "custom/temp" = {
       exec = "${tempScript}";
@@ -737,12 +786,10 @@
       tooltip = false;
       escape = false;
     };
-    "custom/clock" = {
-      exec = "${clockScript}";
+    clock = {
+      format = "ZEIT {:%H:%M:%S %d/%m}";
       interval = 1;
-      format = "{}";
       tooltip = false;
-      escape = false;
       "on-click" = "${wlsunsetToggleScript}";
     };
   };
@@ -928,6 +975,7 @@
       "custom/vms"
       "custom/sep"
       "custom/volume"
+      "custom/audio"
       "custom/bluetooth"
       "custom/sep"
       "custom/temp"
@@ -950,7 +998,7 @@
       "custom/power-profile"
       "custom/battery"
       "custom/sep"
-      "custom/clock"
+      "clock"
     ];
 
     "hyprland/workspaces" = {
@@ -962,7 +1010,7 @@
 
     "custom/workspace-desc" = {
       exec = "${workspaceDescScript}";
-      interval = 1;
+      "restart-interval" = 5;
       format = "{}";
       tooltip = false;
       escape = false;
@@ -975,14 +1023,14 @@
     };
     "custom/focus" = {
       exec = "${focusScript}";
-      interval = 1;
+      "restart-interval" = 5;
       format = "{}";
       tooltip = false;
       escape = false;
     };
     "custom/pomo" = {
       exec = "${pomoScript}";
-      interval = 1;
+      "restart-interval" = 5;
       format = "{}";
       tooltip = false;
       escape = false;
@@ -1024,14 +1072,22 @@
       tooltip = false;
     };
     "custom/volume" = {
-      exec = "${volumeScript}";
-      interval = 5;
+      exec = "${audioWatchScript} level";
+      "restart-interval" = 5;
       format = "{}";
       tooltip = false;
       escape = false;
-      "on-click" = "pavucontrol";
-      "on-scroll-up" = "${pkgs.pulseaudio}/bin/pactl set-sink-volume @DEFAULT_SINK@ +5%";
-      "on-scroll-down" = "${pkgs.pulseaudio}/bin/pactl set-sink-volume @DEFAULT_SINK@ -5%";
+      "on-click" = "${audioCmd} toggle";
+      "on-scroll-up" = "${audioCmd} volume +";
+      "on-scroll-down" = "${audioCmd} volume -";
+    };
+    "custom/audio" = {
+      exec = "${audioWatchScript} output";
+      "restart-interval" = 5;
+      format = "{}";
+      tooltip = false;
+      escape = false;
+      "on-click" = "${audioCmd} toggle";
     };
     "custom/bluetooth" = {
       exec = "${bluetoothScript}";
@@ -1078,12 +1134,10 @@
       tooltip = false;
       escape = false;
     };
-    "custom/clock" = {
-      exec = "${clockScript}";
+    clock = {
+      format = "ZEIT {:%H:%M:%S %d/%m}";
       interval = 1;
-      format = "{}";
       tooltip = false;
-      escape = false;
       "on-click" = "${wlsunsetToggleScript}";
     };
     "custom/power-profile" = {
@@ -1200,7 +1254,7 @@
       margin: 0;
     }
 
-    /* Transparent bar — modules provide all visual weight */
+    /* Transparent bar - modules provide all visual weight */
     window#waybar {
       background: transparent;
     }
@@ -1215,7 +1269,7 @@
       margin: 0;
     }
 
-    /* ── Separator — spacing only, no visible glyph ─────────────────── */
+    /* ── Separator - spacing only, no visible glyph ─────────────────── */
     #custom-sep {
       background: transparent;
       border: none;
@@ -1226,21 +1280,22 @@
       border-radius: ${pillRadius}px;
     }
 
-    /* ── Island pill — default style for all modules ─────────────────── *
+    /* ── Island pill - default style for all modules ─────────────────── *
      *                                                                     *
      *  Color semantics:                                                   *
-     *   @accent     — active time state: clock (anchor), pomo (timer)    *
-     *   @alert      — needs action: focus mode active, staged packages    *
-     *   @color6     — VM-sourced data: text color distinguishes from host *
-     *   @foreground — all neutral informational modules (default below)   *
+     *   @accent     - active time state: clock (anchor), pomo (timer)    *
+     *   @alert      - needs action: focus mode active, staged packages    *
+     *   @color6     - VM-sourced data: text color distinguishes from host *
+     *   @foreground - all neutral informational modules (default below)   *
      * ──────────────────────────────────────────────────────────────────── */
     #workspaces,
-    #custom-clock,
+    #clock,
     #custom-cpu,
     #custom-memory,
     #custom-temp,
     #custom-disk,
     #custom-volume,
+    #custom-audio,
     #custom-uptime,
     #custom-workspace-desc,
     #window,
@@ -1275,13 +1330,13 @@
       box-shadow: ${pillShadow.css};
     }
 
-    /* Battery low/charging states — base pill styling comes from the shared rule above */
+    /* Battery low/charging states - base pill styling comes from the shared rule above */
     #custom-battery.warning  { color: @accent; }
     #custom-battery.critical { color: @accent; }
     #custom-battery.charging { color: @accent; }
     #custom-battery.full     { color: @accent; }
 
-    /* Below 5% — alternate the pill between the normal background and the critical fill every second */
+    /* Below 5% - alternate the pill between the normal background and the critical fill every second */
     @keyframes battery-flash {
       0%     { background-color: alpha(@background, ${pillOpacity}); color: @foreground; }
       49.9%  { background-color: alpha(@background, ${pillOpacity}); color: @foreground; }
@@ -1293,29 +1348,29 @@
       animation: battery-flash 2s linear infinite;
     }
 
-    /* @accent — clock (time anchor) and pomo (active timer) */
-    #custom-clock { color: @accent; }
+    /* @accent - clock (time anchor) and pomo (active timer) */
+    #clock { color: @accent; }
     #custom-pomo  { color: @accent; }
 
-    /* @alert — requires attention or action */
+    /* @alert - requires attention or action */
     #custom-focus { color: @accent; }
     #custom-sync  { color: @alert; }
 
-    /* GIT active — accent when ≥10 uncommitted */
+    /* GIT active - accent when ≥10 uncommitted */
     #custom-git.active { color: @accent; }
 
-    /* Bluetooth connected — accent to draw attention */
+    /* Bluetooth connected - accent to draw attention */
     #custom-bluetooth.connected { color: @accent; }
 
-    /* CPU / RAM — full color fill at ≥50% (host and VM alike) */
+    /* CPU / RAM - full color fill at ≥50% (host and VM alike) */
     #custom-cpu.high    { background: @vcpu; color: @background; }
     #custom-memory.high { background: @vram; color: @background; }
 
-    /* VM CPU / RAM — inverted: colored text only, no fill (distinguishes VM readout from host) */
+    /* VM CPU / RAM - inverted: colored text only, no fill (distinguishes VM readout from host) */
     #custom-vm-cpu.high { color: @vcpu; }
     #custom-vm-ram.high { color: @vram; }
 
-    /* @color6 text — VM-sourced metrics (distinguishes VM data from host) */
+    /* @color6 text - VM-sourced metrics (distinguishes VM data from host) */
     #custom-rproc-bottom,
     #custom-cproc-bottom,
     #custom-vm-cpu,
@@ -1329,12 +1384,13 @@
     #custom-gc-status { color: @color6; }
 
     /* Hover: invert any pill */
-    #custom-clock:hover,
+    #clock:hover,
     #custom-cpu:hover,
     #custom-memory:hover,
     #custom-temp:hover,
     #custom-disk:hover,
     #custom-volume:hover,
+    #custom-audio:hover,
     #custom-uptime:hover,
     #custom-workspace-desc:hover,
     #window:hover,
@@ -1396,13 +1452,13 @@
     }
   '';
 
-  # Script that seeds waybar config files on first session — same content as the
+  # Script that seeds waybar config files on first session - same content as the
   # home.activation hook but runs as a user service before waybar starts, ensuring
   # the files exist even when home-manager activation races with session startup.
   waybarInitScript = pkgs.writeShellScript "waybar-init" ''
     _dir="$HOME/.config/waybar"
     mkdir -p "$_dir"
-    # Write only if absent — home.activation.waybarFiles owns structural updates on rebuild.
+    # Write only if absent - home.activation.waybarFiles owns structural updates on rebuild.
     [ -f "$_dir/config" ]     || printf '%s' ${lib.escapeShellArg configJson} > "$_dir/config"
     [ -f "$_dir/style.css" ]  || printf '%s' ${lib.escapeShellArg styleCSS} > "$_dir/style.css"
     [ -f "$_dir/colors.css" ] || printf '%s' ${lib.escapeShellArg defaultColorsCSS} > "$_dir/colors.css"
@@ -1422,7 +1478,7 @@ in {
 
   config = lib.mkIf shouldActivate {
     home-manager.users.${username} = {lib, ...}: {
-      # All three waybar files are written as mutable regular files — not nix store symlinks.
+      # All three waybar files are written as mutable regular files - not nix store symlinks.
       # This allows live editing (waybar reloads CSS on SIGUSR2, config on restart).
       # Delete a file to have the next rebuild regenerate it from Nix.
       home.activation.waybarFiles = lib.hm.dag.entryAfter ["writeBoundary"] ''
@@ -1442,7 +1498,7 @@ in {
         # reload_style_on_change makes waybar pick up style.css itself.
         _waybarWrite "$_dir/style.css" ${lib.escapeShellArg styleCSS} || true
 
-        # colors.css — only write default if absent (hypr-apply-colors owns this file)
+        # colors.css - only write default if absent (hypr-apply-colors owns this file)
         if [ ! -f "$_dir/colors.css" ]; then
           printf '%s' ${lib.escapeShellArg defaultColorsCSS} > "$_dir/colors.css"
         fi
@@ -1454,7 +1510,7 @@ in {
         fi
       '';
 
-      # Seeds waybar config files before waybar starts — guards against the race where
+      # Seeds waybar config files before waybar starts - guards against the race where
       # home-manager activation (system service) hasn't written configs yet on first boot.
       systemd.user.services.waybar-init = {
         Unit = {
@@ -1469,7 +1525,7 @@ in {
         Install.WantedBy = ["waybar.service"];
       };
 
-      # Waybar — managed by systemd so lifecycle is serialised (no pkill races).
+      # Waybar - managed by systemd so lifecycle is serialised (no pkill races).
       # Started by hyprland-session.target; restarted by waybar-monitor-watch on monitor events.
       systemd.user.services.waybar = lib.mkIf shouldActivate {
         Unit = {
