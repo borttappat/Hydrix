@@ -200,19 +200,46 @@
     ${pkgs.jq}/bin/jq -cn --arg t "GIT $count" --arg c "$class" '{"text":$t,"class":$c}'
   '';
 
+  # Running microVM count: systemd keeps /run/systemd/units/invocation:<unit>
+  # exactly while a unit runs, so count those and recount on create/delete.
   shardsScript = pkgs.writeShellScript "waybar-shards" ''
-    count=$(systemctl list-units --type=service --state=running 2>/dev/null \
-      | grep -c "microvm@") || count=0
-    [ "$count" -eq 0 ] && exit 0
-    echo "SHARDS $count"
+    dir=/run/systemd/units
+    emit() {
+      local units=("$dir"/invocation:microvm@*)
+      if [ -L "''${units[0]}" ]; then echo "SHARDS ''${#units[@]}"; else echo; fi
+    }
+    emit
+    ${pkgs.inotify-tools}/bin/inotifywait -mq -e create,delete --include 'invocation:microvm@' "$dir" \
+      | while read -r _; do
+        while read -rt 0.2 _; do :; done
+        emit
+      done
   '';
 
+  # Running libvirt VM count. Every virsh call is a libvirt connection with
+  # its own polkit authorization, so instead of polling, one `virsh event`
+  # connection waits for lifecycle events and the count is redone on each.
   vmsScript = pkgs.writeShellScript "waybar-vms" ''
-    command -v virsh >/dev/null 2>&1 || exit 0
-    count=$(virsh --connect qemu:///system list --state-running --name 2>/dev/null \
-      | ${pkgs.gnugrep}/bin/grep -c .) || count=0
-    [ "$count" -eq 0 ] && exit 0
-    echo "VMS $count"
+    if ! command -v virsh >/dev/null 2>&1; then
+      echo
+      exec ${pkgs.coreutils}/bin/sleep infinity
+    fi
+    uri=qemu:///system
+    emit() {
+      local n=0 name
+      while read -r name; do [ -n "$name" ] && n=$((n + 1)); done \
+        < <(virsh --connect "$uri" list --state-running --name 2>/dev/null)
+      if [ "$n" -gt 0 ]; then echo "VMS $n"; else echo; fi
+    }
+    emit
+    virsh --connect "$uri" event --loop --event lifecycle 2>/dev/null \
+      | while read -r _; do
+        while read -rt 0.5 _; do :; done
+        emit
+      done
+    # libvirtd unreachable: don't let waybar's restart-interval turn this
+    # into a fast retry loop.
+    ${pkgs.coreutils}/bin/sleep 60
   '';
 
   # Host top-CPU process
@@ -233,81 +260,71 @@
   '';
 
   # VM cache helper: emits nothing if offline/stale; otherwise sets CACHE var and continues
-  _vmCacheHeader = ''
+  # VM metric pills (one persistent reader per pill, field as argument):
+  # prints on start and each time hydrix-vm-poller replaces its cache, hides
+  # the pill when no VM is focused or the cache goes stale (read timeout, so
+  # no clock polling). Parsing uses bash builtins only.
+  vmMetricScript = pkgs.writeShellScript "waybar-vm-metric" ''
+    field=$1
     CACHE="/tmp/hydrix-metrics-current"
-    [ -f "$CACHE" ] || exit 0
-    updated=$(${pkgs.gnugrep}/bin/grep '^updated=' "$CACHE" | ${pkgs.gawk}/bin/awk -F= '{print $2}')
-    now=$(${pkgs.coreutils}/bin/date +%s)
-    [ -z "$updated" ] || [ $((now - updated)) -gt ${staleThreshold} ] && exit 0
-    vm_online=$(${pkgs.gnugrep}/bin/grep '^vm_online=' "$CACHE" | ${pkgs.gawk}/bin/awk -F= '{print $2}')
-    [ "$vm_online" != "1" ] && exit 0
-  '';
-
-  cprocBottomScript = pkgs.writeShellScript "waybar-cproc-bottom" ''
-    ${_vmCacheHeader}
-    val=$(grep '^top=' "$CACHE" | awk -F= '{print $2}')
-    [ -z "$val" ] && exit 0
-    proc=$(echo "$val" | cut -d' ' -f1 | tr '[:lower:]' '[:upper:]' | cut -c1-12)
-    pct=$(echo "$val" | cut -d' ' -f2)
-    echo "CPROC $proc $pct%"
-  '';
-
-  rprocBottomScript = pkgs.writeShellScript "waybar-rproc-bottom" ''
-    ${_vmCacheHeader}
-    val=$(grep '^topmem=' "$CACHE" | awk -F= '{print $2}')
-    [ -z "$val" ] && exit 0
-    proc=$(echo "$val" | cut -d' ' -f1 | tr '[:lower:]' '[:upper:]' | cut -c1-12)
-    ram=$(echo "$val" | cut -d' ' -f2)
-    echo "RPROC $proc ''${ram}MB"
-  '';
-
-  vmCpuScript = pkgs.writeShellScript "waybar-vm-cpu" ''
-    ${_vmCacheHeader}
-    cpu=$(grep '^cpu=' "$CACHE" | awk -F= '{print $2}')
-    [ -z "$cpu" ] && exit 0
-    if [ "$cpu" -ge 50 ]; then class="high"; else class=""; fi
-    ${pkgs.jq}/bin/jq -cn --arg t "VCPU $cpu%" --arg c "$class" '{"text":$t,"class":$c}'
-  '';
-
-  vmRamScript = pkgs.writeShellScript "waybar-vm-ram" ''
-    ${_vmCacheHeader}
-    ram=$(grep '^ram=' "$CACHE" | awk -F= '{print $2}')
-    [ -z "$ram" ] && exit 0
-    if [ "$ram" -ge 50 ]; then class="high"; else class=""; fi
-    ${pkgs.jq}/bin/jq -cn --arg t "VRAM ''${ram}MB" --arg c "$class" '{"text":$t,"class":$c}'
-  '';
-
-  vmFsScript = pkgs.writeShellScript "waybar-vm-fs" ''
-    ${_vmCacheHeader}
-    fs=$(grep '^fs=' "$CACHE" | awk -F= '{print $2}')
-    [ -z "$fs" ] && exit 0
-    echo "FS $fs%"
-  '';
-
-  vmSyncDevScript = pkgs.writeShellScript "waybar-vm-sync-dev" ''
-    ${_vmCacheHeader}
-    dev=$(grep '^syncdev=' "$CACHE" | awk -F= '{print $2}')
-    [ -z "$dev" ] && exit 0
-    echo "DEV $dev"
-  '';
-
-  vmSyncStgScript = pkgs.writeShellScript "waybar-vm-sync-stg" ''
-    ${_vmCacheHeader}
-    stg=$(grep '^syncstg=' "$CACHE" | awk -F= '{print $2}')
-    [ -z "$stg" ] && exit 0
-    echo "STG $stg"
-  '';
-
-  vmTunScript = pkgs.writeShellScript "waybar-vm-tun" ''
-    ${_vmCacheHeader}
-    tun=$(grep '^tun=' "$CACHE" | awk -F= '{print $2}')
-    [ -n "$tun" ] && [ "$tun" != "none" ] && echo "TUN $tun"
-  '';
-
-  vmUpScript = pkgs.writeShellScript "waybar-vm-up" ''
-    ${_vmCacheHeader}
-    up=$(grep '^uptime=' "$CACHE" | awk -F= '{print $2}')
-    [ -n "$up" ] && echo "UP $up"
+    STALE=${staleThreshold}
+    case "$field" in cpu | ram) json=1 ;; *) json=0 ;; esac
+    hide() { if [ "$json" = 1 ]; then echo '{"text":""}'; else echo; fi; }
+    render() {
+      local -A m=()
+      local k v u now text="" class="" t p a
+      [ -f "$CACHE" ] || { hide; return; }
+      while IFS='=' read -r k v; do m[$k]=$v; done < "$CACHE"
+      printf -v now '%(%s)T' -1
+      u=''${m[updated]:-0}
+      if [ "''${m[vm_online]:-}" != 1 ] || ((now - u > STALE)); then hide; return; fi
+      case "$field" in
+        cpu)
+          v=''${m[hostcpu]:-}
+          [ -n "$v" ] || { hide; return; }
+          t=$(((v + 5) / 10))
+          text="VCPU $((t / 10)).$((t % 10))"
+          ((v >= 50)) && class=high
+          ;;
+        ram)
+          v=''${m[ram]:-}
+          [ -n "$v" ] || { hide; return; }
+          t=$(((''${m[rammb]:-0} * 10 + 512) / 1024))
+          text="VRAM $((t / 10)).$((t % 10))GB"
+          ((v >= 50)) && class=high
+          ;;
+        fs) v=''${m[fs]:-}; [ -n "$v" ] && text="FS $v%" ;;
+        fs-high) v=''${m[fs]:-}; [ -n "$v" ] && ((v >= 50)) && text="FS $v%" ;;
+        syncdev) v=''${m[syncdev]:-}; [ -n "$v" ] && [ "$v" != 0 ] && text="DEV $v" ;;
+        syncstg) v=''${m[syncstg]:-}; [ -n "$v" ] && [ "$v" != 0 ] && text="STG $v" ;;
+        tun) v=''${m[tun]:-}; [ -n "$v" ] && [ "$v" != none ] && text="TUN $v" ;;
+        up) v=''${m[uptime]:-}; [ -n "$v" ] && text="UP $v" ;;
+        cproc | rproc)
+          if [ "$field" = cproc ]; then v=''${m[top]:-}; else v=''${m[topmem]:-}; fi
+          [ -n "$v" ] || { hide; return; }
+          read -r p a _ <<< "$v"
+          p=''${p^^}
+          p=''${p:0:12}
+          if [ "$field" = cproc ]; then text="CPROC $p $a%"; else text="RPROC $p ''${a}MB"; fi
+          ;;
+      esac
+      if [ "$json" = 1 ]; then
+        printf '{"text":"%s","class":"%s"}\n' "$text" "$class"
+      else
+        echo "$text"
+      fi
+    }
+    render
+    ${pkgs.inotify-tools}/bin/inotifywait -mq -e moved_to,close_write --include 'hydrix-metrics-current$' /tmp \
+      | while :; do
+        if read -rt "$STALE" _; then
+          render
+        else
+          hide
+          read -r _ || exit 0
+          render
+        fi
+      done
   '';
 
   # VM metrics poller - polls current workspace VM every hostPollInterval seconds.
@@ -412,7 +429,7 @@
     current=$(echo "$poll" | ${pkgs.jq}/bin/jq -r '.current // ""' 2>/dev/null)
     [ -z "$current" ] && exit 0
 
-    pending=$(wifi-sync count 2>/dev/null || echo 0)
+    pending=$(wifi-sync count "$poll" 2>/dev/null || echo 0)
 
     if [ "$pending" -gt 0 ]; then
       ${pkgs.jq}/bin/jq -cn \
@@ -589,14 +606,6 @@
     printf 'UP %dH %02dM\n' "$((secs/3600))" "$(( (secs%3600)/60 ))"
   '';
 
-  monoVmFsScript = pkgs.writeShellScript "waybar-mono-vm-fs" ''
-    ${_vmCacheHeader}
-    fs=$(grep '^fs=' "$CACHE" | awk -F= '{print $2}')
-    [ -z "$fs" ] && exit 0
-    [ "$fs" -lt 50 ] && exit 0
-    echo "FS $fs%"
-  '';
-
   monoBatteryScript = pkgs.writeShellScript "waybar-mono-battery" ''
     cap=$(cat /sys/class/power_supply/BAT*/capacity 2>/dev/null | head -1)
     status=$(cat /sys/class/power_supply/BAT*/status 2>/dev/null | head -1)
@@ -712,14 +721,14 @@
     };
     "custom/shards" = {
       exec = "${shardsScript}";
-      interval = 5;
+      "restart-interval" = 5;
       format = "{}";
       tooltip = false;
       escape = false;
     };
     "custom/vms" = {
       exec = "${vmsScript}";
-      interval = 10;
+      "restart-interval" = 5;
       format = "{}";
       tooltip = false;
       escape = false;
@@ -866,66 +875,66 @@
       escape = false;
     };
     "custom/rproc-bottom" = {
-      exec = "${rprocBottomScript}";
-      interval = lib.toInt hostPollInterval;
+      exec = "${vmMetricScript} rproc";
+      "restart-interval" = 5;
       format = "{}";
       tooltip = false;
       escape = false;
     };
     "custom/cproc-bottom" = {
-      exec = "${cprocBottomScript}";
-      interval = lib.toInt hostPollInterval;
+      exec = "${vmMetricScript} cproc";
+      "restart-interval" = 5;
       format = "{}";
       tooltip = false;
       escape = false;
     };
     "custom/vm-cpu" = {
-      exec = "${vmCpuScript}";
-      interval = lib.toInt hostPollInterval;
+      exec = "${vmMetricScript} cpu";
+      "restart-interval" = 5;
       format = "{}";
       tooltip = false;
       escape = false;
       "return-type" = "json";
     };
     "custom/vm-ram" = {
-      exec = "${vmRamScript}";
-      interval = lib.toInt hostPollInterval;
+      exec = "${vmMetricScript} ram";
+      "restart-interval" = 5;
       format = "{}";
       tooltip = false;
       escape = false;
       "return-type" = "json";
     };
     "custom/vm-fs" = {
-      exec = "${vmFsScript}";
-      interval = lib.toInt hostPollInterval;
+      exec = "${vmMetricScript} fs";
+      "restart-interval" = 5;
       format = "{}";
       tooltip = false;
       escape = false;
     };
     "custom/vm-sync-dev" = {
-      exec = "${vmSyncDevScript}";
-      interval = lib.toInt hostPollInterval;
+      exec = "${vmMetricScript} syncdev";
+      "restart-interval" = 5;
       format = "{}";
       tooltip = false;
       escape = false;
     };
     "custom/vm-sync-stg" = {
-      exec = "${vmSyncStgScript}";
-      interval = lib.toInt hostPollInterval;
+      exec = "${vmMetricScript} syncstg";
+      "restart-interval" = 5;
       format = "{}";
       tooltip = false;
       escape = false;
     };
     "custom/vm-tun" = {
-      exec = "${vmTunScript}";
-      interval = lib.toInt hostPollInterval;
+      exec = "${vmMetricScript} tun";
+      "restart-interval" = 5;
       format = "{}";
       tooltip = false;
       escape = false;
     };
     "custom/vm-up" = {
-      exec = "${vmUpScript}";
-      interval = 30;
+      exec = "${vmMetricScript} up";
+      "restart-interval" = 5;
       format = "{}";
       tooltip = false;
       escape = false;
@@ -1053,14 +1062,14 @@
     };
     "custom/shards" = {
       exec = "${shardsScript}";
-      interval = 5;
+      "restart-interval" = 5;
       format = "{}";
       tooltip = false;
       escape = false;
     };
     "custom/vms" = {
       exec = "${vmsScript}";
-      interval = 10;
+      "restart-interval" = 5;
       format = "{}";
       tooltip = false;
       escape = false;
@@ -1156,52 +1165,52 @@
       "return-type" = "json";
     };
     "custom/vm-cpu" = {
-      exec = "${vmCpuScript}";
-      interval = lib.toInt hostPollInterval;
+      exec = "${vmMetricScript} cpu";
+      "restart-interval" = 5;
       format = "{}";
       tooltip = false;
       escape = false;
       "return-type" = "json";
     };
     "custom/vm-ram" = {
-      exec = "${vmRamScript}";
-      interval = lib.toInt hostPollInterval;
+      exec = "${vmMetricScript} ram";
+      "restart-interval" = 5;
       format = "{}";
       tooltip = false;
       escape = false;
       "return-type" = "json";
     };
     "custom/vm-fs" = {
-      exec = "${monoVmFsScript}";
-      interval = lib.toInt hostPollInterval;
+      exec = "${vmMetricScript} fs-high";
+      "restart-interval" = 5;
       format = "{}";
       tooltip = false;
       escape = false;
     };
     "custom/vm-sync-dev" = {
-      exec = "${vmSyncDevScript}";
-      interval = lib.toInt hostPollInterval;
+      exec = "${vmMetricScript} syncdev";
+      "restart-interval" = 5;
       format = "{}";
       tooltip = false;
       escape = false;
     };
     "custom/vm-sync-stg" = {
-      exec = "${vmSyncStgScript}";
-      interval = lib.toInt hostPollInterval;
+      exec = "${vmMetricScript} syncstg";
+      "restart-interval" = 5;
       format = "{}";
       tooltip = false;
       escape = false;
     };
     "custom/vm-tun" = {
-      exec = "${vmTunScript}";
-      interval = lib.toInt hostPollInterval;
+      exec = "${vmMetricScript} tun";
+      "restart-interval" = 5;
       format = "{}";
       tooltip = false;
       escape = false;
     };
     "custom/vm-up" = {
-      exec = "${vmUpScript}";
-      interval = 30;
+      exec = "${vmMetricScript} up";
+      "restart-interval" = 5;
       format = "{}";
       tooltip = false;
       escape = false;

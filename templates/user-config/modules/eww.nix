@@ -92,7 +92,6 @@
 
   panelRadius = toString sc.panelRadius;
   panelOpacity = toString (ui.opacity.overlayOverrides.eww or ui.opacity.overlay);
-  lockAlpha = toString (builtins.floor ((ui.opacity.overlayOverrides.eww or ui.opacity.overlay) * 100));
   blockPadding = let
     p = ui.padding or 8;
   in "${toString (p + 6)}px ${toString (p + 10)}px";
@@ -135,7 +134,7 @@
         exit 0
       fi
       printf '%s' "$all" > "${routerAllCache}.tmp" && mv "${routerAllCache}.tmp" "${routerAllCache}"
-      pending=$(wifi-sync count 2>/dev/null || echo 0)
+      pending=$(wifi-sync count "$all" 2>/dev/null || echo 0)
       echo "$all" | jq --argjson p "$pending" '.wifi + {"pending": $p}'
     '';
   };
@@ -193,43 +192,48 @@
     '';
   };
 
-  # Parses `shard status` (NAME STATUS CID columns) and caches the result so
-  # eww-wg-status can reuse the running-VM list.
+  # Running/stopped state of every registry VM, cached so eww-wg-status can
+  # reuse the running-VM list. A unit is running while systemd keeps its
+  # /run/systemd/units/invocation:<unit> entry, so no systemctl or D-Bus call
+  # is needed. With --watch it prints again whenever a microvm@ unit starts
+  # or stops (the vm_status deflisten); without, once (hyprlock-dashboard).
   ewwMvmStatus = pkgs.writeShellApplication {
     name = "eww-mvm-status";
-    runtimeInputs = [pkgs.jq pkgs.coreutils pkgs.gnused];
+    runtimeInputs = [pkgs.jq pkgs.inotify-tools];
     text = ''
-      shard=/run/current-system/sw/bin/shard
       registry="/etc/hydrix/vm-registry.json"
-
-      running_json="[]"
-      stopped_json="[]"
-
-      if [ ! -x "$shard" ]; then
+      units_dir=/run/systemd/units
+      if [ ! -f "$registry" ]; then
         echo '{"running":[],"stopped":[]}'
         exit 0
       fi
 
-      while read -r name status cid; do
-        case "$name" in microvm-*) ;; *) continue ;; esac
-        short=$(jq -r --arg n "$name" 'to_entries[] | select(.value.vmName == $n) | .key' "$registry" 2>/dev/null | head -1)
-        [ -z "$short" ] && short="''${name#microvm-}"
-        case "$status" in
-          running)
-            ip="192.168.$cid.2"
-            entry="{\"name\":\"$short\",\"ip\":\"$ip\"}"
-            running_json=$(echo "$running_json" | jq --argjson e "$entry" '. + [$e]') ;;
-          stopped)
-            entry="{\"name\":\"$short\"}"
-            stopped_json=$(echo "$stopped_json" | jq --argjson e "$entry" '. + [$e]') ;;
-        esac
-      done < <("$shard" status 2>/dev/null \
-        | sed -E 's/\x1b\[[0-9;]*[a-zA-Z]//g' \
-        || true)
+      mapfile -t units < <(jq -r 'to_entries | sort_by(.value.vmName)[] | "microvm@\(.value.vmName).service"' "$registry")
 
-      result="{\"running\":$running_json,\"stopped\":$stopped_json}"
-      printf '%s' "$result" > "${vmStatusCache}.tmp" && mv "${vmStatusCache}.tmp" "${vmStatusCache}"
-      echo "$result"
+      emit() {
+        local states="" unit
+        for unit in "''${units[@]}"; do
+          if [ -L "$units_dir/invocation:$unit" ]; then states+="active"$'\n'; else states+="inactive"$'\n'; fi
+        done
+
+        result=$(jq -c --arg states "$states" '
+          ($states | split("\n")) as $s
+          | [to_entries | sort_by(.value.vmName) | to_entries[]
+             | {name: .value.key, cid: .value.value.cid, active: ($s[.key] == "active")}]
+          | {running: [.[] | select(.active) | {name, ip: "192.168.\(.cid).2"}],
+             stopped: [.[] | select(.active | not) | {name}]}
+        ' "$registry")
+        printf '%s' "$result" > "${vmStatusCache}.tmp" && mv "${vmStatusCache}.tmp" "${vmStatusCache}"
+        echo "$result"
+      }
+
+      emit
+      [ "''${1:-}" = --watch ] || exit 0
+      inotifywait -mq -e create,delete --include 'invocation:microvm@' "$units_dir" \
+        | while read -r _; do
+          while read -rt 0.2 _; do :; done
+          emit
+        done
     '';
   };
 
@@ -304,11 +308,11 @@
           echo "usage: hyprlock-dashboard vms|net" >&2
           exit 1 ;;
       esac
-      colors=$(jq -c '{bg: .special.background, fg: .special.foreground, title: .colors.color4,
+      colors=$(jq -c '{bg: .colors.color0, fg: .special.foreground, title: .colors.color4,
                        on: .colors.color2, dim: .colors.color8, warn: .colors.color1}' "$HOME/.cache/wal/colors.json" 2>/dev/null) \
         || colors='{"bg":"#101010","fg":"#dfdfdf","title":"#7aa2f7","on":"#9ece6a","dim":"#808080","warn":"#f7768e"}'
 
-      jq -rn --arg s "$1" --argjson d "$data" --argjson c "$colors" --argjson w 32 --arg alpha "${lockAlpha}%" '
+      jq -rn --arg s "$1" --argjson d "$data" --argjson c "$colors" --argjson w 32 --arg alpha "${toString (builtins.floor (dash.lockscreen.opacity * 100))}%" '
         def esc: gsub("&"; "&amp;") | gsub("<"; "&lt;") | gsub(">"; "&gt;");
         def pad($n): if length < $n then . + (" " * ($n - length)) else . end;
         def lpad($n): if length < $n then (" " * ($n - length)) + . else . end;
@@ -767,10 +771,9 @@
         :initial "[]"
         `eww-wg-status`)
 
-      (defpoll vm_status
-        :interval "10s"
+      (deflisten vm_status
         :initial "{\"running\":[],\"stopped\":[]}"
-        `eww-mvm-status`)
+        `eww-mvm-status --watch`)
 
       (defpoll router_stats
         :interval "10s"
@@ -1579,6 +1582,15 @@ in {
           default = fontSize * 3 / 2;
           defaultText = lib.literalExpression "eww font size * 1.5";
           description = "Font size of the lockscreen blocks, in hyprlock's logical px.";
+        };
+        opacity = lib.mkOption {
+          type = lib.types.numbers.between 0 1;
+          default = 0.6;
+          description = ''
+            Opacity of the blocks' color0 background. Lower than the eww
+            panels' overlay opacity because hyprlock already dims its blurred
+            backdrop to half brightness.
+          '';
         };
       };
       git.extraRepos = lib.mkOption {
