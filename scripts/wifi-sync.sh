@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# wifi-sync — Manage known WiFi networks in modules/wifi.nix
+# wifi-sync - Manage known WiFi networks in modules/wifi.nix
 #
 # Admin mode (router VM reachable via vsock):
 #   wifi-sync              Show status: current SSID, known list, router connections
@@ -190,7 +190,7 @@ case "$CMD" in
         known=$(echo "$local_nets" | jq --arg s "$current" 'any(.[]; .ssid == $s)')
         [[ "$known" == "true" ]] \
           && log "${GREEN}Connected: $current (known)${NC}" \
-          || warn "Connected: $current — NOT in wifi.nix. Run: wifi-sync pull"
+          || warn "Connected: $current - NOT in wifi.nix. Run: wifi-sync pull"
       else
         log "Connected: (none)"
       fi
@@ -202,7 +202,7 @@ case "$CMD" in
       echo "$connections" | jq -r '.[].ssid | "  \(.)"' 2>/dev/null
       if [[ "$pending_count" -gt 0 ]]; then
         log ""
-        warn "Not yet in wifi.nix ($pending_count) — run: wifi-sync pull"
+        warn "Not yet in wifi.nix ($pending_count) - run: wifi-sync pull"
         echo "$pending" | jq -r '.[].ssid | "  \(.)"' 2>/dev/null
       fi
     else
@@ -259,16 +259,16 @@ case "$CMD" in
     pending=$(poll_pending "$(echo "$poll" | jq '.connections // []')" "$local_nets")
     count=$(echo "$pending" | jq 'length' 2>/dev/null || echo 0)
     if [[ -f "$WIFI_YAML" ]]; then
-      [[ "$count" -gt 0 ]] || { log "No pending networks on router — all already in $WIFI_YAML."; exit 0; }
+      [[ "$count" -gt 0 ]] || { log "No pending networks on router - all already in $WIFI_YAML."; exit 0; }
     else
-      [[ "$count" -gt 0 ]] || { log "No pending networks on router — all already in wifi.nix."; exit 0; }
+      [[ "$count" -gt 0 ]] || { log "No pending networks on router - all already in wifi.nix."; exit 0; }
     fi
     merged="$local_nets"; added=0; updated=0
     i=0
     while [[ $i -lt $count ]]; do
       ssid=$(echo "$pending" | jq -r ".[$i].ssid")
       psk=$(echo "$pending"  | jq -r ".[$i].psk // \"\"")
-      # In sops mode the PSK from NM is already plaintext — store as-is (not hashed).
+      # In sops mode the PSK from NM is already plaintext - store as-is (not hashed).
       # In legacy mode, hash it for wifi.nix (NixOS NetworkManager ensureProfiles needs PSK or hash).
       [[ ! -f "$WIFI_YAML" ]] && psk=$(hash_psk "$ssid" "$psk")
       exists=$(echo "$merged" | jq --arg s "$ssid" 'any(.[]; .ssid == $s)')
@@ -310,17 +310,34 @@ case "$CMD" in
         warn "Router: $(echo "$result" | jq -r '.error // "not found (already gone?)"' 2>/dev/null)"
       fi
     else
-      warn "Router not reachable — delete manually: nmcli con delete \"$target\""
+      warn "Router not reachable - delete manually: nmcli con delete \"$target\""
     fi
     ;;
 
   count)
-    if ! is_admin; then echo 0; exit 0; fi
-    poll=$(r_poll)
-    connections=$(echo "$poll" | jq '.connections // []' 2>/dev/null)
-    local_nets=$(read_nix)
-    pending=$(poll_pending "$connections" "$local_nets")
-    echo "$pending" | jq 'length'
+    # Optional $2: router status JSON the caller already holds (POLL output,
+    # or ALL output with it under .wifi), which saves two router round trips.
+    # Known SSIDs are cached in $XDG_RUNTIME_DIR keyed on the source file's
+    # mtime, so the sops decrypt only reruns after that file changes. Only
+    # SSIDs are cached, never PSKs.
+    if [[ -n "${2:-}" ]]; then
+      poll="$2"
+    else
+      if ! is_admin; then echo 0; exit 0; fi
+      poll=$(r_poll)
+    fi
+    connections=$(jq -c '(.wifi // .) | .connections // []' <<< "$poll" 2>/dev/null) || connections='[]'
+    src="$WIFI_NIX"
+    [[ -f "$WIFI_YAML" ]] && src="$WIFI_YAML"
+    cache="${XDG_RUNTIME_DIR:-/tmp}/hydrix-wifi-known-ssids"
+    stamp="$(stat -c '%Y' "$src" 2>/dev/null || echo none) $src"
+    if [[ ! -f "$cache" ]] || [[ "$(head -n1 "$cache")" != "$stamp" ]]; then
+      ( umask 077
+        { echo "$stamp"; read_nix | jq -r '.[].ssid'; } > "$cache.tmp" && mv "$cache.tmp" "$cache" )
+    fi
+    jq -rn --argjson c "$connections" --rawfile k "$cache" '
+      ($k | split("\n") | .[1:] | map(select(. != ""))) as $known
+      | [$c[] | select(.ssid as $s | $known | any(.[]; . == $s) | not)] | length'
     ;;
 
   *)
@@ -332,10 +349,11 @@ Usage: wifi-sync [command] [args]
   pull              Merge all router NM connections into credential store (admin mode)
   list              Show known networks (reads secrets/wifi.yaml or modules/wifi.nix)
   remove SSID       Remove a network from credential store
-  count             Print number of unsaved router connections (for scripts/widgets)
+  count [JSON]      Print number of unsaved router connections (for scripts/widgets);
+                    JSON: router POLL/ALL output the caller already has
 
 Sops mode (secrets/wifi.yaml exists): reads/writes the encrypted file directly.
-Legacy mode (no wifi.yaml): reads/writes modules/wifi.nix — requires rebuild to apply.
+Legacy mode (no wifi.yaml): reads/writes modules/wifi.nix - requires rebuild to apply.
 
 To migrate to sops mode: run setup-wifi-secrets
 USAGE
