@@ -1777,7 +1777,7 @@ live on every install. This is opt-in per extension: entries without a
 `hash` keep the default live-fetch behavior, so users who don't need
 reproducible/audited fetches don't have to do anything differently.
 
-Deliberately `pkgs.fetchurl`, not `pkgs.fetchFirefoxAddon` — the latter
+Deliberately `pkgs.fetchurl`, not `pkgs.fetchFirefoxAddon` - the latter
 unpacks the `.xpi`, rewrites `manifest.json` (injects a legacy
 `applications` key alongside `browser_specific_settings`) and re-zips, but
 keeps the *original* `META-INF/manifest.mf`, which still lists the digest
@@ -1786,11 +1786,11 @@ install:
 ```
 addons.xpi-utils  WARN  Add-on <id> is not correctly signed.
 ```
-silently — no install, no visible error outside the Browser Console
+silently - no install, no visible error outside the Browser Console
 (hamburger menu → More tools → Browser Console). `fetchurl` makes zero
 content changes, so the pinned hash matches the exact bytes Mozilla signed.
 Verify a fetch is safe by diffing it against a fresh download of the same
-URL — it should be byte-identical.
+URL - it should be byte-identical.
 
 #### obsidian.nix
 
@@ -3000,7 +3000,7 @@ The files VM (`microvm-files`, CID 212, fixed infra) is an encrypted jump host f
 
 **Store flow** (`shard files store pentest/projects/report`):
 
-Steps 1–4 are identical. After the files VM has the ciphertext, the host sends the passphrase via vsock and the files VM decrypts in-place into `/storage/pentest/`. Ciphertext is deleted after successful decryption.
+Steps 1-4 are identical. After the files VM has the ciphertext, the host sends the passphrase via vsock and the files VM decrypts in-place into `/storage/pentest/`. Ciphertext is deleted after successful decryption.
 
 **Setup** in `flake.nix`:
 
@@ -3748,19 +3748,30 @@ that binds the vsock listener once and holds it open for the service's lifetime,
 answering every connection from already-cached data or direct in-process work - no
 `fork`/`exec` on the connection path at all. Concretely:
 
-1. **Separate sampling from serving.** A background loop (or thread) periodically
-   gathers whatever data the service needs and writes it to a cache (a file, or just an
-   in-memory struct) - this can still shell out to real tools if no syscall-level
-   alternative exists, since it only happens once per interval, not once per connection.
-   The vsock-facing part is a different, always-running process that just reads the
-   cache and responds - instant, no forking, regardless of how often the host asks.
+1. **Separate gathering from serving, and avoid timers where possible.** The
+   vsock-facing part is an always-running process that answers from memory or a cache
+   file, never forking. How the data gets there depends on its kind:
+   - *State that changes on events* (associated SSID, saved connections): watch the
+     event source (nl80211 multicast groups, inotify on a directory) and rewrite the
+     cache only when something happens. `router-netlink-poller` does this and sleeps in
+     `poll()` with no timeout once everything it watches exists.
+   - *Counters* (interface bytes, WireGuard handshakes and transfer): read them in the
+     server when a request arrives, compute rates from the previous request's values,
+     and reuse the answer for a short window (2s) so several consumers asking at once
+     cost one read. `router-stats-server` does this for `NET` and `WG`.
+   - *Slow external lookups* (geo-location over HTTPS): trigger them from a systemd path
+     unit on a file the server rewrites only when the input set changes
+     (`/tmp/wg-endpoints` -> `router-geo-refresh`).
+   A timer-driven sampler is the last resort, for data with neither an event source nor
+   a cheap on-request read.
 2. **One command that returns everything.** Alongside per-topic commands, give the
    server an `ALL`-style command that returns every topic it serves in one response, so
    a consumer needing multiple pieces of data can do it in a single connection instead
    of several.
-3. **Route the sampling interval through one option.** A single `mkDefault`-able
-   interval option (rather than a hardcoded value duplicated across scripts) lets
-   machine configs dial down sample frequency on weaker hardware without touching code.
+3. **If a timer is unavoidable, route its interval through one option.** A single
+   `mkDefault`-able interval option (rather than a hardcoded value duplicated across
+   scripts) lets machine configs dial down sample frequency on weaker hardware without
+   touching code.
 4. **Merge multiple independent sampler loops into one where they serve the same
    consumer**, instead of several independently-scheduled `while true; sleep` loops
    each paying their own fork/exec cost on their own schedule.
@@ -3785,7 +3796,8 @@ answering every connection from already-cached data or direct in-process work - 
    still be eliminated** if that kernel API is exposed over a stable protocol. `iw`/`wg`
    both wrap netlink (`nl80211`, WireGuard's generic-netlink family): querying the same
    attributes directly over a netlink socket, from an already-running process, removes
-   the fork+exec entirely (see `router-netlink-poller.c`). Watch for two pitfalls
+   the fork+exec entirely (see `router-netlink-poller.c`, `router-stats-server.c` and the
+   shared `router-netlink.h`). Watch for two pitfalls
    specific to netlink dumps when doing this: `MNL_SOCKET_BUFFER_SIZE`/similar library
    defaults can be too small for a real, attribute-heavy response and netlink truncates
    silently rather than erroring; and any receive loop that stops reading as soon as it
@@ -3800,6 +3812,14 @@ treatment as the commands actually hit by a timer. When a rare command's payload
 to run an external tool with caller-supplied arguments (an SSID, a package name), pass
 them as an `execvp`/`execve` argv array rather than building a shell string - avoids any
 possibility of the argument being reinterpreted as shell syntax.
+
+**Measuring it.** Per-process tools miss most of this: the cost is in short-lived processes
+and in the VM's vCPU thread on the host. hydrix-config's `custom/spike-tools` (personal
+tooling, not part of Hydrix) shows the approach: sample each QEMU thread at 0.1s, trace
+host execs and vsock connects with bpftrace, and compare phases with suspected sources
+switched off (consumers frozen with `SIGSTOP`, guest services stopped over the serial
+console). Look for a fixed period in the vCPU spikes: a 10s or 30s rhythm points at a
+timer, and stopping candidates one at a time finds it.
 
 ---
 
@@ -5034,16 +5054,16 @@ needs to actually render. Both live in `profiles/pentest/burpsuite.nix` and
 
 BurpSuite, Ghidra, and most Java-based reverse-engineering GUI tools are AWT/Swing
 applications. Stock OpenJDK has no native Wayland backend, so these apps need a real X11
-`DISPLAY` to render at all — under the Hyprland + waypipe stack (pure Wayland, no X11
+`DISPLAY` to render at all - under the Hyprland + waypipe stack (pure Wayland, no X11
 anywhere by default), they fail outright with no window and, for BurpSuite specifically, a
 `java.lang.Error: no ComponentUI class for: ...` crash partway through its own UI init.
 
 A hand-rolled rootless Xwayland client of the VM's `waypipe-0` socket was tried first and
-never got a single window mapped — waypipe is a generic Wayland *proxy*, not a compositor,
+never got a single window mapped - waypipe is a generic Wayland *proxy*, not a compositor,
 so it doesn't implement whatever rootless Xwayland needs for surface positioning. The
 working fix is waypipe's own `--xwls` flag, which runs
 [xwayland-satellite](https://github.com/Supreeeme/xwayland-satellite) alongside the
-`waypipe server` process — the purpose-built way to forward X11 clients through a waypipe
+`waypipe server` process - the purpose-built way to forward X11 clients through a waypipe
 tunnel. `xwayland.nix` overrides the VM's `waypipe-vsock` service to add `--xwls`.
 
 `--xwls` only sets `$DISPLAY` for the one process waypipe directly execs as its server
@@ -5051,9 +5071,9 @@ command (normally a throwaway `sleep infinity`), not for any shell or app launch
 afterwards. `xwayland.nix` works around this by having that placeholder process write the
 resolved display value to `/run/user/1000/xwayland-display`, which is then read by:
 
-- **Interactive shells** — via `programs.fish.interactiveShellInit`, so typing `burpsuite`
+- **Interactive shells** - via `programs.fish.interactiveShellInit`, so typing `burpsuite`
   in a VM terminal picks up `$DISPLAY` on login.
-- **`waypipe-launch` (vsock:14508)** — the receiver behind mod+D / `wofi-launcher` /
+- **`waypipe-launch` (vsock:14508)** - the receiver behind mod+D / `wofi-launcher` /
   `hypr-ws-app`. This service builds its own environment from scratch and never goes
   through a login shell, so the fish fix above is invisible to it; it needs its own
   override (also in `xwayland.nix`) that reads the display file fresh on every launch
@@ -5062,7 +5082,7 @@ resolved display value to `/run/user/1000/xwayland-display`, which is then read 
   keybind (rather than typed in a terminal) silently get no `$DISPLAY` and hang.
 
 Also note: `waypipe execs "xwayland-satellite"` by bare name, and systemd services don't
-inherit `/run/current-system/sw/bin` the way interactive shells do — `xwayland.nix` adds
+inherit `/run/current-system/sw/bin` the way interactive shells do - `xwayland.nix` adds
 `pkgs.xwayland-satellite` to the `waypipe-vsock` unit's `path` explicitly, or the service
 fails with `Failed to run program "xwayland-satellite": No such file or directory`.
 
@@ -5081,7 +5101,7 @@ it inline with a full pinned commit SHA keeps it fully scoped to `profiles/pente
 evaluates purely (no `--impure` needed, since the ref is a fully locked commit).
 
 **To update:** replace the commit SHA in `burpsuite.nix` with a newer commit from the
-burpsuite-nix repo, then rebuild. `nix flake update` does **not** touch this — it isn't a
+burpsuite-nix repo, then rebuild. `nix flake update` does **not** touch this - it isn't a
 flake input, so there's no lockfile entry tracking it. Bumping it is a manual edit.
 
 ### Isolation
@@ -5089,7 +5109,7 @@ flake input, so there's no lockfile entry tracking it. Bumping it is a manual ed
 Nothing outside `profiles/pentest/` references `burpsuite-nix` or `xwayland-satellite`: no
 `extraInputs` site passes it to another VM or the host, and no other profile/infra/task VM's
 config imports either file. The packages do get built into the shared `/nix/store` like
-anything else (content-addressed, visible from every VM), but that's irrelevant — what
+anything else (content-addressed, visible from every VM), but that's irrelevant - what
 matters is that no other VM's NixOS config or closure references them, and none do.
 
 ### Clipboard isolation still applies
@@ -5099,7 +5119,7 @@ window's title prefix (`[pentest] `, from waypipe's `--title-prefix`) at the rea
 compositor, hooking all four Wayland clipboard-selection protocols directly. Since
 `xwayland-satellite` is itself just another Wayland client of the same `waypipe-0`/vsock
 tunnel, BurpSuite's window gets the same title prefix as any other forwarded pentest-VM
-window and falls into the same isolation group automatically — the mechanism operates below
+window and falls into the same isolation group automatically - the mechanism operates below
 the Wayland-vs-X11 distinction entirely. Verify live with `hyprctl clipguard` while BurpSuite
 is open; its client should show up tagged `pentest`, not `host`.
 
