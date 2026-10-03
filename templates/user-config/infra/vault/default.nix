@@ -1,8 +1,8 @@
-# Vault Infra VM — KeepassXC credential store
+# Vault Infra VM - KeepassXC credential store
 #
 # Persistent KeepassXC DB stored in a virtiofs-backed host directory
 # (/var/lib/microvms/microvm-vault/vault-export/ on host → /var/lib/vault in VM).
-# Fully offline: no TAP interface — credentials cannot be exfiltrated over the network.
+# Fully offline: no TAP interface - credentials cannot be exfiltrated over the network.
 #
 # Host communicates via vsock port 14514. Session managed in /run/vault-session/
 # (tmpfs, cleared on reboot). Auto-locks after 5 minutes of inactivity.
@@ -184,10 +184,17 @@ let
 in {
   microvm.vsock.cid = meta.vsockCid;
 
-  # No network interface — vault stays fully offline
+  # No network interface - vault stays fully offline
   microvm.interfaces = lib.mkForce [];
   networking.useDHCP = lib.mkForce false;
   networking.firewall.enable = lib.mkForce false;
+  # No interfaces, so these have nothing to do; timesyncd keeps retrying its
+  # unreachable servers on a ~30s cycle, which showed as periodic vCPU spikes.
+  # Guest time follows the host through kvm-clock.
+  networking.useNetworkd = lib.mkForce false;
+  systemd.network.enable = lib.mkForce false;
+  services.resolved.enable = lib.mkForce false;
+  services.timesyncd.enable = lib.mkForce false;
 
   microvm.mem = lib.mkForce 512;
 
@@ -244,7 +251,7 @@ in {
     };
   };
 
-  # Main vsock agent — each connection handled by vaultHandler as vault user
+  # Main vsock agent - each connection handled by vaultHandler as vault user
   systemd.services.vault-agent = {
     description = "Vault vsock agent (port 14514)";
     wantedBy    = [ "multi-user.target" ];
@@ -273,7 +280,7 @@ in {
   +-------------------------------------------------+
   |  HYDRIX VAULT VM                                |
   +-------------------------------------------------+
-  |  Credential store — KeepassXC                   |
+  |  Credential store - KeepassXC                   |
   |  vsock port 14514                               |
   |                                                 |
   |  From host:                                     |
