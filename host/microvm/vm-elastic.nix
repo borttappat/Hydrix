@@ -128,10 +128,10 @@
         done
       }
 
+      # read -t on a pipe nobody writes to: a fork-free sleep.
+      exec {tick}<> <(:)
       while true; do
-        sleep ${toString vmCfg.pollIntervalSec}
-
-        systemctl is-active --quiet "$UNIT" || { mem_low_streak=0; cpu_low_streak=0; confirmed_ready=0; continue; }
+        read -rt ${toString vmCfg.pollIntervalSec} -u "$tick" || true
 
         # Hold ceiling unconditionally until waypipe has actually finished
         # connecting - gated on the real readiness signal (display-mode's
@@ -442,8 +442,13 @@ in {
       name: vmCfg:
         lib.nameValuePair "vm-elastic-${name}" (lib.mkIf vmCfg.enable {
           description = "Elastic CPU/RAM policy for ${vmCfg.unitName}";
+          # Runs exactly while its VM runs: started with it (wantedBy), stopped
+          # with it (partOf). requisite, not requires/bindsTo: starting this
+          # unit, e.g. when activation restarts it, must never start the VM.
           after = ["microvm@${vmCfg.unitName}.service"];
-          wantedBy = ["multi-user.target"];
+          requisite = ["microvm@${vmCfg.unitName}.service"];
+          partOf = ["microvm@${vmCfg.unitName}.service"];
+          wantedBy = ["microvm@${vmCfg.unitName}.service"];
           path = [pkgs.socat pkgs.jq pkgs.util-linux pkgs.hyprland pkgs.systemd pkgs.coreutils];
           serviceConfig = {
             Type = "simple";
