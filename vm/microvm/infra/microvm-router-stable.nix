@@ -30,11 +30,23 @@
   cfg = config.hydrix;
   routerCfg = cfg.router;
 
-  # QEMU without seccomp - same as main router (needed for VFIO)
-  qemuNoSeccomp = pkgs.qemu_kvm.overrideAttrs (old: {
-    configureFlags = lib.filter (f: f != "--enable-seccomp") (old.configureFlags or []);
-    buildInputs = lib.filter (p: p.pname or "" != "libseccomp") (old.buildInputs or []);
-  });
+  # QEMU for VFIO passthrough: its seccomp sandbox blocks /dev/vfio access.
+  # Seccomp is only active when QEMU runs with `-sandbox on`, which microvm.nix
+  # adds only when the package's configureFlags list --enable-seccomp. Hiding
+  # that flag at evaluation time drops the argument while the binary stays
+  # the binary-cache build (the same closure-minimised QEMU other microVMs
+  # use); the .override no-op stops microvm.nix re-overriding it into a
+  # derivation nothing has built.
+  qemuNoSeccomp = let
+    qemu = pkgs.qemu_kvm.override {nixosTestRunner = true;};
+    self =
+      qemu
+      // {
+        configureFlags = lib.filter (f: f != "--enable-seccomp") qemu.configureFlags;
+        override = _: self;
+      };
+  in
+    self;
 
   routerUser = routerCfg.username;
   routerHashedPassword = routerCfg.hashedPassword;
