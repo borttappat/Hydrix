@@ -602,16 +602,24 @@
       exit 0
     fi
 
-    wait_and_connect() {
-      local vm_name="$1" cid="$2"
+    # A unit runs exactly while systemd keeps this symlink (no D-Bus call).
+    running() { [[ -L "/run/systemd/units/invocation:microvm@$1.service" ]]; }
 
-      # Poll until VM responds OK to PING - no timeout, VM readiness is the gate.
-      while true; do
+    wait_and_connect() {
+      local vm_name="$1" cid="$2" tries=0 tick
+      # read -t on a pipe nobody writes to: a fork-free sleep.
+      exec {tick}<> <(:)
+
+      # Poll until the VM answers PING with OK. Stops if the VM stops; after
+      # a minute without an answer (stuck or slow boot) polls every 5s.
+      while running "$vm_name"; do
         resp=$(printf 'PING\n' \
           | ${pkgs.socat}/bin/socat -T2 - VSOCK-CONNECT:"$cid":14509 2>/dev/null || true)
         [[ "$resp" == "OK" ]] && break
-        sleep 0.5
+        tries=$((tries + 1))
+        if ((tries < 120)); then read -rt 0.5 -u "$tick" || true; else read -rt 5 -u "$tick" || true; fi
       done
+      running "$vm_name" || return 0
 
       # Spawn waypipe-connect if not already running.
       if ! pgrep -f "waypipe-connect ''${vm_name}$" >/dev/null 2>&1; then
@@ -620,15 +628,17 @@
       fi
     }
 
+    # Only VMs with a display: infra VMs such as the router have a workspace
+    # for their console but no display-mode service to answer PING.
     while IFS= read -r entry; do
       VM_NAME=$(echo "$entry" | ${pkgs.jq}/bin/jq -r '.name')
       CID=$(echo "$entry" | ${pkgs.jq}/bin/jq -r '.cid')
 
-      if systemctl is-active --quiet "microvm@''${VM_NAME}.service" 2>/dev/null; then
+      if running "$VM_NAME"; then
         wait_and_connect "$VM_NAME" "$CID" &
       fi
     done < <(${pkgs.jq}/bin/jq -rc \
-      'to_entries[] | select(.value.workspace != null) | {cid: .value.cid, name: .value.vmName}' \
+      'to_entries[] | select(.value.workspace != null and .value.hasDisplay == true) | {cid: .value.cid, name: .value.vmName}' \
       "${VM_REGISTRY}" 2>/dev/null)
   '';
 
