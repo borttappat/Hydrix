@@ -77,29 +77,6 @@
   routerUser = routerCfg.username;
   routerHashedPassword = routerCfg.hashedPassword;
 
-  # WiFi networks for automatic connection (supports multiple networks)
-  # New format: wifiNetworks = [ { ssid = "..."; password = "..."; priority = 100; } ]
-  # Legacy format: wifiSSID + wifiPassword (converted to single-network list)
-  wifiNetworks = let
-    newFormat = routerCfg.wifi.networks;
-    legacySSID = routerCfg.wifi.ssid;
-    legacyPassword = routerCfg.wifi.password;
-    legacyNetwork =
-      if legacySSID != "" && legacyPassword != ""
-      then [
-        {
-          ssid = legacySSID;
-          password = legacyPassword;
-          priority = 100;
-        }
-      ]
-      else [];
-  in
-    if newFormat != []
-    then newFormat
-    else legacyNetwork;
-  hasWifiCredentials = wifiNetworks != [];
-
   # WiFi PCI address from hardware options
   wifiPciAddress = cfg.hardware.vfio.wifiPciAddress;
 
@@ -501,7 +478,7 @@ in {
       # state) lives on the tmpfs root and is wiped on every restart unless
       # hydrix.router.persistence.enable is set, in which case just
       # /var/lib/NetworkManager gets a small persistent qcow2 volume so
-      # runtime-added (nmcli) connections survive. Declared config (wifi.nix,
+      # runtime-added (nmcli) connections survive. Declared config (wifi.yaml,
       # hydrix.router.vpn.mullvad.*) is the source of truth for anything
       # declarative either way; no `shard purge` needed to clear stale
       # runtime state.
@@ -598,37 +575,16 @@ in {
       networkmanager = {
         enable = true;
         wifi.powersave = false; # Prevent missed broadcast ARP replies
-        # Store connections in /var/lib (persistent qcow2) instead of /etc (read-only squashfs)
+        # Runtime connections go to /var/lib (tmpfs, or the persistence volume
+        # when hydrix.router.persistence is on), not /etc (read-only). WiFi
+        # credentials arrive at boot from secrets/wifi.yaml, see
+        # hydrix-wifi-from-sops below; none are baked into the Nix store.
         settings = {
           keyfile.path = "/var/lib/NetworkManager/system-connections";
         };
         ensureProfiles.profiles =
-          # WiFi profiles (one per network)
-          (lib.optionalAttrs hasWifiCredentials
-            (builtins.listToAttrs (map (network: {
-                name = network.ssid;
-                value = {
-                  connection = {
-                    id = network.ssid;
-                    type = "wifi";
-                    autoconnect = "true";
-                    autoconnect-priority = toString (network.priority or 50);
-                  };
-                  wifi = {
-                    mode = "infrastructure";
-                    ssid = network.ssid;
-                  };
-                  wifi-security = {
-                    key-mgmt = "wpa-psk";
-                    psk = network.password;
-                  };
-                  ipv4.method = "auto";
-                  ipv6.method = "disabled";
-                };
-              })
-              wifiNetworks)))
           # Ethernet WAN profile (for macvtap/ethernet WAN mode)
-          // (lib.optionalAttrs useEthernetWan {
+          lib.optionalAttrs useEthernetWan {
             wan-ethernet = {
               connection = {
                 id = "wan-ethernet";
@@ -639,7 +595,7 @@ in {
               ipv4.method = "auto";
               ipv6.method = "disabled";
             };
-          });
+          };
       };
       # Not set here: NetworkManager's own module (networking.networkmanager)
       # sets wireless.enable = true + dbusControlled = true itself, to spin up
@@ -1163,8 +1119,9 @@ in {
 
     # ===== WiFi from Sops =====
     # Reads /mnt/vm-secrets/wifi/networks.json (delivered by host hydrix-secrets service)
-    # and creates NM connections for each network. No-op when file is absent so
-    # non-sops deployments (credentials still in modules/wifi.nix) are unaffected.
+    # and creates NM connections for each network. This is the only declared
+    # WiFi credential source; without secrets/wifi.yaml the router starts with
+    # no known networks (no-op here) and wifi-sync add / nmcli add them.
     systemd.services.hydrix-wifi-from-sops = {
       description = "Configure WiFi networks from sops secrets";
       wantedBy = ["network.target"];
@@ -1271,8 +1228,9 @@ in {
       ├─────────────────────────────────────────────────────┤
       │  vpn-status           Network & VPN status          │
       │  vpn-assign --help    VPN routing commands          │
-      │  wifi-sync            WiFi credential sync          │
-      │  lan-control          Pentest LAN toggle            │
+      │  router-lan-control   Pentest LAN toggle            │
+      │  nmcli device wifi    WiFi status and scan          │
+      │  nmcli con delete ID  Drop a saved WiFi profile     │
       └─────────────────────────────────────────────────────┘
 
     '';

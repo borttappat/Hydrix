@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
-# setup-wifi-secrets — Migrate WiFi credentials from modules/wifi.nix into sops
+# setup-wifi-secrets - Migrate WiFi credentials from an old modules/wifi.nix into sops
 #
-# Creates secrets/wifi.yaml (sops-encrypted) from the current modules/wifi.nix,
-# then guides you through the rest of the migration.
+# Hydrix no longer reads hydrix.router.wifi.networks (credentials in the Nix
+# store). This one-time migration creates secrets/wifi.yaml (sops-encrypted)
+# from that list, then guides you through the rest. New setups need no
+# migration: wifi-sync creates secrets/wifi.yaml on its first save.
 #
 # Prereqs: hydrix.secrets.enable = true, rebuild done (age key exists),
 #          sops CLI available, .sops.yaml configured with your age key as recipient.
@@ -61,7 +63,7 @@ PY
 
 COUNT=$(echo "$NETWORKS" | python3 -c "import json,sys; print(len(json.load(sys.stdin)))")
 if [[ "$COUNT" -eq 0 ]]; then
-  echo "No WiFi networks found in $WIFI_NIX — nothing to migrate." >&2
+  echo "No WiFi networks found in $WIFI_NIX, nothing to migrate. Delete it and its imports." >&2
   exit 1
 fi
 
@@ -95,12 +97,13 @@ echo "  1. git -C $CONFIG_DIR add secrets/wifi.yaml"
 echo "     git -C $CONFIG_DIR commit -m 'feat(secrets): add encrypted wifi credentials'"
 echo ""
 echo "  2. In your machine config, add:"
+echo "       hydrix.secrets.enable = true;"
 echo "       hydrix.secrets.wifiSecretsFile = ../secrets/wifi.yaml;"
-echo "       hydrix.microvmHost.vms.\"microvm-router\".secrets = [ \"wifi\" ];"
+echo "       and secrets = [ \"wifi\" ]; on the router entry in hydrix.microvmHost.vms"
 echo ""
-echo "  3. Empty the networks list in modules/wifi.nix:"
-echo "       hydrix.router.wifi.networks = lib.mkDefault [];"
+echo "  3. Delete modules/wifi.nix and every ./modules/wifi.nix import in flake.nix"
+echo "     (hydrix.router.wifi.networks no longer exists)."
 echo ""
 echo "  4. rebuild"
-echo "  5. shard purge microvm-router --force && shard rebuild router"
+echo "  5. shard -bR router"
 echo "  6. wifi-sync   # verify"

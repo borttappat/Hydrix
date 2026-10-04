@@ -703,14 +703,7 @@ In **Administrative** mode:
 
 ### WiFi Credentials and the Nix Store
 
-WiFi credentials declared directly in `modules/wifi.nix` are baked into the router VM's NixOS closure and end up in `/nix/store` as plaintext or WPA PSK hashes. Because all VMs share the host's `/nix/store` read-only via virtiofs, any VM (including a compromised browsing or pentest VM) can read those credentials by scanning the store.
-
-Hydrix solves this with sops-encrypted WiFi credentials stored in `secrets/wifi.yaml` and delivered only to the router VM at runtime via virtiofs. See [Secrets Management](#secrets-management) for setup, and [WiFi Credential Management](#wifi-credential-management-wifi-sync) for the `wifi-sync` workflow.
-
-If you do not set up sops, credentials remain in `modules/wifi.nix` and the mitigations are:
-- Full-disk encryption on the host (protects the store at rest)
-- Treat any profile VM as potentially able to read your WiFi PSKs
-- Avoid declaring sensitive network credentials (corporate VPN, etc.) in `wifi.nix`
+All VMs share the host's `/nix/store` read-only via virtiofs, so anything baked into a VM's closure is readable by every VM, including a compromised browsing or pentest VM. WiFi credentials are therefore never part of a build: they live sops-encrypted in `secrets/wifi.yaml` and are delivered only to the router VM at boot via virtiofs. There is no Nix option for declaring networks (`hydrix.router.wifi.networks` was removed). See [Secrets Management](#secrets-management) for setup, and [WiFi Credential Management](#wifi-credential-management-wifi-sync) for the `wifi-sync` workflow.
 
 ---
 
@@ -838,7 +831,6 @@ When you have a working `hydrix-config` on one machine and want to bring a secon
 │   ├── user.nix                 # Identity: username, colorscheme, WM, services
 │   ├── common.nix               # Locale, timezone, keyboard (host + all VMs)
 │   ├── graphical.nix            # UI: gaps, bar height, opacity, lockscreen
-│   ├── wifi.nix                 # WiFi credentials (managed by wifi-sync)
 │   ├── fonts.nix                # Font packages and per-app profiles
 │   ├── fish.nix                 # Shell abbreviations and functions
 │   ├── alacritty.nix            # Terminal cursor, keyboard overrides
@@ -1136,19 +1128,8 @@ shard rebuild comms
     type = "microvm";               # "microvm", "libvirt", or "none"
     autostart = true;
 
-    wifi = {
-      # Single network (legacy)
-      ssid = "MyNetwork";
-      password = "secret";           # Consider using sops-nix
-
-      # Multiple networks (takes precedence if non-empty)
-      networks = [
-        { ssid = "HomeNetwork"; password = "secret"; priority = 100; }
-        { ssid = "WorkNetwork"; password = "secret2"; priority = 50; }
-      ];
-    };
-
-    # Use wifi-sync to manage networks - see "WiFi Credential Management" section below
+    # WiFi networks are not declared here: they live in secrets/wifi.yaml,
+    # managed with wifi-sync (see "WiFi Credential Management" below).
 
     # Mullvad VPN integration
     vpn.mullvad = {
@@ -1172,82 +1153,39 @@ shard rebuild comms
 
 ### WiFi Credential Management (wifi-sync)
 
-`wifi-sync` manages WiFi networks stored in `secrets/wifi.yaml` (sops mode) or `modules/wifi.nix` (legacy mode). It communicates with the router VM over vsock port 14506. Sops mode is strongly recommended; see [Secrets Management](#secrets-management) for setup.
+`wifi-sync` manages WiFi networks stored sops-encrypted in `secrets/wifi.yaml`. It communicates with the router VM over vsock port 14506. See [Secrets Management](#secrets-management) for the sops setup; `wifi-sync` creates `secrets/wifi.yaml` on its first save.
 
 #### How it works
 
-The router VM maintains two NetworkManager connection directories:
+The router VM's NetworkManager keeps its connections in `/var/lib/NetworkManager/system-connections/`. At boot, `hydrix-wifi-from-sops` adds every network from `secrets/wifi.yaml` there (delivered via virtiofs, never through the Nix store). Networks added at runtime with `nmcli` or `wifi-sync add` land in the same directory.
 
-| Directory | Contents | Source |
-|---|---|---|
-| `/run/NetworkManager/system-connections/` | Declared networks, generated from `wifi.nix` at build time | NixOS build |
-| `/var/lib/NetworkManager/system-connections/` | Runtime-added networks | `nmcli` at runtime |
+The router reverts to its baseline on every boot: its `/var/lib` is ephemeral (tmpfs root, see [Infra VM Persistence Model](#infra-vm-persistence-model)), so runtime-added networks only last until the next restart unless they are saved to `secrets/wifi.yaml`. `wifi-sync add`/`pull` do that. `hydrix.router.persistence.enable` keeps `/var/lib/NetworkManager` on a small volume instead; leave it off unless a router must keep state of its own.
 
-The router VM's `/var/lib` is ephemeral (tmpfs root, wiped on every restart - see [Infra VM Persistence Model](#infra-vm-persistence-model)), so runtime-added networks only last until the next restart unless they're also saved back to your credential store. `wifi-sync add`/`pull` handle this automatically.
-
-`wifi-sync` (POLL command over vsock) reads both directories and diffs the result against your credential store to identify networks that are on the router but not yet saved locally.
-
-The waybar WiFi widget shows **+N** when the router has N connections that are not in your credential store. This is your signal to run `wifi-sync pull`.
+`wifi-sync` (POLL command over vsock) diffs the router's connections against `secrets/wifi.yaml`. The router reports per profile whether it ever connected (NetworkManager's `timestamps` file); profiles left by failed attempts are not counted. The waybar WiFi widget shows **+N** when the router has N connected networks that are not saved. This is your signal to run `wifi-sync pull`.
 
 #### Commands
 
 ```bash
 wifi-sync                    # Admin: status + pending count. Fallback: capture current connection
-wifi-sync add SSID PASSWORD  # Push network to router NM and save to credential store
-wifi-sync pull               # Merge all router connections into credential store
+wifi-sync add SSID PASSWORD  # Push network to router NM and save to secrets/wifi.yaml
+wifi-sync pull               # Save all connected router networks to secrets/wifi.yaml
 wifi-sync list               # Show saved networks
-wifi-sync remove SSID        # Remove from credential store and from router NM
+wifi-sync remove SSID        # Remove from secrets/wifi.yaml and from router NM
 ```
 
 **Admin mode** applies when the router VM is reachable via vsock (normal lockdown/administrative operation).
 
-**Fallback mode** applies when the router VM is not running (fallback specialisation with direct host WiFi). `wifi-sync` reads the current connection from the host's `nmcli` and saves it to the credential store.
+**Fallback mode** applies when the router VM is not running (fallback specialisation with direct host WiFi). `wifi-sync` reads the current connection from the host's `nmcli` and saves it to `secrets/wifi.yaml`.
 
-#### Sops mode workflow (recommended)
+No rebuild is needed to apply a change on the running router: `wifi-sync add` pushes the network to the router's live NM over vsock immediately. The saved file reaches the router on its next boot after a host `rebuild` (the host decrypts `secrets/wifi.yaml` from its own build).
 
-In sops mode, networks are stored in the age-encrypted `secrets/wifi.yaml`. Credentials never appear in the Nix store and are only decrypted at boot and delivered to the router VM. Other VMs have no access.
+#### Wiring (machine config)
 
-```bash
-# Add a new network (pushes to router NM immediately, saves to secrets/wifi.yaml):
-wifi-sync add "NetworkName" "password"
-
-# If the router already has a connection you want to save:
-wifi-sync pull
-
-# Check what is saved:
-wifi-sync list
-
-# Remove a network from both the credential store and the router:
-wifi-sync remove "NetworkName"
-```
-
-No rebuild is needed to apply credential changes. `wifi-sync add` pushes the network to the router's live NM over vsock immediately, and also saves it to `secrets/wifi.yaml` so it's declared and gets delivered via virtiofs on every future boot - the router's `/var/lib` is ephemeral, so anything added at runtime but not saved to the credential store is gone on the next restart.
-
-#### Legacy mode workflow (wifi.nix)
-
-In legacy mode, credentials live in `modules/wifi.nix` as WPA PSK hashes and are baked into the Nix store at build time.
-
-```bash
-wifi-sync add "NetworkName" "password"   # saves hash to wifi.nix
-rebuild
-shard restart router
-```
-
-The router's `/var/lib` is ephemeral, so a plain restart is enough - no `shard purge` needed.
-
-To migrate from legacy to sops mode:
-
-```bash
-setup-wifi-secrets    # reads modules/wifi.nix, encrypts to secrets/wifi.yaml
-git add secrets/wifi.yaml && git commit -m 'feat(secrets): add encrypted wifi credentials'
-```
-
-In `machines/<serial>.nix`, wire up the secret and deliver it to the router VM:
+The installer does this when WiFi credentials are given during installation. Otherwise, after the first `wifi-sync` save:
 
 ```nix
 hydrix.secrets = {
   enable = true;
-  wifi.enable = true;
   wifiSecretsFile = ../secrets/wifi.yaml;
 };
 
@@ -1256,24 +1194,16 @@ hydrix.microvmHost.vms = {
 };
 ```
 
-Empty the networks list in `modules/wifi.nix` (credentials now come from the sops secret):
+#### Migrating an old modules/wifi.nix
 
-```nix
-hydrix.router.wifi.networks = [];
-```
-
-Then apply:
+Older configs declared networks in `modules/wifi.nix` (`hydrix.router.wifi.networks`), which put them in the Nix store. That option no longer exists, and setting it fails evaluation with a message saying so. To migrate:
 
 ```bash
-rebuild
-shard purge router --force && shard rebuild router
+setup-wifi-secrets    # reads modules/wifi.nix, encrypts to secrets/wifi.yaml
+git add secrets/wifi.yaml
 ```
 
-After this the router VM receives credentials at boot via virtiofs - they are never baked into the Nix store and survive purges cleanly.
-
-#### Password storage
-
-Passwords are stored as 64-char WPA PSK hashes derived via `wpa_passphrase SSID PASSWORD`. NM accepts these directly and the plaintext password is never written to disk. However, in legacy mode the hashes are still readable by all VMs via the shared `/nix/store` - see [WiFi Credentials and the Nix Store](#wifi-credentials-and-the-nix-store). Migrating to sops mode eliminates this exposure.
+Then add the wiring above, delete `modules/wifi.nix` and its `./modules/wifi.nix` imports in `flake.nix`, `rebuild`, and `shard -bR router`.
 
 ### Networking
 
@@ -1724,7 +1654,6 @@ The `modules/` directory in your `hydrix-config` holds settings that apply to al
 |------|-----------------|-------------|
 | `user.nix` | Username, colorscheme, WM choice, shared services | Installer (fresh/add) |
 | `common.nix` | Locale, timezone, keyboard layout, system packages | Installer (auto-detected) |
-| `wifi.nix` | WiFi credentials for the router VM | `wifi-sync` |
 | `fonts.nix` | Font packages and per-app size relations | User |
 | `graphical.nix` | Opacity, bluelight filter, bar layout, lockscreen | User |
 | `waybar.nix` | Waybar config (Hyprland) | User |
@@ -3164,7 +3093,7 @@ systemd.tmpfiles.rules = let u = config.hydrix.username; in [
 
 ### USB Sandbox (microvm-usb-sandbox)
 
-Ephemeral VM for safely handling USB storage devices. USB drives are passed through via QEMU block device hotplug, isolated from all networks except the files VM.
+Ephemeral VM for safely handling USB storage devices. The whole USB device is hotplugged into it (`usb attach`); the host kernel never binds USB storage, so this VM's kernel is the only one that parses the medium. It is isolated from all networks except the files VM.
 
 **Network architecture:**
 
@@ -3181,7 +3110,7 @@ Host
 ```
 
 **Transfer flow (USB → VM):**
-1. Host -> usb-sandbox (vsock 14506): `ENCRYPT <passphrase> usb/vdb1/file` encrypts AES-256-CBC to `~/shared/xfer.enc`
+1. Host -> usb-sandbox (vsock 14506): `ENCRYPT <passphrase> usb/sda1/file` encrypts AES-256-CBC to `~/shared/xfer.enc`
 2. Host -> usb-sandbox (vsock 14506): `SERVE` starts HTTP server on port 8888
 3. Host -> files VM (vsock 14505): `FETCH 192.168.209.10 xfer.enc` files VM pulls ciphertext over br-usb-sandbox
 4. Host -> files VM (vsock 14505): `DELIVER <dest-ip> xfer.enc` files VM pushes to destination VM
@@ -3203,20 +3132,27 @@ rebuild
 shard start microvm-usb-sandbox
 ```
 
-**Host-side USB device pass-through:**
+**Host-side USB device pass-through** (Hydrix `host/usb.nix`):
+
+The host blocks `usb_storage` and `uas` (initrd included, `hydrix.usb.blockHostStorage`,
+default on; set it false in a fallback specialisation so install media works). Plugging a
+stick in only sends a notification. Nothing attaches without an explicit command that shows
+the device and target and asks y/N:
 
 ```bash
-# List USB storage devices (format: BUS-ADDR, e.g., 002-003)
-usb list
-
-# Pass device to VM (QEMU USB hotplug)
-usb-sandbox add 002-003
-
-# Detach device from VM
-usb-sandbox remove 002-003
+usb list                         # storage devices, where attached, which VMs accept them
+usb attach <busid> usb-sandbox   # e.g. usb attach 4-1 usb-sandbox; -y skips the prompt
+usb detach <busid>               # unmount inside the VM first
 ```
 
-The `usb-sandbox add` command hotplugs the USB storage as `/dev/vdb` (read-only) into the VM via QEMU `drive_add` + `device_add virtio-blk-pci`. The device persists until explicitly removed or VM restart.
+Any microVM whose `meta.nix` sets `usbPassthrough = true` accepts devices this way (an xHCI
+controller plus QMP `device_add usb-host`); libvirt domains get a `virsh attach-device` USB
+hostdev. In a Hydrix microVM, USB block devices arrive read-only (a guest udev rule);
+`usb-rw <dev>` (`usb rw` in usb-sandbox) makes one writable.
+
+Devices a VM should always have, such as a USB WiFi adapter for the pentest VM, go in its
+`meta.nix` as `usbDevices = [ "148f:5572" ];` (vendor:product from `lsusb`). They attach at
+VM start and on replug, and the host grants the `kvm` group access to exactly those IDs.
 
 **Inside the VM (auto-logged in as `sandbox`):**
 
@@ -3227,14 +3163,14 @@ usb list
 # Scan for filesystems
 usb scan
 
-# Mount partition (e.g., /dev/vdb1)
-usb mount /dev/vdb1
+# Mount partition (e.g., /dev/sda1), read-only until `usb rw /dev/sda`
+usb mount /dev/sda1
 
 # View mounted files
-ls ~/usb/vdb1/
+ls ~/usb/sda1/
 
 # Unmount
-usb umount /dev/vdb1
+usb umount /dev/sda1
 
 # USB device info
 lsusb
@@ -3247,10 +3183,10 @@ lsblk
 
 ```bash
 # Archive from USB to files VM (encrypted)
-shard files store usb-sandbox/usb/vdb1/<path>
+shard files store usb-sandbox/usb/sda1/<path>
 
 # Transfer to another VM
-shard files transfer usb-sandbox/usb/vdb1/<path> dev/<dest>
+shard files transfer usb-sandbox/usb/sda1/<path> dev/<dest>
 ```
 
 Paths are relative to `/home/sandbox/` inside the VM. USB drives mount at `/home/sandbox/usb/`.
@@ -3261,10 +3197,10 @@ Paths are relative to `/home/sandbox/` inside the VM. USB drives mount at `/home
 |------------|--------|
 | Network isolation from host |  Isolated bridge, no host IP, no internet |
 | Network isolation from other VMs |  Only files VM access via br-usb-sandbox (port 8888) |
-| Read-only USB access |  USB passed as `/dev/vdb` read-only |
+| Read-only USB access |  Set read-only on arrival in the VM; `usb rw` lifts it |
 | Encrypted file transfers |  AES-256-CBC via files VM |
-| Block device hotplug |  QEMU monitor socket, no libusb on host |
-| **Host USB driver vulnerabilities** |  **Not protected** |
+| Host never parses the medium |  `usb_storage`/`uas` blocked on the host; whole device passed after y/N |
+| **Host USB core (enumeration)** |  **Not protected** |
 | **Firmware-level attacks** |  **Not protected** |
 | **Malicious USB peripherals** |  **Not protected** (only storage) |
 
@@ -4453,8 +4389,8 @@ All scripts are wrapped via Nix and available in PATH after installation.
 | `wifi-sync list` | Show known networks in credential store |
 | `wifi-sync remove SSID` | Remove a network from credential store and router NM |
 
-Credential store is `secrets/wifi.yaml` (sops mode, recommended) if it exists, otherwise
-`modules/wifi.nix` (legacy mode). See [WiFi Credential Management](#wifi-credential-management-wifi-sync).
+The credential store is `secrets/wifi.yaml` (sops), created on the first save. See
+[WiFi Credential Management](#wifi-credential-management-wifi-sync).
 
 ### MicroVM
 
@@ -4649,19 +4585,13 @@ shard console router
 nmcli device status
 ```
 
-### New WiFi Network Not Connecting After Rebuild
+### Changed WiFi Password Not Taken
 
-Rebuilding and restarting the router VM is not enough when you add or remove a network from `wifi.nix`. NetworkManager's persistent state in `/var/lib/NetworkManager/` survives VM restarts and takes precedence over the newly generated `/run/` connections.
-
-Fix: purge the router VM so it starts with a clean NM state:
-
-```bash
-shard purge router --force
-shard build router
-shard start router
-```
-
-After a purge, only the connections declared in `wifi.nix` (written to `/run/` at boot) exist, and NM connects normally.
+At boot the router adds each network from `secrets/wifi.yaml` that NetworkManager does not
+already have; an existing profile with the same name is left alone. The router reverts to its
+baseline on every boot, so after `wifi-sync add` and a host `rebuild`, a router restart
+(`shard -R router`) is enough. With `hydrix.router.persistence.enable` the old profile survives
+on the volume: replace it with `wifi-sync remove SSID` followed by `wifi-sync add SSID PASSWORD`.
 
 ### Host Has No Internet (Expected in Lockdown)
 

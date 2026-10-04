@@ -166,10 +166,6 @@
         done
     fi
 
-    # === Starship prompt ===
-    # Uses static config from configs/starship/starship.toml
-    # No runtime generation needed
-
     # === Sync wal cache to hydrix-config for VMs ===
     # VMs mount ~/.config/hydrix via 9p and can read wal colors from there
     # Skip this in VMs (they have /mnt/hydrix-config as a read-only mount)

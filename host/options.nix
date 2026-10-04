@@ -10,6 +10,10 @@
 }: let
   cfg = config.hydrix;
 in {
+  imports = map (o:
+    lib.mkRemovedOptionModule ["hydrix" "router" "wifi" o]
+    "WiFi credentials live in secrets/wifi.yaml (hydrix.secrets.wifiSecretsFile), not in the Nix store. Migrate an old modules/wifi.nix with setup-wifi-secrets, then delete the file and its imports.") ["networks" "ssid" "password"];
+
   options.hydrix = {
     # =========================================================================
     # ROUTER
@@ -39,12 +43,11 @@ in {
           description = ''
             Persist /var/lib/NetworkManager across router VM restarts, via a small
             qcow2 volume. By default the router's /var/lib is fully ephemeral
-            (tmpfs), so WiFi networks added at runtime via nmcli/NetworkManager's own
-            UI are lost on every restart - declaratively-managed networks
-            (hydrix.router.wifi.networks / modules/wifi.nix) are unaffected either
-            way, since those are baked into the build. Enable this if the router is
-            meant to be an everyday network gateway where ad-hoc connections should
-            survive a restart.
+            (tmpfs) and the router reverts to its baseline on every boot: WiFi
+            networks added at runtime via nmcli are lost on restart, while those
+            in secrets/wifi.yaml (hydrix.secrets.wifiSecretsFile) are delivered
+            on every boot. Save runtime networks with `wifi-sync pull`. Enable
+            this only for a router that must keep state of its own.
           '';
         };
 
@@ -70,57 +73,6 @@ in {
           automatically and sudo needs no password, so this only matters for
           polkit prompts (plain systemctl) and anyone else with console access.
         '';
-      };
-
-      wifi = {
-        ssid = lib.mkOption {
-          type = lib.types.str;
-          default = "";
-          description = "WiFi network SSID for automatic connection (legacy single-network)";
-        };
-
-        password = lib.mkOption {
-          type = lib.types.str;
-          default = "";
-          description = "WiFi network password (legacy single-network)";
-        };
-
-        networks = lib.mkOption {
-          type = lib.types.listOf (lib.types.submodule {
-            options = {
-              ssid = lib.mkOption {
-                type = lib.types.str;
-                description = "WiFi network SSID";
-              };
-              password = lib.mkOption {
-                type = lib.types.str;
-                description = "WiFi network password";
-              };
-              priority = lib.mkOption {
-                type = lib.types.int;
-                default = 50;
-                description = "Connection priority (higher = preferred)";
-              };
-            };
-          });
-          default = [];
-          description = ''
-            List of WiFi networks for automatic connection.
-            Takes precedence over ssid/password if non-empty.
-          '';
-          example = [
-            {
-              ssid = "HomeNetwork";
-              password = "secret";
-              priority = 100;
-            }
-            {
-              ssid = "WorkNetwork";
-              password = "secret2";
-              priority = 50;
-            }
-          ];
-        };
       };
 
       # WAN config for the microvm router

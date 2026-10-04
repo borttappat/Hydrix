@@ -19,5 +19,6 @@
     ./hardware/amd.nix
     ./hardware/asus.nix
     ./webcam-passthrough.nix
+    ./usb.nix           # USB storage block, usb attach CLI, static VM devices
   ];
 }

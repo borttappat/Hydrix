@@ -1,15 +1,18 @@
 #!/usr/bin/env bash
-# wifi-sync - Manage known WiFi networks in modules/wifi.nix
+# wifi-sync - Manage known WiFi networks in secrets/wifi.yaml (sops)
 #
 # Admin mode (router VM reachable via vsock):
 #   wifi-sync              Show status: current SSID, known list, router connections
-#   wifi-sync add SSID PW  Push network to router NM + save to wifi.nix
-#   wifi-sync pull         Merge all router NM connections into wifi.nix
-#   wifi-sync list         Show known networks in wifi.nix
-#   wifi-sync remove SSID  Remove a network from wifi.nix
+#   wifi-sync add SSID PW  Push network to router NM + save to wifi.yaml
+#   wifi-sync pull         Merge all router NM connections into wifi.yaml
+#   wifi-sync list         Show known networks in wifi.yaml
+#   wifi-sync remove SSID  Remove a network from wifi.yaml and from the router
 #
 # Fallback mode (direct WiFi on host, router VM not running):
-#   wifi-sync              Auto-detect current connection via nmcli, save to wifi.nix
+#   wifi-sync              Auto-detect current connection via nmcli, save to wifi.yaml
+#
+# The first save creates secrets/wifi.yaml, encrypted for the recipients in
+# secrets/.sops.yaml. The router receives it through hydrix.secrets.wifiSecretsFile.
 
 set -euo pipefail
 
@@ -22,8 +25,9 @@ else
   echo "Error: hydrix-config not found" >&2; exit 1
 fi
 
-WIFI_NIX="$CONFIG_DIR/modules/wifi.nix"
 WIFI_YAML="$CONFIG_DIR/secrets/wifi.yaml"
+SOPS_CONFIG="$CONFIG_DIR/secrets/.sops.yaml"
+export SOPS_AGE_KEY_FILE="${SOPS_AGE_KEY_FILE:-$HOME/.config/sops/age/keys.txt}"
 ROUTER_PORT=14506
 
 VM_REGISTRY="/etc/hydrix/vm-registry.json"
@@ -66,96 +70,44 @@ poll_pending() {
     '[.[] | select(.connected != false) | select(.ssid as $s | $l | all(.[]; .ssid != $s))]'
 }
 
-# Derive WPA PSK hash from SSID + plaintext password.
-# Pass-through if already a 64-char hex hash.
-hash_psk() {
-  local ssid="$1" pass="$2"
-  if [[ ${#pass} -eq 64 && "$pass" =~ ^[0-9a-f]+$ ]]; then
-    echo "$pass"
-    return
-  fi
-  wpa_passphrase "$ssid" "$pass" | grep -E '^\s+psk=' | grep -v '#' | sed 's/.*psk=//'
-}
-
-# Parse wifi networks -> JSON [{ssid,psk,priority}]
-# Sops mode (secrets/wifi.yaml exists): decrypt via sops --extract.
-# Legacy mode: parse modules/wifi.nix directly.
+# Known networks -> JSON [{ssid,psk,priority}], from secrets/wifi.yaml.
 read_nix() {
-  if [[ -f "$WIFI_YAML" ]]; then
-    local raw
-    raw=$(SOPS_AGE_KEY_FILE="$HOME/.config/sops/age/keys.txt" sops --decrypt --extract '["networks"]' "$WIFI_YAML" 2>/dev/null || echo "[]")
-    # Ensure each entry has a priority field
-    echo "$raw" | jq '[.[] | . + {"priority": (.priority // 100)}]' 2>/dev/null || echo "[]"
-    return
-  fi
-  [[ -f "$WIFI_NIX" ]] || { echo "[]"; return; }
-  python3 - "$WIFI_NIX" <<'PY'
-import sys, re, json
-content = open(sys.argv[1]).read()
-m = re.search(r'\.networks\s*=\s*\[(.*?)\]', content, re.DOTALL)
-if m:
-    entries = []
-    for e in re.finditer(r'\{([^}]+)\}', m.group(1)):
-        s  = re.search(r'ssid\s*=\s*"([^"]*)"', e.group(1))
-        p  = re.search(r'(?:password|psk)\s*=\s*"([^"]*)"', e.group(1))
-        pr = re.search(r'priority\s*=\s*(\d+)', e.group(1))
-        if s and p:
-            entries.append({"ssid": s.group(1), "psk": p.group(1),
-                            "priority": int(pr.group(1)) if pr else 100})
-    print(json.dumps(entries)); sys.exit(0)
-# Legacy single-network format
-s = re.search(r'ssid\s*=\s*"([^"]*)"', content)
-p = re.search(r'(?:password|psk)\s*=\s*"([^"]*)"', content)
-if s and p:
-    print(json.dumps([{"ssid": s.group(1), "psk": p.group(1), "priority": 100}]))
-else:
-    print("[]")
-PY
+  [[ -f "$WIFI_YAML" ]] || { echo "[]"; return; }
+  local raw
+  raw=$(sops --decrypt --extract '["networks"]' "$WIFI_YAML" 2>/dev/null || echo "[]")
+  echo "$raw" | jq '[.[] | . + {"priority": (.priority // 100)}]' 2>/dev/null || echo "[]"
 }
 
-# Write JSON array back to the appropriate store.
-# Sops mode (secrets/wifi.yaml exists): update the sops file in-place via --set.
-# Legacy mode: write modules/wifi.nix directly.
+# Write the JSON array back to secrets/wifi.yaml. sops --set updates the one
+# key in place; the networks array is stored as a JSON string. A missing file
+# is created and encrypted for the recipients in secrets/.sops.yaml.
 write_nix() {
-  local json="$1"
-  if [[ -f "$WIFI_YAML" ]]; then
-    # sops --set updates a single key without touching other keys or re-keying.
-    # The value argument must be a JSON-encoded string (networks is a JSON array stored as string).
-    local json_str
-    json_str=$(python3 -c "import sys, json; print(json.dumps(sys.argv[1]))" "$json")
-    if ! SOPS_AGE_KEY_FILE="$HOME/.config/sops/age/keys.txt" sops --set '["networks"] '"$json_str" "$WIFI_YAML" 2>/tmp/wifi-sync-sops-err; then
-      error "Failed to write to $WIFI_YAML: $(cat /tmp/wifi-sync-sops-err)"
-      return 1
+  local json="$1" json_str err
+  json_str=$(python3 -c "import sys, json; print(json.dumps(sys.argv[1]))" "$json")
+  err=$(mktemp)
+  if [[ ! -f "$WIFI_YAML" ]]; then
+    [[ -f "$SOPS_CONFIG" ]] || error "No $SOPS_CONFIG. Set up sops first (hydrix-sops-setup)."
+    if ! printf 'networks: %s\n' "$json_str" \
+      | sops --config "$SOPS_CONFIG" --encrypt --filename-override "$WIFI_YAML" \
+          --input-type yaml --output-type yaml /dev/stdin > "$WIFI_YAML.tmp" 2>"$err"; then
+      rm -f "$WIFI_YAML.tmp"
+      error "Failed to create $WIFI_YAML: $(cat "$err")"
     fi
-    success "Updated $WIFI_YAML"
+    mv "$WIFI_YAML.tmp" "$WIFI_YAML"
+    rm -f "$err"
+    success "Created $WIFI_YAML"
+    log "Wire it up in your machine config if it is not yet:"
+    log "  hydrix.secrets.enable = true;"
+    log "  hydrix.secrets.wifiSecretsFile = ../secrets/wifi.yaml;"
+    log "  router VM entry in hydrix.microvmHost.vms: secrets = [ \"wifi\" ];"
+    log "Then git add secrets/wifi.yaml, rebuild, and shard -bR router."
     return
   fi
-  local count
-  count=$(echo "$json" | jq 'length')
-  {
-    printf '# WiFi Configuration - Shared across all machines\n'
-    printf '#\n'
-    printf '# Run '"'"'wifi-sync add SSID PASSWORD'"'"' (admin mode) to add via router.\n'
-    printf '# Run '"'"'wifi-sync'"'"' (fallback mode) to capture the current host connection.\n'
-    printf '# Run '"'"'wifi-sync pull'"'"' to merge all router NM connections into this list.\n'
-    printf '\n{ config, lib, pkgs, ... }:\n\n{\n'
-    if [[ "$count" -eq 0 ]]; then
-      printf '  hydrix.router.wifi.networks = [];\n'
-    else
-      printf '  hydrix.router.wifi.networks = [\n'
-      local i=0
-      while [[ $i -lt $count ]]; do
-        local ssid psk pri
-        ssid=$(echo "$json" | jq -r ".[$i].ssid")
-        psk=$(echo "$json"  | jq -r ".[$i].psk")
-        pri=$(echo "$json"  | jq -r ".[$i].priority // 100")
-        printf '    { ssid = "%s"; password = "%s"; priority = %s; }\n' "$ssid" "$psk" "$pri"
-        i=$((i + 1))
-      done
-      printf '  ];\n'
-    fi
-    printf '}\n'
-  } > "$WIFI_NIX"
+  if ! sops --set '["networks"] '"$json_str" "$WIFI_YAML" 2>"$err"; then
+    error "Failed to write to $WIFI_YAML: $(cat "$err")"
+  fi
+  rm -f "$err"
+  success "Updated $WIFI_YAML"
 }
 
 # Merge one network into JSON array (update psk if SSID exists, append if new)
@@ -192,19 +144,19 @@ case "$CMD" in
         known=$(echo "$local_nets" | jq --arg s "$current" 'any(.[]; .ssid == $s)')
         [[ "$known" == "true" ]] \
           && log "${GREEN}Connected: $current (known)${NC}" \
-          || warn "Connected: $current - NOT in wifi.nix. Run: wifi-sync pull"
+          || warn "Connected: $current - NOT in wifi.yaml. Run: wifi-sync pull"
       else
         log "Connected: (none)"
       fi
       log ""
-      log "${CYAN}Known networks in wifi.nix ($local_count):${NC}"
+      log "${CYAN}Known networks in wifi.yaml ($local_count):${NC}"
       echo "$local_nets" | jq -r 'sort_by(-.priority)[] | "  \(.ssid)  [priority \(.priority)]"'
       log ""
       log "${CYAN}All connections on router ($router_count):${NC}"
       echo "$connections" | jq -r '.[].ssid | "  \(.)"' 2>/dev/null
       if [[ "$pending_count" -gt 0 ]]; then
         log ""
-        warn "Not yet in wifi.nix ($pending_count) - run: wifi-sync pull"
+        warn "Not yet in wifi.yaml ($pending_count) - run: wifi-sync pull"
         echo "$pending" | jq -r '.[].ssid | "  \(.)"' 2>/dev/null
       fi
     else
@@ -218,11 +170,9 @@ case "$CMD" in
       [[ -z "$ssid" ]] && error "No WiFi detected. Are you connected in fallback mode?"
       [[ -z "$psk"  ]] && error "Connected to '$ssid' but password unreadable."
       local_nets=$(read_nix)
-      hashed=$(hash_psk "$ssid" "$psk")
-      merged=$(merge_one "$local_nets" "$ssid" "$hashed")
+      merged=$(merge_one "$local_nets" "$ssid" "$psk")
       write_nix "$merged"
-      success "Saved '$ssid' to $WIFI_NIX"
-      log "Run ${BOLD}rebuild${NC} to bake into router VM."
+      log "The router gets it on its next start after ${BOLD}rebuild${NC}."
     fi
     ;;
 
@@ -242,15 +192,9 @@ case "$CMD" in
     psk=$(echo "$poll" | jq -r --arg s "$ssid" \
       '.connections[] | select(.ssid == $s) | .psk // ""' 2>/dev/null | head -1)
     [[ -z "$psk" ]] && psk="$pass"
-    # Sops mode: store plaintext PSK (nmcli handles hashing internally).
-    # Legacy mode: hash the PSK for modules/wifi.nix (NixOS NM ensureProfiles needs it).
-    [[ ! -f "$WIFI_YAML" ]] && psk=$(hash_psk "$ssid" "$psk")
     local_nets=$(read_nix)
     merged=$(merge_one "$local_nets" "$ssid" "$psk")
-    if write_nix "$merged"; then
-      [[ -f "$WIFI_YAML" ]] \
-        || success "Saved to $WIFI_NIX. Run ${BOLD}rebuild${NC} to make it permanent."
-    fi
+    write_nix "$merged"
     ;;
 
   pull)
@@ -260,60 +204,58 @@ case "$CMD" in
     local_nets=$(read_nix)
     pending=$(poll_pending "$(echo "$poll" | jq '.connections // []')" "$local_nets")
     count=$(echo "$pending" | jq 'length' 2>/dev/null || echo 0)
-    if [[ -f "$WIFI_YAML" ]]; then
-      [[ "$count" -gt 0 ]] || { log "No pending networks on router - all already in $WIFI_YAML."; exit 0; }
-    else
-      [[ "$count" -gt 0 ]] || { log "No pending networks on router - all already in wifi.nix."; exit 0; }
-    fi
+    [[ "$count" -gt 0 ]] || { log "No pending networks on router - all already in $WIFI_YAML."; exit 0; }
     merged="$local_nets"; added=0; updated=0
     i=0
     while [[ $i -lt $count ]]; do
       ssid=$(echo "$pending" | jq -r ".[$i].ssid")
       psk=$(echo "$pending"  | jq -r ".[$i].psk // \"\"")
-      # In sops mode the PSK from NM is already plaintext - store as-is (not hashed).
-      # In legacy mode, hash it for wifi.nix (NixOS NetworkManager ensureProfiles needs PSK or hash).
-      [[ ! -f "$WIFI_YAML" ]] && psk=$(hash_psk "$ssid" "$psk")
       exists=$(echo "$merged" | jq --arg s "$ssid" 'any(.[]; .ssid == $s)')
       [[ "$exists" == "true" ]] && updated=$((updated + 1)) || added=$((added + 1))
       merged=$(merge_one "$merged" "$ssid" "$psk")
       i=$((i + 1))
     done
     write_nix "$merged"
-    [[ -f "$WIFI_YAML" ]] \
-      || success "Updated $WIFI_NIX: +$added new, $updated updated. Run ${BOLD}rebuild${NC} to apply."
+    log "+$added new, $updated updated."
     ;;
 
   list)
     local_nets=$(read_nix)
     count=$(echo "$local_nets" | jq 'length')
-    if [[ -f "$WIFI_YAML" ]]; then
-      log "${CYAN}Known WiFi networks ($count) [from secrets/wifi.yaml]:${NC}"
-    else
-      log "${CYAN}Known WiFi networks ($count) [from modules/wifi.nix]:${NC}"
-    fi
+    log "${CYAN}Known WiFi networks ($count) [from secrets/wifi.yaml]:${NC}"
     echo "$local_nets" | jq -r 'sort_by(-.priority)[] | "  \(.ssid)  [priority \(.priority)]"'
     ;;
 
   remove)
     [[ $# -ge 2 ]] || error "Usage: wifi-sync remove SSID"
     target="$2"
+    # Removes from the credential store when saved there, and from the router
+    # either way: a router-only profile (e.g. left by a failed connection
+    # attempt) has no store entry.
+    removed=0
     local_nets=$(read_nix)
     exists=$(echo "$local_nets" | jq --arg s "$target" 'any(.[]; .ssid == $s)')
-    [[ "$exists" == "true" ]] || error "'$target' not found in credential store"
-    updated=$(echo "$local_nets" | jq --arg s "$target" '[.[] | select(.ssid != $s)]')
-    write_nix "$updated"
-    success "Removed '$target' from credential store"
+    if [[ "$exists" == "true" ]]; then
+      updated=$(echo "$local_nets" | jq --arg s "$target" '[.[] | select(.ssid != $s)]')
+      write_nix "$updated"
+      success "Removed '$target' from credential store"
+      removed=1
+    else
+      log "'$target' is not in the credential store"
+    fi
     if is_admin; then
       result=$(r_remove "$target")
       ok=$(echo "$result" | jq -r '.ok' 2>/dev/null)
       if [[ "$ok" == "true" ]]; then
         success "Removed '$target' from router NM"
+        removed=1
       else
         warn "Router: $(echo "$result" | jq -r '.error // "not found (already gone?)"' 2>/dev/null)"
       fi
     else
       warn "Router not reachable - delete manually: nmcli con delete \"$target\""
     fi
+    [[ "$removed" == 1 ]] || error "'$target' not found in the credential store or on the router"
     ;;
 
   count)
@@ -329,8 +271,7 @@ case "$CMD" in
       poll=$(r_poll)
     fi
     connections=$(jq -c '(.wifi // .) | .connections // []' <<< "$poll" 2>/dev/null) || connections='[]'
-    src="$WIFI_NIX"
-    [[ -f "$WIFI_YAML" ]] && src="$WIFI_YAML"
+    src="$WIFI_YAML"
     cache="${XDG_RUNTIME_DIR:-/tmp}/hydrix-wifi-known-ssids"
     stamp="$(stat -c '%Y' "$src" 2>/dev/null || echo none) $src"
     if [[ ! -f "$cache" ]] || [[ "$(head -n1 "$cache")" != "$stamp" ]]; then
@@ -349,15 +290,13 @@ Usage: wifi-sync [command] [args]
   (none)            Admin: show status.  Fallback: capture current connection.
   add SSID PASS     Push to router NM + save credentials (admin mode)
   pull              Merge all router NM connections into credential store (admin mode)
-  list              Show known networks (reads secrets/wifi.yaml or modules/wifi.nix)
+  list              Show known networks in secrets/wifi.yaml
   remove SSID       Remove a network from credential store
   count [JSON]      Print number of unsaved router connections (for scripts/widgets);
                     JSON: router POLL/ALL output the caller already has
 
-Sops mode (secrets/wifi.yaml exists): reads/writes the encrypted file directly.
-Legacy mode (no wifi.yaml): reads/writes modules/wifi.nix - requires rebuild to apply.
-
-To migrate to sops mode: run setup-wifi-secrets
+Credentials live in secrets/wifi.yaml (sops). The first save creates it.
+An old modules/wifi.nix network list migrates with: setup-wifi-secrets
 USAGE
     ;;
 esac

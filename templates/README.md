@@ -38,7 +38,6 @@ templates/user-config/               # Becomes ~/hydrix-config/
 │   ├── common.nix                   # Locale, timezone, keyboard
 │   ├── graphical.nix                # UI prefs: gaps, bar, opacity, lockscreen
 │   ├── fonts.nix                    # Font package + per-app profiles
-│   ├── wifi.nix                     # WiFi credentials (managed by wifi-sync)
 │   ├── fish.nix                     # Shell aliases, abbreviations, functions
 │   ├── alacritty.nix                # Terminal cursor, keyboard overrides
 │   ├── notifications.nix            # Notification popup size, sound, timeouts
@@ -58,8 +57,7 @@ templates/user-config/               # Becomes ~/hydrix-config/
 │   ├── repos.nix                    # Declarative git repo clone list
 │   ├── host-packages.nix            # Host-only packages beyond framework defaults
 │   ├── shell-packages.nix           # Shell packages present on host and all VMs
-│   ├── vm-packages.nix              # Packages present in all profile VMs
-│   └── usb-blocking.nix             # USB new-device blocking in lockdown mode
+│   └── vm-packages.nix              # Packages present in all profile VMs
 ├── profiles/                        # Graphical VM overrides
 │   ├── browsing/
 │   │   ├── meta.nix                 # CID 103, br-browse, ws 3, label BROWSING
@@ -96,18 +94,9 @@ templates/user-config/               # Becomes ~/hydrix-config/
 │   ├── iosevka.nix                  # Iosevka per-app size relations
 │   ├── tamzen.nix                   # Tamzen per-app size relations
 │   └── cozette.nix                  # Cozette per-app size relations
-├── configs/                         # Plain-text config files (not Nix)
-│   ├── starship/starship.toml       # Starship prompt (reference, not auto-used)
-│   ├── ranger/                      # Ranger rc.conf, rifle.conf, scope.sh
-│   ├── vim/.vimrc                   # Vim config (reference)
-│   ├── joshuto/                     # Joshuto file manager config
-│   ├── htop/htoprc                  # htop config
-│   ├── zathura/zathurarc            # Zathura PDF viewer config
-│   └── vm-workspaces.json           # Workspace→VM label overrides
 ├── vpn/
 │   └── mullvad.nix                  # Per-bridge Mullvad exit node mapping
-├── custom/
-│   └── usb-wifi-passthrough.nix     # Example: USB WiFi dongle passthrough to router
+├── custom/                          # Your own modules (created empty)
 └── templates/
     └── profiles/_template/          # Scaffold for new-profile command
         ├── meta.nix                 # __CID__, __BRIDGE__, __WORKSPACE__ placeholders
@@ -172,16 +161,21 @@ Not populated by the installer. Copied from templates with all options commented
 
 All options use `lib.mkDefault` so per-machine overrides work with plain assignment.
 
-### modules/wifi.nix - WiFi Credentials
+### WiFi Credentials (secrets/wifi.yaml)
 
-Managed by `wifi-sync`, not by hand. The installer may pre-populate with the WiFi network used during installation, but subsequent changes should go through `wifi-sync`:
+Known networks live sops-encrypted in `secrets/wifi.yaml` and reach the router VM at boot
+through `hydrix.secrets.wifiSecretsFile`; nothing is baked into the Nix store. The installer
+creates the file from the WiFi used during installation; afterwards use `wifi-sync`, which
+creates it on its first save if it does not exist:
 
 ```bash
 wifi-sync add "NetworkName" "password"
+wifi-sync pull                 # save networks added on the router at runtime
 wifi-sync remove "OldNetwork"
 ```
 
-**Security note**: WiFi PSK hashes end up in the nix store (shared read-only with all VMs). See the Security Model section in DOCUMENTATION.md.
+An older config with a `modules/wifi.nix` network list migrates with `setup-wifi-secrets`
+(`hydrix.router.wifi.networks` no longer exists).
 
 ### modules/fonts.nix - Font Configuration
 
@@ -248,9 +242,13 @@ Declares repos that are cloned automatically on first login:
 }
 ```
 
-### modules/usb-blocking.nix - USB Device Blocking
+### USB devices (framework, `host/usb.nix`)
 
-Imported by the default machine template. Blocks new USB device authorization in lockdown mode and re-enables it in administrative mode. Managed automatically by boot mode switching.
+The host never binds USB storage (`hydrix.usb.blockHostStorage`, default on; the fallback
+specialisation turns it off). Plugging in a stick only notifies; `usb attach <busid> <vm>`
+hands the whole device to a microVM whose `meta.nix` sets `usbPassthrough = true` (or a libvirt
+domain) after a y/N prompt. Devices a VM should always have, such as a USB WiFi adapter for
+pentest, go in its `meta.nix` as `usbDevices = [ "148f:5572" ];` (vendor:product from `lsusb`).
 
 ---
 

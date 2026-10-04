@@ -180,7 +180,6 @@ in {
     environment.systemPackages =
       scriptPackages
       ++ [
-        pkgs.wpa_supplicant # provides wpa_passphrase for wifi-sync PSK hashing
         hydrixInfo
         # Backwards compatibility alias
         (pkgs.writeShellScriptBin "nixbuild" ''

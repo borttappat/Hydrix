@@ -14,8 +14,8 @@
 { config, lib, pkgs, ... }:
 
 {
-  # Reinstall/recovery media must work on the host here (modules/usb-blocking.nix).
-  hydrix.usbSandbox.blockHostStorage = false;
+  # Reinstall/recovery media must work on the host here.
+  hydrix.usb.blockHostStorage = false;
 
   environment.systemPackages = with pkgs; [
     # WiFi tools (essential for fallback)

@@ -348,6 +348,11 @@ in {
               default = false;
               description = "Whether this VM accepts whole USB devices from the host (`usb attach <busid> <vm>`). Set in meta.nix; the VM's hydrix.microvm.usbPassthrough.enable reads the same value.";
             };
+            usbDevices = lib.mkOption {
+              type = lib.types.listOf (lib.types.strMatching "[0-9a-f]{4}:[0-9a-f]{4}");
+              default = [];
+              description = "USB devices (\"vendor:product\", lowercase hex from lsusb) attached to this VM whenever it runs. Set in meta.nix; the VM's hydrix.microvm.usbPassthrough.devices reads the same value, and the host grants the kvm group access to exactly these IDs.";
+            };
             taskSlot = lib.mkOption {
               type = lib.types.nullOr lib.types.str;
               default = null;
@@ -511,7 +516,8 @@ in {
         description = ''
           Path to the encrypted wifi.yaml file in your hydrix-config repo.
           Set this in your machine config: hydrix.secrets.wifiSecretsFile = ../secrets/wifi.yaml;
-          Run setup-wifi-secrets to create this file from your existing modules/wifi.nix.
+          wifi-sync creates it on its first save; setup-wifi-secrets migrates an old
+          modules/wifi.nix network list into it.
         '';
       };
     };

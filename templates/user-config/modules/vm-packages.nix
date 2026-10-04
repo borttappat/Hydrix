@@ -10,18 +10,8 @@
     ./shell-packages.nix
   ];
 
-  # =========================================================================
-  # MicroVM overrides - disable heavy/unnecessary services from Hydrix base
-  # =========================================================================
-  # MicroVMs use waypipe for display, not a local X session.
-  # Disable xsession to prevent .xsession/.xinitrc generation.
-
   # Hardware graphics: mesa/llvmpipe for alacritty GL rendering
   hardware.graphics.enable = true;
-
-  home-manager.users.${config.hydrix.username} = {
-    xsession.enable = lib.mkForce false;
-  };
 
   environment.variables = {
     EDITOR = config.hydrix.editor;

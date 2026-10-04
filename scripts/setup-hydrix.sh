@@ -581,11 +581,10 @@ migrate_legacy_config() {
 
     [[ ! -d "$CONFIG_DIR/infra" ]] && copy_template_infra
 
-    # Ensure custom, colorschemes, templates, configs directories exist
+    # Ensure custom, colorschemes, templates directories exist
     [[ ! -d "$CONFIG_DIR/custom" ]]     && copy_template_custom
     [[ ! -d "$CONFIG_DIR/templates" ]]  && copy_template_templates
     [[ ! -d "$CONFIG_DIR/colorschemes" ]] && create_colorschemes_dir
-    [[ ! -d "$CONFIG_DIR/configs" ]]    && copy_template_configs
     [[ ! -d "$CONFIG_DIR/vpn" ]]       && copy_template_vpn
 
     # Update flake.nix to use auto-discovery
@@ -1110,10 +1109,8 @@ substitute_modules_user() {
 # + hydrix.username, scoped to that repo's local .git/config via
 # modules/user.nix); no prompt, no placeholder substitution needed here.
 
-# wifi.nix ships from the template as a static empty sops stub (no
-# @WIFI_SSID@ placeholder to substitute). Credentials collected by
-# prompt_wifi() are encrypted straight to secrets/wifi.yaml in the sops
-# step of main() instead, never written to modules/wifi.nix in plaintext.
+# WiFi credentials collected by prompt_wifi() are encrypted straight to
+# secrets/wifi.yaml in the sops step of main(); nothing is written in plaintext.
 
 copy_template_fonts() {
     log "Creating fonts from template..."
@@ -1137,15 +1134,10 @@ copy_template_tasks() {
     log "  Copied from template"
 }
 
+# custom/ holds the user's own modules; Hydrix ships none there.
 copy_template_custom() {
-    log "Creating custom modules from template..."
-
     mkdir -p "$CONFIG_DIR/custom"
-
-    local tmpl_root
-    tmpl_root=$(find_hydrix_templates) || error "Could not find Hydrix templates directory"
-    cp -r "$tmpl_root/custom"/* "$CONFIG_DIR/custom/"
-    log "  Copied from template"
+    log "  Created custom/ (your own modules)"
 }
 
 copy_template_templates() {
@@ -1157,16 +1149,6 @@ copy_template_templates() {
     tmpl_root=$(find_hydrix_templates) || error "Could not find Hydrix templates directory"
     cp -r "$tmpl_root/templates"/* "$CONFIG_DIR/templates/"
     log "  Copied from template (new-profile reads these)"
-}
-
-copy_template_configs() {
-    log "Creating configs directory..."
-    mkdir -p "$CONFIG_DIR/configs"
-
-    local tmpl_root
-    tmpl_root=$(find_hydrix_templates) || error "Could not find Hydrix templates directory"
-    cp -r "$tmpl_root/configs"/. "$CONFIG_DIR/configs/"
-    log "  Copied program configs from template"
 }
 
 create_colorschemes_dir() {
@@ -1322,7 +1304,6 @@ generate_full_config() {
     substitute_modules_user
     copy_template_custom
     copy_template_templates
-    copy_template_configs
     copy_template_vpn
     create_colorschemes_dir
     copy_wallpapers

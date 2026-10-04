@@ -51,26 +51,6 @@
   routerUser = routerCfg.username;
   routerHashedPassword = routerCfg.hashedPassword;
 
-  wifiNetworks = let
-    newFormat = routerCfg.wifi.networks;
-    legacySSID = routerCfg.wifi.ssid;
-    legacyPassword = routerCfg.wifi.password;
-    legacyNetwork =
-      if legacySSID != "" && legacyPassword != ""
-      then [
-        {
-          ssid = legacySSID;
-          password = legacyPassword;
-          priority = 100;
-        }
-      ]
-      else [];
-  in
-    if newFormat != []
-    then newFormat
-    else legacyNetwork;
-  hasWifiCredentials = wifiNetworks != [];
-
   wifiPciAddress = cfg.hardware.vfio.wifiPciAddress;
 
   vmName = config.networking.hostName;
@@ -321,37 +301,14 @@ in {
 
       # NetworkManager handles only the WiFi (WAN) interface. LAN interfaces
       # (mv-rts-*) are managed by systemd-networkd below, and any other NIC
-      # stays down rather than getting a DHCP client.
+      # stays down rather than getting a DHCP client. No WiFi credentials are
+      # built in: connect from the console (shard -c router-stable, nmcli).
       networkmanager = {
         enable = true;
         wifi.powersave = false;
         settings.keyfile.path = "/var/lib/NetworkManager/system-connections";
         unmanaged = ["*" "except:type:wifi"];
         settings.main.no-auto-default = "*";
-        ensureProfiles = lib.mkIf hasWifiCredentials {
-          profiles = builtins.listToAttrs (map (network: {
-              name = network.ssid;
-              value = {
-                connection = {
-                  id = network.ssid;
-                  type = "wifi";
-                  autoconnect = "true";
-                  autoconnect-priority = toString (network.priority or 50);
-                };
-                wifi = {
-                  mode = "infrastructure";
-                  ssid = network.ssid;
-                };
-                wifi-security = {
-                  key-mgmt = "wpa-psk";
-                  psk = network.password;
-                };
-                ipv4.method = "auto";
-                ipv6.method = "disabled";
-              };
-            })
-            wifiNetworks);
-        };
       };
 
       # Not set here - see microvm-router.nix for why: NetworkManager's own

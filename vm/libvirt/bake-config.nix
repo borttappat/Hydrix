@@ -5,7 +5,6 @@
 #
 # The config is placed at /home/<user>/hydrix-config and includes:
 # - flake.nix and all modules
-# - configs/ directory
 # - profiles/, colorschemes/, etc.
 #
 # This enables the "baked + orphaned" model where VMs don't need to
@@ -40,9 +39,6 @@ let
 
     # Make copied files writable (nix paths are often read-only)
     chmod -R u+w $out
-
-    # Ensure directories exist
-    mkdir -p $out/configs
   '';
 
 in {

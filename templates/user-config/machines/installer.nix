@@ -28,7 +28,6 @@
     ./@SERIAL@-hardware.nix
     ../specialisations/lockdown.nix
     ./@SERIAL@-grub-entries.nix
-    ../modules/usb-blocking.nix
     ../modules/eww.nix            # eww desktop dashboard (VMs, network, cpu, git, todo, weather)
     "${hydrix}/host/pentest-lan.nix" # pentest-lan: grant VMs the router uplink's LAN, port forwards
   ];
@@ -108,15 +107,15 @@
     # ─────────────────────────────────────────────────────────────────────
     # ROUTER
     # ─────────────────────────────────────────────────────────────────────
-    # WiFi credentials live in secrets/wifi.yaml (sops-encrypted).
-    # Run setup-wifi-secrets to migrate from modules/wifi.nix.
+    # WiFi credentials live in secrets/wifi.yaml (sops-encrypted), managed
+    # with wifi-sync. The router reverts to its baseline on every boot.
     router = {
       type = "@ROUTER_TYPE@";
       wan.mode = "@WAN_MODE@";
       wan.device = if "@WAN_DEVICE@" != "" then "@WAN_DEVICE@" else null;
       # persistence.enable = true;  # DEFAULT: false - keep nmcli-added WiFi
-      #   connections across router restarts (declarative ones from
-      #   modules/wifi.nix survive either way)
+      #   connections across router restarts (wifi.yaml networks are
+      #   delivered on every boot either way; wifi-sync pull saves new ones)
     };
 
       # ─── Mullvad VPN (optional) ────────────────────────────────────────
@@ -164,7 +163,7 @@
     #   4. Set githubSecretsFile below and rebuild
     #
     # For WiFi credentials:
-    #   Run: setup-wifi-secrets          (migrates modules/wifi.nix to secrets/wifi.yaml)
+    #   wifi-sync add SSID PASSWORD      (creates secrets/wifi.yaml on first save)
     #
     secrets = {
       enable = false;

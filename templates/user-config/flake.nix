@@ -120,8 +120,8 @@
         ./modules/common.nix # Locale, timezone, scaling; shared with all VMs
         ./modules/user.nix # Username, colorscheme; shared with all VMs
         ./modules/fonts.nix
-        ./modules/vim.nix # Deploy .vimrc from configs/vim/.vimrc
-        ./modules/starship.nix # Deploy starship.toml from configs/starship/
+        ./modules/vim.nix # Vim and .vimrc
+        ./modules/starship.nix # Starship prompt
         ./modules/fish.nix # Shell abbreviations + functions
         ./modules/alacritty.nix # Cursor, keyboard overrides
         ./modules/notifications.nix # Notification preferences
@@ -171,7 +171,6 @@
             inherit userColorschemesDir;
             modules = [
               (machinesDir + "/${file}")
-              ./modules/wifi.nix # WiFi networks (legacy: move to secrets/wifi.yaml via setup-wifi-secrets)
               ./modules/repos.nix # Declarative git repos (add yours, or leave repos = {})
               ./modules/fonts.nix # Font packages and profiles
               ./modules/hyprland.nix # Hyprland keybindings + config (user-customizable)
@@ -261,8 +260,8 @@
               ./modules/notifications.nix # Notification sound + size preferences
               ./modules/ranger.nix # File manager mappings + rifle rules
               ./modules/zathura.nix # PDF viewer settings
-              ./modules/starship.nix # Prompt env vars (config is in configs/starship/)
-              ./modules/vim.nix # Vim plugins (config is in configs/vim/)
+              ./modules/starship.nix # Starship prompt
+              ./modules/vim.nix # Vim and .vimrc
               ./modules/helix.nix
               ./modules/firefox.nix # Host Firefox toggle + user-agent
               ./modules/vault.nix # Vault VM credential launcher (vault-cli + vault-pick)
@@ -343,7 +342,12 @@
               {hydrix.vmThemeSync.enable = true;}
               {system.stateVersion = mc.config.system.stateVersion;}
               {hydrix.microvm.notifyForward.enable = m.notifyForward;}
-              {hydrix.microvm.usbPassthrough.enable = m.usbPassthrough or false;}
+              {
+                hydrix.microvm.usbPassthrough = {
+                  enable = m.usbPassthrough or false;
+                  devices = m.usbDevices or [];
+                };
+              }
             ];
             inherit userProfiles hostConfig userColorschemesDir;
           };
@@ -412,7 +416,12 @@
         modules =
           [
             (./infra + "/${m._infraName}/default.nix")
-            {hydrix.microvm.usbPassthrough.enable = m.usbPassthrough or false;}
+            {
+              hydrix.microvm.usbPassthrough = {
+                enable = m.usbPassthrough or false;
+                devices = m.usbDevices or [];
+              };
+            }
           ]
           ++ nixpkgs.lib.optional (m.filesAgent or false) "${hydrix}/vm/dev/files-agent.nix";
       };
@@ -433,6 +442,7 @@
             focusBorder = m.focusBorder or null;
             notifyForward = m.notifyForward or false;
             usbPassthrough = m.usbPassthrough or false;
+            usbDevices = m.usbDevices or [];
           };
         })
         discoveredMetas)
@@ -447,6 +457,7 @@
           label = m.label or m._infraName;
           hasDisplay = m.hasDisplay or false;
           usbPassthrough = m.usbPassthrough or false;
+          usbDevices = m.usbDevices or [];
         };
       }) (builtins.filter (m: m ? vsockCid) discoveredInfra))
       // builtins.listToAttrs (map (m: {
@@ -456,6 +467,7 @@
             cid = m.vsockCid;
             inherit (m) bridge subnet workspace label focusBorder notifyForward;
             usbPassthrough = m.usbPassthrough or false;
+            usbDevices = m.usbDevices or [];
             hasDisplay = true;
             taskSlot = m.name;
           };
@@ -469,7 +481,6 @@
       [
         {hydrix.router.microvm.infraLans = infraLans;}
         ./modules/common.nix
-        ./modules/wifi.nix
         "${hydrix}/vm/microvm/infra/router-lan-control.nix"
         ./infra/router/default.nix
       ]
@@ -482,7 +493,6 @@
     stableRouterModules = [
       {hydrix.router.microvm.infraLans = infraLans;}
       ./modules/common.nix
-      ./modules/wifi.nix
       ./infra/router-stable/default.nix
     ];
 
@@ -546,7 +556,12 @@
                 vmThemeSyncModule
                 {hydrix.vmThemeSync.enable = true;}
                 {system.stateVersion = mc.config.system.stateVersion;}
-                {hydrix.microvm.usbPassthrough.enable = m.usbPassthrough or false;}
+                {
+                  hydrix.microvm.usbPassthrough = {
+                    enable = m.usbPassthrough or false;
+                    devices = m.usbDevices or [];
+                  };
+                }
               ]
               ++ nixpkgs.lib.optional (overrides ? ${m._profileName}) overrides.${m._profileName}
               ++ nixpkgs.lib.optional (vmCfg.encryption or false) {hydrix.microvm.encryption.enable = true;}

@@ -2112,24 +2112,18 @@ copy_template_modules() {
         -e "s|@COLORSCHEME@|${CONFIG[colorscheme]}|g" \
         "$config_dir/modules/user.nix"
 
-    # wifi.nix ships from the template as an empty sops stub (see
-    # templates/user-config/modules/wifi.nix) — credentials collected by
-    # gather_wifi() are encrypted straight to secrets/wifi.yaml by
-    # init_sops_during_install(), never written here in plaintext.
+    # WiFi credentials collected by gather_wifi() are encrypted straight to
+    # secrets/wifi.yaml by init_sops_during_install(), never written here in
+    # plaintext.
 
     log "  Copied from template"
 }
 
+# custom/ holds the user's own modules; Hydrix ships none there.
 copy_template_custom() {
     local config_dir="$1"
-    log "Creating custom modules..."
-
     mkdir -p "$config_dir/custom"
-
-    local template_dir="$SCRIPT_DIR/../templates/user-config/custom"
-
-    cp -r "$template_dir"/* "$config_dir/custom/"
-    log "  Copied from template"
+    log "  Created custom/ (your own modules)"
 }
 
 copy_template_templates() {
@@ -2180,15 +2174,6 @@ copy_wallpapers() {
     else
         log "  Created $config_dir/wallpapers/ (add wallpapers here)"
     fi
-}
-
-copy_template_configs() {
-    local config_dir="$1"
-    log "Creating configs directory..."
-    mkdir -p "$config_dir/configs"
-    local template_dir="$SCRIPT_DIR/../templates/user-config/configs"
-    cp -r "$template_dir"/. "$config_dir/configs/"
-    log "  Copied program configs from template"
 }
 
 copy_template_vpn() {
@@ -2317,7 +2302,6 @@ generate_config_to_temp() {
         copy_template_templates "$TEMP_CONFIG"
         copy_template_fonts "$TEMP_CONFIG"
         copy_template_colorschemes "$TEMP_CONFIG"
-        copy_template_configs "$TEMP_CONFIG"
         copy_template_vpn "$TEMP_CONFIG"
         copy_template_readme "$TEMP_CONFIG"
         copy_template_gitignore "$TEMP_CONFIG"
@@ -3164,8 +3148,6 @@ init_sops_during_install() {
                 sed -i \
                     "s|\"microvm-router-${CONFIG[serial]}\" = { autostart = true; };|\"microvm-router-${CONFIG[serial]}\" = { autostart = true; secrets = [ \"wifi\" ]; };|" \
                     "$machine_nix"
-                # modules/wifi.nix ships from the template as an empty sops stub already,
-                # nothing left to write here.
             else
                 rm -f "$plain_yaml"
                 warn "  sops encryption failed, add WiFi credentials after first boot with: wifi-sync add SSID PASSWORD"
@@ -3227,7 +3209,7 @@ init_sops_during_install() {
         cd "$config_dir"
         # -f: secrets/*.yaml and secrets/*.age are gitignored by default (only the
         # encrypted forms belong in the repo, so force past the ignore rule for them).
-        git add secrets/ modules/wifi.nix "machines/${CONFIG[serial]}.nix" 2>/dev/null || true
+        git add secrets/ "machines/${CONFIG[serial]}.nix" 2>/dev/null || true
         git -c user.name="Hydrix Installer" -c user.email="installer@hydrix" \
             commit -m "feat(secrets): initialize sops for ${CONFIG[serial]}" 2>/dev/null || true
     )

@@ -8,7 +8,6 @@
 # - modules/desktop/xinitrc.nix (template deployment)
 # - modules/shell/fish-home.nix
 # - modules/desktop/firefox.nix
-# - Most configs/*.template files
 {
   config,
   lib,
