@@ -28,6 +28,15 @@ in {
   config = lib.mkIf cfg.enable {
     microvm.qemu.extraArgs = ["-device" "qemu-xhci,id=xhci"];
 
+    # Stock qemu_kvm already has the usb-host device, but microvm.nix
+    # re-overrides it into a test-runner build without USB redirection or
+    # libusb (its closure-size optimisation). Handing it a qemu_kvm whose
+    # .override returns itself keeps the binary-cache build for this VM only.
+    microvm.qemu.package = let
+      qemu = config.microvm.vmHostPackages.qemu_kvm;
+    in
+      qemu // {override = _: qemu;};
+
     # Read-only until explicitly lifted with usb-rw: disks and partitions.
     services.udev.extraRules = ''
       ACTION=="add", SUBSYSTEM=="block", ENV{ID_BUS}=="usb", RUN+="${utils}/bin/blockdev --setro $devnode"

@@ -16,6 +16,8 @@ in {
     ./vm-switch.nix
     # Serial console follows the attached terminal's size
     ../../common/serial-console.nix
+    # Whole-USB-device passthrough target (opt-in, meta.nix usbPassthrough)
+    ../usb-passthrough.nix
   ];
 
   config = {

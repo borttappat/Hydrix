@@ -49,6 +49,8 @@
 in {
   imports = [
     ../../options.nix
+    # Whole-USB-device passthrough target (opt-in, meta.nix usbPassthrough)
+    ../usb-passthrough.nix
     # Base system modules
     ../../common/users-vm.nix
     ../../../host/base/networking.nix

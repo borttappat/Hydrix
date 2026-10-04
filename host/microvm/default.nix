@@ -278,9 +278,13 @@ in {
       # tapAssignScript looks up the correct bridge from tapLookupScript (generated at build
       # time from all known router/infra/profile/extra-network mappings) and attaches with
       # retry. Covers new profiles automatically - no per-interface rules to maintain.
+      # Encrypted VM homes reach QEMU (user microvm, group kvm) as
+      # /dev/mapper/vm-<vm>-home: grant kvm exactly those mapper devices, rather
+      # than putting microvm in the disk group, which exposes every block device.
       services.udev.extraRules = ''
         ACTION=="add", SUBSYSTEM=="net", KERNEL=="mv-*", RUN+="${tapAssignScript} %k"
         SUBSYSTEM=="vfio", MODE="0666"
+        SUBSYSTEM=="block", ENV{DM_NAME}=="vm-*-home", GROUP="kvm", MODE="0660"
       '';
 
       # Trust microVM TAP interfaces in firewall
