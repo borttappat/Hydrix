@@ -57,11 +57,13 @@ r_remove() {
     socat -t10 - "VSOCK-CONNECT:${ROUTER_CID}:${ROUTER_PORT}" 2>/dev/null
 }
 
-# Split router connections against wifi.nix: returns jq array of those not in wifi.nix
+# Router connections not yet saved locally, as a jq array. Profiles that never
+# connected (failed attempts NetworkManager kept) are left out; the router
+# reports "connected" per profile, and a missing field counts as connected.
 poll_pending() {
   local conns="$1" local_nets="$2"
   echo "$conns" | jq --argjson l "$local_nets" \
-    '[.[] | select(.ssid as $s | $l | all(.[]; .ssid != $s))]'
+    '[.[] | select(.connected != false) | select(.ssid as $s | $l | all(.[]; .ssid != $s))]'
 }
 
 # Derive WPA PSK hash from SSID + plaintext password.
@@ -337,7 +339,7 @@ case "$CMD" in
     fi
     jq -rn --argjson c "$connections" --rawfile k "$cache" '
       ($k | split("\n") | .[1:] | map(select(. != ""))) as $known
-      | [$c[] | select(.ssid as $s | $known | any(.[]; . == $s) | not)] | length'
+      | [$c[] | select(.connected != false) | select(.ssid as $s | $known | any(.[]; . == $s) | not)] | length'
     ;;
 
   *)

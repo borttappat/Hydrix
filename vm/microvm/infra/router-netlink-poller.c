@@ -33,6 +33,10 @@
 #define WIFI_CACHE "/tmp/wifi-sync-status.json"
 #define NM_DIR_RUN "/run/NetworkManager/system-connections"
 #define NM_DIR_VAR "/var/lib/NetworkManager/system-connections"
+/* NetworkManager's per-profile "last successfully activated" times, keyed by
+ * connection UUID. A profile missing from it has never connected. */
+#define NM_STATE_DIR "/var/lib/NetworkManager"
+#define NM_TIMESTAMPS NM_STATE_DIR "/timestamps"
 
 /* ── JSON string escaping (matches the bash json_esc: backslash then quote) ── */
 
@@ -108,7 +112,7 @@ static int get_wifi_ssid(struct mnl_socket *nl, int nl80211_id, char *out, size_
 /* ── NetworkManager .nmconnection parsing - pure file I/O, kept alongside
  * the SSID query so one process owns the whole wifi-sync-status.json file */
 
-struct nm_conn { char ssid[128]; char psk[128]; };
+struct nm_conn { char ssid[128]; char psk[128]; char uuid[64]; int connected; };
 
 static int nm_scan_dir(const char *dir, struct nm_conn *out, int max, int count) {
     DIR *d = opendir(dir);
@@ -121,7 +125,7 @@ static int nm_scan_dir(const char *dir, struct nm_conn *out, int max, int count)
         snprintf(path, sizeof(path), "%s/%s", dir, e->d_name);
         FILE *f = fopen(path, "r");
         if (!f) continue;
-        char ssid[128] = "", psk[128] = "", line[256];
+        char ssid[128] = "", psk[128] = "", uuid[64] = "", line[256];
         while (fgets(line, sizeof(line), f)) {
             size_t len = strcspn(line, "\r\n");
             line[len] = '\0';
@@ -130,6 +134,7 @@ static int nm_scan_dir(const char *dir, struct nm_conn *out, int max, int count)
              * intentional and bounded, not an overlooked overflow */
             if (strncmp(line, "ssid=", 5) == 0) snprintf(ssid, sizeof(ssid), "%.*s", (int)sizeof(ssid) - 1, line + 5);
             else if (strncmp(line, "psk=", 4) == 0) snprintf(psk, sizeof(psk), "%.*s", (int)sizeof(psk) - 1, line + 4);
+            else if (strncmp(line, "uuid=", 5) == 0) snprintf(uuid, sizeof(uuid), "%.*s", (int)sizeof(uuid) - 1, line + 5);
         }
         fclose(f);
         if (ssid[0] && psk[0]) {
@@ -138,12 +143,31 @@ static int nm_scan_dir(const char *dir, struct nm_conn *out, int max, int count)
             if (!dup) {
                 snprintf(out[count].ssid, sizeof(out[count].ssid), "%s", ssid);
                 snprintf(out[count].psk, sizeof(out[count].psk), "%s", psk);
+                snprintf(out[count].uuid, sizeof(out[count].uuid), "%s", uuid);
+                out[count].connected = 0;
                 count++;
             }
         }
     }
     closedir(d);
     return count;
+}
+
+/* Marks each profile that NetworkManager has recorded a successful activation
+ * for ("<uuid>=<unix time>" lines in NM_TIMESTAMPS). */
+static void nm_mark_connected(struct nm_conn *conns, int count) {
+    FILE *f = fopen(NM_TIMESTAMPS, "r");
+    if (!f) return;
+    char line[256];
+    while (fgets(line, sizeof(line), f)) {
+        char *eq = strchr(line, '=');
+        if (!eq || line[0] == '[') continue;
+        *eq = 0;
+        long long ts = atoll(eq + 1);
+        for (int i = 0; i < count; i++)
+            if (ts > 0 && conns[i].uuid[0] && !strcmp(conns[i].uuid, line)) conns[i].connected = 1;
+    }
+    fclose(f);
 }
 
 static void write_wifi_json(struct mnl_socket *nl, int nl80211_id) {
@@ -154,6 +178,7 @@ static void write_wifi_json(struct mnl_socket *nl, int nl80211_id) {
     int count = 0;
     count = nm_scan_dir(NM_DIR_RUN, conns, 64, count); /* /run/ (active runtime connections) takes precedence over /var/lib (persisted) for same-SSID dedup */
     count = nm_scan_dir(NM_DIR_VAR, conns, 64, count);
+    nm_mark_connected(conns, count);
 
     char tmp[] = "/tmp/wifi-sync-status.json.tmp";
     FILE *f = fopen(tmp, "w");
@@ -167,19 +192,21 @@ static void write_wifi_json(struct mnl_socket *nl, int nl80211_id) {
         json_esc_fputs(conns[i].ssid, f);
         fputs("\",\"psk\":\"", f);
         json_esc_fputs(conns[i].psk, f);
-        fputs("\"}", f);
+        fprintf(f, "\",\"connected\":%s}", conns[i].connected ? "true" : "false");
     }
     fputs("]}", f);
     fclose(f);
     rename(tmp, WIFI_CACHE);
 }
 
-/* Watches both NM connection directories. A directory that doesn't exist
- * yet can't be watched; returns how many are missing so the caller retries. */
-static int watch_nm_dirs(int ifd, int wd[2]) {
-    const char *dirs[2] = {NM_DIR_RUN, NM_DIR_VAR};
+/* Watches both NM connection directories and NM's state directory (for the
+ * timestamps file). A directory that doesn't exist yet can't be watched;
+ * returns how many are missing so the caller retries. */
+#define NM_WATCHES 3
+static int watch_nm_dirs(int ifd, int wd[NM_WATCHES]) {
+    const char *dirs[NM_WATCHES] = {NM_DIR_RUN, NM_DIR_VAR, NM_STATE_DIR};
     int missing = 0;
-    for (int i = 0; i < 2; i++) {
+    for (int i = 0; i < NM_WATCHES; i++) {
         if (wd[i] >= 0) continue;
         wd[i] = inotify_add_watch(ifd, dirs[i],
                                   IN_CREATE | IN_DELETE | IN_CLOSE_WRITE | IN_MOVED_FROM |
@@ -189,20 +216,28 @@ static int watch_nm_dirs(int ifd, int wd[2]) {
     return missing;
 }
 
-/* Reads everything pending on a non-blocking fd. inotify events that report
- * a watched directory going away clear its watch so it is re-added. */
-static void drain_inotify(int ifd, int wd[2]) {
+/* Reads everything pending on a non-blocking fd and returns whether any event
+ * matters: anything in the connection directories, but in NM's state
+ * directory only the timestamps file (it also holds frequently rewritten
+ * scan state). Events that report a watched directory going away clear its
+ * watch so it is re-added. */
+static int drain_inotify(int ifd, int wd[NM_WATCHES]) {
     char buf[4096] __attribute__((aligned(__alignof__(struct inotify_event))));
     ssize_t n;
+    int relevant = 0;
     while ((n = read(ifd, buf, sizeof(buf))) > 0) {
         for (char *p = buf; p < buf + n;) {
             struct inotify_event *ev = (struct inotify_event *)p;
-            if (ev->mask & (IN_IGNORED | IN_DELETE_SELF | IN_MOVE_SELF))
-                for (int i = 0; i < 2; i++)
+            int gone = ev->mask & (IN_IGNORED | IN_DELETE_SELF | IN_MOVE_SELF);
+            if (ev->wd != wd[2] || gone || (ev->len && !strcmp(ev->name, "timestamps")))
+                relevant = 1;
+            if (gone)
+                for (int i = 0; i < NM_WATCHES; i++)
                     if (wd[i] == ev->wd) wd[i] = -1;
             p += sizeof(*ev) + ev->len;
         }
     }
+    return relevant;
 }
 
 static void drain_socket(struct mnl_socket *ev) {
@@ -241,34 +276,41 @@ int main(void) {
 
     int ifd = inotify_init1(IN_NONBLOCK | IN_CLOEXEC);
     if (ifd < 0) { perror("inotify_init1"); return 1; }
-    int wd[2] = {-1, -1};
+    int wd[NM_WATCHES] = {-1, -1, -1};
 
     struct family_result fam = {.ngroups = 0};
     int nl80211_id = resolve_family(nl, NL80211_GENL_NAME, &fam);
     struct mnl_socket *ev = nl80211_id >= 0 ? open_event_socket(nl) : NULL;
 
+    int dirty = 1;
     for (;;) {
         int missing = watch_nm_dirs(ifd, wd);
-        write_wifi_json(nl, nl80211_id);
+        if (dirty) write_wifi_json(nl, nl80211_id);
+        dirty = 0;
 
         /* Only time out while something is still missing (the nl80211
-         * family, its event socket, or an NM directory); otherwise sleep
+         * family, its event socket, or a watched directory); otherwise sleep
          * until an event arrives. */
         int retry = missing || nl80211_id < 0 || !ev;
         struct pollfd pfd[2] = {
             {.fd = ifd, .events = POLLIN},
             {.fd = ev ? mnl_socket_get_fd(ev) : -1, .events = POLLIN},
         };
-        if (poll(pfd, 2, retry ? 30000 : -1) < 0 && errno != EINTR) {
+        int pr = poll(pfd, 2, retry ? 30000 : -1);
+        if (pr < 0 && errno != EINTR) {
             perror("poll");
             return 1;
         }
+        if (pr == 0) dirty = 1;
 
         /* Connect/disconnect and NM's file rewrites arrive in bursts; let
          * them settle, then rewrite once. */
         usleep(300000);
-        drain_inotify(ifd, wd);
-        if (ev) drain_socket(ev);
+        if (drain_inotify(ifd, wd)) dirty = 1;
+        if (ev && (pfd[1].revents & POLLIN)) {
+            drain_socket(ev);
+            dirty = 1;
+        }
 
         if (nl80211_id < 0) nl80211_id = resolve_family(nl, NL80211_GENL_NAME, &fam);
         if (nl80211_id >= 0 && !ev) ev = open_event_socket(nl);
