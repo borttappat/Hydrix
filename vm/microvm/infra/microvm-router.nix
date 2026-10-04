@@ -444,6 +444,9 @@ in {
           source = "/nix/store";
           mountPoint = "/nix/.ro-store";
           proto = "virtiofs";
+          # Host-enforced (virtiofsd --readonly): the guest's own ro mount
+          # can be remounted rw by guest root.
+          readOnly = true;
         }
         # VM config directory - used by vm-switch to receive .switch-reg nix DB dump.
         # Created by `shard build` at /var/lib/microvms/<name>/config on the host.

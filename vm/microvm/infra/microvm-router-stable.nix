@@ -226,6 +226,9 @@ in {
           source = "/nix/store";
           mountPoint = "/nix/.ro-store";
           proto = "virtiofs";
+          # Host-enforced (virtiofsd --readonly): the guest's own ro mount
+          # can be remounted rw by guest root.
+          readOnly = true;
         }
         {
           tag = "router-config";

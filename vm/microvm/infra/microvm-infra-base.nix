@@ -65,6 +65,9 @@ in {
           source = "/nix/store";
           mountPoint = "/nix/.ro-store";
           proto = "virtiofs";
+          # Host-enforced (virtiofsd --readonly): the guest's own ro mount
+          # can be remounted rw by guest root.
+          readOnly = true;
         }
         # Host secrets directory - always mounted; host pre-creates for all enabled VMs.
         # Empty when no secrets are provisioned (vms.<name>.secrets = [] in machine config).
