@@ -1,11 +1,13 @@
 # USB Sandbox Infra VM - NixOS Configuration
 #
 # Ephemeral VM for safely handling USB storage devices.
-# USB devices are passed through via QEMU USB hotplug (no network bridge to host).
-# The host sends device_add/device_del commands to the QEMU monitor socket.
+# The host passes whole USB devices in with `usb attach <busid> usb-sandbox`
+# (after a y/N confirmation there), hotplugged onto this VM's xHCI controller
+# over its QMP socket (hydrix.microvm.usbPassthrough, enabled from meta.nix).
+# The host never binds USB storage itself; this VM's kernel does all parsing.
 #
 # File transfer to/from other VMs uses the shared files-agent (vsock 14506),
-# imported via flake.nix (hydrix.microvm.filesAgent = true in meta.nix) —
+# imported via flake.nix (hydrix.microvm.filesAgent = true in meta.nix) -
 # same agent every profile VM uses, no separate copy here.
 #
 #   shard files transfer <src-vm>/<path> usb-sandbox/shared/
@@ -26,7 +28,7 @@
   vmName = "microvm-usb-sandbox";
 in {
   # The shared files-agent.nix (imported externally via flake.nix) expects
-  # config.hydrix.username to match this VM's actual user/home directory —
+  # config.hydrix.username to match this VM's actual user/home directory -
   # override the host-username default that mkInfraVm applies to all infra VMs.
   hydrix.username = lib.mkForce sandboxUser;
   # Scopes the files-agent's port-8888 firewall rule to the files VM's IP on
@@ -37,7 +39,7 @@ in {
   # MICROVM CONFIGURATION
   # =========================================================================
   microvm = {
-    # Ephemeral rootfs is tmpfs, sized ~50% of this by microvm-nix — needs real
+    # Ephemeral rootfs is tmpfs, sized ~50% of this by microvm-nix - needs real
     # headroom since transient transfer blobs (~/shared/xfer.enc) land there
     # before extraction. 4096 gives ~2GB of usable space for that.
     mem = 4096;
@@ -52,19 +54,6 @@ in {
 
     vsock.cid = meta.vsockCid;
 
-    # QEMU monitor socket for host-side disk hotplug
-    # Host sends: drive_add + device_add virtio-blk-pci  (no libusb needed)
-    #             device_del + drive_del to release
-    # -sandbox off: microvm.nix sets -sandbox on by default, which blocks openat()
-    # for new devices after init — needed for drive_add hotplug to work.
-    qemu.extraArgs = [
-      "-sandbox"
-      "off"
-      "-chardev"
-      "socket,id=monitor,path=/var/lib/microvms/${vmName}/monitor.sock,server=on,wait=off"
-      "-mon"
-      "chardev=monitor,mode=readline"
-    ];
   };
 
   boot.kernelPackages = pkgs.linuxPackages_latest;
@@ -88,7 +77,7 @@ in {
 
   # =========================================================================
   # HOME LAYOUT
-  # Files agent (vsock 14506) is imported externally via flake.nix — it owns
+  # Files agent (vsock 14506) is imported externally via flake.nix - it owns
   # ~/shared and the port-8888 HTTP transfer service itself.
   # =========================================================================
   systemd.tmpfiles.rules = [
@@ -114,25 +103,26 @@ in {
   users.motd = ''
 
     ╔══════════════════════════════════════════════════════╗
-    ║              USB SANDBOX  —  microvm-usb-sandbox     ║
+    ║              USB SANDBOX  -  microvm-usb-sandbox     ║
     ╚══════════════════════════════════════════════════════╝
 
-    The USB drive appears as /dev/vdb once attached from the host.
-    Read-only unless the host ran 'usb attach <busid> --rw'.
-    Files leave only via the files VM — nothing else has egress.
+    The USB drive appears as /dev/sdX once the host attaches it
+    (usb attach <busid> usb-sandbox). It arrives read-only.
+    Files leave only via the files VM - nothing else has egress.
 
     COMMANDS
-      usb list                    — show block devices + mount state
-      usb scan                    — detect filesystems on /dev/vdb*
-      usb mount /dev/vdbX         — mount under ~/usb/ (reports read-only/read-write)
-      usb mount /dev/vdbX --owner — as above + own the files as $(whoami) (FAT/exFAT only)
-      usb umount /dev/vdbX        — unmount
-      lsusb                       — USB device info
-      lsblk                       — block device tree
+      usb list                    - show block devices + mount state
+      usb scan                    - detect filesystems on /dev/sd*
+      usb mount /dev/sdX         - mount under ~/usb/ (reports read-only/read-write)
+      usb mount /dev/sdX --owner - as above + own the files as $(whoami) (FAT/exFAT only)
+      usb rw /dev/sdX            - make the drive writable (all its partitions)
+      usb umount /dev/sdX        - unmount
+      lsusb                       - USB device info
+      lsblk                       - block device tree
 
     FILE TRANSFER (from host, via the files VM)
       shard files transfer <src-vm>/<path> usb-sandbox/shared/
-        → lands at ~/shared/<name> here; 'cp' it into ~/usb/vdbX/ once mounted read-write
+        → lands at ~/shared/<name> here; 'cp' it into ~/usb/sdX/ once mounted read-write
       shard files transfer usb-sandbox/shared/<path> <dst-vm>/<dest>
         → send a file back out the same way
 
@@ -169,11 +159,12 @@ in {
         echo "Usage: usb <command>"
         echo ""
         echo "  list                    show block devices + mount state"
-        echo "  scan                    detect filesystems on /dev/vdb*"
-        echo "  mount /dev/vdbX [--owner]"
+        echo "  scan                    detect filesystems on /dev/sd*"
+        echo "  mount /dev/sdX [--owner]"
         echo "                          mount under ~/usb/, reports read-only/read-write"
         echo "                          --owner: add uid=/gid=$(id -u) (FAT/exFAT only)"
-        echo "  umount /dev/vdbX        unmount"
+        echo "  rw /dev/sdX            make the drive and its partitions writable"
+        echo "  umount /dev/sdX        unmount"
         echo ""
         echo "File transfer (run on the host, not in here):"
         echo "  shard files transfer <src-vm>/<path> usb-sandbox/shared/"
@@ -202,19 +193,23 @@ in {
           MP="$USB_DIR/$(basename "$DEV")"
           mkdir -p "$MP"
           if ! sudo mount -t auto $OWNER_OPT "$DEV" "$MP"; then
-            echo "Mount failed — run 'usb scan' to check the filesystem was detected"
+            echo "Mount failed - run 'usb scan' to check the filesystem was detected"
             exit 1
           fi
           if [ "$(sudo blockdev --getro "$DEV" 2>/dev/null)" = "1" ]; then
-            echo "Mounted $DEV at $MP (READ-ONLY — host must run 'usb attach <busid> --rw' for write access)"
+            echo "Mounted $DEV at $MP (READ-ONLY - run 'usb rw $DEV' first for write access)"
           else
             echo "Mounted $DEV at $MP (read-write)"
           fi
           ;;
+        rw)
+          [ -n "''${2:-}" ] || { echo "Usage: usb rw /dev/sdX"; exit 1; }
+          usb-rw "$2"
+          ;;
         umount)
           DEV="$2"
           if [ -z "$DEV" ]; then
-            echo "Usage: usb umount /dev/vdbX"
+            echo "Usage: usb umount /dev/sdX"
             exit 1
           fi
           sudo umount "$USB_DIR/$(basename "$DEV")"

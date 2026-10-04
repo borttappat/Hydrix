@@ -56,16 +56,6 @@
 
     nix-index-database.url = "github:Mic92/nix-index-database";
     nix-index-database.inputs.nixpkgs.follows = "nixpkgs";
-
-    # Not declared by default -- programs.hyprland.package falls back to plain
-    # nixpkgs (see modules/hyprland.nix's `hyprlandPkg`). Uncomment to pin it
-    # independently of nixpkgs instead, so a Hyprland update landing in
-    # nixpkgs doesn't touch your build until you bump this tag yourself.
-    # Handy to freeze on a known-good release ahead of a config-breaking
-    # upstream change (e.g. a config-format switch):
-    #   hyprland.url = "git+https://github.com/hyprwm/Hyprland?ref=refs/tags/v0.55.4&submodules=1";
-    # then it's picked up automatically -- modules/hyprland.nix already
-    # threads `hyprland` through specialArgs below and uses it when present.
   };
 
   outputs = {
@@ -73,7 +63,6 @@
     hydrix,
     nixpkgs,
     nixpkgs-unstable,
-    hyprland ? null,
     ...
   } @ inputs: let
     # =========================================================================
@@ -177,7 +166,7 @@
         in {
           name = machineName;
           value = hydrix.lib.mkHost {
-            specialArgs = {inherit self hydrix machineName hyprland;};
+            specialArgs = {inherit self hydrix machineName;};
             extraInputs = {inherit (inputs) disko sops-nix nix-index-database;};
             inherit userColorschemesDir;
             modules = [
@@ -354,6 +343,7 @@
               {hydrix.vmThemeSync.enable = true;}
               {system.stateVersion = mc.config.system.stateVersion;}
               {hydrix.microvm.notifyForward.enable = m.notifyForward;}
+              {hydrix.microvm.usbPassthrough.enable = m.usbPassthrough or false;}
             ];
             inherit userProfiles hostConfig userColorschemesDir;
           };
@@ -420,7 +410,10 @@
       value = hydrix.lib.mkInfraVm {
         name = m._infraName;
         modules =
-          [(./infra + "/${m._infraName}/default.nix")]
+          [
+            (./infra + "/${m._infraName}/default.nix")
+            {hydrix.microvm.usbPassthrough.enable = m.usbPassthrough or false;}
+          ]
           ++ nixpkgs.lib.optional (m.filesAgent or false) "${hydrix}/vm/dev/files-agent.nix";
       };
     }) (builtins.filter (m: !(m.builtinVm or false)) discoveredInfra));
@@ -439,6 +432,7 @@
             hasDisplay = m.hasDisplay or true;
             focusBorder = m.focusBorder or null;
             notifyForward = m.notifyForward or false;
+            usbPassthrough = m.usbPassthrough or false;
           };
         })
         discoveredMetas)
@@ -452,6 +446,7 @@
           workspace = m.workspace or null;
           label = m.label or m._infraName;
           hasDisplay = m.hasDisplay or false;
+          usbPassthrough = m.usbPassthrough or false;
         };
       }) (builtins.filter (m: m ? vsockCid) discoveredInfra))
       // builtins.listToAttrs (map (m: {
@@ -460,6 +455,7 @@
             vmName = taskVmName m;
             cid = m.vsockCid;
             inherit (m) bridge subnet workspace label focusBorder notifyForward;
+            usbPassthrough = m.usbPassthrough or false;
             hasDisplay = true;
             taskSlot = m.name;
           };
@@ -550,6 +546,7 @@
                 vmThemeSyncModule
                 {hydrix.vmThemeSync.enable = true;}
                 {system.stateVersion = mc.config.system.stateVersion;}
+                {hydrix.microvm.usbPassthrough.enable = m.usbPassthrough or false;}
               ]
               ++ nixpkgs.lib.optional (overrides ? ${m._profileName}) overrides.${m._profileName}
               ++ nixpkgs.lib.optional (vmCfg.encryption or false) {hydrix.microvm.encryption.enable = true;}

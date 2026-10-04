@@ -19,18 +19,11 @@
   config,
   lib,
   pkgs,
-  hyprland ? null,
   ...
 }: let
-  # Pinned build if you've declared a `hyprland` flake input and threaded it
-  # through specialArgs (see flake.nix) -- falls back to plain nixpkgs
-  # otherwise. Used for every hyprctl invocation in this file too, so helper
-  # scripts always talk to a hyprctl matching the compositor's actual IPC
-  # version.
-  hyprlandPkg =
-    if hyprland == null
-    then pkgs.hyprland
-    else hyprland.packages.${pkgs.stdenv.hostPlatform.system}.hyprland;
+  # Used for programs.hyprland.package and every hyprctl invocation in this
+  # file, so helper scripts always talk to the compositor's own IPC version.
+  hyprlandPkg = pkgs.hyprland;
 
   username = config.hydrix.username;
   sc = config.hydrix.graphical.scaling.computed;
@@ -694,10 +687,6 @@ in {
   };
 
   config = lib.mkIf config.hydrix.hyprland.enable {
-    # No-op by default (hyprlandPkg falls back to pkgs.hyprland above). Pins
-    # to a specific Hyprland release instead if you uncomment the `hyprland`
-    # input in flake.nix -- handy to freeze on a known-good version ahead of
-    # an upstream config-breaking change (e.g. hyprlang -> Lua).
     programs.hyprland.package = hyprlandPkg;
 
     environment.systemPackages = [lockTimeout monitorLayout pkgs.nwg-displays];

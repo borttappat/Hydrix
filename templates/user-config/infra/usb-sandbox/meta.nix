@@ -9,6 +9,7 @@
   vsockCid   = 209;
   hasDisplay = false;
   filesAgent = true;  # opt into the shared files-transfer agent (vm/dev/files-agent.nix)
+  usbPassthrough = true;  # host can hand whole USB devices to this VM (usb attach <busid> usb-sandbox)
   bridge    = "br-usb-sandbox";
   tapId     = "mv-usb-sandbox";
   tapMac    = "02:00:00:02:6d:01";  # CID 209 - 100 = 109 = 0x6d
@@ -20,7 +21,7 @@
 
   # TAP -> bridge mappings for host-side wiring
   # Main TAP on br-usb-sandbox. Files VM connects here via its own mv-files-usb TAP.
-  # No second TAP needed — both VMs share the same bridge.
+  # No second TAP needed - both VMs share the same bridge.
   tapBridges = {
     "mv-usb-sandbox" = "br-usb-sandbox";
   };
