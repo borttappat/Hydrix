@@ -124,6 +124,12 @@
       windowrule = no_blur 1, match:fullscreen 1
       windowrule = opacity 1.0 override, match:fullscreen 1
     ''}
+    ${lib.optionalString (!xwaylandEnabled) ''
+      # XWayland off (hydrix.hyprland.xwayland.enable): no X server is started.
+      xwayland {
+        enabled = false
+      }
+    ''}
   '';
 
   # ── Scripts ──────────────────────────────────────────────────────────────────

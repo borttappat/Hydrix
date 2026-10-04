@@ -1113,7 +1113,9 @@ in {
             and fullscreen windows, letting the compositor skip unnecessary rendering
             overhead for those surfaces.
           Enable only in specialisations where such apps are available
-          (e.g. administrative).
+          (e.g. administrative). When off, XWayland is disabled at runtime
+          (`xwayland { enabled = false }`, no X server started); the compositor
+          package is the same XWayland-capable binary-cache build either way.
         '';
       };
     };

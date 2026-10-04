@@ -31,7 +31,11 @@ in {
   config = lib.mkIf (cfg.enable && config.hydrix.hyprland.enable) {
     programs.hyprland = {
       enable = true;
-      xwayland.enable = lib.mkDefault config.hydrix.hyprland.xwayland.enable;
+      # Always the XWayland-capable build: it is the one in the binary cache,
+      # and turning this off makes NixOS rebuild Hyprland from source. With
+      # hydrix.hyprland.xwayland.enable off, XWayland is disabled at runtime
+      # instead (`xwayland { enabled = false }` in hydrix-generated.conf).
+      xwayland.enable = lib.mkDefault true;
     };
 
     # XDG portal for screen sharing, file pickers, etc.
