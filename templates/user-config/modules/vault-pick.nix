@@ -1,8 +1,8 @@
-# vault-pick — Wayland-native KeepassXC credential picker
+# vault-pick - Wayland-native KeepassXC credential picker
 #
 # Opens a floating Alacritty (class: vault-pick) that drives the vault VM
 # over vsock. Credentials are copied to the Wayland clipboard by wl-copy on
-# the host — they never enter any VM's display pipeline.
+# the host, they never enter any VM's display pipeline.
 #
 # Auto-clears clipboard after 30 seconds.
 # Session: unlock once per session, auto-locked after 5 min idle in vault VM.

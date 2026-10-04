@@ -1,4 +1,4 @@
-# vault-cli — vsock-backed KeepassXC CLI
+# vault-cli - vsock-backed KeepassXC CLI
 #
 # All operations go over vsock to microvm-vault (CID 213, port 14514).
 # No local KeepassXC required on the host.
@@ -35,7 +35,7 @@
 
       require_vault() {
         if ! echo "PING" | socat -T5 - "VSOCK-CONNECT:$CID:$PORT" 2>/dev/null | grep -q "PONG"; then
-          echo "vault not configured — run: shard start vault" >&2
+          echo "vault not configured, run: shard start vault" >&2
           echo "See DOCUMENTATION.md §Vault VM for setup instructions." >&2
           exit 1
         fi

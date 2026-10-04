@@ -1,4 +1,4 @@
-# Alacritty Terminal — User Configuration
+# Alacritty Terminal - User Configuration
 #
 # The framework handles: DPI font size, window opacity, color import,
 # VM color inheritance, and keyboard bindings.

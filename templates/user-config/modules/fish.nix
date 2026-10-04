@@ -1,4 +1,4 @@
-# Fish Shell — User Configuration
+# Fish Shell - User Configuration
 #
 # Framework provides: pywal color sequences, fzf/zoxide integration, Ctrl+R,
 # vi key bindings (hydrix.graphical.fish.viKeyBindings), lockdown git wrapper.
@@ -67,14 +67,14 @@ in {
           set fish_cursor_replace_one underscore blink
           set fish_cursor_visual      underscore blink
 
-          # Ctrl+Z — bring last job to foreground
+          # Ctrl+Z - bring last job to foreground
           bind \cz 'fg 2>/dev/null; commandline -f repaint'
 
-          # Double-Escape — prepend sudo to last command
+          # Double-Escape - prepend sudo to last command
           bind \e\e sudo_last_command
           bind -M insert \e\e sudo_last_command
 
-          # Directory memory — restore last working directory
+          # Directory memory - restore last working directory
           if test -f /tmp/last_fish_dir
             read -l last_dir < /tmp/last_fish_dir
             test -d "$last_dir"; and cd "$last_dir"
@@ -135,9 +135,7 @@ in {
             ga = "git add";
             gd = "git diff";
             gc = "git commit -m";
-            gp = "git push -uf origin main";
-            gur = "git add -A && git commit -m 'updates' && git push -uf origin main";
-            gu = "git add -u && git commit -m 'updates' && git push -uf origin main";
+            gp = "git push";
             gl = "git log --oneline --graph --decorate -20";
 
             # Utilities

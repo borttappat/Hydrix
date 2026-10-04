@@ -1,4 +1,4 @@
-# Starship Prompt — User Configuration
+# Starship Prompt - User Configuration
 #
 # Installs starship, initializes it in fish, and deploys starship.toml.
 #

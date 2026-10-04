@@ -50,9 +50,9 @@
 
   # ─── VM color inheritance ────────────────────────────────────────────
   # hydrix.colorschemeInheritance = "dynamic";  # DEFAULT: "dynamic"
-  #   "full"    — VMs use all host wal colors
-  #   "dynamic" — VMs use host background + their own text colors
-  #   "none"    — VMs use their own colorscheme independently
+  #   "full"     VMs use all host wal colors
+  #   "dynamic"  VMs use host background + their own text colors
+  #   "none"     VMs use their own colorscheme independently
 
   # ─── Extra walrgb theming hook ───────────────────────────────────────
   # Shell commands appended after core walrgb theming. Runs on every walrgb call.

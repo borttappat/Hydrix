@@ -1,4 +1,4 @@
-# Ranger File Manager — User Configuration
+# Ranger File Manager - User Configuration
 #
 # Full ranger configuration. Settings, mappings, and rifle rules are all
 # defined here. Override per-machine in machines/*.nix.

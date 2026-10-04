@@ -1,4 +1,4 @@
-# Helix Editor — User Configuration
+# Helix Editor - User Configuration
 #
 # Config is written as a plain writable file via home.activation.
 # Edit ~/.config/helix/config.toml freely between rebuilds.

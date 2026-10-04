@@ -1,6 +1,6 @@
-# Hydrix Plymouth boot animation — mirrors the GRUB theme (same title, colors).
+# Hydrix Plymouth boot animation, mirrors the GRUB theme (same title, colors).
 # Option declarations + implementation live in the framework
-# (theming/boot/plymouth.nix) — this file just sets values.
+# (theming/boot/plymouth.nix), this file just sets values.
 { config, lib, pkgs, ... }:
 {
   hydrix.plymouth = {

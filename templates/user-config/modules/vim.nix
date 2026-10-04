@@ -1,6 +1,6 @@
-# Vim — User Configuration
+# Vim - User Configuration
 #
-# Full vim configuration — installs vim, sets it as default editor,
+# Full vim configuration - installs vim, sets it as default editor,
 # and deploys .vimrc via home.activation (writable between rebuilds).
 
 { config, lib, pkgs, ... }:

@@ -1,7 +1,7 @@
-# Zathura PDF Viewer — User Configuration
+# Zathura PDF Viewer - User Configuration
 #
 # All settings use hydrix.graphical.zathura.* options.
-# Framework defaults are shown commented out — uncomment to override.
+# Framework defaults are shown commented out, uncomment to override.
 # Colors and font are injected at runtime from the wal cache (no rebuild needed).
 #
 # Framework defaults:

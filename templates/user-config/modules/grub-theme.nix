@@ -1,6 +1,6 @@
-# Hydrix GRUB bootloader theme — dark background, Iosevka font, "HYDRIX" label.
+# Hydrix GRUB bootloader theme; dark background, Iosevka font, "HYDRIX" label.
 # Option declarations + implementation live in the framework
-# (theming/boot/grub-theme.nix) — this file just sets values.
+# (theming/boot/grub-theme.nix), this file just sets values.
 { config, lib, pkgs, hydrix, ... }:
 {
   hydrix.grub.theme = {

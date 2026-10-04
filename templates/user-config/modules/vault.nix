@@ -8,7 +8,7 @@
 # vault-pick   Interactive Wayland picker  (Mod+Shift+P)
 # vault-cli    Programmatic CLI (unlock/lock/status/list/get/sync/pull)
 #
-# Gitsync sync path: vault-cli sync → gitsync VM SYNC command → git push
+# Gitsync sync path: vault-cli sync -> gitsync VM SYNC command -> git push
 { config, lib, pkgs, ... }:
 
 {

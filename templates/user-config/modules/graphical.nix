@@ -1,7 +1,7 @@
-# Graphical Configuration — Shared across all machines
+# Graphical Configuration - Shared across all machines
 #
 # UI preferences that apply to every machine.
-# Machine-specific overrides go in machines/<serial>.nix — plain assignment
+# Machine-specific overrides go in machines/<serial>.nix using plain assignment
 # there takes priority over the lib.mkDefault values here.
 #
 # Bar style and module layout -> modules/waybar.nix
