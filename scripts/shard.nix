@@ -394,33 +394,10 @@
       }
 
       # Start microVM
-      cmd_start() {
+      # Unlock the VM's encrypted home volume if it has one and it is closed.
+      # Every path that starts the service goes through here (start, restart).
+      ensure_unlocked() {
           local vm_name="$1"
-
-          if is_running "$vm_name"; then
-              log_error "''${vm_name} is already running"
-              return 1
-          fi
-
-          local cid
-          cid=$(get_cid "$vm_name")
-          if [[ -z "$cid" ]]; then
-              log_error "Cannot get vsock CID for ''${vm_name}. Is it defined in the flake?"
-              return 1
-          fi
-
-          # Builder VM: stop host nix-daemon and remount store as read-write
-          if is_builder "$vm_name"; then
-              if host_daemon_running; then
-                  log "Stopping host nix-daemon (required for builder)..."
-                  sudo systemctl stop nix-daemon.service nix-daemon.socket
-              fi
-              # Remount /nix/store as read-write for builder to write to
-              log "Remounting /nix/store as read-write..."
-              sudo mount -o remount,rw /nix/store
-          fi
-
-          # Unlock encrypted home volume if present
           local luks_path="/var/lib/microvms/''${vm_name}/home.luks"
           local mapper_name="vm-''${vm_name}-home"
 
@@ -450,6 +427,36 @@
                   log_success "Volume unlocked"
               fi
           fi
+          return 0
+      }
+
+      cmd_start() {
+          local vm_name="$1"
+
+          if is_running "$vm_name"; then
+              log_error "''${vm_name} is already running"
+              return 1
+          fi
+
+          local cid
+          cid=$(get_cid "$vm_name")
+          if [[ -z "$cid" ]]; then
+              log_error "Cannot get vsock CID for ''${vm_name}. Is it defined in the flake?"
+              return 1
+          fi
+
+          # Builder VM: stop host nix-daemon and remount store as read-write
+          if is_builder "$vm_name"; then
+              if host_daemon_running; then
+                  log "Stopping host nix-daemon (required for builder)..."
+                  sudo systemctl stop nix-daemon.service nix-daemon.socket
+              fi
+              # Remount /nix/store as read-write for builder to write to
+              log "Remounting /nix/store as read-write..."
+              sudo mount -o remount,rw /nix/store
+          fi
+
+          ensure_unlocked "$vm_name" || return 1
 
           log "Starting ''${BOLD}''${vm_name}''${NC} (CID: ''${cid})..."
           local start
@@ -722,6 +729,8 @@
               pkill -f "waypipe.*socket.*''${_port}" 2>/dev/null || true
               sleep 0.3
           fi
+
+          ensure_unlocked "$vm_name" || return 1
 
           log "Starting service..."
           sudo systemctl start "microvm@''${vm_name}.service"
