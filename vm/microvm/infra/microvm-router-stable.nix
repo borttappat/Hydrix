@@ -30,23 +30,15 @@
   cfg = config.hydrix;
   routerCfg = cfg.router;
 
-  # QEMU for VFIO passthrough: its seccomp sandbox blocks /dev/vfio access.
-  # Seccomp is only active when QEMU runs with `-sandbox on`, which microvm.nix
-  # adds only when the package's configureFlags list --enable-seccomp. Hiding
-  # that flag at evaluation time drops the argument while the binary stays
-  # the binary-cache build (the same closure-minimised QEMU other microVMs
-  # use); the .override no-op stops microvm.nix re-overriding it into a
-  # derivation nothing has built.
-  qemuNoSeccomp = let
+  # QEMU for VFIO passthrough: the binary-cache, closure-minimised QEMU other
+  # microVMs use, with its seccomp sandbox on (`-sandbox on`, added by
+  # microvm.nix because configureFlags list --enable-seccomp). The .override
+  # no-op stops microvm.nix re-overriding it into a derivation nothing has
+  # built.
+  qemuVfio = let
     qemu = pkgs.qemu_kvm.override {nixosTestRunner = true;};
-    self =
-      qemu
-      // {
-        configureFlags = lib.filter (f: f != "--enable-seccomp") qemu.configureFlags;
-        override = _: self;
-      };
   in
-    self;
+    qemu // {override = _: qemu;};
 
   routerUser = routerCfg.username;
   routerHashedPassword = routerCfg.hashedPassword;
@@ -184,7 +176,7 @@ in {
       # here (see qemu.serialConsole below for the console-collision fix
       # that was needed alongside it).
       qemu.machine = "microvm";
-      qemu.package = qemuNoSeccomp;
+      qemu.package = qemuVfio;
 
       vcpu = 2;
       mem = 1024;
