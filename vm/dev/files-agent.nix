@@ -174,11 +174,18 @@ PYEOF
         fi
 
         mkdir -p "$EXTRACT_FULL"
-        ${pkgs.openssl}/bin/openssl enc -d -aes-256-cbc -pbkdf2 \
-          -pass pass:"$PASSPHRASE" -in "$ARCHIVE_FULL" \
-          | ${pkgs.gnutar}/bin/tar --use-compress-program=${pkgs.gzip}/bin/gzip -xf - -C "$EXTRACT_FULL"
-        rm -f "$ARCHIVE_FULL"
-        echo "OK"
+        # Decrypt first, then a checked extraction: the archive is authored by
+        # the source VM.
+        PLAIN=$(${pkgs.coreutils}/bin/mktemp -p "${userHome}" .decrypt.XXXXXX)
+        if ! ${pkgs.openssl}/bin/openssl enc -d -aes-256-cbc -pbkdf2 \
+              -pass pass:"$PASSPHRASE" -in "$ARCHIVE_FULL" -out "$PLAIN" 2>/dev/null; then
+          echo "ERROR: decrypt failed"
+        elif ! OUT=$(${config.hydrix.microvm.safeExtract} "$PLAIN" "$EXTRACT_FULL"); then
+          echo "$OUT"
+        else
+          echo "OK"
+        fi
+        rm -f "$PLAIN" "$ARCHIVE_FULL"
         ;;
 
       SERVE)

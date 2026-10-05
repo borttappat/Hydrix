@@ -693,7 +693,7 @@
     exec 9>"''${XDG_RUNTIME_DIR:-/tmp}/vm-notify-$vm.lock"
     ${pkgs.util-linux}/bin/flock -n 9 || exit 0
 
-    line=$(${pkgs.coreutils}/bin/timeout 3 head -c 8192 | head -n1)
+    line=$(${pkgs.coreutils}/bin/timeout 1 head -c 8192 | head -n1)
     {
       IFS= read -r -d "" app
       IFS= read -r -d "" summary
@@ -709,6 +709,22 @@
 
     ${pkgs.libnotify}/bin/notify-send -u "$urgency" --app-name="$app" --category="hydrix-vm-$vm" -- "[$vm] $summary" "$body"
     sleep 1
+  '';
+
+  # Audio connections reach the desktop's PipeWire session, so only VMs that
+  # opted in (meta.nix audio = true, mirrored in the registry) get through.
+  # The VM is resolved from the vsock peer CID, never from anything it sends.
+  pulseGateScript = pkgs.writeShellScript "vm-pulse-gate" ''
+    set -u
+    cid=''${SOCAT_PEERADDR:-}
+    vm=$(${pkgs.jq}/bin/jq -r --arg cid "$cid" \
+      'to_entries[] | select((.value.cid | tostring) == $cid and .value.audio == true) | .key' \
+      ${VM_REGISTRY} 2>/dev/null | ${pkgs.coreutils}/bin/head -n1)
+    if [ -z "$vm" ]; then
+      echo "rejected audio connection from CID ''${cid:-unknown}" >&2
+      exit 0
+    fi
+    exec ${pkgs.socat}/bin/socat STDIO "UNIX-CONNECT:''${XDG_RUNTIME_DIR}/pulse/native"
   '';
 in
   lib.mkIf config.hydrix.hyprland.enable {
@@ -732,8 +748,8 @@ in
     #
     # Anonymous auth on the Unix socket: VM clients won't have the host PA cookie,
     # and without auth.anonymous PipeWire silently degrades them to an isolated
-    # null-sink session. Safe on a single-user machine - the cookie is only
-    # meaningful separation between different Unix users, not same-UID processes.
+    # null-sink session. Which VMs may connect at all is decided by
+    # pulseGateScript (meta.nix audio = true), not by the socket.
 
     # PipeWire: accept anonymous connections on the PA Unix socket
     services.pipewire.extraConfig.pipewire-pulse."10-vm-audio" = {
@@ -747,13 +763,13 @@ in
       };
     };
 
-    # Bridge vsock:14505 → PipeWire PA Unix socket
+    # Bridge vsock:14505 → PipeWire PA Unix socket, for opted-in VMs only
     systemd.user.services.pulse-vsock = {
       description = "PulseAudio vsock bridge for waypipe VMs (port 14505)";
       wantedBy = ["default.target"];
       after = ["pipewire-pulse.service"];
       serviceConfig = {
-        ExecStart = "${pkgs.socat}/bin/socat VSOCK-LISTEN:14505,reuseaddr,fork UNIX-CLIENT:/run/user/1000/pulse/native";
+        ExecStart = "${pkgs.socat}/bin/socat VSOCK-LISTEN:14505,reuseaddr,fork,max-children=8 EXEC:${pulseGateScript}";
         Restart = "always";
         RestartSec = "3s";
       };

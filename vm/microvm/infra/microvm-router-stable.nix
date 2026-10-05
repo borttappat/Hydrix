@@ -235,6 +235,7 @@ in {
           source = "/var/lib/microvms/${vmName}/config";
           mountPoint = "/mnt/router-config";
           proto = "9p";
+          readOnly = true;
         }
       ];
 

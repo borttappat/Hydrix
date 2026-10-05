@@ -687,6 +687,8 @@ in {
                     echo "Warning: ${r.path} missing, ${repo} is shared as an empty directory"
                   else
                     ${util}/mount --bind ${lib.escapeShellArg r.path} "$view"
+                    # The VM writes here: setuid bits and device nodes stay inert.
+                    ${util}/mount -o remount,bind,nosuid,nodev "$view"
                     ${util}/mount --make-private "$view"
                     ${lib.concatMapStrings (p: ''
                       t="$view/"${lib.escapeShellArg p}
@@ -812,6 +814,36 @@ in {
     # request, from upstream microvm.nix's setBalloonScript) to ask it to shrink to
     # a percentage of its configured mem. deflate-on-oom means the balloon grows
     # back automatically the moment the guest actually needs the memory.
+    # VMs write into shares under /home (vault, hostsync inbox, gitsync repos)
+    # through a virtiofsd running as host root. Mount /home nosuid,nodev before
+    # any VM or user session starts, so nothing a guest writes there can carry
+    # a working setuid bit or device node on the host.
+    (lib.mkIf cfg.enable {
+      systemd.services.hydrix-home-nosuid = {
+        description = "Mount /home nosuid,nodev (VM-writable shares live there)";
+        wantedBy = ["multi-user.target"];
+        after = ["local-fs.target"];
+        before = ["systemd-user-sessions.service" "microvms.target"];
+        serviceConfig = {
+          Type = "oneshot";
+          RemainAfterExit = true;
+        };
+        path = [pkgs.util-linux pkgs.gnugrep];
+        script = ''
+          opts=$(findmnt -no OPTIONS --target /home)
+          if grep -qw nosuid <<< "$opts" && grep -qw nodev <<< "$opts"; then
+            exit 0
+          fi
+          if mountpoint -q /home; then
+            mount -o remount,nosuid,nodev /home
+          else
+            mount --bind /home /home
+            mount -o remount,bind,nosuid,nodev /home
+          fi
+        '';
+      };
+    })
+
     (lib.mkIf (cfg.enable && cfg.balloonTrim.enable) {
       systemd.services.hydrix-microvm-balloon-trim = {
         description = "Request idle microVMs shrink via virtio-balloon";

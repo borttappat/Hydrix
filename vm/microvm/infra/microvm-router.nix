@@ -455,6 +455,7 @@ in {
           source = "/var/lib/microvms/${vmName}/config";
           mountPoint = "/mnt/router-config";
           proto = "9p";
+          readOnly = true;
         }
         # Secrets delivered by host hydrix-secrets-${vmName} service.
         # Populated when hydrix.microvmHost.vms."microvm-router".secrets includes "wifi".
@@ -464,6 +465,7 @@ in {
           source = "/run/hydrix-secrets/${vmName}";
           mountPoint = "/mnt/vm-secrets";
           proto = "virtiofs";
+          readOnly = true;
         }
       ];
 

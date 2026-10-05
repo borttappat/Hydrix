@@ -10,6 +10,7 @@
   label       = "DEV";
   focusBorder = "cyan";
   notifyForward = true;   # host accepts this VM's notifications (vsock:14518)
+  # audio = true;          # host audio over vsock:14505 (speakers, microphone); off unless set
 
   mem  = 8192;             # ceiling, MB - balloon reclaims idle memory
   vcpu = 8;                # ceiling - generous headroom, balloons down properly when idle

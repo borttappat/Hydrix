@@ -183,6 +183,8 @@ in {
         source = r.source;
         mountPoint = "/mnt/repos/${r.name}";
         proto = "virtiofs";
+        posixAcl = false; # required by uid translation
+        extraArgs = config.hydrix.microvm.ownedShareArgs;
       })
       repos;
 
@@ -207,6 +209,10 @@ in {
     boot.kernelModules = ["vmw_vsock_virtio_transport"];
 
     users.users.gitsync = {
+
+      # Same uid as the host owner of its writable share (uid translation).
+
+      uid = config.hydrix.microvm.hostOwner.uid;
       isNormalUser = true;
       extraGroups = ["wheel"];
       password = "gitsync";

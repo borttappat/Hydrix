@@ -119,6 +119,7 @@ in {
             source = "/nix/store";
             mountPoint = "/nix/store";
             proto = "virtiofs";
+            extraArgs = config.hydrix.microvm.writableShareArgs;
           }
           # Host /nix/var/nix - R/W access for nix database
           {
@@ -126,6 +127,7 @@ in {
             source = "/nix/var/nix";
             mountPoint = "/nix/var/nix";
             proto = "virtiofs";
+            extraArgs = config.hydrix.microvm.writableShareArgs;
           }
           # User's hydrix-config - READ-ONLY for security
           # Builder can evaluate flakes but cannot modify source code
@@ -135,6 +137,7 @@ in {
             source = "/home/${hostUsername}/hydrix-config";
             mountPoint = "/mnt/hydrix";
             proto = "virtiofs";
+            readOnly = true;
           }
         ]
         ++ map (path: {
@@ -349,7 +352,7 @@ in {
                 # --log-format raw: one line per action (fetch/build), no ANSI/carriage-returns.
                 # --print-out-paths: emit result store paths on success.
                 # 2>&1: merge stderr (nix progress) into stdout so socat carries it all.
-                if ${pkgs.nix}/bin/nix build "$flake" --no-link --print-out-paths \
+                if ${pkgs.nix}/bin/nix build "$flake" --no-link --print-out-paths --no-write-lock-file \
                      --log-format raw 2>&1; then
                   echo "DONE"
                 else
@@ -363,7 +366,7 @@ in {
 
                 # Fetch all dependencies without building.
                 # --log-format raw: plain streaming output, no ANSI.
-                if ${pkgs.nix}/bin/nix flake prefetch "$flake" \
+                if ${pkgs.nix}/bin/nix flake prefetch "$flake" --no-write-lock-file \
                      --log-format raw 2>&1; then
                   echo "DONE prefetch complete"
                 else

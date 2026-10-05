@@ -180,12 +180,18 @@
           EXTRACT_FULL="$INBOX/$EXTRACT_PARENT"
         fi
         mkdir -p "$EXTRACT_FULL"
-        ${pkgs.openssl}/bin/openssl enc -d -aes-256-cbc -pbkdf2 \
-          -pass pass:"$PASSPHRASE" -in "$XFER_FILE" \
-          | ${pkgs.gnutar}/bin/tar --use-compress-program=${pkgs.gzip}/bin/gzip \
-              -xf - -C "$EXTRACT_FULL"
-        rm -f "$XFER_FILE"
-        echo "OK"
+        # Decrypt first, then a checked extraction: the archive is authored
+        # by the source VM and lands on the host.
+        PLAIN=$(${pkgs.coreutils}/bin/mktemp -p "$INBOX" .decrypt.XXXXXX)
+        if ! ${pkgs.openssl}/bin/openssl enc -d -aes-256-cbc -pbkdf2 \
+              -pass pass:"$PASSPHRASE" -in "$XFER_FILE" -out "$PLAIN" 2>/dev/null; then
+          echo "ERROR: decrypt failed"
+        elif ! OUT=$(${config.hydrix.microvm.safeExtract} "$PLAIN" "$EXTRACT_FULL"); then
+          echo "$OUT"
+        else
+          echo "OK"
+        fi
+        rm -f "$PLAIN" "$XFER_FILE"
         ;;
 
       CLEANUP)
@@ -240,6 +246,8 @@ in {
       source = "/home/${hostUsername}/vm-inbox";
       mountPoint = "${inbox}";
       proto = "virtiofs";
+      posixAcl = false; # required by uid translation
+      extraArgs = config.hydrix.microvm.ownedShareArgs;
     }
   ];
 
@@ -295,6 +303,10 @@ in {
   };
 
   users.users.hostsync = {
+
+    # Same uid as the host owner of its writable share (uid translation).
+
+    uid = config.hydrix.microvm.hostOwner.uid;
     isNormalUser = true;
     extraGroups = ["wheel"];
     password = "hostsync";

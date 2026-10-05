@@ -206,6 +206,8 @@ in {
     source     = "/home/${hostUsername}/vault";
     mountPoint = "${vaultDir}";
     proto      = "virtiofs";
+    posixAcl   = false; # required by uid translation
+    extraArgs  = config.hydrix.microvm.ownedShareArgs;
   }];
 
   boot.kernelModules = [ "vmw_vsock_virtio_transport" ];
@@ -265,6 +267,10 @@ in {
   };
 
   users.users.vault = {
+
+    # Same uid as the host owner of its writable share (uid translation).
+
+    uid = config.hydrix.microvm.hostOwner.uid;
     isSystemUser = true;
     group        = "vault";
     home         = "/var/lib/vault";

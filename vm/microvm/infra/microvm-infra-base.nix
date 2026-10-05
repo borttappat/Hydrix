@@ -85,6 +85,7 @@ in {
           source = "/var/lib/microvms/${vmName}/config";
           mountPoint = "/mnt/vm-config";
           proto = "9p";
+          readOnly = true;
         }
       ];
 

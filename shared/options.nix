@@ -343,6 +343,11 @@ in {
               default = false;
               description = "Whether the host accepts notifications forwarded from this VM (vsock:14518). Set in meta.nix; the VM's hydrix.microvm.notifyForward.enable should read the same value.";
             };
+            audio = lib.mkOption {
+              type = lib.types.bool;
+              default = false;
+              description = "Whether this VM may use host audio over vsock:14505. Set in meta.nix (`audio = true`); the VM's hydrix.microvm.audio.enable reads the same value.";
+            };
             usbPassthrough = lib.mkOption {
               type = lib.types.bool;
               default = false;

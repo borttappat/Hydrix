@@ -549,7 +549,7 @@ shard builder status
 shard stop microvm-builder  # This also restores host nix-daemon
 
 # If store is still rw after builder crash
-sudo mount -o remount,ro /nix/store
+sudo mount -o remount,ro,bind /nix/store
 sudo systemctl start nix-daemon
 ```
 
@@ -3022,6 +3022,10 @@ Traffic between the files VM and profile VMs never touches the router. The files
 
 - Regular VMs have no direct host filesystem access whatsoever
 - Only hostsync can write to the host, and only to `~/vm-inbox/` - blast radius is one directory
+- Every write is host-started (`shard files transfer ... hostsync/`); the archive, authored by the
+  source VM, is unpacked with `hydrix.microvm.safeExtract` (regular files and directories only, no
+  owners or permissions), the share's virtiofsd cannot create device nodes, and `/home` is mounted
+  `nosuid,nodev` on the host
 - Files arrive at hostsync already encrypted; the passphrase is released via vsock only after three-way SHA-256 verification passes
 - Port 8888 accepts connections only from the files VM (`192.168.214.2`), enforced by nftables
 
@@ -3507,10 +3511,14 @@ shard build microhack                       # Rebuild VM with new package
 - VM staging: `~/staging/<name>/package.nix`
 - Host profiles: `~/hydrix-config/profiles/<type>/packages/<name>.nix`
 
-The `vm-sync pull` command automatically:
-1. Copies package to your user config's profile
-2. Regenerates `packages/default.nix`
-3. Stages for git tracking
+The `vm-sync pull` command:
+1. Fetches the staged archive and checks it before extracting: only regular files and
+   directories under `<package>/` (no links, special files, absolute paths or `..`), extracted
+   without owners or permissions. Anything else is refused.
+2. Shows the staged `package.nix` (control characters stripped) and asks y/N, since the package
+   is built on the host.
+3. Copies it to your user config's profile (never through a symlink), regenerates
+   `packages/default.nix` and stages both for git tracking.
 
 ### Live Switch (shard switch)
 
@@ -3630,7 +3638,7 @@ All host-VM communication uses virtio-vsock. No SSH or network access to VMs. Ea
 | 14505 | files-agent | Host -> Files VM | File transfer ops (FETCH/DELIVER/STORE/LIST) |
 | 14506 | vm-files-agent | Host -> any VM | Per-VM file ops (ENCRYPT/DECRYPT/SERVE/CLEANUP) |
 | 14506 | router-stats-server | Host -> Router | WiFi/net/WireGuard status + WiFi credential sync (see [Polling Architecture](#polling-architecture) below). Commands: `PING`, `POLL`/`STATUS`, `NET`, `WG`, `ALL`, `ADD`/`REMOVE` |
-| 14505 | pulse-vsock | VM -> Host | PulseAudio/PipeWire audio bridge (VM→host, proxied to TCP:4713) |
+| 14505 | pulse-vsock | VM -> Host | PulseAudio/PipeWire audio bridge, only for VMs with `audio = true` in meta.nix |
 | 14508 | waypipe-launch | Host -> VM | App launch commands (Wayland mode) |
 | 14509 | display-mode | Host -> VM | Display mode selector / readiness gate: `PING`/`waypipe-reconnect`/`STATUS`/`stop` |
 | 14510 | builder-build | Host -> Builder | Send build commands |
@@ -3780,13 +3788,28 @@ VM /nix/.rw-store (qcow2) ──┘
 
 ### Filesystem Shares
 
-| Tag | Source (Host) | Mount (VM) | Protocol | Purpose |
-|-----|---------------|------------|----------|---------|
-| `nix-store` | `/nix/store` | `/nix/.ro-store` | virtiofs | Shared nix store (read-only base) |
-| `vm-config` | `/var/lib/microvms/<vm>/config` | `/mnt/vm-config` | 9p | VM config, live switch registration |
-| `hydrix-config` | `~/.config/hydrix` | `/mnt/hydrix-config` | 9p | Host config (scaling.json for DPI) |
-| `vm-secrets` | `/run/hydrix-secrets/<vm>` | `/mnt/vm-secrets` | virtiofs | GitHub SSH keys |
-| `repo-<name>` | `/run/hydrix-repos/<vm>/<name>` | same path as on the host | virtiofs | Host working tree, read-write except `readOnlyPaths` (only with `hostRepos`) |
+**Rule:** anything a VM shares with the host is either read-only to the VM, enforced by the
+host (`readOnly = true` on the share, so virtiofsd runs with `--readonly`; a guest's own
+read-only mount can be remounted by guest root), or written only during an operation the
+host starts (builder builds, `shard git`, `shard files transfer`, vault commands). Shares a
+VM can write additionally get `hydrix.microvm.writableShareArgs`
+(`--modcaps=-mknod:-setfcap`: no device nodes or file capabilities); shares holding the user's
+own files (vault, hostsync inbox, gitsync repos) use `hydrix.microvm.ownedShareArgs`, which also
+squashes every guest uid/gid to `hydrix.microvm.hostOwner` (default 1000/100; those VMs' service
+users are pinned to it, and the shares set `posixAcl = false`). The host mounts
+`/home` and the repo views `nosuid,nodev` (`hydrix-home-nosuid`), so nothing a guest writes
+can carry a working setuid bit or device node. Archives that come from another VM are
+unpacked with `hydrix.microvm.safeExtract` (regular files and directories only, no owners
+or permissions).
+
+| Tag | Source (Host) | Mount (VM) | Access | Purpose |
+|-----|---------------|------------|--------|---------|
+| `nix-store` | `/nix/store` | `/nix/.ro-store` | read-only (builder: read-write) | Shared nix store |
+| `vm-config` / `router-config` | `/var/lib/microvms/<vm>/config` | `/mnt/vm-config`, `/mnt/router-config` | read-only | Live switch registration (the host writes and removes it) |
+| `hydrix-config` | `~/.config/hydrix` | `/mnt/hydrix-config` | read-only | Host theming state |
+| `vm-secrets` | `/run/hydrix-secrets/<vm>` | `/mnt/vm-secrets` | read-only | Provisioned secrets |
+| `repo-<name>` | `/run/hydrix-repos/<vm>/<name>` | same path as on the host | read-write except `readOnlyPaths` | Host working tree (only with `hostRepos`) |
+| `vault-data`, `host-inbox`, gitsync `repo-*` | `~/vault`, `~/vm-inbox`, repos | `/mnt/...` | read-write, host-started operations | Vault database, hostsync inbox, git sync |
 
 #### Host Repos (`hostRepos`)
 
@@ -3948,7 +3971,7 @@ shard builder status
 shard stop microvm-builder  # This also restores host nix-daemon
 
 # If store is still rw after crash
-sudo mount -o remount,ro /nix/store
+sudo mount -o remount,ro,bind /nix/store
 sudo systemctl start nix-daemon
 ```
 
@@ -4836,7 +4859,8 @@ VM app
                                           vsock port 14505
                                                     │
                                          Host pulse-vsock user service
-                                           socat VSOCK-LISTEN:14505 → UNIX-CLIENT:pulse/native
+                                           socat VSOCK-LISTEN:14505 → vm-pulse-gate
+                                           (peer CID must have audio = true) → pulse/native
                                                                               │
                                                                     PipeWire (host)
                                                                     (auth.anonymous = true)
@@ -4844,7 +4868,7 @@ VM app
 
 **Host side (`waypipe-host.nix`):**
 
-- `pulse-vsock` user service: bridges `VSOCK-LISTEN:14505` -> `UNIX-CLIENT:/run/user/1000/pulse/native` (host PipeWire)
+- `pulse-vsock` user service: `VSOCK-LISTEN:14505` (at most 8 connections) runs `vm-pulse-gate` per connection. The gate resolves the VM from the vsock peer CID in `/etc/hydrix/vm-registry.json` and only connects VMs whose `meta.nix` sets `audio = true` to `$XDG_RUNTIME_DIR/pulse/native` (host PipeWire); everything else is rejected and logged.
 - PipeWire anonymous auth enabled on its unix socket so VM clients (which have no host cookie) are accepted:
   ```nix
   services.pipewire.extraConfig.pipewire-pulse."10-vm-audio" = {
@@ -4853,7 +4877,7 @@ VM app
     ];
   };
   ```
-  Any client that can reach the socket is accepted without a cookie. The only clients that can reach it are VMs on this machine via vsock \- so on a single-user machine where you own all VMs, there is no meaningful threat. On a shared machine with untrusted VMs, you would want proper auth instead.
+  Any client that reaches the socket is accepted without a cookie, so the gate above is what decides which VMs get host audio (speakers and microphone).
 
 **VM side (`waypipe-vm.nix`):**
 
@@ -4869,7 +4893,7 @@ VM app
 | `display-mode` receives `waypipe` or `waypipe-reconnect` | Starts `pulse-vsock` in VM |
 | `display-mode` receives `stop` | Stops `pulse-vsock` alongside all display services |
 
-No configuration required \- audio works automatically for all profile VMs as soon as they are started in waypipe mode.
+Audio is **off unless a VM opts in**: set `audio = true;` in its `meta.nix`. That one value turns on the guest's PipeWire stack (`hydrix.microvm.audio.enable`) and admits its CID at the host gate. Rebuild the host (registry) and the VM after changing it.
 
 ### Notification Forwarding (waypipe mode)
 

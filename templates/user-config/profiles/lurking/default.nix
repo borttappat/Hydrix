@@ -55,9 +55,6 @@ in {
 
   # MicroVM resources (ephemeral - no persistence)
   hydrix.microvm = {
-    # Audio disabled for maximum privacy - microphone access leaks identity over Tor.
-    # To enable (e.g. for voice calls): audio.enable = true;
-    audio.enable = false;
     inherit (meta) vsockCid bridge tapId mem vcpu memLowFloorMb memFloorMb cpuLowFloorPct cpuFloorPct;
     persistence.enable = false;
   };

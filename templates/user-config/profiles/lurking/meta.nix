@@ -8,6 +8,7 @@
   subnet    = "192.168.106";     # /24 prefix — matches CID last octet
   workspace   = 6;
   label       = "LURKING";
+  # audio = true;          # host audio over vsock:14505 (speakers, microphone); off unless set
   focusBorder = "red";
   filesAccess = false;   # privacy: no files VM interface on this bridge; true to allow transfers
 

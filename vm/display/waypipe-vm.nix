@@ -195,24 +195,10 @@
           echo "none"
         fi
         ;;
-      TEST_VSOCK)
-        # Test VM→HOST vsock: try connecting to host (CID 2) on port 14599
-        if echo "PING" | ${pkgs.socat}/bin/socat -T3 - VSOCK-CONNECT:2:14599 2>/dev/null | grep -q "PONG"; then
-          echo "VM_TO_HOST_OK"
-        else
-          echo "VM_TO_HOST_FAIL"
-        fi
-        ;;
-      JOURNAL_WAYPIPE)
-        journalctl -u waypipe-vsock -n 10 --no-pager 2>/dev/null || echo "no journal"
-        ;;
       stop)
         # Stop all display services — host WM is exiting; next WM will push its mode on start.
         systemctl stop waypipe-vsock waypipe-launch ${lib.optionalString audioEnabled "pulse-vsock"} 2>/dev/null || true
         echo "stopped"
-        ;;
-      LAUNCH_LOG)
-        cat /tmp/waypipe-launch.log 2>/dev/null || echo "(no log)"
         ;;
       *)
         echo "unknown: $cmd"

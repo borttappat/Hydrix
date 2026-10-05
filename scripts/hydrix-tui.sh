@@ -902,6 +902,31 @@ devshells_query_vm() {
     echo "$cmd" | timeout 2 socat - "VSOCK-CONNECT:${cid}:${STAGING_PORT}" 2>/dev/null || echo ""
 }
 
+# Fetch a staged package from a VM into dest (an empty temp dir). The archive
+# is VM-authored: every member must be a regular file or directory under
+# <pkg>/, extracted without owners or permissions (same checks as vm-sync).
+devshells_fetch_package() {
+    local cid="$1" pkg="$2" dest="$3"
+    local archive="$dest/.archive.tar" types names n
+    [[ "$pkg" =~ ^[A-Za-z0-9][A-Za-z0-9._+-]{0,99}$ ]] || return 1
+    echo "get $pkg" | timeout 5 socat - "VSOCK-CONNECT:${cid}:${STAGING_PORT}" 2>/dev/null \
+        | head -c 10485760 > "$archive"
+    [[ -s "$archive" ]] || return 1
+    types=$(tar -tvf "$archive" 2>/dev/null | cut -c1) || return 1
+    names=$(tar -tf "$archive" 2>/dev/null) || return 1
+    grep -qv '^[-d]$' <<< "$types" && return 1
+    while IFS= read -r n; do
+        case "$n" in "$pkg" | "$pkg/" | "$pkg"/*) ;; *) return 1 ;; esac
+        case "/$n/" in */../*) return 1 ;; esac
+    done <<< "$names"
+    tar --no-same-owner --no-same-permissions -xf "$archive" -C "$dest" 2>/dev/null || return 1
+    rm -f "$archive"
+    [[ -f "$dest/$pkg/package.nix" && ! -L "$dest/$pkg/package.nix" ]]
+}
+
+# Print VM-authored text without terminal control characters.
+show_untrusted() { LC_ALL=C tr -d '\000-\010\013-\037\177'; }
+
 # Get running microVMs with type info
 # Returns: vmname:vmtype:cid
 devshells_get_running_vms() {
@@ -1255,9 +1280,9 @@ devshells_pull() {
     local temp_dir
     temp_dir=$(mktemp -d)
 
-    if ! devshells_query_vm "$cid" "get $pkg_name" | tar xf - -C "$temp_dir" 2>/dev/null; then
+    if ! devshells_fetch_package "$cid" "$pkg_name" "$temp_dir"; then
         rm -rf "$temp_dir"
-        log_action err "Failed to pull package from VM"
+        log_action err "Failed to pull package from VM (missing, or failed the archive checks)"
         return 1
     fi
 
@@ -1266,8 +1291,8 @@ devshells_pull() {
         local packages_dir="$PROFILES_DIR/$target/packages"
         mkdir -p "$packages_dir"
 
-        if [[ -f "$temp_dir/$pkg_name/package.nix" ]]; then
-            cp "$temp_dir/$pkg_name/package.nix" "$packages_dir/${pkg_name}.nix"
+        if [[ -f "$temp_dir/$pkg_name/package.nix" && ! -L "$temp_dir/$pkg_name/package.nix" ]]; then
+            cp --no-dereference "$temp_dir/$pkg_name/package.nix" "$packages_dir/${pkg_name}.nix"
             log "Installed to $target/packages/${pkg_name}.nix"
             devshells_regenerate_default "$target"
         else
@@ -1363,9 +1388,9 @@ devshells_preview() {
             if [[ -n "$cid" ]] && systemctl is-active --quiet "microvm@${vm_name}.service" 2>/dev/null; then
                 local temp_dir
                 temp_dir=$(mktemp -d)
-                if devshells_query_vm "$cid" "get $pkg_name" | tar xf - -C "$temp_dir" 2>/dev/null; then
+                if devshells_fetch_package "$cid" "$pkg_name" "$temp_dir"; then
                     if [[ -f "$temp_dir/$pkg_name/package.nix" ]]; then
-                        head -30 "$temp_dir/$pkg_name/package.nix"
+                        head -30 "$temp_dir/$pkg_name/package.nix" | show_untrusted
                         if [[ $(wc -l < "$temp_dir/$pkg_name/package.nix") -gt 30 ]]; then
                             echo "..."
                         fi
@@ -1413,16 +1438,16 @@ devshells_diff() {
         if [[ -n "$cid" ]] && systemctl is-active --quiet "microvm@${vm_name}.service" 2>/dev/null; then
             local temp_dir
             temp_dir=$(mktemp -d)
-            if devshells_query_vm "$cid" "get $pkg_name" | tar xf - -C "$temp_dir" 2>/dev/null; then
+            if devshells_fetch_package "$cid" "$pkg_name" "$temp_dir"; then
                 if [[ -f "$temp_dir/$pkg_name/package.nix" ]]; then
                     staged_content="$temp_dir/$pkg_name/package.nix"
                 fi
             fi
             if [[ -n "$staged_content" && -f "$installed_path" ]]; then
-                diff --color=always "$installed_path" "$staged_content" || true
+                diff -u "$installed_path" "$staged_content" | show_untrusted || true
             elif [[ -n "$staged_content" ]]; then
                 echo -e "${GREEN}New package (not yet installed)${NC}"
-                cat "$staged_content"
+                show_untrusted < "$staged_content"
             fi
             rm -rf "$temp_dir"
             return

@@ -9,6 +9,7 @@
       socat
       openssl
       python3
+      util-linux
     ];
     text = ''
       # shard - Simple microVM management with timing
@@ -354,9 +355,7 @@
           if is_builder "$vm_name" && ! host_daemon_running; then
               log "Starting host nix-daemon (needed to build VM image)..."
               # Remount store read-only first if it's still rw
-              if mount | grep -q "/nix/store.*(rw"; then
-                  sudo mount -o remount,ro /nix/store 2>/dev/null || true
-              fi
+              restore_store_ro || true
               sudo systemctl start nix-daemon.socket
           fi
 
@@ -394,6 +393,26 @@
       }
 
       # Start microVM
+      # Return /nix/store to read-only after the builder had it read-write.
+      # Retries while virtiofsd releases it, then checks the result: a store
+      # left writable must never pass silently.
+      restore_store_ro() {
+          local i
+          for i in 1 2 3 4 5; do
+              if findmnt -no OPTIONS /nix/store | grep -qE '(^|,)ro(,|$)'; then
+                  return 0
+              fi
+              sudo mount -o remount,ro,bind /nix/store 2>/dev/null || sleep 1
+          done
+          if findmnt -no OPTIONS /nix/store | grep -qE '(^|,)ro(,|$)'; then
+              return 0
+          fi
+          log_error "/nix/store is still read-write on the host (remount busy)"
+          log "Restore it with: sudo mount -o remount,ro,bind /nix/store"
+          log "A reboot also restores it."
+          return 1
+      }
+
       # Unlock the VM's encrypted home volume if it has one and it is closed.
       # Every path that starts the service goes through here (start, restart).
       ensure_unlocked() {
@@ -453,7 +472,7 @@
               fi
               # Remount /nix/store as read-write for builder to write to
               log "Remounting /nix/store as read-write..."
-              sudo mount -o remount,rw /nix/store
+              sudo mount -o remount,rw,bind /nix/store
           fi
 
           ensure_unlocked "$vm_name" || return 1
@@ -615,11 +634,8 @@
               if is_builder "$vm_name" && ! host_daemon_running; then
                   log "Builder not running, but restoring host state..."
                   # Check if store is still rw and remount ro
-                  if mount | grep -q "/nix/store.*(rw"; then
-                      log "Remounting /nix/store as read-only..."
-                      sleep 1
-                      sudo mount -o remount,ro /nix/store 2>/dev/null || log "''${YELLOW}Warning: Could not remount (busy)''${NC}"
-                  fi
+                  log "Remounting /nix/store as read-only..."
+                  restore_store_ro || true
                   log "Restarting host nix-daemon..."
                   sudo systemctl start nix-daemon.socket
                   log_success "Host state restored"
@@ -685,10 +701,7 @@
               log "Remounting /nix/store as read-only..."
               # Wait a moment for virtiofsd to release the mount
               sleep 1
-              if ! sudo mount -o remount,ro /nix/store 2>/dev/null; then
-                  log "''${YELLOW}Warning: Could not remount /nix/store as read-only (busy)''${NC}"
-                  log "''${DIM}This is usually fine - nix-daemon will handle it''${NC}"
-              fi
+              restore_store_ro || true
               log "Restarting host nix-daemon..."
               sudo systemctl start nix-daemon.socket
               log_success "Host nix-daemon restarted"
@@ -1458,6 +1471,8 @@
           # Send switch command
           local result
           result=$(vsock_query "$cid" "$SWITCH_PORT" "SWITCH $path" 60 120 2>&1)
+          # The VM only reads the dump (its share is read-only); remove it here.
+          sudo rm -f "$reg_file"
 
           local switch_time
           switch_time=$(timer_end "$start")
@@ -1751,6 +1766,7 @@
 
               { echo "BUILD $flake_target"; sleep 1; } \
                   | socat -t600 -T900 - "VSOCK-CONNECT:''${BUILDER_CID}:''${BUILDER_BUILD_PORT}" \
+                  | LC_ALL=C tr -d '\000-\010\013-\037\177' \
                   | tee "$build_log" \
                   | while IFS= read -r line; do
                       case "$line" in
@@ -2655,7 +2671,10 @@
           local msg="$3"
           local connect_timeout="''${4:-10}"
           local total_timeout="''${5:-15}"
-          printf '%s\n' "$msg" | timeout "$total_timeout" vsock-cmd "$cid" "$port" "$connect_timeout"
+          # VM replies are untrusted text: drop control characters (except tab
+          # and newline) so nothing a VM sends can drive the host terminal.
+          printf '%s\n' "$msg" | timeout "$total_timeout" vsock-cmd "$cid" "$port" "$connect_timeout" \
+              | LC_ALL=C tr -d '\000-\010\013-\037\177'
       }
 
       # Send a command to files VM via vsock 14505

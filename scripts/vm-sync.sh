@@ -74,8 +74,49 @@ is_running() {
 query_vm() {
     local cid="$1"
     local cmd="$2"
-    echo "$cmd" | socat -t5 - "VSOCK-CONNECT:${cid}:${STAGING_PORT}" 2>/dev/null || echo ""
+    # Text replies only (package archives use fetch_package): drop control
+    # characters so VM-sent text cannot drive the terminal.
+    echo "$cmd" | socat -t5 - "VSOCK-CONNECT:${cid}:${STAGING_PORT}" 2>/dev/null \
+        | LC_ALL=C tr -d '\000-\010\013-\037\177' || echo ""
 }
+
+# Package names come from the user and the VM: plain names only.
+valid_pkg_name() { [[ "$1" =~ ^[A-Za-z0-9][A-Za-z0-9._+-]{0,99}$ ]]; }
+
+# Fetch a staged package from a VM into dest (an empty temp dir). The archive
+# is VM-authored, so it is checked before extraction: every member must be a
+# regular file or directory under <pkg>/ (no links, devices, absolute paths or
+# ".."), and it is extracted without owners or permissions.
+fetch_package() {
+    local cid="$1" pkg="$2" dest="$3"
+    local archive="$dest/.archive.tar"
+    valid_pkg_name "$pkg" || return 1
+    echo "get $pkg" | socat -t5 - "VSOCK-CONNECT:${cid}:${STAGING_PORT}" 2>/dev/null \
+        | head -c 10485760 > "$archive"
+    [[ -s "$archive" ]] || return 1
+    local types names
+    types=$(tar -tvf "$archive" 2>/dev/null | cut -c1) || return 1
+    names=$(tar -tf "$archive" 2>/dev/null) || return 1
+    if grep -qv '^[-d]$' <<< "$types"; then
+        log "${RED}Refusing package: archive contains links or special files${NC}" >&2
+        return 1
+    fi
+    while IFS= read -r n; do
+        case "$n" in
+            "$pkg" | "$pkg/" | "$pkg"/*) ;;
+            *) log "${RED}Refusing package: unexpected member '$n'${NC}" >&2; return 1 ;;
+        esac
+        case "/$n/" in
+            */../*) log "${RED}Refusing package: '..' in member path${NC}" >&2; return 1 ;;
+        esac
+    done <<< "$names"
+    tar --no-same-owner --no-same-permissions -xf "$archive" -C "$dest" 2>/dev/null || return 1
+    rm -f "$archive"
+    [[ -f "$dest/$pkg/package.nix" && ! -L "$dest/$pkg/package.nix" ]]
+}
+
+# Print VM-authored text without terminal control characters.
+show_untrusted() { LC_ALL=C tr -d '\000-\010\013-\037\177' < "$1"; }
 
 # Get list of running microVMs
 get_running_vms() {
@@ -293,6 +334,7 @@ cmd_pull() {
     done
 
     [[ -z "$pkg_name" ]] && error "Usage: vm-sync pull <pkg> [--from <vm>] [--target <type>...]"
+    valid_pkg_name "$pkg_name" || error "Invalid package name: $pkg_name"
 
     # Find VM with package
     if [[ -z "$from_vm" ]]; then
@@ -326,9 +368,21 @@ cmd_pull() {
     local temp_dir
     temp_dir=$(mktemp -d)
 
-    if ! query_vm "$cid" "get $pkg_name" | tar xf - -C "$temp_dir" 2>/dev/null; then
+    if ! fetch_package "$cid" "$pkg_name" "$temp_dir"; then
         rm -rf "$temp_dir"
-        error "Failed to pull package from VM"
+        error "Failed to pull package from VM (missing, or failed the archive checks)"
+    fi
+
+    # The package is built on the host: show it and confirm before it enters the repo.
+    log ""
+    log "${BOLD}package.nix from $from_vm:${NC}"
+    show_untrusted "$temp_dir/$pkg_name/package.nix"
+    log ""
+    local answer
+    read -rp "Add this package to ${targets[*]}? [y/N] " answer
+    if [[ "$answer" != [yY] && "$answer" != yes ]]; then
+        rm -rf "$temp_dir"
+        error "Cancelled"
     fi
 
     # Copy to user's profile packages directory
@@ -343,8 +397,8 @@ cmd_pull() {
         local packages_dir="$PROFILES_DIR/$target/packages"
         mkdir -p "$packages_dir"
 
-        if [[ -f "$temp_dir/$pkg_name/package.nix" ]]; then
-            cp "$temp_dir/$pkg_name/package.nix" "$packages_dir/${pkg_name}.nix"
+        if [[ -f "$temp_dir/$pkg_name/package.nix" && ! -L "$temp_dir/$pkg_name/package.nix" ]]; then
+            cp --no-dereference "$temp_dir/$pkg_name/package.nix" "$packages_dir/${pkg_name}.nix"
             log "  Copied to ${CYAN}profiles/$target/packages/${pkg_name}.nix${NC}"
             regenerate_default "$target"
             # Track in git so Nix flake can see them
@@ -428,15 +482,11 @@ cmd_show() {
     # Pull and display
     local temp_dir
     temp_dir=$(mktemp -d)
-    if query_vm "$cid" "get $pkg_name" | tar xf - -C "$temp_dir" 2>/dev/null; then
-        if [[ -f "$temp_dir/$pkg_name/package.nix" ]]; then
-            cat "$temp_dir/$pkg_name/package.nix"
-        else
-            error "No package.nix found"
-        fi
+    if fetch_package "$cid" "$pkg_name" "$temp_dir"; then
+        show_untrusted "$temp_dir/$pkg_name/package.nix"
     else
         rm -rf "$temp_dir"
-        error "Failed to fetch package"
+        error "Failed to fetch package (missing, or failed the archive checks)"
     fi
     rm -rf "$temp_dir"
 }

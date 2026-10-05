@@ -12,8 +12,8 @@
   options.hydrix.microvm = {
     audio.enable = lib.mkOption {
       type = lib.types.bool;
-      default = true;
-      description = "Enable audio: PipeWire/WirePlumber/rtkit in the guest plus PulseAudio-over-vsock forwarding to host PipeWire in waypipe mode. Disabling turns off the guest audio daemons entirely, not just the forwarding. Disable for privacy-sensitive VMs (pentest, lurking).";
+      default = false;
+      description = "Enable audio: PipeWire/WirePlumber/rtkit in the guest plus PulseAudio-over-vsock forwarding to host PipeWire in waypipe mode. Off unless the VM opts in with `audio = true` in its meta.nix, which also allows its CID through the host's audio bridge (vsock:14505).";
     };
 
     notifyForward.enable = lib.mkOption {

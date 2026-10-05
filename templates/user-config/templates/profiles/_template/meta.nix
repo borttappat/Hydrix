@@ -12,6 +12,7 @@
   workspace = __WORKSPACE__;
   label     = "__LABEL__";
   notifyForward = false;  # true: forward VM notifications to host popups (vsock:14518)
+  # audio = true;          # host audio over vsock:14505 (speakers, microphone); off unless set
   # filesAccess = false;  # keep the files VM off this bridge (no transfers in/out);
   #                        # the router then is the only way in (see allowedAccessTo)
 

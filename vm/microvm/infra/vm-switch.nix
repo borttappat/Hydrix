@@ -42,12 +42,11 @@
               # Update profile symlink directly (bypass nix-env to avoid Nix DB issues)
               ln -sfn "$path" /nix/var/nix/profiles/system
 
-              # Register host-built store paths in VM's nix DB.
-              # Profile VMs need this for home-manager activation; infra VMs skip it
-              # if the share is absent (host write fails silently, file won't exist).
+              # Register host-built store paths in VM's nix DB. The share is
+              # read-only here; the host removes the dump after the switch.
+              # Infra VMs skip it if the share is absent (no file).
               if [[ -f /mnt/vm-config/.switch-reg ]]; then
                 ${pkgs.nix}/bin/nix-store --load-db < /mnt/vm-config/.switch-reg 2>/dev/null || true
-                rm -f /mnt/vm-config/.switch-reg
               fi
 
               output=$("$path/bin/switch-to-configuration" switch 2>&1)

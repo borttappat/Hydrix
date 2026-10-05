@@ -153,16 +153,20 @@
           exit 0
         fi
         mkdir -p "$DEST_DIR"
-        ERRFILE=$(${pkgs.coreutils}/bin/mktemp)
+        # Decrypt first, then a checked extraction: the archive is VM-authored.
+        PLAIN=$(${pkgs.coreutils}/bin/mktemp -p "$STORAGE_DIR/tmp" .decrypt.XXXXXX)
         if ! ${pkgs.openssl}/bin/openssl enc -d -aes-256-cbc -pbkdf2 \
-              -pass pass:"$PASSPHRASE" -in "$SRC" 2>"$ERRFILE" \
-              | ${pkgs.gnutar}/bin/tar --use-compress-program=${pkgs.gzip}/bin/gzip \
-                  -xf - -C "$DEST_DIR" 2>>"$ERRFILE"; then
-          echo "ERROR: $(cat "$ERRFILE")"
-          rm -f "$ERRFILE"
+              -pass pass:"$PASSPHRASE" -in "$SRC" -out "$PLAIN" 2>/dev/null; then
+          rm -f "$PLAIN"
+          echo "ERROR: decrypt failed"
           exit 0
         fi
-        rm -f "$ERRFILE" "$SRC"
+        if ! OUT=$(${config.hydrix.microvm.safeExtract} "$PLAIN" "$DEST_DIR"); then
+          rm -f "$PLAIN"
+          echo "$OUT"
+          exit 0
+        fi
+        rm -f "$PLAIN" "$SRC"
         echo "OK"
         ;;
 

@@ -148,6 +148,10 @@ in {
             save_to_clipboard = alCfg.selection.saveToClipboard;
           };
 
+          # Terminal output may not write the clipboard (OSC 52): text printed
+          # from a VM reply or a remote shell must never reach it.
+          terminal.osc52 = lib.mkDefault "Disabled";
+
           # General
           general = {
             live_config_reload = lib.mkDefault true;

@@ -16,6 +16,74 @@ in {
   ];
 
   options.hydrix = {
+    # virtiofsd arguments for every share a VM can write to. Keeps the host
+    # root virtiofsd from creating device nodes or file capabilities for the
+    # guest; setuid bits are neutralised host-side by nosuid mounts.
+    # Extract a .tar.gz that another VM authored. Every member must be a
+    # regular file or directory with a relative path and no "..", and it is
+    # extracted without owners or permissions. Prints "ERROR: ..." and exits
+    # non-zero otherwise. Usage: <script> ARCHIVE DEST
+    microvm.safeExtract = lib.mkOption {
+      type = lib.types.package;
+      readOnly = true;
+      default = pkgs.writeShellScript "hydrix-safe-extract" ''
+        set -u
+        export PATH=${lib.makeBinPath [pkgs.gnutar pkgs.gzip pkgs.coreutils pkgs.gnugrep]}
+        archive=$1 dest=$2
+        types=$(tar -tvzf "$archive" 2>/dev/null | cut -c1) || { echo "ERROR: unreadable archive"; exit 1; }
+        names=$(tar -tzf "$archive" 2>/dev/null) || { echo "ERROR: unreadable archive"; exit 1; }
+        if grep -qv '^[-d]$' <<< "$types"; then
+          echo "ERROR: archive contains links or special files"
+          exit 1
+        fi
+        while IFS= read -r n; do
+          case "$n" in /*) echo "ERROR: absolute path in archive"; exit 1 ;; esac
+          case "/$n/" in */../*) echo "ERROR: '..' in archive path"; exit 1 ;; esac
+        done <<< "$names"
+        tar --no-same-owner --no-same-permissions -xzf "$archive" -C "$dest" || { echo "ERROR: extraction failed"; exit 1; }
+      '';
+      description = "Checked extraction for archives that come from another VM.";
+    };
+
+    # The desktop user on the host. Writable shares that hold the user's own
+    # files (vault, hostsync inbox, gitsync repos) squash every guest uid/gid
+    # to it, so nothing a guest creates there is root-owned on the host. The
+    # VM's service user is pinned to the same uid so it keeps owning its files.
+    microvm.hostOwner = {
+      uid = lib.mkOption {
+        type = lib.types.int;
+        default = 1000;
+        description = "Host uid that owns the user-owned writable shares.";
+      };
+      gid = lib.mkOption {
+        type = lib.types.int;
+        default = 100;
+        description = "Host gid that owns the user-owned writable shares.";
+      };
+    };
+
+    # virtiofsd arguments for shares holding the user's own files: the
+    # writableShareArgs plus uid/gid squash to hostOwner. Such a share must set
+    # posixAcl = false (virtiofsd refuses translation together with ACLs).
+    microvm.ownedShareArgs = lib.mkOption {
+      type = lib.types.listOf lib.types.str;
+      default =
+        cfg.microvm.writableShareArgs
+        ++ [
+          "--translate-uid"
+          "squash-guest:0:${toString cfg.microvm.hostOwner.uid}:4294967295"
+          "--translate-gid"
+          "squash-guest:0:${toString cfg.microvm.hostOwner.gid}:4294967295"
+        ];
+      description = "virtiofsd extraArgs for writable shares that hold the host user's own files.";
+    };
+
+    microvm.writableShareArgs = lib.mkOption {
+      type = lib.types.listOf lib.types.str;
+      default = ["--modcaps=-mknod:-setfcap"];
+      description = "virtiofsd extraArgs for writable shares (set on each share's extraArgs).";
+    };
+
     # =========================================================================
     # VM IDENTITY
     # Used by both microVMs (set by mkMicrovm/mkInfraVm) and libvirt VMs.

@@ -348,6 +348,7 @@
                   devices = m.usbDevices or [];
                 };
               }
+              {hydrix.microvm.audio.enable = m.audio or false;}
             ];
             inherit userProfiles hostConfig userColorschemesDir;
           };
@@ -443,6 +444,7 @@
             notifyForward = m.notifyForward or false;
             usbPassthrough = m.usbPassthrough or false;
             usbDevices = m.usbDevices or [];
+            audio = m.audio or false;
           };
         })
         discoveredMetas)
@@ -466,6 +468,7 @@
             vmName = taskVmName m;
             cid = m.vsockCid;
             inherit (m) bridge subnet workspace label focusBorder notifyForward;
+            audio = m.audio or false;
             usbPassthrough = m.usbPassthrough or false;
             usbDevices = m.usbDevices or [];
             hasDisplay = true;
@@ -562,6 +565,7 @@
                     devices = m.usbDevices or [];
                   };
                 }
+                {hydrix.microvm.audio.enable = m.audio or false;}
               ]
               ++ nixpkgs.lib.optional (overrides ? ${m._profileName}) overrides.${m._profileName}
               ++ nixpkgs.lib.optional (vmCfg.encryption or false) {hydrix.microvm.encryption.enable = true;}

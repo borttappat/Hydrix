@@ -275,6 +275,10 @@
       local k v u now text="" class="" t p a
       [ -f "$CACHE" ] || { hide; return; }
       while IFS='=' read -r k v; do m[$k]=$v; done < "$CACHE"
+      # Numbers only before any arithmetic (the poller already filters).
+      for k in updated hostcpu cpu ram rammb fs; do
+        [[ -z ''${m[$k]-} || ''${m[$k]} =~ ^[0-9]+$ ]] || { hide; return; }
+      done
       printf -v now '%(%s)T' -1
       u=''${m[updated]:-0}
       if [ "''${m[vm_online]:-}" != 1 ] || ((now - u > STALE)); then hide; return; fi
@@ -333,6 +337,28 @@
   vmPollerScript = pkgs.writeShellScript "hydrix-vm-poller" ''
     VM_REGISTRY="/etc/hydrix/vm-registry.json"
     CURRENT_LINK="/tmp/hydrix-metrics-current"
+
+    # The VM's reply is untrusted: keep only known keys whose values have the
+    # expected form. Host-side keys are written after these, so a VM line can
+    # never override them.
+    _sanitize() {
+      local k v name val
+      while IFS='=' read -r k v; do
+        case "$k" in
+          cpu | ram | rammb | availmb | fs | syncdev | syncstg)
+            [[ $v =~ ^[0-9]{1,10}$ ]] && printf '%s=%s\n' "$k" "$v"
+            ;;
+          uptime) [[ $v =~ ^[0-9DHM\ ]{1,20}$ ]] && printf 'uptime=%s\n' "$v" ;;
+          tun) [[ $v =~ ^[A-Za-z0-9._-]{1,32}$ ]] && printf 'tun=%s\n' "$v" ;;
+          top | topmem)
+            val=''${v##* }
+            name=''${v% *}
+            name=''${name//[^A-Za-z0-9._-]/_}
+            [[ $val =~ ^[0-9]{1,10}$ && -n $name ]] && printf '%s=%s %s\n' "$k" "''${name:0:16}" "$val"
+            ;;
+        esac
+      done
+    }
 
     _get_workspace() {
       ${pkgs.hyprland}/bin/hyprctl activeworkspace -j 2>/dev/null \
@@ -396,11 +422,10 @@
         continue
       fi
 
-      response=$(echo "all" | ${pkgs.coreutils}/bin/timeout 1 ${pkgs.socat}/bin/socat - "VSOCK-CONNECT:$cid:14501" 2>/dev/null)
+      response=$(echo "all" | ${pkgs.coreutils}/bin/timeout 1 ${pkgs.socat}/bin/socat - "VSOCK-CONNECT:$cid:14501" 2>/dev/null | ${pkgs.coreutils}/bin/head -c 4096)
       if [ -n "$response" ]; then
-        { printf 'ws=%s\ncid=%s\nvm_name=%s\nvm_online=1\n' "$ws" "$cid" "$vm_name"
-          printf '%s\n' "$response"
-          printf 'updated=%s\n' "$now"
+        { _sanitize <<< "$response"
+          printf 'ws=%s\ncid=%s\nvm_name=%s\nvm_online=1\nupdated=%s\n' "$ws" "$cid" "$vm_name" "$now"
         } > "$tmp_file"
       else
         printf 'ws=%s\ncid=%s\nvm_name=%s\nvm_online=0\nupdated=%s\n' \
@@ -865,28 +890,28 @@
       interval = 3;
       format = "{}";
       tooltip = false;
-      escape = false;
+      escape = true; # router/VM-supplied text
     };
     "custom/cproc" = {
       exec = "${cprocDynamicScript}";
       interval = 3;
       format = "{}";
       tooltip = false;
-      escape = false;
+      escape = true; # router/VM-supplied text
     };
     "custom/rproc-bottom" = {
       exec = "${vmMetricScript} rproc";
       "restart-interval" = 5;
       format = "{}";
       tooltip = false;
-      escape = false;
+      escape = true; # router/VM-supplied text
     };
     "custom/cproc-bottom" = {
       exec = "${vmMetricScript} cproc";
       "restart-interval" = 5;
       format = "{}";
       tooltip = false;
-      escape = false;
+      escape = true; # router/VM-supplied text
     };
     "custom/vm-cpu" = {
       exec = "${vmMetricScript} cpu";
@@ -930,7 +955,7 @@
       "restart-interval" = 5;
       format = "{}";
       tooltip = false;
-      escape = false;
+      escape = true; # router/VM-supplied text
     };
     "custom/vm-up" = {
       exec = "${vmMetricScript} up";
@@ -944,7 +969,7 @@
       interval = 10;
       format = "{}";
       tooltip = false;
-      escape = false;
+      escape = true; # router/VM-supplied text
       "return-type" = "json";
     };
     "custom/gc-status" = {
@@ -1206,7 +1231,7 @@
       "restart-interval" = 5;
       format = "{}";
       tooltip = false;
-      escape = false;
+      escape = true; # router/VM-supplied text
     };
     "custom/vm-up" = {
       exec = "${vmMetricScript} up";
@@ -1220,7 +1245,7 @@
       interval = 10;
       format = "{}";
       tooltip = true;
-      escape = false;
+      escape = true; # router/VM-supplied text
       "return-type" = "json";
     };
     "custom/gc-status" = {

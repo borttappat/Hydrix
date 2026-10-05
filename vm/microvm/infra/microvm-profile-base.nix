@@ -177,6 +177,7 @@ in {
             source = config.hydrix.microvm.configPath;
             mountPoint = "/mnt/vm-config";
             proto = "9p";
+            readOnly = true;
           }
           # Host config directory (for scaling.json - dynamic DPI, read-only)
           {
@@ -215,6 +216,7 @@ in {
           source = "/run/hydrix-repos/${vmName}/${name}";
           mountPoint = path;
           proto = "virtiofs";
+          extraArgs = config.hydrix.microvm.writableShareArgs;
         })
         config.hydrix.microvm.hostRepos;
 
