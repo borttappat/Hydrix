@@ -31,6 +31,7 @@ in {
     ./native-theme.nix     # Fonts, console colors (always on, no Stylix needed)
     ./home.nix             # Home Manager programs
     ./scripts.nix          # Colorscheme management scripts
+    ./pywal.nix            # pywal 3.3.0 pin, fast backend, scheme precache
     ../fonts                     # Per-font profiles (sizes, overrides, UI adjustments)
     ../wm/focus-mode.nix   # Focus mode (lock keybindings to single VM type)
     # NixOS-level WM modules: system packages, portals, PAM, session scripts.

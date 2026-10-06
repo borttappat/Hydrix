@@ -8,6 +8,10 @@
     home-manager.url = "github:nix-community/home-manager/release-26.05";
 
     microvm.url = "github:astro/microvm.nix";
+
+    # pywal 3.3.0, the last release before nixpkgs moved to the pywal16 fork
+    # (see theming/graphical/pywal.nix). Only used with hydrix.graphical.pywal.pin.enable.
+    nixpkgs-pywal.url = "github:nixos/nixpkgs/d96b37bbeb9840f1c0ebfe90585ef5067b69bbb3";
   };
 
   outputs = { self, ... }@inputs:

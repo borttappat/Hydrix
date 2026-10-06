@@ -49,6 +49,37 @@ in {
       '';
     };
 
+    pywal.pin.enable = lib.mkOption {
+      type = lib.types.bool;
+      default = true;
+      description = ''
+        Use pywal 3.3.0 (dylanaraps/pywal) from the `nixpkgs-pywal` flake input
+        instead of the pywal16 fork current nixpkgs ships, which forces
+        saturation onto near-black backgrounds and tints color0/color8. Also
+        installs a faster `wal` backend for it with byte-identical palettes.
+        Host only: VMs only load saved themes. Set false for upstream pywal.
+      '';
+    };
+
+    pywal.precache.enable = lib.mkOption {
+      type = lib.types.bool;
+      default = cfg.graphical.pywal.pin.enable;
+      defaultText = lib.literalExpression "config.hydrix.graphical.pywal.pin.enable";
+      description = ''
+        Pre-generate pywal's scheme cache for every wallpaper in
+        `pywal.precache.directories` in the background (at login and when a
+        directory changes), so walrgb/randomwalrgb only apply colors.
+        Requires `pywal.pin.enable`.
+      '';
+    };
+
+    pywal.precache.directories = lib.mkOption {
+      type = lib.types.listOf lib.types.str;
+      default = ["/home/${cfg.username}/wallpapers" "${cfg.paths.configDir}/wallpapers"];
+      defaultText = lib.literalExpression ''["/home/''${username}/wallpapers" "''${config.hydrix.paths.configDir}/wallpapers"]'';
+      description = "Wallpaper directories to pre-cache; missing ones are skipped. Defaults match randomwalrgb's.";
+    };
+
     firefox.hostEnable = lib.mkOption {
       type = lib.types.bool;
       default = false;

@@ -71,6 +71,14 @@
     # lockscreen.wrongText   = lib.mkDefault "Wrong password"; # set to whatever you like
     # lockscreen.verifyText  = lib.mkDefault "Verifying...";
     # lockscreen.blur        = lib.mkDefault true;
+
+    # ─── pywal (walrgb color extraction) ───────────────────────────────
+    # Default: pywal 3.3.0 instead of nixpkgs' pywal16 (tints dark backgrounds),
+    # with a faster backend (same palettes) and a background service that
+    # pre-generates palettes for your wallpapers so walrgb only applies colors.
+    # pywal.pin.enable       = lib.mkDefault false;  # Upstream nixpkgs pywal only (also turns off precache)
+    # pywal.precache.enable  = lib.mkDefault false;  # Keep the pin, no background palette generation
+    # pywal.precache.directories = lib.mkDefault [ "/home/<user>/wallpapers" "/home/<user>/hydrix-config/wallpapers" ];
   };
 
   hydrix.colorscheme = lib.mkDefault "hydrix";
