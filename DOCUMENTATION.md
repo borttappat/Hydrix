@@ -453,7 +453,7 @@ The Builder VM enables nix package builds in lockdown mode when the host has no 
 Host (Lockdown Mode)                     Builder VM                     Router VM
 
  /nix/store (R/O)       <-virtiofs->     /nix/store       --vsock-->    WiFi (WAN)  
- nix-daemon: STOPPED     (mounted)      (R/W overlay)     internet               
+ nix-daemon: STOPPED     (mounted)      (host store, R/W) internet               
 
                                                                             
                             nix build outputs 
@@ -515,9 +515,17 @@ targets resolve it automatically. See
 1. **Start**: Host nix-daemon stops, `/nix/store` remounted R/W
 2. **Build**: Builder evaluates flake from `/mnt/hydrix` (your config)
 3. **Fetch**: Dependencies fetched via router VM (has internet)
-4. **Build**: Compilation happens in Builder with virtiofs store access
+4. **Build**: Compilation happens in Builder with virtiofs store access, every build in Nix's
+   sandbox (see below)
 5. **Stop**: Outputs written to host's `/nix/store`, Builder stops
 6. **Switch**: Host nix-daemon restarts, host builds instant (all deps cached)
+
+**Sandboxed builds.** The builder holds the host's `/nix/store` and `/nix/var/nix`
+read-write, so root inside it would reach the host. Every build therefore runs in Nix's
+sandbox (`sandbox = true`, `sandbox-fallback = false`): only its declared inputs, no network
+except fixed-output fetches, no view of `/mnt/hydrix` or of other builds. Only root is a
+trusted Nix user, so nothing can request `--option sandbox false`. The host builds with the
+same settings, so anything that builds on the host builds in the builder.
 
 **Builder shell access:**
 
@@ -3493,18 +3501,32 @@ Test packages without nixos-rebuild using per-package flakes:
 
 ```bash
 # === Inside VM ===
-vm-dev build https://github.com/owner/repo   # Create flake from GitHub
+vm-dev build https://github.com/owner/repo   # Create flake from GitHub, auto-fix until it builds
 vm-dev run repo                               # Test it works
-vm-dev fix repo                               # Analyze build errors, suggest fixes
+vm-dev fix repo                               # Diagnose and edit flake.nix until it builds (-n: diagnose only)
+vm-dev update repo                            # Re-pin nixpkgs to the VM's own nixpkgs
 vm-dev list                                   # List local packages
 vm-sync push --name repo                      # Stage for host integration
 
 # === On host ===
 vm-sync list                                  # List staged packages from running VMs
-vm-sync pull repo --target pentest            # Pull to profiles/pentest/packages/
+vm-sync pull repo --target pentest            # Review, approve, pull to profiles/pentest/packages/
 vm-sync status                                # Show packages per profile
-shard build microhack                       # Rebuild VM with new package
+shard -r pentest                              # Build and live-switch the VM with the new package
 ```
+
+**Pinning.** `vm-dev build` pins the source to the commit its default branch points at, and
+the package flake's nixpkgs to the nixpkgs the VM itself was built from. The staged
+`package.nix` is self-contained: it fetches exactly that nixpkgs revision (`builtins.fetchTree`
+with `rev` and `narHash`) and the source at that commit, so a host nixpkgs bump never changes
+what a pulled package builds with. Staging refuses a package whose nixpkgs or source is not
+pinned (`vm-dev update` / `vm-dev fix` pin it).
+
+**Trust.** A staged `package.nix` is Nix code written by the VM, evaluated and built by the
+host when the target VM is built (pure evaluation, sandboxed builds on the host and in the
+builder). The y/N review in `vm-sync pull` is the decision point: check the `fetchTree` lines
+name `NixOS/nixpkgs` and the source is the repo you expect. A future flow builds and tests
+packages only in VMs and never in the host store (`hydrix-config/plans/vm-local-packages.md`).
 
 **Package locations:**
 - VM development: `~/dev/packages/<name>/flake.nix`
