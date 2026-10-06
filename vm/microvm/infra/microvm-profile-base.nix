@@ -332,6 +332,8 @@ in {
       description = "VM staging server for host package sync";
       wantedBy = ["multi-user.target"];
       after = ["network.target"];
+      # `get` execs tar by name; the default unit PATH has coreutils but no tar
+      path = [pkgs.gnutar];
 
       serviceConfig = {
         Type = "simple";
