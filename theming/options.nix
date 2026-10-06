@@ -1096,6 +1096,49 @@ in {
         default = true;
         description = "Apply blur effect";
       };
+
+      rounding = lib.mkOption {
+        type = lib.types.ints.unsigned;
+        default = let
+          scale = cfg.graphical.scaling.hyprInternalScale;
+        in
+          builtins.floor (cfg.graphical.scaling.computed.panelRadius
+            * (
+              if scale == null
+              then 1.0
+              else scale
+            )
+            + 0.5);
+        defaultText = lib.literalExpression "scaling.computed.panelRadius * scaling.hyprInternalScale, rounded";
+        description = ''
+          Corner radius of the password field and lockscreen blocks, matching
+          the eww panels by default. hyprlock draws at the output's native
+          resolution, so this is in physical px.
+        '';
+      };
+
+      dim = {
+        timeout = lib.mkOption {
+          type = lib.types.nullOr lib.types.ints.positive;
+          default = null;
+          description = ''
+            Seconds without input before the internal panel's backlight dims,
+            locked or not. Any input restores it. null disables dimming.
+          '';
+        };
+
+        brightness = lib.mkOption {
+          type = lib.types.ints.between 1 100;
+          default = 10;
+          description = "Dimmed backlight level, in percent. A panel already below it is left alone.";
+        };
+      };
+
+      battery.enable = lib.mkOption {
+        type = lib.types.bool;
+        default = true;
+        description = "Battery block below the password field. Hidden on machines without a battery.";
+      };
     };
   };
 

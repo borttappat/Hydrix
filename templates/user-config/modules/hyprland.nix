@@ -284,10 +284,232 @@
     fi
   '';
 
+  # Two races in hyprlock's async resources that leave a widget waiting on a
+  # finished render for good: the finished listener is attached after the
+  # gatherer thread may already be done (hyprwm/hyprlock#1071), and unload()
+  # of a widget's null texture (the block images before their first render)
+  # releases another widget's in-flight resource, such as the clock's.
+  hyprlockPkg = pkgs.hyprlock.overrideAttrs (old: {
+    patches = (old.patches or []) ++ [./hyprlock-async-resources.patch];
+  });
+
+  blocks = config.hydrix.hyprland.hyprlockBlocks;
+  # Shared bottom edge of the lockscreen blocks, below the password field
+  # (center 0, -80, height 55) and the battery block's height above it.
+  blocksBottom = -250;
+  # Square canvas every block is drawn on. hyprlock scales an image so its
+  # shorter side equals `size`; a fixed square keeps that scale at exactly 1.
+  blockCanvas = 40 * 4 / 3 * lib.foldl' lib.max 1 (lib.mapAttrsToList (_: b: b.fontSize) blocks);
+
+  # Renders the lockscreen blocks while hyprlock runs, into
+  # $XDG_RUNTIME_DIR/hyprlock: every block command's pango markup becomes a
+  # PNG with a rounded color0 background (hyprlock labels cannot have one).
+  # Exits with the lock session that started it.
+  lockWidgetsConfig = pkgs.writeText "hyprlock-widgets.json" (builtins.toJSON {
+    canvas = blockCanvas;
+    radius = lk.rounding;
+    font = config.hydrix.graphical.font.family or "Iosevka";
+    blocks = lib.mapAttrs (_: b: {inherit (b) command fontSize opacity group;}) blocks;
+  });
+  lockWidgetsPy = pkgs.writeText "hyprlock-widgets.py" ''
+    import json, os, signal, subprocess, sys, threading
+    import gi
+    gi.require_version("Pango", "1.0")
+    gi.require_version("PangoCairo", "1.0")
+    from gi.repository import GLib, Pango, PangoCairo
+    import cairo
+
+    with open(sys.argv[1]) as f:
+        cfg = json.load(f)
+    out = sys.argv[2]
+    parent = os.getppid()
+    stop = threading.Event()
+
+
+    def colors():
+        try:
+            with open(os.path.expanduser("~/.cache/wal/colors.json")) as f:
+                w = json.load(f)
+            return w["colors"]["color0"], w["special"]["foreground"]
+        except (OSError, ValueError, KeyError):
+            return "#101010", "#dfdfdf"
+
+
+    def rgb(h):
+        h = h.lstrip("#")
+        return [int(h[i:i + 2], 16) / 255 for i in (0, 2, 4)]
+
+
+    def replace(path, write):
+        write(path + ".tmp")
+        os.replace(path + ".tmp", path)
+
+
+    def layout_for(ctx, block, markup):
+        layout = PangoCairo.create_layout(ctx)
+        font = Pango.FontDescription.from_string(cfg["font"])
+        font.set_size(block["fontSize"] * Pango.SCALE)
+        layout.set_font_description(font)
+        try:
+            layout.set_markup(markup, -1)
+        except GLib.Error:
+            layout.set_text(markup, -1)
+        em = block["fontSize"] * 4 / 3
+        return layout, round(em * 1.2), round(em * 0.8)
+
+
+    def measure(block, markup):
+        ctx = cairo.Context(cairo.ImageSurface(cairo.FORMAT_ARGB32, 1, 1))
+        layout, px, py = layout_for(ctx, block, markup)
+        _, text = layout.get_pixel_extents()
+        return text.width + 2 * px, text.height + 2 * py
+
+
+    # Draws the block bottom-centered on the canvas, so hyprlock positions it
+    # by its bottom edge, at size w x h (its group's largest block).
+    def render(path, block, markup, w, h, bg, fg):
+        size = cfg["canvas"]
+        surface = cairo.ImageSurface(cairo.FORMAT_ARGB32, size, size)
+        if markup:
+            ctx = cairo.Context(surface)
+            layout, px, py = layout_for(ctx, block, markup)
+            _, text = layout.get_pixel_extents()
+            scale = min(1, size / max(w, h))
+            ctx.translate((size - w * scale) / 2, size - h * scale)
+            ctx.scale(scale, scale)
+            r = min(cfg["radius"], w / 2, h / 2)
+            ctx.new_sub_path()
+            ctx.arc(w - r, r, r, -1.5708, 0)
+            ctx.arc(w - r, h - r, r, 0, 1.5708)
+            ctx.arc(r, h - r, r, 1.5708, 3.1416)
+            ctx.arc(r, r, r, 3.1416, 4.7124)
+            ctx.close_path()
+            ctx.set_source_rgba(*rgb(bg), block["opacity"])
+            ctx.fill()
+            ctx.set_source_rgb(*rgb(fg))
+            ctx.move_to(px - text.x, py - text.y)
+            PangoCairo.show_layout(ctx, layout)
+        replace(path, surface.write_to_png)
+
+
+    def run(command):
+        try:
+            return subprocess.run(["/bin/sh", "-c", command], capture_output=True,
+                                  text=True, timeout=10).stdout.rstrip("\n")
+        except (OSError, subprocess.TimeoutExpired):
+            return ""
+
+
+    def blocks():
+        last = {}
+        while not stop.is_set():
+            bg, fg = colors()
+            markups = {name: run(block["command"]) for name, block in cfg["blocks"].items()}
+            sizes = {name: measure(cfg["blocks"][name], m) for name, m in markups.items() if m.strip()}
+            # Shown blocks sharing a group take the group's widest and tallest size.
+            own = dict(sizes)
+            for name in sizes:
+                group = cfg["blocks"][name]["group"]
+                if group is not None:
+                    peers = [own[n] for n in own if cfg["blocks"][n]["group"] == group]
+                    sizes[name] = (max(w for w, _ in peers), max(h for _, h in peers))
+            for name, block in cfg["blocks"].items():
+                markup = markups[name] if name in sizes else ""
+                w, h = sizes.get(name, (0, 0))
+                if last.get(name) != (markup, w, h, bg, fg):
+                    last[name] = (markup, w, h, bg, fg)
+                    render(os.path.join(out, name + ".png"), block, markup, w, h, bg, fg)
+            stop.wait(5)
+
+
+
+    def quit(*_):
+        stop.set()
+        sys.exit(0)
+
+
+    signal.signal(signal.SIGTERM, quit)
+    signal.signal(signal.SIGINT, quit)
+    threading.Thread(target=blocks, daemon=True).start()
+    while os.getppid() == parent:
+        stop.wait(1)
+    quit()
+  '';
+  lockWidgets = pkgs.writeShellScript "hyprlock-widgets" ''
+    export GI_TYPELIB_PATH=${lib.makeSearchPath "lib/girepository-1.0" [pkgs.pango.out pkgs.glib.out pkgs.harfbuzz pkgs.gobject-introspection]}
+    exec ${pkgs.python3.withPackages (ps: [ps.pygobject3 ps.pycairo])}/bin/python3 ${lockWidgetsPy} ${lockWidgetsConfig} "$@"
+  '';
+  # BATTERY block: charge bar, status and time to empty/full, from the first
+  # BAT* power supply. Prints nothing without one, which hides the block.
+  hyprlockBattery = pkgs.writeShellApplication {
+    name = "hyprlock-battery";
+    runtimeInputs = [pkgs.jq pkgs.coreutils];
+    text = ''
+      bat=$(find /sys/class/power_supply -maxdepth 1 -name 'BAT*' | sort | head -n1)
+      [ -n "$bat" ] || exit 0
+      read_() { cat "$bat/$1" 2>/dev/null || echo 0; }
+      cap=$(read_ capacity)
+      status=$(read_ status)
+      now=$(read_ energy_now); full=$(read_ energy_full); rate=$(read_ power_now)
+      if [ "$now" = 0 ]; then now=$(read_ charge_now); full=$(read_ charge_full); rate=$(read_ current_now); fi
+      wal="$HOME/.cache/wal/colors.json"
+      [ -f "$wal" ] || wal=/dev/null
+      jq -rn --argjson cap "$cap" --arg status "$status" --argjson now "$now" --argjson full "$full" \
+        --argjson rate "$rate" --argjson w 32 --slurpfile wal "$wal" '
+        def color($col): "<span color=\"\($col)\">\(.)</span>";
+        def rep($n): if $n > 0 then . * $n else "" end;
+        def hm: (. * 60 | floor) as $m | "\($m / 60 | floor)h \($m % 60 | tostring | if length < 2 then "0" + . else . end)m";
+        ($wal[0] // {}) as $p
+        | {fg: ($p.special.foreground // "#dfdfdf"), title: ($p.colors.color4 // "#7aa2f7"),
+           on: ($p.colors.color2 // "#9ece6a"), dim: ($p.colors.color8 // "#808080"),
+           warn: ($p.colors.color1 // "#f7768e")} as $c
+        | (($cap | tostring) + "%") as $aside
+        | ([$cap * $w / 100 | round, $w] | min) as $fill
+        | (if $rate <= 0 then ""
+           elif $status == "Discharging" then " · " + ($now / $rate | hm) + " left"
+           elif $status == "Charging" then " · " + (($full - $now) / $rate | hm) + " to full"
+           else "" end) as $eta
+        | [ ("<b>" + ("BATTERY" | color($c.title)) + (" " * ($w - 7 - ($aside | length))) + ($aside | color($c.fg)) + "</b>"),
+            (("█" | rep($fill) | color(if $status == "Discharging" and $cap <= 20 then $c.warn else $c.on end))
+              + ("░" | rep($w - $fill) | color($c.dim))),
+            ((if $status == "Not charging" then "plugged in · held at \($cap)%" else ($status | ascii_downcase) end) + $eta | color($c.dim)) ]
+        | join("\n")' 2>/dev/null || true
+    '';
+  };
+
   # Idempotent lock script: flock prevents duplicate hyprlock instances.
+  # Non-blocking (-n): if hyprlock already holds the lock, exits immediately.
+  # The widget renderer lives exactly as long as hyprlock. hyprlock.conf
+  # reads the rendered images through ~/.cache/hydrix/hyprlock, since its
+  # paths cannot expand $XDG_RUNTIME_DIR.
+  lockSession = pkgs.writeShellScript "hypr-lock-session" ''
+    dir="$XDG_RUNTIME_DIR/hyprlock"
+    rm -rf "$dir" && mkdir -p "$dir" "$HOME/.cache/hydrix"
+    ln -sfn "$dir" "$HOME/.cache/hydrix/hyprlock"
+    ${lockWidgets} "$dir" &
+    widgets=$!
+    trap 'kill $widgets 2>/dev/null; rm -rf "$dir"' EXIT
+    ${hyprlockPkg}/bin/hyprlock
+  '';
   lockScreen = pkgs.writeShellScript "hypr-lock" ''
-    exec ${pkgs.util-linux}/bin/flock -n "$XDG_RUNTIME_DIR/hyprlock.lock" \
-      ${pkgs.hyprlock}/bin/hyprlock
+    exec ${pkgs.util-linux}/bin/flock -n "$XDG_RUNTIME_DIR/hyprlock.lock" ${lockSession}
+  '';
+
+  # Idle dimming of the internal panel (brightnessctl via logind, no root).
+  # `dim on` saves the current level and dims; `dim off` restores it only
+  # after an actual dim, so a panel already darker than the target is kept.
+  idleDim = pkgs.writeShellScript "hydrix-idle-dim" ''
+    marker="$XDG_RUNTIME_DIR/hydrix-idle-dimmed"
+    bctl=${pkgs.brightnessctl}/bin/brightnessctl
+    case "$1" in
+      on)
+        cur=$($bctl -m -c backlight info | cut -d, -f4 | tr -d %)
+        [ "''${cur:-0}" -gt ${toString lk.dim.brightness} ] || exit 0
+        $bctl -q -c backlight -s set ${toString lk.dim.brightness}% && touch "$marker" ;;
+      off)
+        [ -e "$marker" ] || exit 0
+        $bctl -q -c backlight -r; rm -f "$marker" ;;
+    esac
   '';
 
   # Writes ~/.config/hypr/hypridle.conf with the current timeout then starts hypridle.
@@ -304,6 +526,13 @@
       timeout = $_t
       on-timeout = ${pkgs.systemd}/bin/loginctl lock-session
     }
+    ${lib.optionalString (lk.dim.timeout != null) ''
+
+      listener {
+        timeout = ${toString lk.dim.timeout}
+        on-timeout = ${idleDim} on
+        on-resume = ${idleDim} off
+      }''}
     EOF
         exec ${pkgs.hypridle}/bin/hypridle
   '';
@@ -643,7 +872,7 @@
       fade_on_empty = false
       placeholder_text = ${lk.text}
       fail_text = ${lk.wrongText}
-      rounding = ${lkRounding}
+      rounding = ${toString lk.rounding}
       outline_thickness = ${borderSize}
       font_family = ${lk.font}
       outer_color = $lockAccent
@@ -677,17 +906,62 @@
       valign = center
     }
 
-    ${config.hydrix.hyprland.hyprlockExtraConfig}
+    ${lib.concatStrings (lib.mapAttrsToList (name: b: ''
+        image {
+          monitor =
+          path = ~/.cache/hydrix/hyprlock/${name}.png
+          reload_time = 1
+          size = ${toString blockCanvas}
+          rounding = 0
+          border_size = 0
+          position = ${b.x}, ${toString (blocksBottom + blockCanvas / 2)}
+          halign = center
+          valign = center
+        }
+      '')
+      blocks)}
   '';
 in {
-  options.hydrix.hyprland.hyprlockExtraConfig = lib.mkOption {
-    type = lib.types.lines;
-    default = "";
-    description = "Extra hyprlock.conf sections (labels, shapes) appended after the clock, for other modules to add lockscreen widgets.";
+  options.hydrix.hyprland.hyprlockBlocks = lib.mkOption {
+    type = lib.types.attrsOf (lib.types.submodule {
+      options = {
+        command = lib.mkOption {
+          type = lib.types.str;
+          description = "Prints the block's pango markup, run every 5s while locked. Empty output hides the block.";
+        };
+        x = lib.mkOption {
+          type = lib.types.str;
+          description = "hyprlock x position of the block's center, relative to the screen center (px or %). Every block's bottom edge sits on one line below the password field.";
+        };
+        group = lib.mkOption {
+          type = lib.types.nullOr lib.types.str;
+          default = null;
+          description = "Blocks in the same group are drawn at the size of the largest one shown.";
+        };
+        fontSize = lib.mkOption {
+          type = lib.types.ints.positive;
+          default = (config.hydrix.graphical.font.size or 10) * 3 / 2;
+          description = "Font size in hyprlock's units (pt at 96 dpi on the output's native pixels).";
+        };
+        opacity = lib.mkOption {
+          type = lib.types.numbers.between 0 1;
+          default = 0.6;
+          description = "Opacity of the rounded color0 background.";
+        };
+      };
+    });
+    default = {};
+    description = "Lockscreen blocks: text panels with rounded backgrounds, for other modules to add lockscreen widgets.";
   };
 
   config = lib.mkIf config.hydrix.hyprland.enable {
     programs.hyprland.package = hyprlandPkg;
+
+    # Centered below the password field.
+    hydrix.hyprland.hyprlockBlocks.battery = lib.mkIf lk.battery.enable {
+      command = "${hyprlockBattery}/bin/hyprlock-battery";
+      x = "0";
+    };
 
     environment.systemPackages = [lockTimeout monitorLayout pkgs.nwg-displays];
     security.pam.services.hyprlock = {};

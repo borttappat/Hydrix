@@ -286,13 +286,11 @@
   };
 
   # Lockscreen copies of the VMS and NETWORK blocks (`hyprlock-dashboard
-  # vms|net`), printed as pango markup for hyprlock labels: the session lock
-  # hides every layer-shell surface, eww included. Reuses the dashboard
-  # fetchers. Labels have no background of their own, so every line is padded
-  # to the same width and the whole block sits in one translucent background
-  # span. Only single-width glyphs: Iosevka draws arrows and large circles
-  # double-width, which would break the padding. Lines are joined with real newlines: hyprlock expands <br/> only in
-  # static label text, and pango rejects it as markup in cmd output.
+  # vms|net`), printed as pango markup for hydrix.hyprland.hyprlockBlocks:
+  # the session lock hides every layer-shell surface, eww included. Reuses
+  # the dashboard fetchers. Rows are padded to one width so the right-hand
+  # columns line up. Only single-width glyphs: Iosevka draws arrows and large
+  # circles double-width, which would break the padding.
   hyprlockDashboard = pkgs.writeShellApplication {
     name = "hyprlock-dashboard";
     runtimeInputs = [pkgs.jq ewwMvmStatus ewwRouterStats ewwNetStats];
@@ -308,11 +306,11 @@
           echo "usage: hyprlock-dashboard vms|net" >&2
           exit 1 ;;
       esac
-      colors=$(jq -c '{bg: .colors.color0, fg: .special.foreground, title: .colors.color4,
+      colors=$(jq -c '{fg: .special.foreground, title: .colors.color4,
                        on: .colors.color2, dim: .colors.color8, warn: .colors.color1}' "$HOME/.cache/wal/colors.json" 2>/dev/null) \
-        || colors='{"bg":"#101010","fg":"#dfdfdf","title":"#7aa2f7","on":"#9ece6a","dim":"#808080","warn":"#f7768e"}'
+        || colors='{"fg":"#dfdfdf","title":"#7aa2f7","on":"#9ece6a","dim":"#808080","warn":"#f7768e"}'
 
-      jq -rn --arg s "$1" --argjson d "$data" --argjson c "$colors" --argjson w 32 --arg alpha "${toString (builtins.floor (dash.lockscreen.opacity * 100))}%" '
+      jq -rn --arg s "$1" --argjson d "$data" --argjson c "$colors" --argjson w 32 '
         def esc: gsub("&"; "&amp;") | gsub("<"; "&lt;") | gsub(">"; "&gt;");
         def pad($n): if length < $n then . + (" " * ($n - length)) else . end;
         def lpad($n): if length < $n then (" " * ($n - length)) + . else . end;
@@ -338,11 +336,7 @@
             + [ "<b>" + ($d.net.wan | netrow(.iface)) + "</b>" ]
             + [ $d.net.vms[] | netrow(.vm) ]
           else [] end
-        end) as $lines
-        | if $lines == [] then "" else
-            ([" " * $w] + $lines + [" " * $w]) | map(" " + . + " ") | join("\n")
-            | "<span background=\"\($c.bg)\" bgalpha=\"\($alpha)\">\(.)</span>"
-          end'
+        end) | join("\n")'
     '';
   };
 
@@ -1684,30 +1678,16 @@ in {
   };
 
   config = lib.mkIf config.hydrix.hyprland.enable {
-    # Centered in the left and right halves, beside the clock.
-    hydrix.hyprland.hyprlockExtraConfig = lib.mkIf dash.lockscreen.enable ''
-      label {
-        monitor =
-        text = cmd[update:5000] ${hyprlockDashboard}/bin/hyprlock-dashboard vms
-        color = $lockFg
-        font_size = ${toString dash.lockscreen.fontSize}
-        font_family = ${fontFamily}
-        position = -25%, 0
-        halign = center
-        valign = center
-      }
-
-      label {
-        monitor =
-        text = cmd[update:5000] ${hyprlockDashboard}/bin/hyprlock-dashboard net
-        color = $lockFg
-        font_size = ${toString dash.lockscreen.fontSize}
-        font_family = ${fontFamily}
-        position = 25%, 0
-        halign = center
-        valign = center
-      }
-    '';
+    # Centered in the left and right halves, one size for both.
+    hydrix.hyprland.hyprlockBlocks = lib.mkIf dash.lockscreen.enable (lib.mapAttrs (arg: x: {
+        command = "${hyprlockDashboard}/bin/hyprlock-dashboard ${arg}";
+        inherit x;
+        group = "dashboard";
+        inherit (dash.lockscreen) fontSize opacity;
+      }) {
+        vms = "-25%";
+        net = "25%";
+      });
 
     home-manager.users.${username} = {lib, ...}: {
       home.packages = [

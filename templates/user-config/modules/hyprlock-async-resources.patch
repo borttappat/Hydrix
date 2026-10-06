@@ -1,0 +1,34 @@
+--- a/src/renderer/AsyncResourceManager.cpp
++++ b/src/renderer/AsyncResourceManager.cpp
+@@ -196,6 +196,11 @@
+ }
+ 
+ void CAsyncResourceManager::unload(ASP<CTexture> texture) {
++    // A widget without a texture yet passes null, which would otherwise match
++    // (and release) some other widget's in-flight resource.
++    if (!texture)
++        return;
++
+     auto preload = std::ranges::find_if(m_assets, [texture](const auto& a) { return a.second.texture == texture; });
+     if (preload == m_assets.end())
+         return;
+@@ -254,8 +259,6 @@
+ }
+ 
+ void CAsyncResourceManager::enqueue(ResourceID resourceID, const ASP<IAsyncResource>& resource, const AWP<IWidget>& widget) {
+-    m_gatherer.enqueue(resource);
+-
+     m_resourcesMutex.lock();
+     if (m_resources.contains(resourceID))
+         Log::logger->log(Log::ERR, "Resource already enqueued! This is a bug.");
+@@ -275,6 +278,10 @@
+             },
+             (void*)resourceID);
+     });
++
++    // Only hand the resource to the gatherer once the listener is attached:
++    // a fast resource could otherwise finish first and its event be lost.
++    m_gatherer.enqueue(resource);
+ }
+ 
+ void CAsyncResourceManager::onResourceFinished(ResourceID id) {
