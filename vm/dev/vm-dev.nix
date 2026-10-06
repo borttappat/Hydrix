@@ -3,6 +3,7 @@
 # This module provides:
 # - vm-dev: Manage per-package flakes (build/run/list/remove/edit/update/install)
 # - vm-dev-add-github: Create flake from GitHub URL with language detection
+# - vm-dev-fix: Build, diagnose and edit a package flake until it builds (vm-dev-fix.py)
 # - vm-sync: Stage packages for host
 #
 # Supported languages:
@@ -531,11 +532,23 @@
               rev = "@BRANCH@";
               hash = "@HASH@";
             };
-            # Add dependencies here if build fails (e.g., missing headers)
-            # buildInputs = [ pkgs.ncurses pkgs.openssl ];
+            nativeBuildInputs = with pkgs; [ ];
+            buildInputs = with pkgs; [ ];
+            # Install @NAME@, or else every executable the build produced
+            preBuild = '''
+              touch .vm-dev-stamp
+            ''';
             installPhase = '''
+              runHook preInstall
               mkdir -p $out/bin
-              cp @NAME@ $out/bin/ || cp *@NAME@* $out/bin/ || find . -maxdepth 1 -type f -executable -exec cp {} $out/bin/ \;
+              if [ -f @NAME@ ] && [ -x @NAME@ ]; then
+                install -Dm755 @NAME@ $out/bin/@NAME@
+              else
+                find . -type f -perm -u+x -newer .vm-dev-stamp ! -name '*.so*' ! -name '*.o' ! -name '*.a' \
+                  -exec install -Dm755 -t $out/bin {} +
+              fi
+              [ -n "$(ls -A $out/bin)" ] || { echo 'vm-dev: the build produced no executables' >&2; exit 1; }
+              runHook postInstall
             ''';
           };
         };
@@ -718,12 +731,23 @@
               rev = "@BRANCH@";
               hash = "@HASH@";
             };
-            # Add dependencies here if build fails (e.g., missing headers)
-            # buildInputs = [ pkgs.ncurses pkgs.openssl ];
+            nativeBuildInputs = with pkgs; [ ];
+            buildInputs = with pkgs; [ ];
+            # Install @NAME@, or else every executable the build produced
+            preBuild = '''
+              touch .vm-dev-stamp
+            ''';
             installPhase = '''
+              runHook preInstall
               mkdir -p $out/bin
-              # Adjust based on what the build produces
-              cp @NAME@ $out/bin/ 2>/dev/null || find . -maxdepth 1 -type f -executable -exec cp {} $out/bin/ \;
+              if [ -f @NAME@ ] && [ -x @NAME@ ]; then
+                install -Dm755 @NAME@ $out/bin/@NAME@
+              else
+                find . -type f -perm -u+x -newer .vm-dev-stamp ! -name '*.so*' ! -name '*.o' ! -name '*.a' \
+                  -exec install -Dm755 -t $out/bin {} +
+              fi
+              [ -n "$(ls -A $out/bin)" ] || { echo 'vm-dev: the build produced no executables' >&2; exit 1; }
+              runHook postInstall
             ''';
           };
         };
@@ -912,6 +936,7 @@ in {
       # - ~/dev/packages/<name>/flake.nix  (development)
       (pkgs.writeShellScriptBin "vm-dev" ''
         #!/usr/bin/env bash
+        set -o pipefail
         PACKAGES_DIR="$HOME/dev/packages"
         LEGACY_DIR="$HOME/dev"
 
@@ -919,22 +944,21 @@ in {
           echo "vm-dev - Manage dev environment"
           echo ""
           echo "Commands:"
-          echo "  build <url> [name] Build package from GitHub URL"
-          echo "  run <pkg> [args]   Run a package"
-          echo "  fix <pkg>          Analyze errors, suggest fixes (interactive)"
+          echo "  build <url> [name] Create package from GitHub URL, auto-fix until it builds"
+          echo "  run <pkg> [args]   Run a package (auto-fixes the build first if needed)"
+          echo "  fix <pkg>          Build, diagnose and edit flake.nix until it builds"
+          echo "                     (-n: diagnose only, --max N: build rounds)"
           echo "  rebuild <pkg>      Rebuild package"
           echo "  list               List all packages"
           echo "  remove <pkg>       Remove a package"
-          echo "  install <pkg>      Install to user profile (persistent)"
+          echo "  install <pkg|url>  Install to user profile (persistent)"
           echo "  edit <pkg>         Edit package flake"
           echo "  update [pkg]       Update flake.lock (all if no pkg)"
           echo "  add <pkg>          Add nixpkgs package (legacy)"
           echo ""
           echo "Workflow:"
-          echo "  vm-dev build https://github.com/owner/repo"
-          echo "  vm-dev run repo        # fails with missing ncurses.h"
-          echo "  vm-dev fix repo        # suggests: buildInputs = [ pkgs.ncurses ]"
-          echo "  vm-dev run repo        # works!"
+          echo "  vm-dev build https://github.com/owner/repo   # missing ncurses.h -> adds ncurses"
+          echo "  vm-dev run repo"
           echo "  vm-sync push --name repo"
           echo ""
           echo "Directories:"
@@ -950,6 +974,10 @@ in {
           # Check per-package flake first
           if [ -f "$PACKAGES_DIR/$pkg/flake.nix" ]; then
             cd "$PACKAGES_DIR/$pkg"
+            if ! nix build ".#default" -L > build.log 2>&1; then
+              echo "Build failed, trying to fix it..."
+              vm-dev-fix "$pkg" || exit 1
+            fi
             exec nix run ".#default" -- "$@"
           fi
 
@@ -1001,22 +1029,39 @@ in {
         }
 
         cmd_install() {
-          [ $# -eq 0 ] && { echo "Usage: vm-dev install <pkg>"; exit 1; }
+          [ $# -eq 0 ] && { echo "Usage: vm-dev install <pkg|github-url> [name]"; exit 1; }
           local pkg="$1"
 
+          if [[ "$pkg" == *github.com/* ]]; then
+            local repo="''${pkg%/}"
+            repo="''${repo%.git}"
+            local name="''${2:-''${repo##*/}}"
+            if [ ! -f "$PACKAGES_DIR/$name/flake.nix" ]; then
+              vm-dev-add-github "$pkg" "$name" || exit 1
+            fi
+            pkg="$name"
+          fi
+
+          local ref
           if [ -f "$PACKAGES_DIR/$pkg/flake.nix" ]; then
-            cd "$PACKAGES_DIR/$pkg"
-            nix profile install ".#default"
-            echo ""
-            echo "Installed $pkg to user profile"
-            echo "Persists across reboots"
-          elif [ -f "$LEGACY_DIR/flake.nix" ]; then
-            cd "$LEGACY_DIR"
-            nix profile install ".#$pkg"
-            echo ""
-            echo "Installed $pkg to user profile"
+            ref="$PACKAGES_DIR/$pkg#default"
+            if ! (cd "$PACKAGES_DIR/$pkg" && nix build ".#default" -L > build.log 2>&1); then
+              echo "Build failed, trying to fix it..."
+              vm-dev-fix "$pkg" || exit 1
+            fi
+          elif [ -f "$LEGACY_DIR/flake.nix" ] && grep -qE "^ +$pkg = pkgs\." "$LEGACY_DIR/flake.nix"; then
+            ref="$LEGACY_DIR#$pkg"
           else
             echo "Error: Package '$pkg' not found"
+            echo "Create it first: vm-dev build https://github.com/<owner>/<repo>"
+            exit 1
+          fi
+
+          if nix profile add "$ref"; then
+            echo ""
+            echo "Installed $pkg to user profile (persists across reboots)"
+          else
+            echo "Error: installing $pkg failed"
             exit 1
           fi
         }
@@ -1097,225 +1142,6 @@ in {
           exec vm-dev-add-github "$@"
         }
 
-        # Smart fix: analyze build errors and suggest fixes
-        cmd_fix() {
-          [ $# -eq 0 ] && { echo "Usage: vm-dev fix <pkg>"; exit 1; }
-          local pkg="$1"
-          local pkg_dir="$PACKAGES_DIR/$pkg"
-          local flake="$pkg_dir/flake.nix"
-          local log="$pkg_dir/build.log"
-
-          if [ ! -f "$flake" ]; then
-            echo "Error: Package '$pkg' not found"
-            exit 1
-          fi
-
-          # Header to package mapping
-          declare -A HEADER_MAP=(
-            ["ncurses.h"]="ncurses"
-            ["curses.h"]="ncurses"
-            ["panel.h"]="ncurses"
-            ["openssl/ssl.h"]="openssl"
-            ["openssl/crypto.h"]="openssl"
-            ["zlib.h"]="zlib"
-            ["curl/curl.h"]="curl"
-            ["sqlite3.h"]="sqlite"
-            ["readline/readline.h"]="readline"
-            ["png.h"]="libpng"
-            ["jpeglib.h"]="libjpeg"
-            ["X11/Xlib.h"]="xorg.libX11"
-            ["SDL.h"]="SDL2"
-            ["SDL2/SDL.h"]="SDL2"
-            ["pcre.h"]="pcre"
-            ["pcre2.h"]="pcre2"
-            ["uuid/uuid.h"]="libuuid"
-            ["libusb.h"]="libusb1"
-            ["json-c/json.h"]="json_c"
-            ["yaml.h"]="libyaml"
-            ["expat.h"]="expat"
-            ["lzma.h"]="xz"
-            ["archive.h"]="libarchive"
-            ["bz2.h"]="bzip2"
-            ["gmp.h"]="gmp"
-            ["ffi.h"]="libffi"
-            ["iconv.h"]="libiconv"
-          )
-
-          # Library to package mapping (for -l errors)
-          declare -A LIB_MAP=(
-            ["ncurses"]="ncurses"
-            ["curses"]="ncurses"
-            ["ssl"]="openssl"
-            ["crypto"]="openssl"
-            ["z"]="zlib"
-            ["curl"]="curl"
-            ["sqlite3"]="sqlite"
-            ["readline"]="readline"
-            ["png"]="libpng"
-            ["jpeg"]="libjpeg"
-            ["X11"]="xorg.libX11"
-            ["SDL2"]="SDL2"
-            ["pcre"]="pcre"
-            ["pcre2"]="pcre2"
-            ["uuid"]="libuuid"
-            ["usb"]="libusb1"
-            ["json-c"]="json_c"
-            ["yaml"]="libyaml"
-            ["expat"]="expat"
-            ["lzma"]="xz"
-            ["archive"]="libarchive"
-            ["bz2"]="bzip2"
-            ["gmp"]="gmp"
-            ["ffi"]="libffi"
-            ["m"]=""  # math library, in glibc
-            ["pthread"]=""  # in glibc
-            ["dl"]=""  # in glibc
-            ["rt"]=""  # in glibc
-          )
-
-          echo "Analyzing build errors for $pkg..."
-          echo ""
-
-          if [ ! -f "$log" ]; then
-            echo "No build.log found. Run: vm-dev run $pkg"
-            exit 1
-          fi
-
-          local suggestions=()
-          local install_phase_fix=""
-
-          # Check for missing headers
-          while IFS= read -r line; do
-            if [[ "$line" =~ fatal\ error:\ ([^:]+):\ No\ such\ file ]]; then
-              local header="''${BASH_REMATCH[1]}"
-              local dep="''${HEADER_MAP[$header]:-}"
-              if [ -n "$dep" ]; then
-                suggestions+=("$dep")
-                echo "Found: missing header '$header' -> need '$dep'"
-              else
-                echo "Found: missing header '$header' (unknown package)"
-              fi
-            fi
-          done < <(grep "fatal error:" "$log" 2>/dev/null)
-
-          # Check for missing libraries (-l)
-          while IFS= read -r line; do
-            if [[ "$line" =~ cannot\ find\ -l([a-zA-Z0-9_]+) ]]; then
-              local lib="''${BASH_REMATCH[1]}"
-              local dep="''${LIB_MAP[$lib]:-}"
-              if [ -n "$dep" ]; then
-                suggestions+=("$dep")
-                echo "Found: missing library '-l$lib' -> need '$dep'"
-              elif [ -z "''${LIB_MAP[$lib]+x}" ]; then
-                echo "Found: missing library '-l$lib' (unknown package)"
-              fi
-            fi
-          done < <(grep "cannot find -l" "$log" 2>/dev/null)
-
-          # Check for install phase issues
-          if grep -q "cp: cannot stat" "$log" 2>/dev/null; then
-            echo "Found: installPhase trying to copy non-existent file"
-            install_phase_fix="check"
-          fi
-
-          # Remove duplicates
-          local unique_deps=($(printf "%s\n" "''${suggestions[@]}" | sort -u))
-
-          echo ""
-
-          if [ ''${#unique_deps[@]} -eq 0 ] && [ -z "$install_phase_fix" ]; then
-            echo "No automatic fixes detected."
-            echo "Check the full log: less $log"
-            exit 0
-          fi
-
-          # Show current buildInputs
-          echo "Current flake.nix buildInputs:"
-          grep -E "buildInputs\s*=" "$flake" 2>/dev/null || echo "  (none found)"
-          echo ""
-
-          # Suggest buildInputs fix
-          if [ ''${#unique_deps[@]} -gt 0 ]; then
-            local deps_str=$(printf "pkgs.%s " "''${unique_deps[@]}")
-            echo "Suggested fix:"
-            echo "  buildInputs = [ $deps_str];"
-            echo ""
-            read -p "Add these to buildInputs? [y/N] " confirm
-            if [[ "$confirm" =~ ^[Yy] ]]; then
-              # Check if buildInputs exists
-              if grep -q "buildInputs\s*=" "$flake"; then
-                # Add to existing buildInputs
-                for dep in "''${unique_deps[@]}"; do
-                  if ! grep -q "pkgs\.$dep" "$flake"; then
-                    sed -i "s/buildInputs\s*=\s*\[/buildInputs = [ pkgs.$dep /" "$flake"
-                    echo "Added: pkgs.$dep"
-                  fi
-                done
-              else
-                # Insert buildInputs after the src block (after hash line + closing brace)
-                # Find the line number of the hash inside fetchFromGitHub, then add after the };
-                local hash_line=$(grep -n "hash = " "$flake" | head -1 | cut -d: -f1)
-                if [ -n "$hash_line" ]; then
-                  # Insert after the }; that closes fetchFromGitHub (hash_line + 2)
-                  local insert_line=$((hash_line + 2))
-                  sed -i "''${insert_line}i\\        buildInputs = [ $deps_str];" "$flake"
-                  echo "Added buildInputs line"
-                else
-                  echo "Could not find insertion point. Edit manually: vm-dev edit $pkg"
-                fi
-              fi
-            fi
-          fi
-
-          # Check for installPhase issues
-          local needs_install_fix=false
-
-          # Case 1: installPhase doesn't copy anything
-          if grep -q 'installPhase.*mkdir.*\$out' "$flake" && ! grep -q "cp .* \\\$out" "$flake"; then
-            needs_install_fix=true
-            echo ""
-            echo "installPhase only creates directory, doesn't copy binary."
-          fi
-
-          # Case 2: cp to wrong path (e.g., /bin instead of $out/bin)
-          if grep -q "cp: cannot create.*Permission denied" "$log" 2>/dev/null; then
-            needs_install_fix=true
-            echo ""
-            echo "installPhase trying to write outside \$out (permission denied)."
-          fi
-
-          # Case 3: failed to produce output
-          if grep -q "failed to produce output" "$log" 2>/dev/null; then
-            needs_install_fix=true
-            echo ""
-            echo "Build failed to produce output - installPhase may be empty."
-          fi
-
-          if [ "$needs_install_fix" = true ]; then
-            echo ""
-            echo "Fix installPhase manually:"
-            echo "  vm-dev edit $pkg"
-            echo ""
-            echo "Change installPhase to:"
-            printf '  installPhase = %s%s\n' "'" "'"
-            printf '    mkdir -p $out/bin\n'
-            printf '    cp %s $out/bin/\n' "$pkg"
-            printf '  %s%s;\n' "'" "'"
-          fi
-
-          echo ""
-          echo "Rebuilding..."
-          cd "$pkg_dir"
-          if nix build ".#default" 2>&1 | tee "$log"; then
-            echo ""
-            echo "Build succeeded!"
-            echo "Test with: vm-dev run $pkg"
-          else
-            echo ""
-            echo "Build still failing. Run 'vm-dev fix $pkg' again or check the log."
-          fi
-        }
-
         # Rebuild package (just run nix build)
         cmd_rebuild() {
           [ $# -eq 0 ] && { echo "Usage: vm-dev rebuild <pkg>"; exit 1; }
@@ -1335,7 +1161,7 @@ in {
             echo "Test with: vm-dev run $pkg"
           else
             echo ""
-            echo "Build failed. Run 'vm-dev fix $pkg' to analyze errors."
+            echo "Build failed. Run 'vm-dev fix $pkg' to repair it."
           fi
         }
 
@@ -1348,7 +1174,7 @@ in {
           edit) shift; cmd_edit "$@" ;;
           update) shift; cmd_update "$@" ;;
           add) shift; cmd_add "$@" ;;
-          fix) shift; cmd_fix "$@" ;;
+          fix) shift; exec vm-dev-fix "$@" ;;
           rebuild) shift; cmd_rebuild "$@" ;;
           *) usage ;;
         esac
@@ -1849,110 +1675,18 @@ in {
         echo "Generating flake.lock..."
         cd "$PKG_DIR" && ${pkgs.nix}/bin/nix flake update 2>/dev/null || true
 
-        # Try to build and capture the hash from error message
         echo ""
-        echo "Attempting initial build..."
-        BUILD_OUTPUT=$(cd "$PKG_DIR" && ${pkgs.nix}/bin/nix build ".#default" 2>&1) || true
-
-        # Check if we got a hash mismatch error with the real hash
-        REAL_HASH=$(echo "$BUILD_OUTPUT" | ${pkgs.gnugrep}/bin/grep -oP 'got:\s+\Ksha256-[A-Za-z0-9+/=]+' | head -1 || true)
-
-        if [ -n "$REAL_HASH" ]; then
-          echo "Got dependency hash: $REAL_HASH"
-
-          # Determine which hash field to update based on project type
-          case "$PROJECT_TYPE" in
-            rust)
-              ${pkgs.gnused}/bin/sed -i "s|cargoHash = \"${hashPlaceholder}\";|cargoHash = \"$REAL_HASH\";|" "$PKG_DIR/flake.nix"
-              ;;
-            go)
-              ${pkgs.gnused}/bin/sed -i "s|vendorHash = \"${hashPlaceholder}\";|vendorHash = \"$REAL_HASH\";|" "$PKG_DIR/flake.nix"
-              ;;
-            npm)
-              ${pkgs.gnused}/bin/sed -i "s|npmDepsHash = \"${hashPlaceholder}\";|npmDepsHash = \"$REAL_HASH\";|" "$PKG_DIR/flake.nix"
-              ;;
-            maven)
-              ${pkgs.gnused}/bin/sed -i "s|mvnHash = \"${hashPlaceholder}\";|mvnHash = \"$REAL_HASH\";|" "$PKG_DIR/flake.nix"
-              ;;
-            elixir)
-              ${pkgs.gnused}/bin/sed -i "s|hash = \"${hashPlaceholder}\";|hash = \"$REAL_HASH\";|" "$PKG_DIR/flake.nix"
-              ;;
-          esac
-          echo "Updated flake with correct hash"
-
-          # Save build log
-          echo "$BUILD_OUTPUT" > "$PKG_DIR/build.log"
-          echo "Build log saved to $PKG_DIR/build.log"
-
-          # Try building again
+        echo "Building (fixing errors automatically)..."
+        if vm-dev-fix "$NAME"; then
           echo ""
-          echo "Retrying build..."
-          cd "$PKG_DIR" && ${pkgs.nix}/bin/nix build ".#default" 2>&1 | tee -a "$PKG_DIR/build.log" || true
+          echo "Done! Run with:  vm-dev run $NAME"
+          echo "Stage for host:  vm-sync push --name $NAME"
         else
-          # Save build log even if no hash mismatch
-          echo "$BUILD_OUTPUT" > "$PKG_DIR/build.log"
-          if [ -n "$BUILD_OUTPUT" ]; then
-            echo "Build log saved to $PKG_DIR/build.log"
-          fi
-
-          # For Go packages without vendor/, try to extract vendorHash from build output
-          # Nix sometimes provides the hash in different formats
-          if [ "$PROJECT_TYPE" = "go" ]; then
-            local go_hash
-            # Try various patterns that Nix might use
-            go_hash=$(echo "$BUILD_OUTPUT" | ${pkgs.gnugrep}/bin/grep -oP 'vendorHash.*got:\s+\Ksha256-[A-Za-z0-9+/=]+' | head -1 || true)
-            if [ -z "$go_hash" ]; then
-              go_hash=$(echo "$BUILD_OUTPUT" | ${pkgs.gnugrep}/bin/grep -oP 'sha256-[A-Za-z0-9+/=]+' | head -1 || true)
-            fi
-            if [ -z "$go_hash" ]; then
-              go_hash=$(echo "$BUILD_OUTPUT" | ${pkgs.gnugrep}/bin/grep -oP 'sha256-[A-Za-z0-9+/=]{88}' | head -1 || true)
-            fi
-
-            if [ -n "$go_hash" ]; then
-              echo "Found Go vendorHash in build output: $go_hash"
-              ${pkgs.gnused}/bin/sed -i "s|vendorHash = \"${hashPlaceholder}\";|vendorHash = \"$go_hash\";|" "$PKG_DIR/flake.nix"
-              echo "Updated flake with vendorHash"
-              echo ""
-              echo "Retrying build..."
-              cd "$PKG_DIR" && ${pkgs.nix}/bin/nix build ".#default" 2>&1 | tee -a "$PKG_DIR/build.log" || true
-            else
-              echo "Could not extract vendorHash automatically."
-              echo "Run: vm-dev-fixhash go $NAME"
-            fi
-          fi
+          echo ""
+          echo "Created $PKG_DIR/flake.nix, but it does not build yet."
+          echo "Edit flake:  vm-dev edit $NAME"
+          echo "Retry fixes: vm-dev fix $NAME"
         fi
-
-        # ── Self-heal: remove bad python3Packages names and retry ─────────────
-        if [ "$PROJECT_TYPE" = "python-script" ]; then
-          BAD_PKGS=$(echo "$BUILD_OUTPUT" | \
-            ${pkgs.gnugrep}/bin/grep -oP "undefined variable '\\K[^']+" | \
-            sort -u || true)
-          if [ -n "$BAD_PKGS" ]; then
-            echo ""
-            echo "Removing unresolved packages from flake:"
-            for bad_pkg in $BAD_PKGS; do
-              echo "  - $bad_pkg"
-              # Remove the package name from the withPackages list
-              ${pkgs.gnused}/bin/sed -i \
-                "s/\bps\.$bad_pkg\b//g; s/\b$bad_pkg\b //g; s/ \b$bad_pkg\b//g" \
-                "$PKG_DIR/flake.nix"
-            done
-            echo "Retrying build..."
-            BUILD_OUTPUT=$(cd "$PKG_DIR" && ${pkgs.nix}/bin/nix build ".#default" 2>&1) || true
-            echo "$BUILD_OUTPUT" >> "$PKG_DIR/build.log"
-            if echo "$BUILD_OUTPUT" | grep -q "error:"; then
-              echo "Still failing after cleanup. Run: vm-dev fix $NAME"
-            else
-              echo "Build succeeded after cleanup."
-            fi
-          fi
-        fi
-        # ─────────────────────────────────────────────────────────────────────
-
-        echo ""
-        echo "Done! Test with: vm-dev run $NAME"
-        echo "Edit flake:     vm-dev edit $NAME"
-        echo "Stage for host: vm-sync push --name $NAME"
       '')
 
       # Alias for backward compatibility
@@ -1961,192 +1695,15 @@ in {
         exec vm-sync "$@"
       '')
 
-      # ===== vm-dev-fixhash: Compute dependency hashes for Go/NPM packages =====
-      # For Go modules without vendor/, computes vendorHash from go.mod/go.sum
-      # For NPM packages, computes npmDepsHash from package-lock.json
+      # ===== vm-dev-fix: build, diagnose and edit a package flake until it builds =====
+      (pkgs.writeShellScriptBin "vm-dev-fix" ''
+        exec ${pkgs.python3}/bin/python3 ${./vm-dev-fix.py} "$@"
+      '')
+
+      # Hash mismatches are one of the cases vm-dev-fix handles
       (pkgs.writeShellScriptBin "vm-dev-fixhash" ''
-        #!/usr/bin/env bash
-        set -e
-
-        PACKAGES_DIR="$HOME/dev/packages"
-
-        usage() {
-          echo "vm-dev-fixhash - Compute dependency hashes for packages"
-          echo ""
-          echo "Commands:"
-          echo "  go <pkg>     Compute vendorHash for Go package"
-          echo "  npm <pkg>    Compute npmDepsHash for NPM package"
-          echo "  all <pkg>    Auto-detect and compute hash for package"
-          echo ""
-          echo "Examples:"
-          echo "  vm-dev-fixhash go sheets"
-          echo "  vm-dev-fixhash all sheets"
-          echo ""
-          echo "This computes the correct dependency hash and updates your flake.nix"
-          echo "by actually building/fetching the dependencies in the Nix environment."
-        }
-
-        # Compute Go module vendorHash
-        cmd_go() {
-          local pkg="$1"
-          local pkg_dir="$PACKAGES_DIR/$pkg"
-
-          if [ ! -d "$pkg_dir" ]; then
-            echo "Error: Package '$pkg' not found at $pkg_dir"
-            exit 1
-          fi
-
-          if [ ! -f "$pkg_dir/flake.nix" ]; then
-            echo "Error: No flake.nix in $pkg_dir"
-            exit 1
-          fi
-
-          cd "$pkg_dir"
-
-          # Check for go.mod/go.sum
-          if [ ! -f "go.mod" ]; then
-            echo "Error: No go.mod found in $pkg_dir"
-            exit 1
-          fi
-
-          echo "Computing vendorHash for Go module..."
-
-          # Approach: Use go mod download to fetch dependencies, then compute hash
-          # The vendorHash needs to match what buildGoModule expects
-
-          # First, try to build and capture the actual error with the correct hash
-          echo "Attempting build to extract correct hash..."
-          local build_output
-          build_output=$(nix build ".#default" 2>&1) || true
-
-          # Check if we got a vendorHash mismatch with the real hash
-          local real_hash
-          real_hash=$(echo "$build_output" | ${pkgs.gnugrep}/bin/grep -oP 'got:\s+\Ksha256-[A-Za-z0-9+/=]+' | head -1 || true)
-
-          if [ -n "$real_hash" ];
-          then
-            echo "Found vendorHash in build output: $real_hash"
-            ${pkgs.gnused}/bin/sed -i "s|vendorHash = \"[^\"]*\";|vendorHash = \"$real_hash\";|" "$pkg_dir/flake.nix"
-            echo "Updated flake.nix"
-            echo ""
-            echo "Try building again: vm-dev rebuild $pkg"
-            return
-          fi
-
-          # If that failed, try nix-prefetch-url on go.mod expanded content
-          echo "Using alternative hash computation..."
-
-          # Create a temp directory for vendor
-          local tmp_vendor
-          tmp_vendor=$(mktemp -d)
-
-          # Use go mod vendor to fetch dependencies
-          if go mod vendor -mod=mod 2>/dev/null; then
-            if [ -d vendor ]; then
-              echo "Computing hash from vendored dependencies..."
-              local vendor_hash
-              vendor_hash=$(nix-prefetch-url --unpack file://$(pwd)/vendor 2>&1 | \
-                ${pkgs.gnugrep}/bin/grep -o 'sha256-[A-Za-z0-9+/=]*' | head -1 || true)
-
-              if [ -n "$vendor_hash" ];
-              then
-                echo "Computed vendorHash: $vendor_hash"
-                ${pkgs.gnused}/bin/sed -i "s|vendorHash = \"[^\"]*\";|vendorHash = \"$vendor_hash\";|" "$pkg_dir/flake.nix"
-                echo "Updated flake.nix"
-                rm -rf "$tmp_vendor"
-                echo ""
-                echo "Try building again: vm-dev rebuild $pkg"
-                return
-              fi
-            fi
-          fi
-
-          rm -rf "$tmp_vendor"
-
-          # Final fallback: manual instructions
-          echo "Could not compute vendorHash automatically."
-          echo ""
-          echo "Manual approach:"
-          echo "  1. cd $pkg_dir"
-          echo "  2. go mod vendor"
-          echo "  3. nix-prefetch-url --unpack file://\$(pwd)/vendor"
-          echo "  4. Copy the hash and update vendorHash in flake.nix"
-          echo ""
-          echo "Or let Nix tell you the hash:"
-          echo "  1. Run: nix build '.#default'"
-          echo "  2. Copy the 'got: sha256-...' hash from the error"
-          echo "  3. Update vendorHash in flake.nix manually"
-          exit 1
-        }
-
-        # Compute NPM deps hash
-        cmd_npm() {
-          local pkg="$1"
-          local pkg_dir="$PACKAGES_DIR/$pkg"
-
-          if [ ! -f "$pkg_dir/package-lock.json" ]; then
-            echo "Error: No package-lock.json found in $pkg_dir"
-            exit 1
-          fi
-
-          cd "$pkg_dir"
-          echo "Computing npmDepsHash..."
-
-          # Try build first to get hash from error
-          local build_output
-          build_output=$(nix build ".#default" 2>&1) || true
-
-          local real_hash
-          real_hash=$(echo "$build_output" | ${pkgs.gnugrep}/bin/grep -oP 'got:\s+\Ksha256-[A-Za-z0-9+/=]+' | head -1 || true)
-
-          if [ -n "$real_hash" ];
-          then
-            echo "Found npmDepsHash in build output: $real_hash"
-            ${pkgs.gnused}/bin/sed -i "s|npmDepsHash = \"[^\"]*\";|npmDepsHash = \"$real_hash\";|" "$pkg_dir/flake.nix"
-            echo "Updated flake.nix"
-            return
-          fi
-
-          echo "Failed to compute npmDepsHash automatically"
-          echo "Manual approach:"
-          echo "  1. Run: nix build '.#default'"
-          echo "  2. Copy the 'got: sha256-...' hash from the error"
-          echo "  3. Update npmDepsHash in flake.nix manually"
-          exit 1
-        }
-
-        # Auto-detect project type and compute appropriate hash
-        cmd_all() {
-          local pkg="$1"
-          local pkg_dir="$PACKAGES_DIR/$pkg"
-
-          if [ ! -d "$pkg_dir" ]; then
-            echo "Error: Package '$pkg' not found at $pkg_dir"
-            exit 1
-          fi
-
-          if [ -f "$pkg_dir/go.mod" ]; then
-            cmd_go "$pkg"
-          elif [ -f "$pkg_dir/package-lock.json" ]; then
-            cmd_npm "$pkg"
-          elif [ -f "$pkg_dir/yarn.lock" ]; then
-            echo "Yarn hash computation not yet implemented"
-            echo "Manual approach: nix build '.#default' and extract hash from error"
-            exit 1
-          else
-            echo "No supported project type found (go.mod, package-lock.json, yarn.lock)"
-            exit 1
-          fi
-        }
-
-        case ''${2:-} in
-          go) shift; shift; cmd_go "$1" ;;
-          npm) shift; shift; cmd_npm "$1" ;;
-          yarn) shift; shift; echo "Yarn hash computation not yet implemented" ;;
-          all) shift; shift; cmd_all "$1" ;;
-          -h|--help|"") usage ;;
-          *) usage ;;
-        esac
+        echo "Note: vm-dev-fixhash is replaced by vm-dev fix"
+        exec vm-dev-fix "''${@: -1}"
       '')
     ];
   };
