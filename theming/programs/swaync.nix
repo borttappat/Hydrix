@@ -18,7 +18,8 @@
 #
 # Placement: top-right, X = gaps + notifications.offset from the screen edge,
 # Y = notifications.offset under the bar's exclusive zone, so both axes leave
-# the same clearance past a tiled window's edge. offsetCompensation is a
+# the same clearance past a tiled window's edge. The panel's bottom edge keeps
+# that clearance above the bottom window edge too. offsetCompensation is a
 # per-machine fudge on top for fractional-scale rounding.
 {
   config,
@@ -44,6 +45,16 @@
   };
   offsetX = ui.gaps + n.offset + n.offsetCompensation.x;
   offsetY = n.offset + n.offsetCompensation.y;
+  # Panel bottom: offsetY past the bottom window edge, which sits gaps_out
+  # above the screen on monobar and on the bottom bar's exclusive zone on dualbar.
+  barType = config.hydrix.graphical.waybar.barType or "monobar";
+  panelBottom =
+    offsetY
+    + (
+      if barType == "monobar"
+      then ui.gaps
+      else 0
+    );
   # px equivalent of the pt size eww and alacritty use (14px, waybar's size, at
   # the 11pt default).
   fontSize = builtins.floor (cfg.font.size * (cfg.font.relations.notifications or 1.0) * 4 / 3);
@@ -60,7 +71,7 @@
       cssPriority = "user";
       "control-center-margin-top" = offsetY;
       "control-center-margin-right" = offsetX;
-      "control-center-margin-bottom" = ui.gaps;
+      "control-center-margin-bottom" = panelBottom;
       "control-center-margin-left" = 0;
       "control-center-width" = n.width + 100;
       # Card plus its padding: offsetX on the right, shadow room on the left.
