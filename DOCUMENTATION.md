@@ -3497,50 +3497,109 @@ shard rebuild vault
 
 ### In-VM Development (vm-dev workflow)
 
-Test packages without nixos-rebuild using per-package flakes:
+Package a GitHub project inside a VM, get it building there, then pull it into a profile on the
+host. Every staged package is self-contained: it carries the nixpkgs revision and source commit
+it was built and tested with, so it builds the same on the host, and host nixpkgs bumps never
+change it.
 
 ```bash
 # === Inside VM ===
-vm-dev build https://github.com/owner/repo   # Create flake from GitHub, auto-fix until it builds
-vm-dev run repo                               # Test it works
-vm-dev fix repo                               # Diagnose and edit flake.nix until it builds (-n: diagnose only)
-vm-dev update repo                            # Re-pin nixpkgs to the VM's own nixpkgs
+vm-dev build https://github.com/owner/repo   # Create flake, then auto-fix until it builds
+vm-dev run repo                               # Run it (auto-fixes the build first if needed)
+vm-dev fix repo                               # Build, diagnose, edit flake.nix, repeat
+vm-dev update repo                            # Re-pin nixpkgs to the VM's current system nixpkgs
+vm-dev install repo                           # Install to the VM user profile (also takes a URL)
 vm-dev list                                   # List local packages
-vm-sync push --name repo                      # Stage for host integration
+vm-sync push --name repo                      # Stage for the host
 
 # === On host ===
 vm-sync list                                  # List staged packages from running VMs
-vm-sync pull repo --target pentest            # Review, approve, pull to profiles/pentest/packages/
+vm-sync pull repo --target dev                # Pull to profiles/dev/packages/
 vm-sync status                                # Show packages per profile
-shard -r pentest                              # Build and live-switch the VM with the new package
+shard -r dev                                  # Build the VM with the package, live switch
 ```
 
-**Pinning.** `vm-dev build` pins the source to the commit its default branch points at, and
-the package flake's nixpkgs to the nixpkgs the VM itself was built from. The staged
-`package.nix` is self-contained: it fetches exactly that nixpkgs revision (`builtins.fetchTree`
-with `rev` and `narHash`) and the source at that commit, so a host nixpkgs bump never changes
-what a pulled package builds with. Staging refuses a package whose nixpkgs or source is not
-pinned (`vm-dev update` / `vm-dev fix` pin it).
-
-**Trust.** A staged `package.nix` is Nix code written by the VM, evaluated and built by the
-host when the target VM is built (pure evaluation, sandboxed builds on the host and in the
-builder). The y/N review in `vm-sync pull` is the decision point: check the `fetchTree` lines
-name `NixOS/nixpkgs` and the source is the repo you expect. A future flow builds and tests
-packages only in VMs and never in the host store (`hydrix-config/plans/vm-local-packages.md`).
-
 **Package locations:**
-- VM development: `~/dev/packages/<name>/flake.nix`
+- VM development: `~/dev/packages/<name>/flake.nix` (+ `flake.lock`, `build.log`)
 - VM staging: `~/staging/<name>/package.nix`
 - Host profiles: `~/hydrix-config/profiles/<type>/packages/<name>.nix`
 
+#### Pinning
+
+`vm-dev build` resolves the repository's default branch to its current commit and writes that
+commit into `fetchFromGitHub` (`rev` + `hash`), so upstream pushes never change the package.
+The flake's `nixpkgs` input is locked to an exact `github:NixOS/nixpkgs/<rev>` with its
+`narHash`. The first lock uses the VM's own system nixpkgs (revision from `nixos-version --json`,
+store path from `/etc/nix/registry.json`), which is already in the store, so pinning downloads
+nothing. The pin is explicit (`nix flake lock --override-input`) because locking an indirect
+`nixpkgs` input resolves through the global registry (nixpkgs-unstable), not the system one.
+
+The pin is sticky: `vm-dev run`, `rebuild`, `install` and `fix` keep it. `vm-dev update <pkg>`
+moves it to the VM's current system nixpkgs, which is how a package follows a host nixpkgs bump
+on purpose (rebuild the VM first so its system nixpkgs is the new one).
+
+#### Auto-fix (`vm-dev fix`)
+
+`vm-dev fix` (`vm/dev/vm-dev-fix.py`) builds with full logs, turns recognised errors into
+`flake.nix` edits, and rebuilds, up to 10 rounds (`--max N`, `-n` to only diagnose). Changes
+are shown as a diff; the previous file is kept as `flake.nix.bak`. `vm-dev build` and `vm-dev
+run` call it automatically. It handles:
+
+- Missing C/C++ headers, `-l` libraries, pkg-config modules, CMake packages and build tools
+- Rust `-sys` crates and bindgen, Python build backends, missing modules and version pins
+- Fixed-output hash mismatches (source, `vendorHash`, `cargoHash`, `npmDepsHash`, ...)
+- Names that are not nixpkgs attributes (removed again)
+- Newer-gcc strictness on old C (`-Wno-error=...`, `-std=gnu17`, `-fcommon`), hardening flags
+- Failing sandboxed tests (`doCheck = false`) and installs that cannot find the binary
+- Go: builds only the module's `package main` directories (`subPackages`) when the tree holds
+  nested modules or test-only packages; picks a `buildGo1XXModule` new enough for `go.mod`
+- A binary not named after the package (`meta.mainProgram`)
+
+Dependency candidates come from a curated map, then `nix-locate` (nix-index-database), then
+name guesses, filtered to attributes that exist in the package's pinned nixpkgs. A candidate that
+does not clear the error is removed again and the next one is tried. When the pinned toolchain
+is too old for the project (Go, Rust, Python), only that package's pin moves, to the latest
+`nixos-unstable`.
+
+#### Staging and transfer
+
+`vm-sync push --name <pkg>` makes sure nixpkgs and the source are pinned (refusing otherwise),
+then writes `~/staging/<pkg>/package.nix`: the flake's derivation, wrapped to import its own
+pinned nixpkgs instead of the host's:
+
+```nix
+{ pkgs }:
+let
+  system = pkgs.stdenv.hostPlatform.system;
+  nixpkgs = builtins.fetchTree { type = "github"; owner = "NixOS"; repo = "nixpkgs"; rev = "<rev>"; narHash = "<narHash>"; };
+in
+let
+  pkgs = import nixpkgs { inherit system; };
+in
+pkgs.buildGoModule { ... }
+```
+
+The VM never writes to the host. Each profile VM runs `vm-staging-server`
+(`vm/microvm/infra/vm-staging-server.c`, vsock 14502), which only answers host requests:
+`list`, `info <pkg>`, `dev`, `get <pkg>` (a `tar` stream of `~/staging/<pkg>`) and
+`unstage <pkg>`.
+
 The `vm-sync pull` command:
-1. Fetches the staged archive and checks it before extracting: only regular files and
-   directories under `<package>/` (no links, special files, absolute paths or `..`), extracted
-   without owners or permissions. Anything else is refused.
-2. Shows the staged `package.nix` (control characters stripped) and asks y/N, since the package
+1. Finds the VM holding the package (`info` to each running VM; CID from
+   `/etc/hydrix/vm-registry.json`) and fetches it with `get`, capped at 10 MB.
+2. Checks the archive before extracting: only regular files and directories under `<package>/`
+   (no links, special files, absolute paths or `..`), extracted without owners or permissions.
+   Anything else is refused.
+3. Shows the staged `package.nix` (control characters stripped) and asks y/N, since the package
    is built on the host.
-3. Copies it to your user config's profile (never through a symlink), regenerates
-   `packages/default.nix` and stages both for git tracking.
+4. Copies it to your user config's profile (never through a symlink), regenerates
+   `packages/default.nix` (each package as `import ./<name>.nix { inherit pkgs; }` in
+   `environment.systemPackages`), stages both for git tracking, and sends `unstage` to the VM.
+
+When the host evaluates the package, `fetchTree` resolves the pinned nixpkgs by its hash: free
+when it is already in the store, otherwise fetched (through the builder VM in lockdown mode). A
+package pinned to a different nixpkgs than the host adds that nixpkgs (and possibly its
+toolchain) to the store.
 
 ### Live Switch (shard switch)
 
