@@ -11,6 +11,7 @@ again and the next one is tried.
 import argparse
 import difflib
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -324,7 +325,7 @@ class Flake:
             return "python"
         if "buildRustPackage" in t:
             return "rust"
-        if "buildGoModule" in t:
+        if re.search(r"buildGo\d*Module", t):
             return "go"
         if "callCabal2nix" in t or "bundlerApp" in t:
             return "opaque"
@@ -532,7 +533,7 @@ def py_deps_attr(flake):
     return "propagatedBuildInputs" if flake.has_attr("propagatedBuildInputs") else "dependencies"
 
 
-def diagnose(log, flake, name):
+def diagnose(log, flake, name, pkg_dir, system):
     issues = []
     lib_attr = dep_list_attr(flake, native=False)
     nat_attr = dep_list_attr(flake, native=True)
@@ -679,6 +680,26 @@ def diagnose(log, flake, name):
         issues.append(Edit("relaxdeps", "pinned python versions differ from nixpkgs, relaxing",
                            lambda f: f.set_attr("pythonRelaxDeps", "true")))
 
+    # Go: nested modules, test-only or example packages break the default ./...
+    if flake.kind == "go" and not flake.has_attr("subPackages") and re.search(
+            r"does not contain package|no non-test Go files|build constraints exclude all Go files|"
+            r"no Go files in", log):
+        def set_sub(f):
+            mains = go_main_packages(pkg_dir)
+            return bool(mains) and f.set_attr("subPackages", "[ " + " ".join(f'"{m}"' for m in mains) + " ]")
+        issues.append(Edit("go-subpackages", "building only the module's main packages", set_sub))
+    m = re.search(r"go\.mod requires go >= ([\d.]*\d)", log)
+    if flake.kind == "go" and m:
+        need = m.group(1)
+        issues.append(Edit(f"go-version:{need}", f"go.mod needs Go {need}",
+                           lambda f, need=need: go_toolchain(f, pkg_dir, system, need)))
+
+    # Toolchain older than the project needs: only this package's own pin moves.
+    if re.search(r"requires rustc [\d.]+ or newer|rustc [\d.]+ is not supported by the following package|"
+                 r"Python [\d.]+ is not supported|feature `[\w-]+` is required", log):
+        issues.append(Edit("toolchain-old", "toolchain too old, pinning this package to nixos-unstable",
+                           lambda f: pin_nixpkgs(pkg_dir, system, ref=UNSTABLE)))
+
     # Phase-level failures
     phases = re.findall(r"Running phase: (\w+)", log)
     last = phases[-1] if phases else ""
@@ -700,16 +721,86 @@ def diagnose(log, flake, name):
     # Several patterns can report the same problem; keep the first of each.
     return list({i.key: i for i in reversed(issues)}.values())[::-1]
 
+def go_toolchain(flake, pkg_dir, system, need):
+    """Pick a Go builder whose toolchain satisfies go.mod from the pinned nixpkgs, or
+    move this package's pin to nixos-unstable once."""
+    req = tuple(int(x) for x in need.split("."))
+    major, minor = req[0], req[1] if len(req) > 1 else 0
+    attrs = ["go"] + [f"go_{major}_{v}" for v in range(minor, minor + 8)]
+    lst = " ".join(f'"{a}"' for a in attrs)
+    expr = (f"ps: builtins.listToAttrs (map (n: {{ name = n; value = let r = builtins.tryEval "
+            f"(ps.${{n}}.version or null); in if r.success then r.value else null; }}) [ {lst} ])")
+    res = run(["nix", "eval", "--inputs-from", ".", "--json", f"nixpkgs#legacyPackages.{system}",
+               "--apply", expr], cwd=pkg_dir)
+    try:
+        versions = {k: v for k, v in json.loads(res.stdout).items() if v}
+    except ValueError:
+        versions = {}
+    ok = lambda v: tuple(int(x) for x in re.findall(r"\d+", v)[:3]) >= req
+    if "go" in versions and ok(versions["go"]):
+        builder = "buildGoModule"
+    else:
+        fits = [a for a in attrs[1:] if a in versions and ok(versions[a])]
+        builder = f"buildGo{major}{fits[-1].rsplit('_', 1)[1]}Module" if fits else None
+    if builder:
+        new = re.sub(r"pkgs\.buildGo\d*Module", "pkgs." + builder, flake.text, count=1)
+        changed, flake.text = new != flake.text, new
+        return changed
+    if not pin_nixpkgs(pkg_dir, system, ref=UNSTABLE):
+        return False
+    flake.text = re.sub(r"pkgs\.buildGo\d*Module", "pkgs.buildGoModule", flake.text, count=1)
+    return True
+
+
+# ── Source inspection ─────────────────────────────────────────────────────────
+
+def source_dir(pkg_dir):
+    """Store path of the package's fetched source."""
+    res = run(["nix", "build", ".#default.src", "--no-link", "--print-out-paths"], cwd=pkg_dir)
+    path = res.stdout.strip().splitlines()[-1] if res.returncode == 0 and res.stdout.strip() else ""
+    return Path(path) if path and Path(path).is_dir() else None
+
+
+GO_SKIP_DIRS = {"vendor", "testdata", ".git", "node_modules", "third_party"}
+GO_AUX = re.compile(r"(^|/)(tests?|e2e|integration|examples?|_examples|samples?|demos?|internal|tools|hack|scripts|benchmarks?)(/|$)")
+
+
+def go_main_packages(pkg_dir):
+    """`package main` directories of the root module, preferring the root and cmd/."""
+    src = source_dir(pkg_dir)
+    if not src:
+        return []
+    mains = []
+    for d, dirs, files in os.walk(src):
+        d = Path(d)
+        rel = d.relative_to(src).as_posix()
+        # Subdirectories with their own go.mod are separate modules.
+        dirs[:] = [x for x in dirs if x not in GO_SKIP_DIRS and not (d / x / "go.mod").exists()]
+        for f in files:
+            if f.endswith(".go") and not f.endswith("_test.go"):
+                try:
+                    head = (d / f).read_text(errors="ignore")[:4096]
+                except OSError:
+                    continue
+                if re.search(r"^package main\b", head, re.M):
+                    mains.append("." if rel == "." else rel)
+                    break
+    preferred = [m for m in mains if m == "." or m == "cmd" or m.startswith("cmd/")]
+    if preferred:
+        return sorted(preferred)
+    return sorted([m for m in mains if not GO_AUX.search(m)] or mains)
+
+
 # ── Candidate validation ──────────────────────────────────────────────────────
 
-def existing(pkg_dir, system, names):
-    """Subset of names (relative to pkgs) that are derivations in the flake's nixpkgs."""
+def existing(pkg_dir, system, names, drv=True):
+    """Subset of names (relative to pkgs) that exist in the flake's nixpkgs (as derivations if drv)."""
     names = [n for n in uniq(names) if re.match(r"^[A-Za-z_][\w.+-]*$", n)]
     if not names:
         return set()
     lst = " ".join('"' + n + '"' for n in names)
     expr = ("ps: let lib = ps.lib; ok = n: let v = lib.attrByPath (lib.splitString \".\" n) null ps; "
-            "r = builtins.tryEval (v != null && lib.isDerivation v); in r.success && r.value; "
+            f"r = builtins.tryEval (v != null && {'lib.isDerivation v' if drv else 'true'}); in r.success && r.value; "
             f"in builtins.filter ok [ {lst} ]")
     res = run(["nix", "eval", "--inputs-from", ".", "--json",
                f"nixpkgs#legacyPackages.{system}", "--apply", expr], cwd=pkg_dir)
@@ -719,6 +810,93 @@ def existing(pkg_dir, system, names):
     return set(json.loads(res.stdout))
 
 # ── Main loop ─────────────────────────────────────────────────────────────────
+
+def system_nixpkgs():
+    """Store path the NixOS system registry maps `nixpkgs` to (the VM's own nixpkgs)."""
+    try:
+        reg = json.loads(Path("/etc/nix/registry.json").read_text())
+    except (OSError, ValueError):
+        return None
+    for f in reg.get("flakes", []):
+        if f.get("from", {}).get("id") == "nixpkgs" and f.get("to", {}).get("type") == "path":
+            return f["to"]["path"]
+    return None
+
+
+def locked_nixpkgs(pkg_dir):
+    try:
+        lock = json.loads((pkg_dir / "flake.lock").read_text())
+        node = lock["nodes"]["root"]["inputs"]["nixpkgs"]
+        return lock["nodes"][node]["locked"]
+    except (OSError, ValueError, KeyError, TypeError):
+        return {}
+
+
+def is_pinned(locked):
+    return locked.get("type") == "github" and bool(locked.get("rev")) and bool(locked.get("narHash"))
+
+
+def system_pin():
+    """github ref of the VM's own nixpkgs: already in the store, so pinning to it is free."""
+    path = system_nixpkgs()
+    try:
+        rev = json.loads(run(["nixos-version", "--json"]).stdout)["nixpkgsRevision"]
+    except (ValueError, KeyError):
+        rev = ""
+    if not path or not re.fullmatch(r"[0-9a-f]{40}", rev or ""):
+        return None
+    nar = run(["nix", "hash", "path", path]).stdout.strip()
+    return f"github:NixOS/nixpkgs/{rev}?narHash={nar.replace('+', '%2B').replace('/', '%2F').replace('=', '%3D')}"
+
+
+UNSTABLE = "github:NixOS/nixpkgs/nixos-unstable"
+
+
+def pin_nixpkgs(pkg_dir, system, ref=None, force=False):
+    """Lock nixpkgs to an exact github rev + narHash. vm-sync push copies this pin into
+    package.nix, so the host builds with exactly the nixpkgs tested here."""
+    if 'inputs.nixpkgs.url = "nixpkgs";' not in (pkg_dir / "flake.nix").read_text():
+        if not (pkg_dir / "flake.lock").exists():
+            run(["nix", "flake", "lock"], cwd=pkg_dir)
+        return True
+    if force or ref or not is_pinned(locked_nixpkgs(pkg_dir)):
+        ref = ref or system_pin()
+        if not ref:
+            say("Error: cannot determine the system nixpkgs revision to pin to")
+            return False
+        res = run(["nix", "flake", "lock", "--override-input", "nixpkgs", ref], cwd=pkg_dir)
+        if res.returncode != 0:
+            say(f"Error: could not pin nixpkgs to {ref.split('?')[0]}:")
+            say(res.stderr.strip())
+            return False
+    go = run(["nix", "eval", "--inputs-from", ".", "--raw", f"nixpkgs#legacyPackages.{system}.go.version"], cwd=pkg_dir)
+    say(f"  nixpkgs: {locked_nixpkgs(pkg_dir).get('rev', '?')[:12]} (go {go.stdout.strip() or '?'})")
+    return True
+
+
+def pin_src(flake):
+    """Turn `rev = "<branch>"` of fetchFromGitHub into the commit it points at now."""
+    changed = False
+    pat = r'owner = "([^"]+)";\s*repo = "([^"]+)";\s*rev = "([^"]+)";\s*hash = "([^"]+)";'
+    for owner, repo, rev, old_hash in set(re.findall(pat, flake.text)):
+        if re.fullmatch(r"[0-9a-f]{40}", rev):
+            continue
+        res = run(["nix", "flake", "prefetch", "--json", f"github:{owner}/{repo}/{rev}"])
+        try:
+            info = json.loads(res.stdout)
+            commit, new_hash = info["locked"]["rev"], info["hash"]
+        except (ValueError, KeyError):
+            say(f"  warning: could not resolve {owner}/{repo} {rev} to a commit (offline?)")
+            continue
+        flake.text = flake.text.replace(f'rev = "{rev}";', f'rev = "{commit}";')
+        if new_hash != old_hash:
+            flake.text = flake.text.replace(old_hash, new_hash)
+            say(f"  source: {rev} moved upstream, pinned to {commit[:12]} (new hash)")
+        else:
+            say(f"  source: {rev} pinned to commit {commit[:12]}")
+        changed = True
+    return changed
+
 
 def build(pkg_dir, log_path):
     res = run(["nix", "build", ".#default", "-L"], cwd=pkg_dir)
@@ -756,6 +934,8 @@ def main():
     ap.add_argument("pkg", help="package name under ~/dev/packages, or a directory")
     ap.add_argument("--max", type=int, default=10, help="maximum build rounds (default 10)")
     ap.add_argument("-n", "--dry-run", action="store_true", help="diagnose once, change nothing")
+    ap.add_argument("--lock-only", action="store_true", help="only make sure nixpkgs and the source are pinned")
+    ap.add_argument("--update", action="store_true", help="re-pin nixpkgs to the VM's current system nixpkgs")
     args = ap.parse_args()
 
     pkg_dir = Path(args.pkg) if "/" in args.pkg else Path.home() / "dev" / "packages" / args.pkg
@@ -770,8 +950,18 @@ def main():
     m = re.search(r'system = "([^"]+)";', original)
     system = m.group(1) if m else run(["nix", "eval", "--impure", "--raw", "--expr", "builtins.currentSystem"]).stdout or "x86_64-linux"
 
-    if not (pkg_dir / "flake.lock").exists():
-        run(["nix", "flake", "lock"], cwd=pkg_dir)
+    # Build against the VM's system nixpkgs (what the host uses for staged packages).
+    if 'inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";' in original:
+        flake_path.write_text(original.replace('inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";',
+                                               'inputs.nixpkgs.url = "nixpkgs";'))
+        say("  fix: nixpkgs is now pinned in flake.lock instead of following nixos-unstable")
+    if not pin_nixpkgs(pkg_dir, system, force=args.update):
+        return 1
+    src_flake = Flake(flake_path)
+    if pin_src(src_flake):
+        src_flake.save()
+    if args.lock_only or args.update:
+        return 0
 
     tried = {}     # issue key -> candidates already added in an earlier round
     done = set()   # one-shot edits already applied
@@ -787,7 +977,7 @@ def main():
             main_program_hint(pkg_dir, flake, name)
             break
 
-        issues = diagnose(clean_log(raw), flake, name)
+        issues = diagnose(clean_log(raw), flake, name, pkg_dir, system)
         deps = [i for i in issues if isinstance(i, Dep)]
         valid = existing(pkg_dir, system, [c for d in deps for c in d.candidates] +
                          [x for d in deps for _, x in d.extra])

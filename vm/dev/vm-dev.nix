@@ -43,13 +43,15 @@
   hashPlaceholder = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
 
   # Externalized flake templates - no more triple-escaping in heredocs
+  # `nixpkgs` resolves through the VM's flake registry to the nixpkgs the VM itself was
+  # built from, which is also what the host builds staged packages with.
   templateDir = pkgs.runCommand "vm-dev-templates" {} ''
         mkdir -p $out
 
         cat > $out/rust.nix << 'EOF'
     {
       description = "@NAME@ - tested in VM";
-      inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+      inputs.nixpkgs.url = "nixpkgs";
       outputs = { self, nixpkgs }:
         let
           system = "@SYSTEM@";
@@ -74,7 +76,7 @@
         cat > $out/go.nix << 'EOF'
     {
       description = "@NAME@ - tested in VM";
-      inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+      inputs.nixpkgs.url = "nixpkgs";
       outputs = { self, nixpkgs }:
         let
           system = "@SYSTEM@";
@@ -98,7 +100,7 @@
         cat > $out/python-pyproject.nix << 'EOF'
     {
       description = "@NAME@ - tested in VM";
-      inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+      inputs.nixpkgs.url = "nixpkgs";
       outputs = { self, nixpkgs }:
         let
           system = "@SYSTEM@";
@@ -128,7 +130,7 @@
         cat > $out/python-pyproject-uv.nix << 'EOF'
     {
       description = "@NAME@ - tested in VM";
-      inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+      inputs.nixpkgs.url = "nixpkgs";
       outputs = { self, nixpkgs }:
         let
           system = "@SYSTEM@";
@@ -162,7 +164,7 @@
         cat > $out/python-setuptools.nix << 'EOF'
     {
       description = "@NAME@ - tested in VM";
-      inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+      inputs.nixpkgs.url = "nixpkgs";
       outputs = { self, nixpkgs }:
         let
           system = "@SYSTEM@";
@@ -189,7 +191,7 @@
         cat > $out/python-script.nix << 'EOF'
     {
       description = "@NAME@ - tested in VM";
-      inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+      inputs.nixpkgs.url = "nixpkgs";
       outputs = { self, nixpkgs }:
         let
           system = "@SYSTEM@";
@@ -223,7 +225,7 @@
         cat > $out/npm.nix << 'EOF'
     {
       description = "@NAME@ - tested in VM";
-      inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+      inputs.nixpkgs.url = "nixpkgs";
       outputs = { self, nixpkgs }:
         let
           system = "@SYSTEM@";
@@ -247,7 +249,7 @@
         cat > $out/yarn.nix << 'EOF'
     {
       description = "@NAME@ - tested in VM";
-      inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+      inputs.nixpkgs.url = "nixpkgs";
       outputs = { self, nixpkgs }:
         let
           system = "@SYSTEM@";
@@ -270,7 +272,7 @@
         cat > $out/cmake.nix << 'EOF'
     {
       description = "@NAME@ - tested in VM";
-      inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+      inputs.nixpkgs.url = "nixpkgs";
       outputs = { self, nixpkgs }:
         let
           system = "@SYSTEM@";
@@ -295,7 +297,7 @@
         cat > $out/meson.nix << 'EOF'
     {
       description = "@NAME@ - tested in VM";
-      inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+      inputs.nixpkgs.url = "nixpkgs";
       outputs = { self, nixpkgs }:
         let
           system = "@SYSTEM@";
@@ -320,7 +322,7 @@
         cat > $out/autotools.nix << 'EOF'
     {
       description = "@NAME@ - tested in VM";
-      inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+      inputs.nixpkgs.url = "nixpkgs";
       outputs = { self, nixpkgs }:
         let
           system = "@SYSTEM@";
@@ -345,7 +347,7 @@
         cat > $out/haskell.nix << 'EOF'
     {
       description = "@NAME@ - tested in VM";
-      inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+      inputs.nixpkgs.url = "nixpkgs";
       outputs = { self, nixpkgs }:
         let
           system = "@SYSTEM@";
@@ -365,7 +367,7 @@
         cat > $out/elixir.nix << 'EOF'
     {
       description = "@NAME@ - tested in VM";
-      inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+      inputs.nixpkgs.url = "nixpkgs";
       outputs = { self, nixpkgs }:
         let
           system = "@SYSTEM@";
@@ -406,7 +408,7 @@
     #
     {
       description = "@NAME@ - tested in VM";
-      inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+      inputs.nixpkgs.url = "nixpkgs";
       outputs = { self, nixpkgs }:
         let
           system = "@SYSTEM@";
@@ -429,7 +431,7 @@
         cat > $out/maven.nix << 'EOF'
     {
       description = "@NAME@ - tested in VM";
-      inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+      inputs.nixpkgs.url = "nixpkgs";
       outputs = { self, nixpkgs }:
         let
           system = "@SYSTEM@";
@@ -453,7 +455,7 @@
         cat > $out/gradle.nix << 'EOF'
     {
       description = "@NAME@ - tested in VM";
-      inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+      inputs.nixpkgs.url = "nixpkgs";
       outputs = { self, nixpkgs }:
         let
           system = "@SYSTEM@";
@@ -491,7 +493,7 @@
         cat > $out/dotnet.nix << 'EOF'
     {
       description = "@NAME@ - tested in VM";
-      inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+      inputs.nixpkgs.url = "nixpkgs";
       outputs = { self, nixpkgs }:
         let
           system = "@SYSTEM@";
@@ -517,7 +519,7 @@
         cat > $out/makefile.nix << 'EOF'
     {
       description = "@NAME@ - tested in VM";
-      inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+      inputs.nixpkgs.url = "nixpkgs";
       outputs = { self, nixpkgs }:
         let
           system = "@SYSTEM@";
@@ -558,7 +560,7 @@
         cat > $out/nim.nix << 'NIMTEMPLATE'
     {
       description = "@NAME@ - tested in VM";
-      inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+      inputs.nixpkgs.url = "nixpkgs";
       outputs = { self, nixpkgs }:
         let
           system = "@SYSTEM@";
@@ -584,7 +586,7 @@
         cat > $out/zig.nix << 'EOF'
     {
       description = "@NAME@ - tested in VM";
-      inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+      inputs.nixpkgs.url = "nixpkgs";
       outputs = { self, nixpkgs }:
         let
           system = "@SYSTEM@";
@@ -609,7 +611,7 @@
         cat > $out/ocaml.nix << 'EOF'
     {
       description = "@NAME@ - tested in VM";
-      inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+      inputs.nixpkgs.url = "nixpkgs";
       outputs = { self, nixpkgs }:
         let
           system = "@SYSTEM@";
@@ -635,7 +637,7 @@
         cat > $out/perl.nix << 'EOF'
     {
       description = "@NAME@ - tested in VM";
-      inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+      inputs.nixpkgs.url = "nixpkgs";
       outputs = { self, nixpkgs }:
         let
           system = "@SYSTEM@";
@@ -661,7 +663,7 @@
         cat > $out/php.nix << 'EOF'
     {
       description = "@NAME@ - tested in VM";
-      inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+      inputs.nixpkgs.url = "nixpkgs";
       outputs = { self, nixpkgs }:
         let
           system = "@SYSTEM@";
@@ -685,7 +687,7 @@
         cat > $out/crystal.nix << 'EOF'
     {
       description = "@NAME@ - tested in VM";
-      inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+      inputs.nixpkgs.url = "nixpkgs";
       outputs = { self, nixpkgs }:
         let
           system = "@SYSTEM@";
@@ -716,7 +718,7 @@
         cat > $out/generic.nix << 'EOF'
     {
       description = "@NAME@ - tested in VM";
-      inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+      inputs.nixpkgs.url = "nixpkgs";
       outputs = { self, nixpkgs }:
         let
           system = "@SYSTEM@";
@@ -845,6 +847,26 @@ in {
             exit 1
           fi
 
+          # Pin nixpkgs and the source commit if not yet done
+          vm-dev-fix --lock-only "$pkg" > /dev/null || {
+            echo "Error: could not pin $pkg (run: vm-dev fix $pkg)"
+            exit 1
+          }
+
+          # The nixpkgs the package was built and tested with goes into package.nix
+          local jq=${pkgs.jq}/bin/jq lock="$pkg_dir/flake.lock" node owner repo rev narhash
+          node=$($jq -r '.nodes.root.inputs.nixpkgs // empty' "$lock" 2>/dev/null)
+          read -r owner repo rev narhash < <($jq -r --arg n "$node" \
+            '.nodes[$n].locked | select(.type == "github") | "\(.owner) \(.repo) \(.rev) \(.narHash)"' "$lock" 2>/dev/null)
+          if [ -z "$narhash" ] || [ "$narhash" = null ]; then
+            echo "Error: nixpkgs of $pkg is not pinned to a revision (run: vm-dev update $pkg)"
+            exit 1
+          fi
+          if grep -qE 'rev = "[^"]*";' "$pkg_dir/flake.nix" && grep -E 'rev = "[^"]*";' "$pkg_dir/flake.nix" | grep -qvE 'rev = "[0-9a-f]{40}";'; then
+            echo "Error: the source of $pkg is not pinned to a commit (run: vm-dev fix $pkg)"
+            exit 1
+          fi
+
           mkdir -p "$staging_pkg_dir"
 
           # Extract derivation and any let-bindings from flake.nix
@@ -873,14 +895,27 @@ in {
           ')
 
           # Write package.nix
+          # Self-contained: builds with the nixpkgs pinned above, not the host's own,
+          # so host nixpkgs bumps never change what this package builds with.
           {
             echo "# $pkg - from VM"
             echo "{ pkgs }:"
+            echo "let"
+            echo "  system = pkgs.stdenv.hostPlatform.system;"
+            echo "  nixpkgs = builtins.fetchTree {"
+            echo "    type = \"github\";"
+            echo "    owner = \"$owner\";"
+            echo "    repo = \"$repo\";"
+            echo "    rev = \"$rev\";"
+            echo "    narHash = \"$narhash\";"
+            echo "  };"
+            echo "in"
+            echo "let"
+            echo "  pkgs = import nixpkgs { inherit system; };"
             if [ -n "$(echo "$let_bindings" | tr -d '[:space:]')" ]; then
-              echo "let"
               echo "$let_bindings"
-              echo "in"
             fi
+            echo "in"
             echo "$derivation"
           } > "$staging_pkg_dir/package.nix"
 
@@ -953,7 +988,7 @@ in {
           echo "  remove <pkg>       Remove a package"
           echo "  install <pkg|url>  Install to user profile (persistent)"
           echo "  edit <pkg>         Edit package flake"
-          echo "  update [pkg]       Update flake.lock (all if no pkg)"
+          echo "  update [pkg]       Re-pin nixpkgs to the VM's system nixpkgs (all if no pkg)"
           echo "  add <pkg>          Add nixpkgs package (legacy)"
           echo ""
           echo "Workflow:"
@@ -974,6 +1009,7 @@ in {
           # Check per-package flake first
           if [ -f "$PACKAGES_DIR/$pkg/flake.nix" ]; then
             cd "$PACKAGES_DIR/$pkg"
+            vm-dev-fix --lock-only "$pkg" > /dev/null || exit 1
             if ! nix build ".#default" -L > build.log 2>&1; then
               echo "Build failed, trying to fix it..."
               vm-dev-fix "$pkg" || exit 1
@@ -1045,6 +1081,7 @@ in {
           local ref
           if [ -f "$PACKAGES_DIR/$pkg/flake.nix" ]; then
             ref="$PACKAGES_DIR/$pkg#default"
+            vm-dev-fix --lock-only "$pkg" > /dev/null || exit 1
             if ! (cd "$PACKAGES_DIR/$pkg" && nix build ".#default" -L > build.log 2>&1); then
               echo "Build failed, trying to fix it..."
               vm-dev-fix "$pkg" || exit 1
@@ -1085,8 +1122,7 @@ in {
 
           if [ -n "$pkg" ]; then
             if [ -f "$PACKAGES_DIR/$pkg/flake.nix" ]; then
-              cd "$PACKAGES_DIR/$pkg"
-              nix flake update
+              vm-dev-fix --update "$pkg" || exit 1
               echo "Updated: $pkg"
             else
               echo "Error: Package '$pkg' not found"
@@ -1100,7 +1136,7 @@ in {
                 if [ -f "''${dir}flake.nix" ]; then
                   local name=$(basename "$dir")
                   echo "Updating $name..."
-                  (cd "$dir" && nix flake update) || true
+                  vm-dev-fix --update "$name" || true
                 fi
               done
             fi
@@ -1154,6 +1190,7 @@ in {
           fi
 
           cd "$pkg_dir"
+          vm-dev-fix --lock-only "$pkg" > /dev/null || exit 1
           echo "Building $pkg..."
           if nix build ".#default" 2>&1 | tee "$pkg_dir/build.log"; then
             echo ""
@@ -1258,35 +1295,24 @@ in {
         # Fetch and detect project type
         echo "Fetching repository info..."
 
-        # Try main branch first, then master
-        BRANCH="main"
-        ARCHIVE_URL="https://github.com/$OWNER/$REPO/archive/main.tar.gz"
+        # Default branch, resolved to the commit it points at now: the flake pins that
+        # commit, so later upstream pushes never change what this package builds.
+        PREFETCH=$(${pkgs.nix}/bin/nix flake prefetch --json "github:$OWNER/$REPO" 2>/dev/null) || true
+        BRANCH=$(echo "$PREFETCH" | ${pkgs.jq}/bin/jq -r '.locked.rev // empty' 2>/dev/null)
+        HASH_SRI=$(echo "$PREFETCH" | ${pkgs.jq}/bin/jq -r '.hash // empty' 2>/dev/null)
+        SRC_PATH=$(echo "$PREFETCH" | ${pkgs.jq}/bin/jq -r '.storePath // empty' 2>/dev/null)
 
-        echo "Trying branch: main..."
-        HASH_NIX32=$(${pkgs.nix}/bin/nix-prefetch-url --unpack "$ARCHIVE_URL" 2>/dev/null | tail -1)
-
-        if [ -z "$HASH_NIX32" ]; then
-          echo "main branch not found, trying master..."
-          BRANCH="master"
-          ARCHIVE_URL="https://github.com/$OWNER/$REPO/archive/master.tar.gz"
-          HASH_NIX32=$(${pkgs.nix}/bin/nix-prefetch-url --unpack "$ARCHIVE_URL" 2>/dev/null | tail -1)
-        fi
-
-        if [ -z "$HASH_NIX32" ]; then
+        if [ -z "$BRANCH" ] || [ -z "$HASH_SRI" ] || [ ! -d "$SRC_PATH" ]; then
           echo "Error: Could not fetch repository. Check if the URL is correct."
           exit 1
         fi
 
-        echo "Using branch: $BRANCH"
-        HASH_SRI=$(${pkgs.nix}/bin/nix hash convert --hash-algo sha256 --to sri "$HASH_NIX32" 2>/dev/null || ${pkgs.nix}/bin/nix hash to-sri --type sha256 "$HASH_NIX32" 2>/dev/null)
+        echo "Using commit: $BRANCH"
         echo "Source hash: $HASH_SRI"
 
         # Detect project type by checking for marker files
         TEMP_DIR=$(mktemp -d)
-        echo "Extracting to detect project type..."
-        if ! ${pkgs.curl}/bin/curl -sL "$ARCHIVE_URL" | ${pkgs.gnutar}/bin/tar -xz -C "$TEMP_DIR" --strip-components=1; then
-          echo "Warning: tar extraction may have failed"
-        fi
+        cp -r --no-preserve=mode "$SRC_PATH/." "$TEMP_DIR/"
 
         PROJECT_TYPE="unknown"
         HAS_PYPROJECT="false"
@@ -1669,11 +1695,6 @@ in {
 
         echo ""
         echo "Created package at $PKG_DIR/flake.nix"
-
-        # Generate lock file
-        echo ""
-        echo "Generating flake.lock..."
-        cd "$PKG_DIR" && ${pkgs.nix}/bin/nix flake update 2>/dev/null || true
 
         echo ""
         echo "Building (fixing errors automatically)..."

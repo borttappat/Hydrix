@@ -416,7 +416,7 @@ cmd_pull() {
     success "Pulled $pkg_name to: ${targets[*]}"
     log ""
     log "Rebuild to apply:"
-    log "  shard build microvm-${targets[0]}"
+    log "  shard -r ${targets[0]}"
 }
 
 # Remove package from user's profile packages
