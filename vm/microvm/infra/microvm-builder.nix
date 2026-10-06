@@ -185,12 +185,18 @@ in {
     nix = {
       enable = true;
       settings = {
-        trusted-users = lib.mkDefault ["root" "builder"];
+        # root only: the build service runs as root; the console user (builder)
+        # can build but cannot pass options such as --option sandbox false.
+        trusted-users = lib.mkDefault ["root"];
         auto-optimise-store = lib.mkDefault false; # Host manages optimization
         max-jobs = lib.mkDefault "auto";
         cores = lib.mkDefault 0; # Use all available
-        # Disable sandbox - doesn't work well with virtiofs store mount
-        sandbox = lib.mkDefault false;
+        # Every build runs sandboxed: only its declared inputs, no network
+        # (except fixed-output fetches), no view of /mnt/hydrix or other builds.
+        # This VM holds the host store read-write, so a build that reached root
+        # here would reach the host.
+        sandbox = lib.mkDefault true;
+        sandbox-fallback = false;
         # Enable flakes and nix-command
         experimental-features = lib.mkDefault ["nix-command" "flakes"];
         # Use substituters for faster builds
