@@ -54,6 +54,22 @@
         "type": "github"
       }
     },
+    "nixpkgs-pywal": {
+      "locked": {
+        "lastModified": 1775525138,
+        "narHash": "sha256-BQb70+B378ECLO8iQT3P/b1hCC5/CJVHZdeulY8futc=",
+        "owner": "nixos",
+        "repo": "nixpkgs",
+        "rev": "d96b37bbeb9840f1c0ebfe90585ef5067b69bbb3",
+        "type": "github"
+      },
+      "original": {
+        "owner": "nixos",
+        "repo": "nixpkgs",
+        "rev": "d96b37bbeb9840f1c0ebfe90585ef5067b69bbb3",
+        "type": "github"
+      }
+    },
     "nixpkgs-unstable": {
       "locked": {
         "lastModified": 1785571196,
@@ -107,6 +123,7 @@
         "home-manager": "home-manager",
         "microvm": "microvm",
         "nixpkgs": "nixpkgs_3",
+        "nixpkgs-pywal": "nixpkgs-pywal",
         "nixpkgs-unstable": "nixpkgs-unstable"
       }
     },
