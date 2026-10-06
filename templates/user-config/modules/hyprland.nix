@@ -477,6 +477,25 @@
     '';
   };
 
+  # A second hypridle the lock session runs for its own lifetime, so its idle
+  # timer starts at lock time and the unlocked session never dims. It leaves
+  # D-Bus, logind and sleep handling to the main hypridle, and ignores
+  # wayland idle inhibitors (a video left playing behind the lock).
+  lockDimConf = pkgs.writeText "hypridle-lock-dim.conf" ''
+    general {
+      ignore_dbus_inhibit = 1
+      ignore_systemd_inhibit = 1
+      ignore_wayland_inhibit = 1
+      inhibit_sleep = 0
+    }
+
+    listener {
+      timeout = ${toString lk.dim.timeout}
+      on-timeout = ${idleDim} on
+      on-resume = ${idleDim} off
+    }
+  '';
+
   # Idempotent lock script: flock prevents duplicate hyprlock instances.
   # Non-blocking (-n): if hyprlock already holds the lock, exits immediately.
   # The widget renderer lives exactly as long as hyprlock. hyprlock.conf
@@ -487,17 +506,22 @@
     rm -rf "$dir" && mkdir -p "$dir" "$HOME/.cache/hydrix"
     ln -sfn "$dir" "$HOME/.cache/hydrix/hyprlock"
     ${lockWidgets} "$dir" &
-    widgets=$!
-    trap 'kill $widgets 2>/dev/null; rm -rf "$dir"' EXIT
+    helpers=$!
+    ${lib.optionalString (lk.dim.timeout != null) ''
+      ${pkgs.hypridle}/bin/hypridle -q -c ${lockDimConf} &
+      helpers="$helpers $!"
+    ''}
+    trap 'kill $helpers 2>/dev/null; ${idleDim} off; rm -rf "$dir"' EXIT
     ${hyprlockPkg}/bin/hyprlock
   '';
   lockScreen = pkgs.writeShellScript "hypr-lock" ''
     exec ${pkgs.util-linux}/bin/flock -n "$XDG_RUNTIME_DIR/hyprlock.lock" ${lockSession}
   '';
 
-  # Idle dimming of the internal panel (brightnessctl via logind, no root).
-  # `dim on` saves the current level and dims; `dim off` restores it only
-  # after an actual dim, so a panel already darker than the target is kept.
+  # Idle dimming of the internal panel while locked (brightnessctl via
+  # logind, no root). `dim on` saves the current level and dims; `dim off`
+  # restores it only after an actual dim, so a panel already darker than the
+  # target is kept.
   idleDim = pkgs.writeShellScript "hydrix-idle-dim" ''
     marker="$XDG_RUNTIME_DIR/hydrix-idle-dimmed"
     bctl=${pkgs.brightnessctl}/bin/brightnessctl
@@ -526,13 +550,6 @@
       timeout = $_t
       on-timeout = ${pkgs.systemd}/bin/loginctl lock-session
     }
-    ${lib.optionalString (lk.dim.timeout != null) ''
-
-      listener {
-        timeout = ${toString lk.dim.timeout}
-        on-timeout = ${idleDim} on
-        on-resume = ${idleDim} off
-      }''}
     EOF
         exec ${pkgs.hypridle}/bin/hypridle
   '';
@@ -1038,6 +1055,22 @@ in {
           cat ${hyprlandConf} > "$_dir/hyprland.conf"
           echo "${hyprlandConf}" > "$_stamp"
           hydrixHyprReload=1
+        fi
+      '';
+
+      # hypridle reads its config only at start, so a changed start script
+      # (timeouts, lock command, dim listener) restarts it. Launched through
+      # each Hyprland instance so it lives in the session, not in this
+      # activation's cgroup.
+      home.activation.hypridleRestart = lib.hm.dag.entryAfter ["writeBoundary"] ''
+        _stamp="$HOME/.config/hypr/.hypridle-stamp"
+        if [ "$(cat "$_stamp" 2>/dev/null)" != "${startHypridle}" ]; then
+          for _sig in $(${hyprlandPkg}/bin/hyprctl instances -j 2>/dev/null | ${pkgs.jq}/bin/jq -r '.[].instance' 2>/dev/null); do
+            ${pkgs.procps}/bin/pkill -x hypridle 2>/dev/null || true
+            HYPRLAND_INSTANCE_SIGNATURE="$_sig" ${hyprlandPkg}/bin/hyprctl dispatch exec ${startHypridle} >/dev/null 2>&1 || true
+          done
+          mkdir -p "$HOME/.config/hypr"
+          echo "${startHypridle}" > "$_stamp"
         fi
       '';
 

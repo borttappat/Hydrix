@@ -72,7 +72,7 @@
     # lockscreen.verifyText  = lib.mkDefault "Verifying...";
     # lockscreen.blur        = lib.mkDefault true;
     # lockscreen.rounding    = lib.mkDefault 3;     # DEFAULT: eww panelRadius * scale, physical px
-    lockscreen.dim.timeout = lib.mkDefault 120; # dim the panel after 2 min idle; any input restores
+    lockscreen.dim.timeout = lib.mkDefault 120; # locked: dim the panel after 2 min idle; any input restores
     # lockscreen.dim.brightness = lib.mkDefault 10; # percent
     # lockscreen.battery.enable = lib.mkDefault true; # hidden without a battery
 

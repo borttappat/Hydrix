@@ -1122,8 +1122,9 @@ in {
           type = lib.types.nullOr lib.types.ints.positive;
           default = null;
           description = ''
-            Seconds without input before the internal panel's backlight dims,
-            locked or not. Any input restores it. null disables dimming.
+            Seconds without input on the lockscreen before the internal
+            panel's backlight dims, counted from the lock or the last input.
+            Any input restores it, as does unlocking. null disables dimming.
           '';
         };
 
