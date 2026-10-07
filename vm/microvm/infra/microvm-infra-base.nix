@@ -18,6 +18,8 @@ in {
     ../../common/serial-console.nix
     # Whole-USB-device passthrough target (opt-in, meta.nix usbPassthrough)
     ../usb-passthrough.nix
+    # Password database service (opt-in, the vault VM sets hydrix.vault.agent.enable)
+    ./vault-agent.nix
   ];
 
   config = {

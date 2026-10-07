@@ -20,5 +20,6 @@
     ./hardware/asus.nix
     ./webcam-passthrough.nix
     ./usb.nix           # USB storage block, usb attach CLI, static VM devices
+    ./passwords.nix       # Password frontends (vault, vault-pick) over the vault VM or host
   ];
 }
