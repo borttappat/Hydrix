@@ -195,7 +195,15 @@
       "''${color0#\#}" "''${color7#\#}" "''${color4#\#}" "''${color1#\#}" > "$LOCK_OUT"
 
     ${pkgs.hyprland}/bin/hyprctl reload 2>/dev/null || true
-    ${pkgs.procps}/bin/pkill -SIGUSR2 waybar 2>/dev/null || true
+    # CSS-only reload through waybar's reload_style_on_change watch on
+    # style.css (which imports colors.css). SIGUSR2 would rebuild every module,
+    # racing the hyprland/workspaces reinit that `hyprctl reload` triggers.
+    # The watch needs a content write in place; touch or mv does not fire it.
+    _style="$HOME/.config/waybar/style.css"
+    if [ -f "$_style" ]; then
+      _css=$(cat "$_style"; echo x)
+      printf '%s' "''${_css%x}" > "$_style"
+    fi
   '';
 
   hydrixBrightnessHypr = pkgs.writeShellScriptBin "hydrix-brightness-hypr" ''

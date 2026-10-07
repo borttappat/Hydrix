@@ -324,9 +324,6 @@
               echo "Restoring wallpaper: $WALLPAPER_PATH"
               pkill swaybg 2>/dev/null || true
               ${pkgs.swaybg}/bin/swaybg -i "$WALLPAPER_PATH" -m fill &
-              if ${pkgs.procps}/bin/pgrep -x hyprland >/dev/null 2>&1; then
-                  ${pkgs.hyprland}/bin/hyprctl reload 2>/dev/null || true
-              fi
               if command -v generate-lockscreen >/dev/null 2>&1; then
                   generate-lockscreen "$WALLPAPER_PATH" &
               fi
@@ -409,10 +406,6 @@
     # Set wallpaper
     pkill swaybg 2>/dev/null || true
     ${pkgs.swaybg}/bin/swaybg -i "$FILE_PATH" -m fill &
-    # Reload Hyprland if running (applies colorscheme to decorations)
-    if ${pkgs.procps}/bin/pgrep -x hyprland >/dev/null 2>&1; then
-      ${pkgs.hyprland}/bin/hyprctl reload 2>/dev/null || true
-    fi
 
     # Run nixwal to update nix-specific cache
     ${nixWalScript}/bin/nixwal
@@ -483,10 +476,6 @@
     if [ -n "$SELECTED_WALLPAPER" ] && [ -f "$SELECTED_WALLPAPER" ]; then
       pkill swaybg 2>/dev/null || true
       ${pkgs.swaybg}/bin/swaybg -i "$SELECTED_WALLPAPER" -m fill &
-      # Reload Hyprland if running (applies colorscheme to decorations)
-      if ${pkgs.procps}/bin/pgrep -x hyprland >/dev/null 2>&1; then
-        ${pkgs.hyprland}/bin/hyprctl reload 2>/dev/null || true
-      fi
     fi
 
     # Run nixwal to update nix-specific cache
