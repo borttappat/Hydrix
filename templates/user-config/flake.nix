@@ -264,7 +264,6 @@
               ./modules/vim.nix # Vim and .vimrc
               ./modules/helix.nix
               ./modules/firefox.nix # Host Firefox toggle + user-agent
-              ./modules/vault.nix # Vault VM credential launcher (vault-cli + vault-pick)
             ];
           };
         })

@@ -102,7 +102,7 @@
         echo "DONE"
         ;;
       SYNC)
-        # Commit all changes then push - used by vault-cli sync
+        # Commit all changes then push (vault sync)
         repo="$rest"
         repo_path="/mnt/repos/$repo"
         if [ ! -d "$repo_path/.git" ]; then echo "ERROR repo not found: $repo"; exit 0; fi

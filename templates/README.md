@@ -51,9 +51,6 @@ templates/user-config/               # Becomes ~/hydrix-config/
 │   ├── helix.nix                    # Helix editor config
 │   ├── eww.nix                      # eww widget daemon (exit-nodes, vm-status overlay)
 │   ├── tor-hardening.nix            # Tor anonymity module (import in lurking profile)
-│   ├── vault.nix                    # Vault VM host-side integration (import in machine)
-│   ├── vault-cli.nix                # vault-cli and vault-pick tools
-│   ├── vault-pick.nix               # Interactive vault picker (Wayland)
 │   ├── repos.nix                    # Declarative git repo clone list
 │   ├── host-packages.nix            # Host-only packages beyond framework defaults
 │   ├── shell-packages.nix           # Shell packages present on host and all VMs
@@ -76,7 +73,7 @@ templates/user-config/               # Becomes ~/hydrix-config/
 │   ├── files/                       # Encrypted inter-VM file transfer
 │   ├── gitsync/                     # Lockdown-mode git push/pull
 │   ├── hostsync/                    # Secure host file inbox
-│   ├── vault/                       # Offline KeepassXC credential store
+│   ├── vault/                       # Offline KeePassXC password database (hydrix.vault.agent)
 │   └── usb-sandbox/                 # Safe USB device handling
 ├── tasks/                           # Task slots, generated from one block
 │   ├── default.nix                  # count, baseCid, base profile, secrets, shared module
@@ -226,9 +223,13 @@ hydrix.tor.hardening = {
 };
 ```
 
-### modules/vault.nix / vault-cli.nix / vault-pick.nix - Vault Integration
+### Passwords (framework, `host/passwords.nix`)
 
-Import `vault.nix` in your machine config to enable vault VM host-side integration. Import `vault-cli.nix` for the CLI tools. `vault-pick.nix` adds the interactive Wayland credential picker.
+Set `hydrix.passwords.backend` in your machine config: `"vm"` (KeePassXC in the offline vault
+VM, `infra/vault`), `"host"` (keepassxc-cli on the host) or `"none"` (the default, no Hydrix
+password frontend). With a backend set, `vault` is an fzf TUI and `vault-pick` (Mod+P) opens it
+floating. The database is `~/vault/Passwords.kdbx`; the first `vault` creates it. See
+DOCUMENTATION.md, "Passwords".
 
 ### modules/repos.nix - Declarative Git Repos
 

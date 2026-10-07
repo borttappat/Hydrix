@@ -68,7 +68,7 @@ Things being actively worked on or not yet verified. Checked off once resolved a
 - **Builder VM** - builds host and VM closures from inside a locked-down nix environment with internet via router VM
 - **Gitsync VM** - push and pull git repos from lockdown mode without host internet
 - **Hostsync VM** - secure file inbox from VMs to host
-- **Vault VM** - isolated KeepassXC credential store with launcher-based picker and vsock-only access
+- **Passwords** - KeePassXC in an offline vault VM (or on the host, or none: `hydrix.passwords.backend`), a floating fzf TUI on `Mod+P`, vsock-only access
 - **USB sandbox VM** - safe handling of untrusted USB storage inside an isolated VM
 
 - **Declarative boot modes** - lockdown (default), administrative, fallback as NixOS specialisations

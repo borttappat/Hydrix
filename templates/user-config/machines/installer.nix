@@ -196,8 +196,8 @@
         # hostsync requires ~/vm-inbox on the host (created automatically when enabled).
         # Disabled by default - enable when you need secure inter-VM file transfers.
         "microvm-hostsync" = { enable = false; };
-        # vault requires setup before first use - see DOCUMENTATION.md §Vault VM.
-        # Disabled by default - enable and set autostart = true after initializing ~/vault/.
+        # Password vault VM (see DOCUMENTATION.md "Passwords"). Enable it together with
+        # hydrix.passwords.backend = "vm" below; the first `vault` creates the database.
         "microvm-vault"    = { enable = false; };
         # Per-VM options (combine freely): enable, autostart, secrets, encryption, coupled
         #
@@ -372,4 +372,18 @@
   # hydrix.vmElastic.vms.lurking.cpuFloorPct = 20;     # true CPU floor once RAM has settled
   # hydrix.vmElastic.vms.lurking.cpuLowFloorPct = 60;  # CPU floor while RAM is still deflating
   # hydrix.vmElastic.vms.lurking.enable = false;       # opt this VM out of elastic management entirely
+
+  # Passwords (DOCUMENTATION.md "Passwords"): "vm" = KeePassXC in the offline vault VM
+  # (enable microvm-vault above), "host" = keepassxc-cli on the host, "none" = bring your own.
+  # Frontends: `vault` (TUI) and `vault-pick` (Mod+P).
+  # hydrix.passwords.backend = "vm";
+  # The database is ~/vault/Passwords.kdbx. To carry it between machines, keep ~/vault in
+  # your own PRIVATE git repo and let ensure-repos clone it (modules/repos.nix):
+  # hydrix.repos.entries.vault = {
+  #   url = "https://github.com/<you>/vault.git";
+  #   sshUrl = "git@github.com:<you>/vault.git";
+  #   path = "/home/<user>/vault";
+  #   description = "Password database (private)";
+  # };
+  # Then `shard git push vault` / `shard git pull vault` (add vault to the gitsync repos).
 }

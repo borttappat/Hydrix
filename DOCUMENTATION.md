@@ -33,7 +33,7 @@ Hydrix is an options-driven NixOS framework that provides complete network isola
   - [Files VM (Encrypted Inter-VM Transfer)](#files-vm-encrypted-inter-vm-transfer)
   - [Hostsync VM (Host File Inbox)](#hostsync-vm-host-file-inbox)
   - [USB Sandbox](#usb-sandbox-microvm-usb-sandbox)
-  - [Vault VM (Credential Store)](#vault-vm-microvm-vault)
+  - [Passwords (vault VM)](#passwords-hydrixpasswords-vault-vm)
   - [Builder VM](#builder-vm-lockdown-mode-builds)
 - [Vsock Communication](#vsock-communication)
 - [VM Store Sharing](#vm-store-sharing)
@@ -2748,7 +2748,7 @@ Infrastructure VMs fall into two categories:
 | `microvm-usb-sandbox` | 209 | Safe USB storage handling |
 | `microvm-gitsync` | 211 | Lockdown-mode git push/pull |
 | `microvm-files` | 212 | Encrypted inter-VM file transfer |
-| `microvm-vault` | 213 | Isolated KeepassXC credential store |
+| `microvm-vault` | 213 | Offline KeePassXC password database (`hydrix.passwords`) |
 | `microvm-hostsync` | 214 | Secure host file inbox/outbox via virtiofs |
 
 ### Tor Hardening (lurking profile example)
@@ -3235,263 +3235,134 @@ Paths are relative to `/home/sandbox/` inside the VM. USB drives mount at `/home
 
 ---
 
-### Vault VM (microvm-vault)
+### Passwords (hydrix.passwords, vault VM)
 
-`microvm-vault` (CID 213) is a fully offline KeepassXC credential store. KeePassXC runs inside the VM, the host communicates over vsock, and credentials travel to the host clipboard via `wl-copy`. The master password and decrypted credentials never reside in plaintext on the host filesystem or in any other VM.
-
-#### Architecture
-
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│  Host (Hyprland / Wayland)                                          │
-│                                                                     │
-│  vault-pick (launcher dmenu - runs on host)                         │
-│  vault-cli  (shell script - runs on host)                           │
-│                                                                     │
-│  ~/vault/Passwords.kdbx  ◄── AES-256 encrypted blob                │
-│       │  virtiofs (live mount, R/W)                                 │
-│       ▼                                                             │
-│  ┌──────────────────────────────────────────────────────────────┐  │
-│  │  microvm-vault (CID 213)  - NO network interface              │  │
-│  │                                                              │  │
-│  │  /var/lib/vault/Passwords.kdbx  (virtiofs of ~/vault/)       │  │
-│  │  vault-agent: socat VSOCK-LISTEN:14514 (runs as vault user)  │  │
-│  │  /run/vault-session/token  (tmpfs, 600 \- cleared on reboot)  │  │
-│  └──────────────────────────────────────────────────────────────┘  │
-│       │ vsock 14514                                                 │
-│  vault-pick / vault-cli                                             │
-│       │                                                             │
-│  wl-copy ──► Wayland clipboard (30s auto-clear)                     │
-│                                                                     │
-│  ~/vault/ (git repo)  ──virtiofs──►  microvm-gitsync (CID 211)     │
-│                                         git push ──► GitHub         │
-└─────────────────────────────────────────────────────────────────────┘
-```
-
-#### Security Boundaries
-
-**Boundary 1 \- Network isolation**
-
-The vault VM has no TAP interface and no bridge. `networking.useDHCP` and `networking.firewall` are force-disabled. The VM cannot initiate or receive any network connection regardless of what runs inside it.
-
-*Protects against:* A compromised keepassxc binary or vsock handler cannot exfiltrate credentials over the network. The only data exit is vsock back to the host.
-
-**Boundary 2 \- vsock CID addressing**
-
-vsock uses CID addressing. Only the host (CID 2) can connect to CID 213's ports \- other VMs (browsing CID 103, pentest CID 102, etc.) cannot address the vault VM.
-
-*Protects against:* Compromised profile VMs cannot request credentials from the vault agent even if they attempt to.
-
-**Boundary 3 \- Session token in VM tmpfs**
-
-The master password is stored in `/run/vault-session/token` inside the vault VM. This is a tmpfs filesystem \- never written to disk, owned by `vault:vault` (mode 700 dir, 600 file), inaccessible to the host via virtiofs, cleared on VM reboot.
-
-*Protects against:* A host process, even as root, cannot read the master password from disk. It exists only in vault VM RAM after `UNLOCK`.
-
-**Boundary 4 \- Wayland clipboard isolation (hypr-clip-guard)**
-
-Credentials flow: vault VM → vsock → host → `wl-copy`. The `hypr-clip-guard` Hyprland plugin enforces clipboard isolation at the protocol level - it hooks all 6 Wayland clipboard delivery methods and blocks cross-VM transfers. Credentials written by `vault-pick` have source group "host" and are delivered only to the currently focused VM. The 30-second auto-clear (`wl-copy --clear`) limits the exposure window.
-
-*Protects against:* Unfocused and background VM windows cannot read clipboard contents at all - the plugin blocks delivery before data reaches the Wayland client. Cross-VM clipboard leaks are impossible regardless of focus timing or selection events.
-
-**Boundary 5 \- AES-256 at rest**
-
-`~/vault/Passwords.kdbx` is world-readable and committed to git. This is intentional \- the file is an opaque ciphertext without the master password.
-
-*Protects against:* Physical disk theft, git repository compromise, or a host process reading the file directly yields only ciphertext.
-
-#### Data Flow
-
-**Unlock:**
-```
-launcher password prompt (host)
-  │  master password typed - never stored on host
-  ▼
-vault-pick-tui
-  │  printf '%s' "UNLOCK <password>" | socat → VSOCK-CONNECT:213:14514
-  ▼
-vault-agent (vault VM, vault user)
-  │  keepassxc-cli ls Passwords.kdbx  ← verifies password
-  │  write password → /run/vault-session/token (mode 600)
-  │  rm -f /run/vault-session/locked
-  ▼
-host receives: "OK"
-```
-
-**GET credential:**
-```
-vault-pick-tui
-  │  echo "GET <entry> password" | socat → VSOCK-CONNECT:213:14514
-  ▼
-vault-agent
-  │  touch /run/vault-session/token  (resets idle timer)
-  │  cat token | keepassxc-cli show --show-protected Passwords.kdbx "<entry>"
-  ▼
-host receives: "OK <value>"
-  │
-  ▼
-printf '%s' "$val" | wl-copy        (host only \- never enters VM clipboard)
-(sleep 30; wl-copy --clear) &       (background auto-clear)
-```
-
-**Sync:**
-```
-vault-cli sync
-  │  echo "SYNC vault" | socat → VSOCK-CONNECT:211:14512  (gitsync VM)
-  ▼
-gitsync VM: git add -A && git commit && git push ~/vault/ → GitHub
-```
-
-#### vsock Protocol (port 14514)
-
-One command per connection. Line-based text.
-
-| Command | Response | Notes |
-|---------|----------|-------|
-| `PING` | `PONG` | Connectivity check |
-| `UNLOCK <password>` | `OK` / `ERROR <reason>` | Stores pw in session tmpfs |
-| `LOCK` | `OK` | Touches lockfile; leaves token intact |
-| `STATUS` | `LOCKED` / `UNLOCKED <n>` | `<n>` = entry count |
-| `LIST` | `OK\n<entry>\n...` / `ERROR` | `OK` on first line, one entry per line after |
-| `GET <entry> <field>` | `OK <value>` / `ERROR` | field: `password` `username` `url` `notes` |
-
-Every command except `UNLOCK` and `PING` triggers an idle check: if `mtime(token) + 300s < now`, the lockfile is set before handling the command.
-
-#### Session Lifecycle
-
-```
-VM boot → tmpfs mounted at /run/vault-session/ (empty) → vault-agent listening
-
-UNLOCK  → token written (mode 600) → locked file removed
-Active  → each GET/LIST touches token → 1-min timer checks mtime
-Idle >5m → lockfile created (token preserved for re-unlock without retype? No \- UNLOCK rewrites)
-Locked  → GET/LIST return ERROR vault is locked
-VM reboot / shutdown → tmpfs destroyed → starts locked
-```
-
-#### Host Tools
-
-| Command | Description |
-|---------|-------------|
-| `vault-cli unlock` | Unlock vault (prompts for master password) |
-| `vault-cli lock` | Lock vault immediately |
-| `vault-cli status` | Show `LOCKED` / `UNLOCKED <count>` |
-| `vault-cli list` | List all entries |
-| `vault-cli get <entry> <field>` | Get field value |
-| `vault-cli sync` | Commit + push via gitsync VM |
-| `vault-cli pull` | Pull from git via gitsync VM |
-| `vault-cli ping` | Check vault VM connectivity |
-| `vault-pick` | Interactive Wayland picker (`Mod+P`) |
-
-#### Setup
-
-**1. Add vault infra and host modules** (already in the flake template):
-
-```bash
-cp -r ~/Hydrix/templates/user-config/infra/vault ~/hydrix-config/infra/
-cp ~/Hydrix/templates/user-config/modules/vault*.nix ~/hydrix-config/modules/
-```
-
-**2. Import in your machine config:**
+One frontend over a choice of backends, set per machine:
 
 ```nix
-imports = [ ../modules/vault.nix ];
+hydrix.passwords.backend = "vm";   # "vm" | "host" | "none" (default)
 ```
 
-**3. Add to machine autostart:**
+| Backend | Where the database is opened |
+|---------|------------------------------|
+| `"vm"` | Inside `microvm-vault` (CID 213), a fully offline VM. KeePassXC and the decrypted database never run in the host session. Enable the VM too (`hydrix.microvmHost.vms."microvm-vault"`). |
+| `"host"` | `keepassxc-cli` in the host session, against the same file. |
+| `"none"` | Nothing installed; use your own password manager. |
 
-```nix
-hydrix.microvmHost.vms."microvm-vault" = { autostart = true; };
+The database is one file on the host, `~/vault/Passwords.kdbx`, a standard KeePassXC
+database (encrypted with the master password; any KeePassXC opens it). With the `vm`
+backend it is shared into the vault VM as `/var/lib/vault` (virtiofs, read-write,
+uid-squashed to your user) and only ever decrypted there.
+
+#### Using it
+
+| Command | What it does |
+|---------|--------------|
+| `Mod+P` (`vault-pick`) | The TUI in a floating window; picking an entry copies it into the window you came from |
+| `vault` | The same TUI in the current terminal |
+| `vault ls` / `get PATH [FIELD]` / `copy PATH [FIELD]` | List entries; print or copy a field (`password` `username` `url` `notes` `totp`) |
+| `vault add [PATH]` / `edit PATH [FIELD]` / `mv PATH NEW` / `rm PATH` | Add (empty password = generated), edit, rename or move between groups, delete (recycle bin) |
+| `vault gen [LENGTH]` | Generate a password |
+| `vault status` / `unlock` / `lock` | Session state |
+
+TUI keys: `Enter` password, `Ctrl+U` username, `Ctrl+O` URL, `Ctrl+A` add, `Ctrl+E` edit,
+`Ctrl+R` move, `Ctrl+D` delete, `Ctrl+G` generate, `Ctrl+L` lock, `Esc` quit. Entry paths are
+`Group/Sub/Title`; groups are created as needed. The first `vault` on a machine without a
+database asks for a master password twice and creates one.
+
+Copies go to the host clipboard with `wl-copy --sensitive` and are cleared after
+`hydrix.passwords.clipboardClear` seconds (30) if the clipboard still holds them (compared by
+hash, so the background clearer never holds the secret).
+
+#### How it works
+
+```
+vault / vault-pick (host, Hydrix host/passwords.nix)
+   │  one request per call: VERB plus base64 arguments
+   ├── backend "vm":   vsock 14514 ──▶ microvm-vault: socat (as user vault)
+   └── backend "host": local process                 │
+                                                     ▼
+                         hydrix-vault-backend (Hydrix shared/vault/backend.py)
+                           master password on keepassxc-cli's stdin only
+                                                     │
+                         ~/vault/Passwords.kdbx  (/var/lib/vault in the VM)
 ```
 
-**4. Add keybind** in `modules/hyprland.nix`:
+- **Protocol v2** (`shared/vault/backend.py`): `PING`, `STATUS`, `INIT`, `UNLOCK`, `LOCK`,
+  `LIST`, `GET`, `ADD`, `EDIT`, `MOVE`, `RM`, `GEN`, `MERGE`. Every argument is base64, so
+  names with spaces or any characters work; replies are `OK` or `ERROR <message>` followed
+  by base64 data lines. `LIST` never returns passwords; `GET` returns one field.
+- **Session**: `UNLOCK` stores the master password in a tmpfs file, mode 600: in the vault VM
+  `/run/vault-session/token` (1 MB tmpfs owned by the vault user), for the host backend
+  `$XDG_RUNTIME_DIR/hydrix-vault/session`. `LOCK`, or `lockTimeout` seconds without use
+  (300, checked every minute in the VM), deletes it.
+- **Agent** (`hydrix.vault.agent`, `vm/microvm/infra/vault-agent.nix`): a socat listener on
+  vsock 14514 running each request as the vault user, plus the auto-lock timer.
 
-```
-bind = $mod, P, exec, vault-pick              # Hyprland
-```
+#### Security boundaries
 
-**5. Rebuild and initialize the database:**
+- **No network**: the vault VM has no interface at all, so nothing running in it can send a
+  credential anywhere. The only way out is the vsock reply to the host.
+- **Only the host reaches it**: vhost-vsock delivers guest connections to the host only, so
+  other VMs cannot address the vault VM's port.
+- **Master password in VM RAM only**: never written to disk, never on a command line, never
+  logged; deleted on lock and after the idle timeout.
+- **Clipboard scoping (hypr-clip-guard)**: `vault-pick` remembers the focused window, closes
+  its floating window, refocuses that window, and only then copies. clip-guard sees a
+  headless copy while that window has focus and locks the secret to it, so it is not
+  replayed to windows focused later or to other VMs. A copy from `vault` in a normal
+  terminal is locked to the host (the terminal has focus); use `Mod+P` for VMs.
+- **Encrypted at rest**: the `.kdbx` file is ciphertext without the master password; it can
+  sit in a private git repository.
 
-```bash
-rebuild
-shard rebuild vault && shard start vault
-shard console microvm-vault
-# Inside VM:
-keepassxc-cli db-create /var/lib/vault/Passwords.kdbx --set-password
-exit
-# Fix ownership (DB created as root via console autologin):
-sudo chown $USER:users ~/vault/Passwords.kdbx && chmod 644 ~/vault/Passwords.kdbx
-vault-cli unlock
-```
-
-**6. Initialize git repo** (for multi-machine sync):
-
-```bash
-cd ~/vault && git init
-git add Passwords.kdbx && git commit -m "init vault"
-git remote add origin git@github.com:youruser/vault-private.git
-git push -u origin master
-```
-
-#### Multi-Machine Setup
-
-On a new machine after `rebuild`:
-
-```bash
-vault-cli pull   # pulls ~/vault/ from GitHub via gitsync VM
-vault-cli unlock # enter master password
-```
-
-#### Adding Entries
-
-Via KeePassXC GUI (recommended):
-
-```bash
-nix shell nixpkgs#keepassxc -c keepassxc ~/vault/Passwords.kdbx
-```
-
-Via vault VM console:
-
-```bash
-shard console microvm-vault
-keepassxc-cli add /var/lib/vault/Passwords.kdbx "GitHub" --username myuser -p
-exit
-```
-
-#### What It Does NOT Protect Against
+#### What it does not protect against
 
 | Threat | Notes |
 |--------|-------|
-| Compromised Wayland compositor | Controls clipboard; malicious compositor could intercept wl-copy |
-| Host keylogger | Master password typed on host before reaching vault-pick |
-| Host root ptrace | Could inspect vault-pick or wl-copy memory at credential-in-memory moment |
-| Weak master password | Security only as strong as the password chosen |
+| Compromised host session or compositor | Sees the master password as it is typed and every copied secret |
+| Host root | Can read the vault VM's memory |
+| Weak master password | The file's protection is only as strong as the password |
+
+#### Setup
+
+1. In the machine config: `hydrix.passwords.backend = "vm";` and the vault VM enabled
+   (`"microvm-vault" = { autostart = true; };` under `hydrix.microvmHost.vms`).
+2. `rebuild`, then `shard -bR vault`.
+3. Press `Mod+P` (or run `vault`): set a master password, and the database is created.
+
+#### Between machines
+
+The database moves as the one encrypted file, and `~/vault` is yours to track. Keep it in
+your own **private** git repository and let `ensure-repos` clone it on every machine
+(`hydrix.repos.entries`; an empty `~/vault` is cloned into):
+
+```nix
+hydrix.repos.entries.vault = {
+  url = "https://github.com/<you>/vault.git";
+  sshUrl = "git@github.com:<you>/vault.git";
+  path = "/home/<user>/vault";
+  description = "Password database (private)";
+};
+```
+
+Add `vault` to the gitsync VM's repo list, then commit and `shard git push vault` after
+changes, and `shard git pull vault` on the other machine. Edit on one machine at a time: two
+edited copies of the binary file cannot be merged by git. A built-in `vault sync` that merges
+both sides entry by entry (protocol `MERGE`) is a possible later addition
+(`hydrix-config/plans/vault-rework.md`, Step 5).
+
+Never track the database inside your hydrix-config repo: every tracked file there is copied
+into `/nix/store`, which every VM can read, and the database's protection would then rest on
+the master password against offline guessing.
 
 #### Troubleshooting
 
-**"ERROR wrong password" despite correct password** \- DB created as root, unreadable by vault agent:
-```bash
-sudo chown $USER:users ~/vault/Passwords.kdbx && chmod 644 ~/vault/Passwords.kdbx
-```
-
-**vault-cli ping returns nothing** \- vault VM not running:
-```bash
-shard status microvm-vault
-shard start vault
-```
-
-**shard start vault hangs / virtiofsd error `/home/user/vault does not exist`** \- missing username fix in `infraVMConfigs` in `flake.nix`. Ensure the block passes `{ hydrix.username = hostUsername; }`:
-```nix
-modules = [
-  { hydrix.username = hostUsername; }
-  (./infra + "/${m._infraName}/default.nix")
-];
-```
-
-**Clipboard shows `PROTECTED`** \- vault VM runner is stale, rebuild it:
-```bash
-shard rebuild vault
-```
+| Symptom | Cause / fix |
+|---------|-------------|
+| "vault VM unreachable (shard -s vault)" | The VM is not running, or its agent is not: `shard -i vault`, then `shard -bR vault` |
+| "the vault VM runs an older agent" | The VM was not rebuilt after an update: `shard -bR vault` |
+| "wrong password" on a machine meant to start fresh | An old `Passwords.kdbx` is still in `~/vault`; move it aside |
+| `Mod+P` shows an error and "Press any key to close" | The message is the backend's; the table above covers the common ones |
 
 ---
 
@@ -4898,7 +4769,7 @@ clip-monitor-host           # host: live-tails the event log by polling hyprctl 
 
 #### Vault Interaction
 
-`vault-pick` writes credentials to the host clipboard via `wl-copy` on the host. The source group is "host", so the credential is delivered only to the currently focused VM - background VMs cannot read it. The 30-second auto-clear (`wl-copy --clear`) limits the exposure window further.
+`vault-pick` copies with `wl-copy` on the host after refocusing the window it was opened from, so the credential is locked to that window's group and not replayed to windows focused later. The 30-second auto-clear (only if the clipboard still holds it) limits the exposure window further.
 
 #### Key Files
 

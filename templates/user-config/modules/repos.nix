@@ -37,7 +37,9 @@
       local ssh_url="$3"
       local path="$4"
 
-      if [[ -d "$path" ]]; then
+      # An existing empty directory (e.g. ~/vault, created at boot for the vault VM's
+      # share) is cloned into; anything else already there is left alone.
+      if [[ -d "$path" ]] && [[ -n "$(ls -A "$path" 2>/dev/null)" ]]; then
         log "$name already exists at $path"
         return 0
       fi

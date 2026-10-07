@@ -533,7 +533,18 @@
       USAGE
       }
 
+      # fzf colours from the wal palette, the same mapping as fish's FZF_DEFAULT_OPTS
+      # (Hydrix theming/programs/fish.nix); set here because floating TUIs start without fish.
+      wal_fzf_colors() {
+        [ -n "''${FZF_DEFAULT_OPTS:-}" ] && return 0
+        local c="$HOME/.cache/wal/colors.json"
+        [ -r "$c" ] || return 0
+        FZF_DEFAULT_OPTS=$(jq -r '.colors | "--color=fg:\(.color7),bg:-1,hl:\(.color4),fg+:\(.color7),bg+:\(.color8),hl+:\(.color4),info:\(.color6),prompt:\(.color4),pointer:\(.color5),marker:\(.color3),spinner:\(.color6),header:\(.color8),border:\(.color8),label:\(.color4)"' "$c" 2>/dev/null) || FZF_DEFAULT_OPTS=""
+        export FZF_DEFAULT_OPTS
+      }
+
       tui() {
+        wal_fzf_colors
         SHELL=$(command -v bash)
         export SHELL
         local help='type+enter add · enter tick · ctrl-r rename · ctrl-d delete

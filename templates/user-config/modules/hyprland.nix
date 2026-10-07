@@ -735,6 +735,7 @@
 
     # Bluetooth TUI / router console (floating)
     bind = $mod SHIFT, B, exec, alacritty --class hypr-float -e bluetui
+    bind = $mod SHIFT, T, exec, alacritty --class hypr-float --title todo -e todo
     bind = $mod SHIFT, R, exec, alacritty --class hypr-float -e shard -c router
 
     # File manager / file finder (via VM)
