@@ -1772,16 +1772,17 @@ hydrix.secrets.githubSecretsFile = ../secrets/github.yaml;   # key goes to the g
 hydrix.microvmHost.vms."microvm-dev-<serial>".repos = [ "hydrix-config" ];
 ```
 
-- **Host** (`host/repos.nix`): each entry's directory is created at activation if missing (the git
-  VM's shares need a source). `ensure-repos`, also run at boot by `hydrix-ensure-repos.service`
-  (`After=network-online.target`), clones every `clone = true` entry whose path is missing or
-  empty: `gh repo clone` when `gh auth status` succeeds, else `sshUrl` with
-  `~/.ssh/id_ed25519`/`id_rsa`. Existing clones are never pulled or overwritten; a failed clone
-  logs a warning and never fails the boot. In lockdown the host has no internet, so clones wait
-  for administrative or fallback mode.
+- **Host** (`host/repos.nix`): holds clones and commits, but no GitHub credential in any boot
+  mode. Each entry's directory is created at activation if missing (the git VM's shares need a
+  source when it starts). `ensure-repos` (run it yourself after install or after declaring a repo;
+  starting the git VM asks for sudo) asks the git VM to clone every `clone = true` entry whose
+  path is empty (`shard git clone <name>`), starting and stopping the VM around it. Existing
+  clones are never pulled or overwritten. This works in lockdown: the git VM reaches GitHub
+  through the router.
 - **Git VM** (`hydrix.gitsync.agent`, `vm/microvm/infra/gitsync-agent.nix`): mounts every
   `push = true` entry at `/mnt/repos/<name>` (uid-squashed, no mknod/setfcap) and answers
-  `shard git push|pull|fetch|status|repos <name>` on vsock 14512, refusing undeclared names. Its
+  `shard git clone|push|pull|fetch|status|repos <name>` on vsock 14512, refusing undeclared
+  names; `clone` only fills an empty, host-shared directory. Its
   SSH key arrives from `secrets/github.yaml` through `hydrix.secrets.github.vms` (default: the
   git VM only).
 - **VM views** (`microvmHost.vms.<vm>.repos`): the host's working tree at the same path, read-write,

@@ -2,8 +2,8 @@
 #
 # Imported by every machine (flake.nix) and by the git VM (infra/gitsync), so a repo listed
 # here is:
-#   - cloned on the host when its path is missing or empty (ensure-repos, at boot and on
-#     demand; existing clones are never pulled or overwritten),
+#   - cloned into its host path by the git VM when that is empty (`ensure-repos`, by hand;
+#     existing clones are never pulled or overwritten),
 #   - pushed and pulled by the git VM (`shard git push|pull|fetch|status <name>`), unless
 #     push = false,
 #   - shared with a VM only when a machine config names it in
@@ -11,8 +11,7 @@
 #     on the host side: the VM edits, the host commits, the git VM pushes).
 #
 # Credentials: only the git VM holds the GitHub key (hydrix.secrets.githubSecretsFile in the
-# machine config, see its SECRETS section). On the host, ensure-repos uses `gh auth login`
-# (HTTPS) or ~/.ssh/id_ed25519.
+# machine config, see its SECRETS section). The host has none and needs none, in lockdown too.
 #
 # Defaults per entry: url github.com/<owner>/<name>, path ~/<name>, clone = true, push = true.
 # An empty entries set is a valid no-op.

@@ -1,10 +1,10 @@
 # Declarative git repos: one declaration per repo, shared by the host and the git VM.
 #
-# The host holds every clone and makes every commit (host/repos.nix: ensure-repos). The git
-# VM (gitsync) holds the GitHub credential and pushes/pulls the entries with push = true
-# (vm/microvm/infra/gitsync-agent.nix). Other VMs see a repo only through
-# hydrix.microvmHost.vms.<vm>.repos: a host-side view of the working tree with readOnlyPaths
-# read-only, so they can edit files but never commit.
+# The host holds every clone and makes every commit, with no GitHub credential. The git VM
+# (gitsync) holds the key and clones, pushes and pulls the entries with push = true
+# (vm/microvm/infra/gitsync-agent.nix; ensure-repos in host/repos.nix asks it to clone).
+# Other VMs see a repo only through hydrix.microvmHost.vms.<vm>.repos: a host-side view of
+# the working tree with readOnlyPaths read-only, so they can edit files but never commit.
 #
 # Declare entries in a module imported by both the host and the git VM (hydrix-config:
 # modules/repos.nix), since the git VM is not built per machine.
@@ -17,7 +17,7 @@
   homeDir = "/home/${config.hydrix.username}";
 in {
   options.hydrix.repos = {
-    enable = lib.mkEnableOption "cloning hydrix.repos.entries on the host (ensure-repos)";
+    enable = lib.mkEnableOption "the ensure-repos command (clone hydrix.repos.entries through the git VM)";
 
     owner = lib.mkOption {
       type = lib.types.nullOr lib.types.str;
@@ -48,7 +48,7 @@ in {
               then "https://github.com/${cfg.owner}/${name}.git"
               else null;
             defaultText = lib.literalExpression ''"https://github.com/''${owner}/<name>.git"'';
-            description = "HTTPS clone URL, used with the gh CLI when it is authenticated.";
+            description = "HTTPS URL. The git VM clones from sshUrl when set, else from this.";
           };
           sshUrl = lib.mkOption {
             type = lib.types.nullOr lib.types.str;
@@ -57,7 +57,7 @@ in {
               then "git@github.com:${cfg.owner}/${name}.git"
               else null;
             defaultText = lib.literalExpression ''"git@github.com:''${owner}/<name>.git"'';
-            description = "SSH clone URL, used when gh is not authenticated.";
+            description = "SSH URL the git VM clones from, with its key.";
           };
           path = lib.mkOption {
             type = lib.types.str;
@@ -69,8 +69,9 @@ in {
             type = lib.types.bool;
             default = true;
             description = ''
-              Clone this repo on the host when its path is missing or empty. Set false for a
-              repo without a remote yet (it is still shared and pushable).
+              ensure-repos has the git VM clone this repo when its host path is empty (needs
+              push = true, which shares it with the git VM). Set false for a repo without a
+              remote yet (it is still shared and pushable).
             '';
           };
           push = lib.mkOption {
@@ -96,9 +97,9 @@ in {
         }
       '';
       description = ''
-        Repos the host keeps cloned (missing or empty paths are cloned at boot and by
-        `ensure-repos`; existing clones are never pulled or overwritten). Entries with
-        push = true are shared with the git VM.
+        Repos the host keeps cloned. `ensure-repos` has the git VM clone empty paths;
+        existing clones are never pulled or overwritten. Entries with push = true are
+        shared with the git VM.
       '';
     };
   };

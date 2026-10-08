@@ -3469,22 +3469,9 @@ EOF
     gid=$(nixos-enter -c "id -g ${CONFIG[username]}" 2>/dev/null || echo "100")
     chown -R "$uid:$gid" "/mnt/home/${CONFIG[username]}"
 
-    # Provision GitHub CLI config so gh auth is ready on first boot
-    local gh_config_src=""
-    if [[ -n "${SUDO_USER:-}" ]]; then
-        local sudo_home
-        sudo_home=$(getent passwd "$SUDO_USER" | cut -d: -f6)
-        gh_config_src="$sudo_home/.config/gh"
-    else
-        gh_config_src="$HOME/.config/gh"
-    fi
-    if [[ -d "$gh_config_src" ]]; then
-        log "Provisioning GitHub CLI config to new system..."
-        install -d -o "$uid" -g "$gid" -m 700 "/mnt/home/${CONFIG[username]}/.config"
-        cp -r "$gh_config_src" "/mnt/home/${CONFIG[username]}/.config/gh"
-        chown -R "$uid:$gid" "/mnt/home/${CONFIG[username]}/.config/gh"
-        chmod 700 "/mnt/home/${CONFIG[username]}/.config/gh"
-    fi
+    # The installer's gh login stays on the live system: the installed host holds no GitHub
+    # credential. The git VM pushes, pulls and clones (`shard git`, `ensure-repos`) with
+    # the key in secrets/github.yaml.
 
     # Remove installer swapfile if we created one
     if [[ -f /mnt/.swapfile ]]; then
@@ -3762,22 +3749,9 @@ check_resume() {
     gid=$(nixos-enter -c "id -g ${CONFIG[username]}" 2>/dev/null || echo "100")
     chown -R "$uid:$gid" "/mnt/home/${CONFIG[username]}"
 
-    # Provision GitHub CLI config so gh auth is ready on first boot
-    local gh_config_src_r=""
-    if [[ -n "${SUDO_USER:-}" ]]; then
-        local sudo_home_r
-        sudo_home_r=$(getent passwd "$SUDO_USER" | cut -d: -f6)
-        gh_config_src_r="$sudo_home_r/.config/gh"
-    else
-        gh_config_src_r="$HOME/.config/gh"
-    fi
-    if [[ -d "$gh_config_src_r" ]]; then
-        log "Provisioning GitHub CLI config to new system..."
-        install -d -o "$uid" -g "$gid" -m 700 "/mnt/home/${CONFIG[username]}/.config"
-        cp -r "$gh_config_src_r" "/mnt/home/${CONFIG[username]}/.config/gh"
-        chown -R "$uid:$gid" "/mnt/home/${CONFIG[username]}/.config/gh"
-        chmod 700 "/mnt/home/${CONFIG[username]}/.config/gh"
-    fi
+    # The installer's gh login stays on the live system: the installed host holds no GitHub
+    # credential. The git VM pushes, pulls and clones (`shard git`, `ensure-repos`) with
+    # the key in secrets/github.yaml.
 
     local _hydrix_symlink=""
     if [[ -n "$HYDRIX_LOCAL_TARGET" ]] && [[ ! -e "$HYDRIX_LOCAL_TARGET" ]]; then

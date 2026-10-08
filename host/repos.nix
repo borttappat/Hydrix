@@ -1,9 +1,11 @@
 # Host side of hydrix.repos (options: shared/repos-options.nix).
 #
-# The host holds every clone. ensure-repos clones each entry with clone = true whose path is
-# missing or empty (gh over HTTPS when authenticated, else the SSH key); existing clones are
-# never pulled or overwritten. Every entry's directory exists from boot, because the git VM
-# and VM views share it (virtiofsd needs the source), and an empty directory is cloned into.
+# The host holds every clone and makes every commit, but no GitHub credential: the git VM
+# (gitsync) is the only machine that talks to GitHub, in every boot mode. ensure-repos asks
+# it to clone (`shard git clone <name>`, the agent's CLONE) each entry with clone = true
+# whose path is empty; existing clones are never pulled or overwritten. Every entry's
+# directory exists from activation on, because the git VM and VM views share it (virtiofsd
+# needs the source when the VM starts), and an empty directory is cloned into.
 #
 # Guards for the git boundary: VMs name repos through microvmHost.vms.<vm>.repos, and only
 # hydrix.secrets.github.vms (the git VM) holds the GitHub key.
@@ -15,43 +17,54 @@
 }: let
   cfg = config.hydrix.repos;
   username = config.hydrix.username;
-  homeDir = "/home/${username}";
   vms = config.hydrix.microvmHost.vms;
-  cloned = lib.filterAttrs (_: e: e.clone) cfg.entries;
+  gitVm = config.hydrix.microvmHost.vmNames.gitsync;
+  cloned = lib.filterAttrs (_: e: e.clone && e.push) cfg.entries;
+  notShared = lib.attrNames (lib.filterAttrs (_: e: e.clone && !e.push) cfg.entries);
 
+  # Interactive (starting the git VM asks for sudo), run by the owner after install or
+  # after declaring a repo.
   ensureRepos = pkgs.writeShellApplication {
     name = "ensure-repos";
-    runtimeInputs = with pkgs; [coreutils git gh openssh];
+    runtimeInputs = with pkgs; [coreutils systemd];
     text = ''
       log() { echo "[ensure-repos] $*"; }
 
-      clone_repo() {
-        local name="$1" https_url="$2" ssh_url="$3" path="$4"
-
-        # An existing empty directory (created at boot for the git VM's share) is cloned
-        # into; anything else already there is left alone.
-        if [[ -d "$path" ]] && [[ -n "$(ls -A "$path" 2>/dev/null)" ]]; then
-          log "$name already exists at $path"
-          return 0
-        fi
-
-        log "Cloning $name to $path..."
-        if [[ -n "$https_url" ]] && gh auth status &>/dev/null; then
-          log "Using gh CLI (HTTPS)..."
-          gh repo clone "$https_url" "$path" && return 0
-        fi
-        if [[ -n "$ssh_url" ]] && { [[ -f "${homeDir}/.ssh/id_ed25519" ]] || [[ -f "${homeDir}/.ssh/id_rsa" ]]; }; then
-          log "Using SSH..."
-          GIT_SSH_COMMAND="ssh -o StrictHostKeyChecking=accept-new" git clone "$ssh_url" "$path" && return 0
-        fi
-        log "Warning: failed to clone $name (no gh auth or SSH key, or no URL)"
-        return 1
-      }
-
+      missing=()
       ${lib.concatStrings (lib.mapAttrsToList (name: e: ''
-          clone_repo ${lib.escapeShellArgs [name (toString e.url) (toString e.sshUrl) e.path]} || true
+          if [[ -n "$(ls -A ${lib.escapeShellArg e.path} 2>/dev/null)" ]]; then
+            log ${lib.escapeShellArg "${name} already exists at ${e.path}"}
+          else
+            missing+=(${lib.escapeShellArg name})
+          fi
         '')
         cloned)}
+      ${lib.concatMapStrings (n: ''
+          log ${lib.escapeShellArg "${n}: push = false, so the git VM cannot clone it; clone it yourself"}
+        '')
+        notShared}
+      if [[ ''${#missing[@]} -eq 0 ]]; then
+        log "Nothing to clone"
+        exit 0
+      fi
+
+      log "Cloning through the git VM: ''${missing[*]}"
+      we_started=false
+      if ! systemctl is-active --quiet "microvm@${gitVm}.service"; then
+        shard -s ${gitVm}
+        we_started=true
+      fi
+      failed=0
+      for name in "''${missing[@]}"; do
+        shard git clone "$name" || failed=$((failed + 1))
+      done
+      if [[ "$we_started" == true ]]; then
+        shard -S ${gitVm}
+      fi
+      if [[ $failed -gt 0 ]]; then
+        log "$failed repo(s) not cloned (see above)"
+        exit 1
+      fi
       log "Done"
     '';
   };
@@ -92,20 +105,7 @@ in {
     }
 
     (lib.mkIf cfg.enable {
-      environment.systemPackages = [pkgs.gh ensureRepos];
-
-      systemd.services.hydrix-ensure-repos = {
-        description = "Clone declared git repos (hydrix.repos.entries)";
-        after = ["network-online.target" "local-fs.target"];
-        wants = ["network-online.target"];
-        wantedBy = ["multi-user.target"];
-        serviceConfig = {
-          Type = "oneshot";
-          RemainAfterExit = true;
-          User = username;
-          ExecStart = "${ensureRepos}/bin/ensure-repos";
-        };
-      };
+      environment.systemPackages = [ensureRepos];
     })
   ];
 }

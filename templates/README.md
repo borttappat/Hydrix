@@ -234,8 +234,9 @@ DOCUMENTATION.md, "Passwords".
 ### modules/repos.nix - Git Repos
 
 Each repo is declared once (Hydrix options `hydrix.repos`), imported by every machine and by
-the git VM. The host clones missing repos (`ensure-repos`) and makes every commit; the git VM
-(`infra/gitsync`) holds the GitHub key and pushes; a VM gets a repo only when the machine config
+the git VM. The host holds the clones and makes every commit, with no GitHub credential; the
+git VM (`infra/gitsync`) holds the key and clones (`ensure-repos`), pushes and pulls, also in
+lockdown; a VM gets a repo only when the machine config
 names it in `hydrix.microvmHost.vms.<vm>.repos` (editable working tree, `.git` read-only):
 
 ```nix

@@ -7,7 +7,9 @@
 # fresh on every boot; or `gh auth login` with hydrix.gitsync.gh.enable.
 #
 # vsock 14512 (one command per connection, from `shard git`):
-#   PUSH|PULL|FETCH|STATUS|SYNC <repo>, REPOS, PING
+#   CLONE|PUSH|PULL|FETCH|STATUS|SYNC <repo>, REPOS, PING
+# CLONE fills the host's empty directory for a declared repo: the host holds no GitHub
+# credential, so this is how ensure-repos clones.
 # vsock 14513: BUSY/IDLE, answers only once the network is up (the host's readiness gate).
 {
   config,
@@ -19,8 +21,18 @@
   repos = lib.filterAttrs (_: e: e.push) config.hydrix.repos.entries;
   repoNames = lib.attrNames repos;
 
+  # name|url per repo for CLONE (sshUrl first: the key is what this VM authenticates with).
+  cloneUrls = pkgs.writeText "gitsync-clone-urls" (lib.concatStrings (lib.mapAttrsToList (name: e: let
+    url =
+      if e.sshUrl != null
+      then e.sshUrl
+      else e.url;
+  in
+    lib.optionalString (url != null) "${name}|${url}\n")
+  repos));
+
   gitHandler = pkgs.writeShellScript "gitsync-vsock-handler" ''
-    export PATH="${lib.makeBinPath (with pkgs; [coreutils git openssh glibc.bin])}:$PATH"
+    export PATH="${lib.makeBinPath (with pkgs; [coreutils git openssh glibc.bin util-linux])}:$PATH"
     export HOME="/home/gitsync"
 
     read -r cmd rest
@@ -77,6 +89,25 @@
         done
         echo "DONE"
         ;;
+      CLONE)
+        # Into the host's empty directory only: never over an existing clone or files.
+        repo_path="/mnt/repos/$rest"
+        known=""
+        for name in ${lib.escapeShellArgs repoNames}; do
+          [ "$name" = "$rest" ] && known=1
+        done
+        if [ -z "$known" ]; then echo "ERROR repo not found: $rest"; exit 0; fi
+        url=""
+        while IFS='|' read -r n u; do
+          [ "$n" = "$rest" ] && url="$u"
+        done < ${cloneUrls}
+        if [ -z "$url" ]; then echo "ERROR no URL declared for $rest"; exit 0; fi
+        # The share exists only if the host directory did when this VM started.
+        if ! mountpoint -q "$repo_path"; then echo "ERROR $rest is not shared from the host yet (restart the git VM)"; exit 0; fi
+        if [ -n "$(ls -A "$repo_path" 2>/dev/null)" ]; then echo "ERROR $rest is not empty on the host"; exit 0; fi
+        echo "OK cloning $rest"
+        if git clone --quiet "$url" "$repo_path" 2>&1; then echo "DONE"; else echo "ERROR clone failed"; fi
+        ;;
       SYNC)
         # Commit all changes then push (vault sync)
         repo_dir "$rest"
@@ -94,7 +125,7 @@
         ;;
       *)
         echo "ERROR unknown command: $cmd"
-        echo "Commands: PUSH <repo>, PULL <repo>, FETCH <repo>, SYNC <repo>, STATUS <repo>, REPOS, PING"
+        echo "Commands: CLONE <repo>, PUSH <repo>, PULL <repo>, FETCH <repo>, SYNC <repo>, STATUS <repo>, REPOS, PING"
         ;;
     esac
   '';
@@ -233,7 +264,9 @@ in {
         Type = "simple";
         Restart = "always";
         RestartSec = 5;
-        ExecStart = "${pkgs.socat}/bin/socat -t60 VSOCK-LISTEN:14512,reuseaddr,fork EXEC:${gitHandler},su=gitsync";
+        # -t: seconds socat keeps a command running after the host's request EOF; a clone of
+        # a large repo takes minutes. The connection still closes as soon as git finishes.
+        ExecStart = "${pkgs.socat}/bin/socat -t900 VSOCK-LISTEN:14512,reuseaddr,fork EXEC:${gitHandler},su=gitsync";
       };
     };
 

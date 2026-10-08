@@ -2514,14 +2514,19 @@
           # are all safe to retry. REPOS/STATUS/PING don't touch the network, so a
           # real failure there won't fix itself with time.
           local output rc=0
+          # A clone of a large repo can take minutes; everything else answers in seconds.
+          local total_timeout=120
+          [[ "$cmd" == CLONE* ]] && total_timeout=900
           case "$cmd" in
-              PUSH*|PULL*|FETCH*|SYNC*)
+              CLONE*|PUSH*|PULL*|FETCH*|SYNC*)
                   local attempt max_attempts=5 retry_delay=15
                   for ((attempt = 1; attempt <= max_attempts; attempt++)); do
                       rc=0
-                      output=$(vsock_query "$GITSYNC_CID" "$GITSYNC_GIT_PORT" "$cmd" 60 120 2>&1) || rc=$?
+                      output=$(vsock_query "$GITSYNC_CID" "$GITSYNC_GIT_PORT" "$cmd" 60 "$total_timeout" 2>&1) || rc=$?
                       echo "$output" | grep -q "^ERROR" && rc=1
                       [[ $rc -eq 0 ]] && break
+                      # Refusals (undeclared, not empty, not shared) will not fix themselves.
+                      echo "$output" | grep -q "^ERROR .*\(not found\|not empty\|not shared\|no URL\)" && break
                       if [[ $attempt -lt $max_attempts ]]; then
                           log "Attempt $attempt/$max_attempts failed (network likely still settling) - retrying in ''${retry_delay}s..."
                           sleep "$retry_delay"
@@ -2557,6 +2562,12 @@
           fi
 
           return $rc
+      }
+
+      cmd_git_clone() {
+          local repo="''${1:-}"
+          [[ -z "$repo" ]] && { log_error "Usage: shard git clone <repo>"; return 1; }
+          gitsync_vsock_cmd "CLONE $repo"
       }
 
       cmd_git_push() {
@@ -2607,6 +2618,7 @@
           shard git <command> [repo]
 
       ''${BOLD}COMMANDS''${NC}
+          clone <repo>       Clone a declared repo into its empty host directory
           push <repo>        Push commits to remote
           pull <repo>        Pull changes from remote
           fetch <repo>       Fetch from all remotes
@@ -2638,6 +2650,7 @@
           shift 2>/dev/null || true
 
           case "$subcmd" in
+              clone)   cmd_git_clone "$@" ;;
               push)    cmd_git_push "$@" ;;
               pull)    cmd_git_pull "$@" ;;
               fetch)   cmd_git_fetch "$@" ;;
