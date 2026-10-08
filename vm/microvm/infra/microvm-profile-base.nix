@@ -631,9 +631,15 @@ in {
         SSH_DIR="$USER_HOME/.ssh"
         SECRETS_DIR="/mnt/vm-secrets/ssh"
 
-        # Skip if secrets mount doesn't exist
-        if [ ! -d "$SECRETS_DIR" ]; then
-          echo "Secrets mount not present at $SECRETS_DIR, skipping"
+        MARKER="$SSH_DIR/.hydrix-provisioned"
+
+        # The key is only kept while the host provides it: once "github" is gone from this
+        # VM's secrets, remove what an earlier boot provisioned (never other keys).
+        if [ ! -f "$SECRETS_DIR/id_ed25519" ]; then
+          if [ -f "$MARKER" ]; then
+            rm -f "$SSH_DIR/id_ed25519" "$SSH_DIR/id_ed25519.pub" "$MARKER"
+            echo "GitHub key no longer provided, removed the provisioned copy"
+          fi
           exit 0
         fi
 
@@ -647,6 +653,8 @@ in {
           cp "$SECRETS_DIR/id_ed25519" "$SSH_DIR/id_ed25519"
           chmod 600 "$SSH_DIR/id_ed25519"
           chown ${config.hydrix.username}:users "$SSH_DIR/id_ed25519"
+          : > "$MARKER"
+          chown ${config.hydrix.username}:users "$MARKER"
           echo "GitHub private key provisioned"
         else
           echo "Warning: GitHub private key not found"

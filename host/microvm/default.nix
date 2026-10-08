@@ -609,6 +609,8 @@ in {
               # Ensure parent dir exists for virtiofsd (safe even with no secrets)
               mkdir -p "/run/hydrix-secrets/${name}"
               chmod 700 "/run/hydrix-secrets/${name}"
+              # Start empty: a secret removed from vms.<name>.secrets must not linger.
+              find "/run/hydrix-secrets/${name}" -mindepth 1 -delete
 
               ${lib.concatMapStrings (
                   secretName: let
