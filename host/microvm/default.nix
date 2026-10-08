@@ -675,6 +675,11 @@ in {
             wantedBy = ["microvm-virtiofsd@${name}.service" "microvm@${name}.service"];
             before = ["microvm-virtiofsd@${name}.service" "microvm@${name}.service"];
             after = ["local-fs.target"];
+            # Lives and dies with the VM: a stop unmounts the views, the next start binds
+            # the working tree as it is then. Kept up across VM stops, the views pinned
+            # a repo directory that had since been moved or replaced, and the VM got
+            # the old tree back on its next start.
+            partOf = ["microvm@${name}.service"];
             # Tearing views down under a running virtiofsd would leave the guest
             # on stale mounts; changes apply on the next VM start instead.
             restartIfChanged = false;

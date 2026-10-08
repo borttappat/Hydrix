@@ -3802,7 +3802,9 @@ the git VM receives the `github` secret, it has no push path at all. For declare
 shorthand `microvmHost.vms.<vm>.repos = [ "<name>" ]` (see [repos.nix](#reposnix)).
 
 The views are built on VM start, not on rebuild (`restartIfChanged = false`), so a changed
-`hostRepos` takes effect on the next restart. Inside the guest, read-only paths still pass
+`hostRepos` takes effect on the next restart. They are torn down when the VM stops
+(`partOf` its `microvm@` unit), so a repo directory moved or replaced on the host while the
+VM is down is picked up as it is at the next start. Inside the guest, read-only paths still pass
 `test -w`, since only the host knows they are read-only. VM-side scripts must attempt the
 write and handle `EROFS` rather than check first.
 
