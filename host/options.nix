@@ -748,8 +748,18 @@ in {
       };
 
       vms = lib.mkOption {
-        type = lib.types.attrsOf (lib.types.submodule {
+        type = lib.types.attrsOf (lib.types.submodule ({config, ...}: {
           options = {
+            repos = lib.mkOption {
+              type = lib.types.listOf lib.types.str;
+              default = [];
+              example = ["notes" "tools"];
+              description = ''
+                Names from hydrix.repos.entries shared into this VM as host views: the
+                working tree read-write at the same path, hydrix.repos.readOnlyPaths
+                (.git, .claude) read-only on the host side. Shorthand for hostRepos.
+              '';
+            };
             enable = lib.mkOption {
               type = lib.types.bool;
               default = true;
@@ -824,7 +834,11 @@ in {
               '';
             };
           };
-        });
+          config.hostRepos = lib.genAttrs config.repos (n: {
+            path = (cfg.repos.entries.${n} or {path = "/nonexistent/${n}";}).path;
+            readOnlyPaths = cfg.repos.readOnlyPaths;
+          });
+        }));
         default = {};
         description = "MicroVMs to manage";
       };

@@ -450,6 +450,17 @@ in {
 
       github = {
         enable = lib.mkEnableOption "GitHub SSH key provisioning";
+        vms = lib.mkOption {
+          type = lib.types.listOf lib.types.str;
+          default = [config.hydrix.microvmHost.vmNames.gitsync];
+          defaultText = lib.literalExpression "[ config.hydrix.microvmHost.vmNames.gitsync ]";
+          description = ''
+            MicroVMs that receive the GitHub key (secrets/github.yaml) when
+            githubSecretsFile is set. Only the git VM by default: it pushes and pulls for
+            the host, every other VM edits repos through host views without a credential.
+            Listing "github" in a VM's own secrets is rejected; extend this list instead.
+          '';
+        };
       };
 
       githubSecretsFile = lib.mkOption {

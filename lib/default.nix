@@ -36,6 +36,7 @@
 
   optionsModules = [
     ../shared/options.nix
+    ../shared/repos-options.nix
     ../host/options.nix
     ../vm/options.nix
     ../theming/options.nix

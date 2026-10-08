@@ -20,6 +20,8 @@ in {
     ../usb-passthrough.nix
     # Password database service (opt-in, the vault VM sets hydrix.vault.agent.enable)
     ./vault-agent.nix
+    # Git VM: push/pull hydrix.repos entries for the host (opt-in, infra/gitsync)
+    ./gitsync-agent.nix
   ];
 
   config = {

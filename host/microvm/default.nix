@@ -40,14 +40,23 @@
   routerVmName = cfg.vmNames.router;
   stableRouterVmName = cfg.vmNames.routerStable;
 
+  # VMs that get the GitHub key automatically (hydrix.secrets.github.vms, the git VM by
+  # default); host/repos.nix rejects "github" listed by hand.
+  githubVms = lib.optionals (secretsCfg.githubSecretsFile != null) secretsCfg.github.vms;
+
   # Merge: knownVms auto-enabled with defaults; explicit cfg.vms entries override.
   allVms =
-    (lib.genAttrs cfg.knownVms (_: {
-      enable = true;
-      autostart = false;
-      secrets = [];
-    }))
-    // cfg.vms;
+    lib.mapAttrs (name: v:
+      v
+      // {
+        secrets = lib.unique ((v.secrets or []) ++ lib.optional (builtins.elem name githubVms) "github");
+      })
+    ((lib.genAttrs cfg.knownVms (_: {
+        enable = true;
+        autostart = false;
+        secrets = [];
+      }))
+      // cfg.vms);
 
   enabledVMs = lib.filterAttrs (_: v: v.enable) allVms;
 
