@@ -3072,9 +3072,7 @@ init_sops_during_install() {
             sed -i \
                 's|# githubSecretsFile = ../secrets/github.yaml;|githubSecretsFile = ../secrets/github.yaml;|' \
                 "$machine_nix"
-            sed -i \
-                's|# "microvm-gitsync"  = { secrets = \[ "github" \]; };|"microvm-gitsync" = { secrets = [ "github" ]; };|' \
-                "$machine_nix"
+            # The git VM receives the key automatically (hydrix.secrets.github.vms).
             log "  Wired existing secrets/github.yaml into ${CONFIG[serial]}.nix"
         fi
 
@@ -3189,9 +3187,7 @@ init_sops_during_install() {
                     sed -i \
                         's|# githubSecretsFile = ../secrets/github.yaml;|githubSecretsFile = ../secrets/github.yaml;|' \
                         "$machine_nix"
-                    sed -i \
-                        's|# "microvm-gitsync"  = { secrets = \[ "github" \]; };|"microvm-gitsync" = { secrets = [ "github" ]; };|' \
-                        "$machine_nix"
+                    # The git VM receives the key automatically (hydrix.secrets.github.vms).
                     log "  SSH deploy key encrypted to secrets/github.yaml"
                 else
                     rm -f "$plain_gh_yaml"

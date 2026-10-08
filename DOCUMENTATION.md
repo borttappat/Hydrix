@@ -1260,7 +1260,7 @@ Advanced networking options (rarely needed):
     vms = {
       "microvm-browsing-<serial>" = { autostart = false; };
       "microvm-pentest-<serial>"  = { enable = true; };
-      "microvm-dev-<serial>"      = { enable = true; secrets = [ "github" ]; };
+      "microvm-dev-<serial>"      = { enable = true; repos = [ "hydrix-config" ]; };
       "microvm-comms-<serial>"    = { enable = true; };
       "microvm-lurking-<serial>"  = { enable = true; };
     };
@@ -1676,7 +1676,7 @@ The `modules/` directory in your `hydrix-config` holds settings that apply to al
 | `firefox.nix` | Host Firefox toggle and user-agent spoofing | User |
 | `obsidian.nix` | Host Obsidian toggle and vault CSS theme deployment | User |
 | `tor-hardening.nix` | Tor anonymity: bridges, Firefox hardening, no-swap enforcement | User |
-| `repos.nix` | Declarative git repo cloning, on host or any VM that imports it | User |
+| `repos.nix` | Git repos, declared once: host clones, git VM pushes, VM views | User |
 
 `user.nix` and `common.nix` are the only two files the installer writes to. All other modules are copied from templates with sensible defaults and are edited manually by the user.
 
@@ -1743,28 +1743,53 @@ The framework auto-generates a CSS snippet from the active colorscheme and font 
 
 #### repos.nix
 
-Unlike the other shared modules, `repos.nix` isn't imported globally, import it wherever you want repo cloning: the host machine config, or any profile VM's own `default.nix`. Each importer declares its own `hydrix.repos.entries`, so different VMs can clone different repos.
+Every repo is declared once, in `modules/repos.nix` (options in Hydrix `shared/repos-options.nix`).
+The flake imports it for every machine, and `infra/gitsync/default.nix` imports it for the git VM,
+which is not built per machine. The git boundary:
+
+| Who | Does | From |
+|---|---|---|
+| Host | Holds every clone, makes every commit | `hydrix.repos.entries`, `ensure-repos` |
+| Git VM (gitsync) | Only holder of the GitHub key; push, pull, fetch, status | entries with `push = true` |
+| Other VMs | Edit working trees, cannot commit | `microvmHost.vms.<vm>.repos` in the machine config |
 
 ```nix
-# In machines/<serial>.nix, or a profile's default.nix (e.g. profiles/dev/default.nix)
-imports = [ ../../modules/repos.nix ];   # path depth varies by importer
-
+# modules/repos.nix
 hydrix.repos = {
   enable = true;
+  owner = "youruser";            # default url github.com/<owner>/<name>, sshUrl to match
   entries = {
-    my-notes = {
-      url = "https://github.com/youruser/my-notes.git";       # used with gh CLI when authenticated
-      sshUrl = "git@github.com:youruser/my-notes.git";         # fallback when gh isn't authenticated
-      path = "/home/${config.hydrix.username}/my-notes";
-      description = "Personal notes";
-    };
+    hydrix-config = {};          # path defaults to ~/<name>
+    notes = { description = "Personal notes"; };
+    site = { url = "https://github.com/youruser/site.git"; path = "/home/youruser/www"; };
+    vault = { clone = false; };  # no remote yet: shared and pushable, not cloned
+    scratch = { push = false; }; # host clone only
   };
 };
+
+# machines/<serial>.nix
+hydrix.secrets.githubSecretsFile = ../secrets/github.yaml;   # key goes to the git VM only
+hydrix.microvmHost.vms."microvm-dev-<serial>".repos = [ "hydrix-config" ];
 ```
 
-A `hydrix-ensure-repos.service` runs once at boot (`After=network-online.target`, so it's safe on a VM whose network comes up through the router after boot rather than at activation time). For each entry: if `path` already exists, it's left alone; otherwise it's cloned, trying `gh repo clone` first (if `gh auth status` succeeds) and falling back to `sshUrl` via the user's `~/.ssh/id_ed25519`/`id_rsa`. A missing repo that fails to clone (no gh auth, no SSH key) logs a warning to the journal and is skipped, it never fails the boot.
-
-On a VM, the SSH fallback needs a key present, wire that VM into `hydrix.secrets.github` (`microvmHost.vms.<name>.secrets = ["github"]` in the machine config) to have one provisioned automatically. See [Secrets Management](#secrets-management) below.
+- **Host** (`host/repos.nix`): each entry's directory is created at activation if missing (the git
+  VM's shares need a source). `ensure-repos`, also run at boot by `hydrix-ensure-repos.service`
+  (`After=network-online.target`), clones every `clone = true` entry whose path is missing or
+  empty: `gh repo clone` when `gh auth status` succeeds, else `sshUrl` with
+  `~/.ssh/id_ed25519`/`id_rsa`. Existing clones are never pulled or overwritten; a failed clone
+  logs a warning and never fails the boot. In lockdown the host has no internet, so clones wait
+  for administrative or fallback mode.
+- **Git VM** (`hydrix.gitsync.agent`, `vm/microvm/infra/gitsync-agent.nix`): mounts every
+  `push = true` entry at `/mnt/repos/<name>` (uid-squashed, no mknod/setfcap) and answers
+  `shard git push|pull|fetch|status|repos <name>` on vsock 14512, refusing undeclared names. Its
+  SSH key arrives from `secrets/github.yaml` through `hydrix.secrets.github.vms` (default: the
+  git VM only).
+- **VM views** (`microvmHost.vms.<vm>.repos`): the host's working tree at the same path, read-write,
+  with `hydrix.repos.readOnlyPaths` (default `.git`, `.claude`) read-only on the host side. See
+  [Host Repos](#host-repos-hostrepos). `hostRepos` is the low-level form for paths that
+  are not declared repos.
+- **Guards**: the build fails when a VM names an undeclared repo, or lists `"github"` in its own
+  `secrets` (extend `hydrix.secrets.github.vms` instead, only for a VM that must push).
 
 #### waybar.nix
 
@@ -1952,8 +1977,11 @@ hydrix.secrets = {
 # this machine's own serial (router already did); infra VMs (gitsync, etc.) stay bare.
 hydrix.microvmHost.vms."microvm-browsing-<serial>".secrets = [ "discord" ];
 hydrix.microvmHost.vms."microvm-router-<serial>".secrets   = [ "wifi" ];
-hydrix.microvmHost.vms."microvm-dev-<serial>".secrets      = [ "github" ];
 ```
+
+The `github` secret is the exception: it is never listed per VM (that is a build error). With
+`githubSecretsFile` set it goes to `hydrix.secrets.github.vms`, the git VM by default, the only
+machine that pushes (see [repos.nix](#reposnix)).
 
 Task slots get theirs from `secrets` in `tasks/default.nix` (applied with `mkDefault`, so a
 per-slot `microvmHost.vms` entry still overrides it).
@@ -3333,19 +3361,9 @@ vault / vault-pick (host, Hydrix host/passwords.nix)
 #### Between machines
 
 The database moves as the one encrypted file, and `~/vault` is yours to track. Keep it in
-your own **private** git repository and let `ensure-repos` clone it on every machine
-(`hydrix.repos.entries`; an empty `~/vault` is cloned into):
-
-```nix
-hydrix.repos.entries.vault = {
-  url = "https://github.com/<you>/vault.git";
-  sshUrl = "git@github.com:<you>/vault.git";
-  path = "/home/<user>/vault";
-  description = "Password database (private)";
-};
-```
-
-Add `vault` to the gitsync VM's repo list, then commit and `shard git push vault` after
+your own **private** git repository and declare it in `modules/repos.nix` (`vault = {};`, or
+`vault = { clone = false; };` until the remote exists): `ensure-repos` clones it into an empty
+`~/vault` on every machine and the git VM shares it. Commit on the host and `shard git push vault` after
 changes, and `shard git pull vault` on the other machine. Edit on one machine at a time: two
 edited copies of the binary file cannot be merged by git. A built-in `vault sync` that merges
 both sides entry by entry (protocol `MERGE`) is a possible later addition
@@ -3778,8 +3796,9 @@ runs before the VM's virtiofsd and builds one view per repo:
 
 The read-only mounts live in the host's mount namespace, so root in the guest can't undo
 them. A guest-side read-only mount stacked over a read-write share could simply be unmounted.
-With `.git` read-only the VM cannot commit or change refs, hooks, or git config. Pair it
-with no `github` secret for that VM and it has no push path at all.
+With `.git` read-only the VM cannot commit or change refs, hooks, or git config, and since only
+the git VM receives the `github` secret, it has no push path at all. For declared repos, use the
+shorthand `microvmHost.vms.<vm>.repos = [ "<name>" ]` (see [repos.nix](#reposnix)).
 
 The views are built on VM start, not on rebuild (`restartIfChanged = false`), so a changed
 `hostRepos` takes effect on the next restart. Inside the guest, read-only paths still pass

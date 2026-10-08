@@ -159,8 +159,14 @@
     #   1. Set enable = true
     #   2. Run: hydrix-sops-setup        (master key + secrets/.sops.yaml;
     #                                     other machines: hydrix-sops-setup --unlock)
-    #   3. Run: sops secrets/github.yaml (create and encrypt secrets file)
+    #   3. Run: sops secrets/github.yaml (keys id_ed25519 and id_ed25519_pub: an SSH key,
+    #                                     ideally a deploy key per repo, added on GitHub)
     #   4. Set githubSecretsFile below and rebuild
+    #
+    # The GitHub key goes to the git VM (microvm-gitsync) only, automatically
+    # (hydrix.secrets.github.vms). The host commits, the git VM pushes, other VMs edit repos
+    # through views without a credential (modules/repos.nix, vms.<vm>.repos below). Listing
+    # "github" in a VM's own secrets is a build error.
     #
     # For WiFi credentials:
     #   wifi-sync add SSID PASSWORD      (creates secrets/wifi.yaml on first save)
@@ -199,31 +205,24 @@
         # Password vault VM (see DOCUMENTATION.md "Passwords"). Enable it together with
         # hydrix.passwords.backend = "vm" below; the first `vault` creates the database.
         "microvm-vault"    = { enable = false; };
-        # Per-VM options (combine freely): enable, autostart, secrets, encryption, coupled
+        # Per-VM options (combine freely): enable, autostart, secrets, encryption, coupled, repos
         #
-        # secrets: provision named secrets into the VM (e.g. GitHub SSH key from secrets/github.yaml)
+        # secrets: provision named secrets into the VM (e.g. "wifi", "burp"; never "github",
+        #   which only the git VM receives)
         # encryption: enable LUKS-encrypted home volume — run 'shard encrypt-setup <name>' once after enabling
         # coupled: profile/task VMs are excluded from the host build by default (built and
         #   managed only via `shard build/start <name>`, not `rebuild`) so host
         #   rebuilds stay fast regardless of how many heavy desktop VMs are declared. Infra
         #   VMs stay coupled (always built with the host) by default. Override either way here.
-        # hostRepos: share host working trees read-write at the same path, with .git (and any
-        #   other readOnlyPaths) read-only on the host side, so the VM can edit but never commit
-        #   or push. Leave "github" out of that VM's secrets so it holds no push credential.
+        # repos: names from modules/repos.nix shared into the VM as host views, at the same
+        #   path: the working tree read-write, .git and .claude read-only on the host side, so
+        #   the VM edits but never commits or pushes (the host commits, the git VM pushes).
+        #   hostRepos is the low-level form, for paths that are not declared repos.
         #
         # Profile VMs (browsing/comms/pentest/dev/lurking) are per-machine nixosConfigurations
         # (like the router above), so their keys here carry @SERIAL@ too:
-        # "microvm-pentest-@SERIAL@"  = { encryption = true; secrets = [ "github" ]; };
-        # "microvm-browsing-@SERIAL@" = { secrets = [ "github" ]; };
-        # "microvm-dev-@SERIAL@"      = { secrets = [ "github" ]; coupled = true; }; # e.g. keep always-fresh
-        # "microvm-dev-@SERIAL@" = {
-        #   hostRepos = {
-        #     hydrix-config = { path = "/home/${config.hydrix.username}/hydrix-config"; readOnlyPaths = [ ".git" ".claude" ]; };
-        #     Hydrix        = { path = "/home/${config.hydrix.username}/Hydrix"; readOnlyPaths = [ ".git" ".claude" ]; };
-        #   };
-        # };
-        # "microvm-builder"  = { secrets = [ "github" ]; };
-        # "microvm-gitsync"  = { secrets = [ "github" ]; };
+        # "microvm-pentest-@SERIAL@"  = { encryption = true; repos = [ "notes" ]; };
+        # "microvm-dev-@SERIAL@"      = { repos = [ "hydrix-config" ]; coupled = true; }; # e.g. keep always-fresh
       };
 
       # ─── Per-machine VM overrides ─────────────────────────────────────
@@ -378,12 +377,6 @@
   # Frontends: `vault` (TUI) and `vault-pick` (Mod+P).
   # hydrix.passwords.backend = "vm";
   # The database is ~/vault/Passwords.kdbx. To carry it between machines, keep ~/vault in
-  # your own PRIVATE git repo and let ensure-repos clone it (modules/repos.nix):
-  # hydrix.repos.entries.vault = {
-  #   url = "https://github.com/<you>/vault.git";
-  #   sshUrl = "git@github.com:<you>/vault.git";
-  #   path = "/home/<user>/vault";
-  #   description = "Password database (private)";
-  # };
-  # Then `shard git push vault` / `shard git pull vault` (add vault to the gitsync repos).
+  # your own PRIVATE git repo and declare it in modules/repos.nix (`vault = {};`): ensure-repos
+  # clones it into an empty ~/vault, `shard git push vault` / `shard git pull vault` move it.
 }

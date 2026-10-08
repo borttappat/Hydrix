@@ -231,16 +231,22 @@ password frontend). With a backend set, `vault` is an fzf TUI and `vault-pick` (
 floating. The database is `~/vault/Passwords.kdbx`; the first `vault` creates it. See
 DOCUMENTATION.md, "Passwords".
 
-### modules/repos.nix - Declarative Git Repos
+### modules/repos.nix - Git Repos
 
-Declares repos that are cloned automatically on first login:
+Each repo is declared once (Hydrix options `hydrix.repos`), imported by every machine and by
+the git VM. The host clones missing repos (`ensure-repos`) and makes every commit; the git VM
+(`infra/gitsync`) holds the GitHub key and pushes; a VM gets a repo only when the machine config
+names it in `hydrix.microvmHost.vms.<vm>.repos` (editable working tree, `.git` read-only):
 
 ```nix
-{
-  hydrix.repos = [
-    { url = "git@github.com:you/dotfiles.git"; path = "~/dotfiles"; }
-  ];
-}
+hydrix.repos = {
+  enable = true;
+  owner = "you";                          # url github.com/you/<name>, path ~/<name>
+  entries = {
+    notes = {};
+    vault = { clone = false; };           # no remote yet
+  };
+};
 ```
 
 ### USB devices (framework, `host/usb.nix`)

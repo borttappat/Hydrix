@@ -1618,9 +1618,7 @@ init_sops_and_wifi() {
             sed -i \
                 's|# githubSecretsFile = ../secrets/github.yaml;|githubSecretsFile = ../secrets/github.yaml;|' \
                 "$machine_nix"
-            sed -i \
-                's|# "microvm-gitsync"  = { secrets = \[ "github" \]; };|"microvm-gitsync" = { secrets = [ "github" ]; };|' \
-                "$machine_nix"
+            # The git VM receives the key automatically (hydrix.secrets.github.vms).
             log "  Wired existing secrets/github.yaml into ${CONFIG[serial]}.nix"
         fi
 
@@ -1752,9 +1750,6 @@ init_sops_and_wifi() {
                     sed -i 's/      enable = false;/      enable = true;/' "$machine_nix"
                     sed -i \
                         's|# githubSecretsFile = ../secrets/github.yaml;|githubSecretsFile = ../secrets/github.yaml;|' \
-                        "$machine_nix"
-                    sed -i \
-                        's|# "microvm-gitsync"  = { secrets = \[ "github" \]; };|"microvm-gitsync" = { secrets = [ "github" ]; };|' \
                         "$machine_nix"
                     echo ""
                     echo "  Deploy key generated. Add this public key to GitHub (github.com/settings/keys):"

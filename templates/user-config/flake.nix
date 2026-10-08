@@ -171,7 +171,7 @@
             inherit userColorschemesDir;
             modules = [
               (machinesDir + "/${file}")
-              ./modules/repos.nix # Declarative git repos (add yours, or leave repos = {})
+              ./modules/repos.nix # Git repos, declared once (host clones, git VM pushes, VM views)
               ./modules/fonts.nix # Font packages and profiles
               ./modules/hyprland.nix # Hyprland keybindings + config (user-customizable)
               ./modules/waybar.nix # Waybar layout and modules (user-customizable)
