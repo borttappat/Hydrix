@@ -100,8 +100,13 @@
   vmStatusCache = "/tmp/hydrix-eww-vm-status.json";
   todoFile = "$HOME/.local/share/hydrix/todo.txt";
 
-  # name|path per line. hydrix-config first, then extras, then declared repos.
-  gitReposFile = pkgs.writeText "eww-git-repos" (lib.concatMapStrings (r: "${r.name}|${r.path}\n") (
+  # name|path per line. hydrix-config first, then extras, then declared repos; a path
+  # listed twice (hydrix-config is usually a declared repo too) shows once.
+  dedupePaths = lib.foldl' (acc: r:
+    if lib.any (a: a.path == r.path) acc
+    then acc
+    else acc ++ [r]) [];
+  gitReposFile = pkgs.writeText "eww-git-repos" (lib.concatMapStrings (r: "${r.name}|${r.path}\n") (dedupePaths (
     [
       {
         name = baseNameOf config.hydrix.paths.configDir;
@@ -114,7 +119,7 @@
         inherit (e) path;
       })
       config.hydrix.repos.entries)
-  ));
+  )));
 
   weatherLocationsFile = pkgs.writeText "eww-weather-locations" (lib.concatMapStrings (
       l: "${l.name}|${toString l.latitude}|${toString l.longitude}\n"

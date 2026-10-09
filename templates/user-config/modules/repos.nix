@@ -6,21 +6,26 @@
 #     existing clones are never pulled or overwritten),
 #   - pushed and pulled by the git VM (`shard git push|pull|fetch|status <name>`), unless
 #     push = false,
-#   - shared with a VM only when a machine config names it in
-#     hydrix.microvmHost.vms.<vm>.repos (working tree read-write, .git and .claude read-only
-#     on the host side: the VM edits, the host commits, the git VM pushes).
+#   - shared with a VM only when hydrix.microvmHost.byName.<vm>.repos names it (modules/vms.nix:
+#     working tree read-write, .git and .claude read-only on the host side; the VM edits, the
+#     host commits, the git VM pushes).
 #
 # Credentials: only the git VM holds the GitHub key (hydrix.secrets.githubSecretsFile in the
 # machine config, see its SECRETS section). The host has none and needs none, in lockdown too.
 #
 # Defaults per entry: url github.com/<owner>/<name>, path ~/<name>, clone = true, push = true.
-# An empty entries set is a valid no-op.
+#
+# A suggested starting point, not a requirement: this config itself is declared, so the git VM
+# can push it from lockdown once it has a remote, and modules/vms.nix shares it with the dev VM. Remove or add entries freely; an empty entries set is a valid no-op.
 {lib, ...}: {
   hydrix.repos = {
     enable = lib.mkDefault true;
     # owner = "youruser";                  # GitHub user/organisation for default URLs
     entries = {
-      # hydrix-config = {};                # this repo: pushable from lockdown via the git VM
+      # This repo: pushed by the git VM (`shard git push hydrix-config`), edited from the dev
+      # VM. Already cloned by the installer; with owner set, ensure-repos gives it its origin
+      # and clones it into an empty ~/hydrix-config on a new machine.
+      hydrix-config = {};
       # notes = { description = "Personal notes"; };
       # site = {
       #   url = "https://github.com/youruser/youruser.github.io.git";

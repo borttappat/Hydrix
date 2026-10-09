@@ -51,7 +51,8 @@ templates/user-config/               # Becomes ~/hydrix-config/
 │   ├── helix.nix                    # Helix editor config
 │   ├── eww.nix                      # eww widget daemon (exit-nodes, vm-status overlay)
 │   ├── tor-hardening.nix            # Tor anonymity module (import in lurking profile)
-│   ├── repos.nix                    # Declarative git repo clone list
+│   ├── repos.nix                    # Git repos, declared once (host clones, git VM, VM views)
+│   ├── vms.nix                      # Per-VM settings shared by every machine (byName)
 │   ├── host-packages.nix            # Host-only packages beyond framework defaults
 │   ├── shell-packages.nix           # Shell packages present on host and all VMs
 │   └── vm-packages.nix              # Packages present in all profile VMs
@@ -249,6 +250,13 @@ hydrix.repos = {
   };
 };
 ```
+
+### modules/vms.nix - Per-VM Settings
+
+VM settings every machine shares, keyed by VM name (`hydrix.microvmHost.byName`): each name
+resolves to that machine's own VM, so no serial appears here. Ships a suggested setup (the dev
+VM edits `hydrix-config` through a view); change it freely. Machine configs keep only what
+differs per machine (router WiFi secret, autostarts) and override with plain assignments.
 
 ### USB devices (framework, `host/usb.nix`)
 

@@ -5,7 +5,7 @@
 # Config file is named by hardware serial for automatic reinstall detection.
 # The visual hostname is always "hydrix".
 #
-# Shared UI prefs: modules/graphical.nix — override here with plain assignment.
+# Shared UI prefs: modules/graphical.nix; override here with plain assignment.
 # All hydrix.graphical.* options listed there with lib.mkDefault values.
 #
 # BOOT MODES:
@@ -197,32 +197,27 @@
       enable = true;
       vmNames.router       = "microvm-router-@SERIAL@";
       vmNames.routerStable = "microvm-router-stable-@SERIAL@";
-      vms = {
-        "microvm-router-@SERIAL@" = { autostart = true; };
+      # Per-VM settings for this machine, by VM name (router, dev, pentest, gitsync, vault,
+      # ...): each name resolves to this machine's VM. Settings every machine shares live in
+      # modules/vms.nix; a plain assignment here overrides them.
+      #
+      # Options per VM (combine freely): enable, autostart, secrets, encryption, coupled, repos
+      #   secrets: named secrets delivered into the VM (e.g. "wifi"; never "github", which
+      #     only the git VM receives)
+      #   encryption: LUKS-encrypted home volume, set up on the VM's first `shard -b`
+      #   coupled: build the VM with every `rebuild` (profile/task VMs are built separately,
+      #     with `shard -b <name>`, by default)
+      #   repos: declared repos (modules/repos.nix) shared as host views: editable working
+      #     tree, .git read-only, so the VM never commits or pushes
+      byName = {
+        router = { autostart = true; };
         # hostsync requires ~/vm-inbox on the host (created automatically when enabled).
         # Disabled by default - enable when you need secure inter-VM file transfers.
-        "microvm-hostsync" = { enable = false; };
+        hostsync.enable = false;
         # Password vault VM (see DOCUMENTATION.md "Passwords"). Enable it together with
         # hydrix.passwords.backend = "vm" below; the first `vault` creates the database.
-        "microvm-vault"    = { enable = false; };
-        # Per-VM options (combine freely): enable, autostart, secrets, encryption, coupled, repos
-        #
-        # secrets: provision named secrets into the VM (e.g. "wifi", "burp"; never "github",
-        #   which only the git VM receives)
-        # encryption: enable LUKS-encrypted home volume — run 'shard encrypt-setup <name>' once after enabling
-        # coupled: profile/task VMs are excluded from the host build by default (built and
-        #   managed only via `shard build/start <name>`, not `rebuild`) so host
-        #   rebuilds stay fast regardless of how many heavy desktop VMs are declared. Infra
-        #   VMs stay coupled (always built with the host) by default. Override either way here.
-        # repos: names from modules/repos.nix shared into the VM as host views, at the same
-        #   path: the working tree read-write, .git and .claude read-only on the host side, so
-        #   the VM edits but never commits or pushes (the host commits, the git VM pushes).
-        #   hostRepos is the low-level form, for paths that are not declared repos.
-        #
-        # Profile VMs (browsing/comms/pentest/dev/lurking) are per-machine nixosConfigurations
-        # (like the router above), so their keys here carry @SERIAL@ too:
-        # "microvm-pentest-@SERIAL@"  = { encryption = true; repos = [ "notes" ]; };
-        # "microvm-dev-@SERIAL@"      = { repos = [ "hydrix-config" ]; coupled = true; }; # e.g. keep always-fresh
+        vault.enable = false;
+        # dev.coupled = true;              # e.g. keep the dev VM built with the host
       };
 
       # ─── Per-machine VM overrides ─────────────────────────────────────
@@ -281,7 +276,7 @@
       # scaling.hyprInternalOutput = "eDP-1";   # DEFAULT: "eDP-1" (run: hyprctl monitors)
 
       # ─── Hyprland keyboard remapping ───────────────────────────────────
-      # Custom xkb keymap — takes precedence over layout/variant from modules/common.nix.
+      # Custom xkb keymap: takes precedence over layout/variant from modules/common.nix.
       # Use for key remapping (e.g. § -> ~, CapsLock -> Ctrl).
       # keyboard.xkbFile = pkgs.writeText "my-keymap" ''
       #   xkb_keymap {

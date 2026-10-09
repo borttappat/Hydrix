@@ -3061,7 +3061,7 @@ init_sops_during_install() {
                 's|# wifiSecretsFile   = ../secrets/wifi.yaml;|wifiSecretsFile = ../secrets/wifi.yaml;|' \
                 "$machine_nix"
             sed -i \
-                "s|\"microvm-router-${CONFIG[serial]}\" = { autostart = true; };|\"microvm-router-${CONFIG[serial]}\" = { autostart = true; secrets = [ \"wifi\" ]; };|" \
+                's|router = { autostart = true; };|router = { autostart = true; secrets = [ "wifi" ]; };|' \
                 "$machine_nix"
             log "  Wired existing secrets/wifi.yaml into ${CONFIG[serial]}.nix"
         fi
@@ -3144,7 +3144,7 @@ init_sops_during_install() {
                     "$machine_nix"
                 # Deliver wifi secrets into the router VM (key is serial-specific)
                 sed -i \
-                    "s|\"microvm-router-${CONFIG[serial]}\" = { autostart = true; };|\"microvm-router-${CONFIG[serial]}\" = { autostart = true; secrets = [ \"wifi\" ]; };|" \
+                    's|router = { autostart = true; };|router = { autostart = true; secrets = [ "wifi" ]; };|' \
                     "$machine_nix"
             else
                 rm -f "$plain_yaml"

@@ -766,11 +766,11 @@ On first boot:
 
 To customize VMs per-machine, edit `machines/<serial>.nix`. Profile/task VMs are per-machine
 nixosConfigurations (see [§ VM Naming and Machine Identity](#vm-naming-and-machine-identity)),
-so their `vms` key here carries this machine's own serial:
+so `byName` resolves the name to this machine's VM:
 
 ```nix
 { config, ... }: {
-  hydrix.microvmHost.vms."microvm-pentest-<serial>".enable = false;  # Disable if not needed
+  hydrix.microvmHost.byName.pentest.enable = false;  # Disable if not needed
 }
 ```
 
@@ -1253,22 +1253,25 @@ Advanced networking options (rarely needed):
   hydrix.microvmHost = {
     enable = true;
 
-    # Per-VM overrides: only declare autostart/secrets/encryption/coupled you actually
-    # want to change - every VM is enabled by default without an entry here at all.
-    # Profile/task VM keys carry this machine's own serial (see § VM Naming and Machine
-    # Identity); infra VM keys (builder, gitsync, files, ...) stay bare/shared.
-    vms = {
-      "microvm-browsing-<serial>" = { autostart = false; };
-      "microvm-pentest-<serial>"  = { enable = true; };
-      "microvm-dev-<serial>"      = { enable = true; repos = [ "hydrix-config" ]; };
-      "microvm-comms-<serial>"    = { enable = true; };
-      "microvm-lurking-<serial>"  = { enable = true; };
+    # Per-VM settings, by VM name: each name resolves to this machine's VM (serial
+    # included), so a shared module (modules/vms.nix) can set them for every machine and a
+    # machine config overrides with a plain assignment. Only declare what you change:
+    # every VM is enabled by default without an entry.
+    byName = {
+      browsing.autostart = false;
+      dev.repos = [ "hydrix-config" ];
+      pentest.encryption = true;
+      router.secrets = [ "wifi" ];
     };
   };
 
   hydrix.builder.enable = true;      # Builder VM for lockdown mode builds
 }
 ```
+
+`byName` keys are the registry names (`browsing`, `dev`, `router`, `gitsync`, `pentest-task1`,
+...); an unknown one is a build error that lists the valid names. The full-name form
+`hydrix.microvmHost.vms."microvm-dev-<serial>"` sets the same options and still works.
 
 `hydrix.microvmHost.vmNames` also exists (`.router`/`.routerStable` only) but it's internal
 wiring the flake sets for you - it's how the router's per-machine name gets threaded into
@@ -1294,7 +1297,7 @@ manually.
 
 ```nix
 # Per VM, in a machine config: overrides the default either direction.
-hydrix.microvmHost.vms."microvm-dev-<serial>".coupled = true;
+hydrix.microvmHost.byName.dev.coupled = true;
 
 # Repo-wide, in the user flake: couples ALL profile/task VMs at once.
 # A per-VM `coupled` override above still wins over this either way.
@@ -1769,7 +1772,9 @@ hydrix.repos = {
 
 # machines/<serial>.nix
 hydrix.secrets.githubSecretsFile = ../secrets/github.yaml;   # key goes to the git VM only
-hydrix.microvmHost.vms."microvm-dev-<serial>".repos = [ "hydrix-config" ];
+
+# modules/vms.nix (shared by every machine)
+hydrix.microvmHost.byName.dev.repos = [ "hydrix-config" ];
 ```
 
 - **Host** (`host/repos.nix`): holds clones and commits, but no GitHub credential in any boot
@@ -1974,10 +1979,10 @@ hydrix.secrets = {
   };
 };
 
-# Per-VM opt-in: only listed VMs receive each secret type. Profile/task VM keys carry
-# this machine's own serial (router already did); infra VMs (gitsync, etc.) stay bare.
-hydrix.microvmHost.vms."microvm-browsing-<serial>".secrets = [ "discord" ];
-hydrix.microvmHost.vms."microvm-router-<serial>".secrets   = [ "wifi" ];
+# Per-VM opt-in: only listed VMs receive each secret type (by VM name, resolved to this
+# machine's VM).
+hydrix.microvmHost.byName.browsing.secrets = [ "discord" ];
+hydrix.microvmHost.byName.router.secrets   = [ "wifi" ];
 ```
 
 The `github` secret is the exception: it is never listed per VM (that is a build error). With
@@ -2722,7 +2727,7 @@ The flake auto-discovers any profile directory that contains `meta.nix` - no man
 1. Declare the VM in `machines/<serial>.nix` (optional - only needed to change a default
    like autostart/secrets/encryption; the VM builds and runs with no entry here at all):
 ```nix
-hydrix.microvmHost.vms."microvm-myprofile-<serial>" = { autostart = false; };
+hydrix.microvmHost.byName.myprofile = { autostart = false; };
 ```
 
 2. Customise `profiles/myprofile/default.nix` - set colorscheme, RAM/vCPUs, packages.
@@ -2837,7 +2842,7 @@ The `tor-hardening.nix` module provides Tor anonymity hardening for VMs. Import 
 
 3. Declare in `machines/<serial>.nix`:
 ```nix
-hydrix.microvmHost.vms."microvm-myinfra" = { enable = true; };
+hydrix.microvmHost.byName.myinfra = { enable = true; };
 ```
 
 4. Rebuild and start:
@@ -2981,7 +2986,7 @@ Steps 1-4 are identical. After the files VM has the ciphertext, the host sends t
 Enable in your machine config:
 
 ```nix
-hydrix.microvmHost.vms."microvm-files".enable = true;
+hydrix.microvmHost.byName.files.enable = true;
 hydrix.microvmFiles.enable = true;
 ```
 
@@ -3101,7 +3106,7 @@ shard files transfer hostsync/<filename> <dst-vm>/<path>
 **Enable in your machine config** (included in the default template):
 
 ```nix
-hydrix.microvmHost.vms."microvm-hostsync".enable = true;
+hydrix.microvmHost.byName.hostsync.enable = true;
 
 # Required: pre-create the inbox before virtiofsd starts
 systemd.tmpfiles.rules = let u = config.hydrix.username; in [
@@ -3163,7 +3168,7 @@ The passphrase is generated on the host and sent exclusively over vsock -> it ne
 **Setup** in your `machines/<serial>.nix`:
 
 ```nix
-hydrix.microvmHost.vms."microvm-usb-sandbox".enable = true;
+hydrix.microvmHost.byName.usb-sandbox.enable = true;
 ```
 
 Then rebuild and start:
@@ -3274,7 +3279,7 @@ hydrix.passwords.backend = "vm";   # "vm" | "host" | "none" (default)
 
 | Backend | Where the database is opened |
 |---------|------------------------------|
-| `"vm"` | Inside `microvm-vault` (CID 213), a fully offline VM. KeePassXC and the decrypted database never run in the host session. Enable the VM too (`hydrix.microvmHost.vms."microvm-vault"`). |
+| `"vm"` | Inside `microvm-vault` (CID 213), a fully offline VM. KeePassXC and the decrypted database never run in the host session. Enable the VM too (`hydrix.microvmHost.byName.vault`). |
 | `"host"` | `keepassxc-cli` in the host session, against the same file. |
 | `"none"` | Nothing installed; use your own password manager. |
 
@@ -4249,7 +4254,7 @@ The script scans existing profiles for the next free CID (starts at 107), prompt
 
 **After scaffolding, complete integration manually:**
 
-1. Declare in `machines/<serial>.nix` (optional, only for non-default settings): `hydrix.microvmHost.vms."microvm-myprofile-<serial>" = { autostart = false; };`
+1. Declare in `machines/<serial>.nix` (optional, only for non-default settings): `hydrix.microvmHost.byName.myprofile = { autostart = false; };`
 2. Customise `profiles/myprofile/default.nix` ,colorscheme, RAM/vCPUs, packages
 3. Add VPN if needed: `hydrix.router.vpn.mullvad.bridges.myprofile = ./conf;`
 4. Rebuild in order (router and files VM have TAPs baked into their QEMU runner):

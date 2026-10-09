@@ -172,6 +172,7 @@
             modules = [
               (machinesDir + "/${file}")
               ./modules/repos.nix # Git repos, declared once (host clones, git VM pushes, VM views)
+              ./modules/vms.nix # Per-VM settings shared by every machine (hydrix.microvmHost.byName)
               ./modules/fonts.nix # Font packages and profiles
               ./modules/hyprland.nix # Hyprland keybindings + config (user-customizable)
               ./modules/waybar.nix # Waybar layout and modules (user-customizable)
