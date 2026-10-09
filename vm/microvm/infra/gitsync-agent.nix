@@ -49,11 +49,21 @@
       cd "$repo_path" || { echo "ERROR cannot enter $1"; exit 0; }
     }
 
+    # A branch without an upstream (a fresh config's first push) pushes to origin and
+    # tracks it from then on.
+    push() {
+      if git rev-parse --abbrev-ref --symbolic-full-name '@{u}' >/dev/null 2>&1; then
+        git push 2>&1
+      else
+        git push -u origin HEAD 2>&1
+      fi
+    }
+
     case "$cmd" in
       PUSH)
         repo_dir "$rest"
         echo "OK pushing $rest"
-        if git push 2>&1; then echo "DONE"; else echo "ERROR push failed"; fi
+        if push; then echo "DONE"; else echo "ERROR push failed"; fi
         ;;
       PULL)
         repo_dir "$rest"
@@ -118,7 +128,7 @@
         else
           echo "(nothing to commit)"
         fi
-        if git push 2>&1; then echo "DONE"; else echo "ERROR push failed"; fi
+        if push; then echo "DONE"; else echo "ERROR push failed"; fi
         ;;
       PING)
         echo "PONG"

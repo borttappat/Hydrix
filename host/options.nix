@@ -747,98 +747,124 @@ in {
         };
       };
 
+      byName = lib.mkOption {
+        type = lib.types.attrsOf lib.types.deferredModule;
+        default = {};
+        example = lib.literalExpression ''
+          {
+            dev.repos = [ "hydrix-config" ];
+            pentest.encryption = lib.mkDefault true;
+            router.secrets = [ "wifi" ];
+          }
+        '';
+        description = ''
+          Settings for vms.<vm>, keyed by the VM's registry name (dev, pentest, router,
+          gitsync, pentest-task1, ...) instead of its full per-machine name. Each key resolves
+          through hydrix.networking.vmRegistry to this machine's VM, so a shared module can
+          configure VMs without knowing any machine's serial. Definitions from several
+          modules merge like any NixOS option (shared modules use lib.mkDefault, a machine
+          config overrides with a plain assignment).
+        '';
+      };
+
       vms = lib.mkOption {
-        type = lib.types.attrsOf (lib.types.submodule ({config, ...}: {
-          options = {
-            repos = lib.mkOption {
-              type = lib.types.listOf lib.types.str;
-              default = [];
-              example = ["notes" "tools"];
-              description = ''
-                Names from hydrix.repos.entries shared into this VM as host views: the
-                working tree read-write at the same path, hydrix.repos.readOnlyPaths
-                (.git, .claude) read-only on the host side. Shorthand for hostRepos.
-              '';
-            };
-            enable = lib.mkOption {
-              type = lib.types.bool;
-              default = true;
-              description = "Enable this VM on this host. Set false to explicitly exclude a VM.";
-            };
-            autostart = lib.mkOption {
-              type = lib.types.bool;
-              default = false;
-              description = "Start this microVM at boot";
-            };
-            secrets = lib.mkOption {
-              type = lib.types.listOf lib.types.str;
-              default = [];
-              description = "Named secrets to provision into this VM (e.g. [ \"github\" ])";
-            };
-            encryption = lib.mkOption {
-              type = lib.types.bool;
-              default = false;
-              description = ''
-                Enable LUKS-encrypted home volume for this VM on this machine.
-                Run 'shard encrypt-setup <name>' once after setting this, then rebuild.
-              '';
-            };
-            coupled = lib.mkOption {
-              type = lib.types.nullOr lib.types.bool;
-              default = null;
-              description = ''
-                Force this VM's coupling to the host build closure.
-                true: built by every `rebuild` (host toplevel depends on this
-                VM's runner) and `current` relinked on activation.
-                false: never coupled, even with coupleProfiles.
-                null (default): decoupled, except profile/task VMs when
-                coupleProfiles is set. Decoupled VMs are built with
-                `shard -b <name>`, infra VMs also by `rebuild -a`.
-              '';
-            };
-            hostRepos = lib.mkOption {
-              type = lib.types.attrsOf (lib.types.submodule {
-                options = {
-                  path = lib.mkOption {
-                    type = lib.types.str;
-                    description = "Absolute host path of the working tree. Mounted at the same path in the VM.";
-                  };
-                  readOnlyPaths = lib.mkOption {
-                    type = lib.types.listOf lib.types.str;
-                    default = [".git"];
-                    description = ''
-                      Paths relative to the repo root that the VM sees read-only.
-                      Missing entries are created as empty directories first, so
-                      the VM cannot create them either.
-                    '';
-                  };
+        # A definition may be a module ({ imports = [ ... ]; }), which is how byName reaches it.
+        type = lib.types.attrsOf (lib.types.submoduleWith {
+          shorthandOnlyDefinesConfig = false;
+          modules = [
+            ({config, ...}: {
+              options = {
+                repos = lib.mkOption {
+                  type = lib.types.listOf lib.types.str;
+                  default = [];
+                  example = ["notes" "tools"];
+                  description = ''
+                    Names from hydrix.repos.entries shared into this VM as host views: the
+                    working tree read-write at the same path, hydrix.repos.readOnlyPaths
+                    (.git, .claude) read-only on the host side. Shorthand for hostRepos.
+                  '';
                 };
+                enable = lib.mkOption {
+                  type = lib.types.bool;
+                  default = true;
+                  description = "Enable this VM on this host. Set false to explicitly exclude a VM.";
+                };
+                autostart = lib.mkOption {
+                  type = lib.types.bool;
+                  default = false;
+                  description = "Start this microVM at boot";
+                };
+                secrets = lib.mkOption {
+                  type = lib.types.listOf lib.types.str;
+                  default = [];
+                  description = "Named secrets to provision into this VM (e.g. [ \"github\" ])";
+                };
+                encryption = lib.mkOption {
+                  type = lib.types.bool;
+                  default = false;
+                  description = ''
+                    Enable LUKS-encrypted home volume for this VM on this machine.
+                    Run 'shard encrypt-setup <name>' once after setting this, then rebuild.
+                  '';
+                };
+                coupled = lib.mkOption {
+                  type = lib.types.nullOr lib.types.bool;
+                  default = null;
+                  description = ''
+                    Force this VM's coupling to the host build closure.
+                    true: built by every `rebuild` (host toplevel depends on this
+                    VM's runner) and `current` relinked on activation.
+                    false: never coupled, even with coupleProfiles.
+                    null (default): decoupled, except profile/task VMs when
+                    coupleProfiles is set. Decoupled VMs are built with
+                    `shard -b <name>`, infra VMs also by `rebuild -a`.
+                  '';
+                };
+                hostRepos = lib.mkOption {
+                  type = lib.types.attrsOf (lib.types.submodule {
+                    options = {
+                      path = lib.mkOption {
+                        type = lib.types.str;
+                        description = "Absolute host path of the working tree. Mounted at the same path in the VM.";
+                      };
+                      readOnlyPaths = lib.mkOption {
+                        type = lib.types.listOf lib.types.str;
+                        default = [".git"];
+                        description = ''
+                          Paths relative to the repo root that the VM sees read-only.
+                          Missing entries are created as empty directories first, so
+                          the VM cannot create them either.
+                        '';
+                      };
+                    };
+                  });
+                  default = {};
+                  example = lib.literalExpression ''
+                    {
+                      hydrix-config = {
+                        path = "/home/user/hydrix-config";
+                        readOnlyPaths = [".git" ".claude"];
+                      };
+                    }
+                  '';
+                  description = ''
+                    Host working trees shared read-write into this VM via virtiofs,
+                    keyed by share name. The host serves a per-VM view from
+                    /run/hydrix-repos/<vm>/<name> with readOnlyPaths remounted
+                    read-only on the host side, so the guest (root included) can edit
+                    files but cannot write .git: no commits, refs, hooks or git config.
+                    The VM applies these through hydrix.microvm.hostRepos, which the
+                    flake sets from the same value.
+                  '';
+                };
+              };
+              config.hostRepos = lib.genAttrs config.repos (n: {
+                path = (cfg.repos.entries.${n} or {path = "/nonexistent/${n}";}).path;
+                readOnlyPaths = cfg.repos.readOnlyPaths;
               });
-              default = {};
-              example = lib.literalExpression ''
-                {
-                  hydrix-config = {
-                    path = "/home/user/hydrix-config";
-                    readOnlyPaths = [".git" ".claude"];
-                  };
-                }
-              '';
-              description = ''
-                Host working trees shared read-write into this VM via virtiofs,
-                keyed by share name. The host serves a per-VM view from
-                /run/hydrix-repos/<vm>/<name> with readOnlyPaths remounted
-                read-only on the host side, so the guest (root included) can edit
-                files but cannot write .git: no commits, refs, hooks or git config.
-                The VM applies these through hydrix.microvm.hostRepos, which the
-                flake sets from the same value.
-              '';
-            };
-          };
-          config.hostRepos = lib.genAttrs config.repos (n: {
-            path = (cfg.repos.entries.${n} or {path = "/nonexistent/${n}";}).path;
-            readOnlyPaths = cfg.repos.readOnlyPaths;
-          });
-        }));
+            })
+          ];
+        });
         default = {};
         description = "MicroVMs to manage";
       };

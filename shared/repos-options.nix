@@ -3,8 +3,9 @@
 # The host holds every clone and makes every commit, with no GitHub credential. The git VM
 # (gitsync) holds the key and clones, pushes and pulls the entries with push = true
 # (vm/microvm/infra/gitsync-agent.nix; ensure-repos in host/repos.nix asks it to clone).
-# Other VMs see a repo only through hydrix.microvmHost.vms.<vm>.repos: a host-side view of
-# the working tree with readOnlyPaths read-only, so they can edit files but never commit.
+# Other VMs see a repo only through microvmHost.byName.<vm>.repos (or vms.<vm>.repos): a
+# host-side view of the working tree with readOnlyPaths read-only, so they can edit files
+# but never commit.
 #
 # Declare entries in a module imported by both the host and the git VM (hydrix-config:
 # modules/repos.nix), since the git VM is not built per machine.

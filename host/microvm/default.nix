@@ -233,6 +233,20 @@ in {
   imports = [./vm-elastic.nix];
 
   config = lib.mkMerge [
+    # byName.<registry name> applies to this machine's VM of that name.
+    (let
+      registry = config.hydrix.networking.vmRegistry;
+      unknown = lib.filter (n: !(registry ? ${n})) (lib.attrNames cfg.byName);
+    in {
+      hydrix.microvmHost.vms = lib.mapAttrs' (n: m: lib.nameValuePair registry.${n}.vmName {imports = [m];}) (lib.filterAttrs (n: _: registry ? ${n}) cfg.byName);
+      assertions = [
+        {
+          assertion = unknown == [];
+          message = "hydrix.microvmHost.byName: no VM named ${lib.concatStringsSep ", " unknown} in the registry (known: ${lib.concatStringsSep ", " (lib.attrNames registry)})";
+        }
+      ];
+    })
+
     # Always available - fallback mode and fresh installs need these to manage VMs
     {
       environment.systemPackages = [shardPkg];
