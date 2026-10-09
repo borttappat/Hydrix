@@ -3482,7 +3482,7 @@ EOF
 
     success "NixOS installed"
 
-    # Pre-build essential microVMs (router, builder)
+    # Pre-build essential microVMs (router, router-stable, builder; git VM optional)
     # If the flake uses a local path: for hydrix that doesn't exist on the live ISO,
     # create a temporary symlink so nix can resolve it during eval.
     local _hydrix_symlink=""
@@ -3525,9 +3525,13 @@ prebuild_microvms() {
         "microvm-builder:Builder VM (lockdown mode builds)"
     )
 
-    # Optional VMs - can be built later (empty for faster install)
+    # Optional VMs: a failure is not fatal. The git VM is the only way to clone or push
+    # (the host holds no GitHub credential), and the first boot is offline in lockdown, so
+    # prebuilding it lets hydrix-firstboot-vms link it from the store.
     # Add "microvm-browsing:Browsing VM" here to pre-build during install
-    local optional_vms=()
+    local optional_vms=(
+        "microvm-gitsync:Git VM (clone, push, pull)"
+    )
 
     local critical_failed=()
     local optional_failed=0
@@ -3978,13 +3982,16 @@ access-tokens = github.com=$gh_token"
         echo "Other machines in your config:"
         list_existing_machines "/mnt/home/${CONFIG[username]}/hydrix-config"
         echo ""
-        echo "Push your updated config to sync across machines:"
-        echo "  cd ~/hydrix-config && git push"
+        echo "Commit, then push your updated config through the git VM:"
+        echo "  cd ~/hydrix-config && git commit -am '...' && shard git push hydrix-config"
         echo ""
     else
         echo "To add another machine to this config:"
-        echo "  1. Push config to git: cd ~/hydrix-config && git remote add origin <url> && git push"
-        echo "  2. On new machine: run installer and select 'Clone existing repo'"
+        echo "  1. Create an empty hydrix-config repo on GitHub and give it the git VM's key (below)"
+        echo "  2. git -C ~/hydrix-config remote add origin git@github.com:<you>/hydrix-config.git"
+        echo "     (or set hydrix.repos.owner in modules/repos.nix and run ensure-repos)"
+        echo "  3. shard git push hydrix-config   (the host holds no GitHub credential)"
+        echo "  4. On the new machine: run the installer and select 'Clone existing repo'"
         echo ""
     fi
 
@@ -4001,8 +4008,9 @@ access-tokens = github.com=$gh_token"
     fi
     if [[ -n "$GITSYNC_DEPLOY_PUBKEY" ]]; then
         echo ""
-        echo "  gitsync deploy key generated (secrets/github.yaml). Add the public key to"
-        echo "  GitHub yourself (github.com/settings/keys) so offline push/pull works:"
+        echo "  Git VM key generated (secrets/github.yaml), the only GitHub credential."
+        echo "  Add the public key on GitHub yourself: under github.com/settings/keys it"
+        echo "  reaches all your repos; as a repo's deploy key (with write access) only that one:"
         echo "    $GITSYNC_DEPLOY_PUBKEY"
     fi
     echo "=========================================="

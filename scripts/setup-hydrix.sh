@@ -1752,7 +1752,9 @@ init_sops_and_wifi() {
                         's|# githubSecretsFile = ../secrets/github.yaml;|githubSecretsFile = ../secrets/github.yaml;|' \
                         "$machine_nix"
                     echo ""
-                    echo "  Deploy key generated. Add this public key to GitHub (github.com/settings/keys):"
+                    echo "  Git VM key generated, the only GitHub credential. Add the public key on GitHub:"
+                    echo "  under github.com/settings/keys it reaches all your repos; as a repo's deploy key"
+                    echo "  (with write access) only that one."
                     echo "    $(cat "$deploy_tmp.pub")"
                 else
                     rm -f "$plain_gh_yaml"

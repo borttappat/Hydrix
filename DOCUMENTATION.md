@@ -847,7 +847,9 @@ When you have a working `hydrix-config` on one machine and want to bring a secon
 │   ├── starship.nix             # Prompt configuration
 │   ├── vim.nix                  # Editor configuration
 │   ├── firefox.nix              # Host Firefox toggle and user-agent
-│   └── obsidian.nix             # Host Obsidian toggle and vault paths
+│   ├── obsidian.nix             # Host Obsidian toggle and vault paths
+│   ├── repos.nix                # Git repos, declared once (host clones, git VM, VM views)
+│   └── vms.nix                  # Per-VM settings shared by every machine (byName)
 ├── profiles/                    # Graphical VM customizations (overlay on Hydrix base)
 │   ├── browsing/
 │   │   ├── meta.nix             # CID, bridge, subnet, workspace, label, focusBorder
@@ -861,7 +863,7 @@ When you have a working `hydrix-config` on one machine and want to bring a secon
 │   ├── router/default.nix       # Router: DNS servers, firewall, extra packages
 │   ├── builder/default.nix      # Builder: lockdown-mode nix build settings
 │   ├── files/default.nix        # Files VM: accessFrom list, storage size
-│   ├── gitsync/default.nix      # Gitsync: repo paths and remote URLs
+│   ├── gitsync/default.nix      # Git VM: enables hydrix.gitsync.agent (repos: modules/repos.nix)
 │   ├── hostsync/default.nix     # Hostsync: inbox path
 │   ├── vault/default.nix        # Vault: KeePassXC database path
 │   └── usb-sandbox/default.nix  # USB sandbox settings
@@ -877,7 +879,7 @@ When you have a working `hydrix-config` on one machine and want to bring a secon
 ├── secrets/                     # sops-encrypted credentials
 │   ├── .sops.yaml               # Recipient list (age keys per machine + personal key)
 │   ├── wifi.yaml                # WiFi credentials (encrypted)
-│   └── github.yaml              # GitHub SSH key (encrypted)
+│   └── github.yaml              # GitHub SSH key for the git VM only (encrypted)
 └── vpn/
     └── mullvad.nix              # Per-bridge Mullvad exit node mapping
 ```
@@ -1287,7 +1289,9 @@ them.
 `/var/lib/microvms/<name>/current` (the image `microvm@<name>` boots). `rebuild -a` also
 runs `shard -b` on every infra VM that has been built on the machine before, and every
 `rebuild` lists running VMs whose `current` differs from the image they booted. Nothing is
-restarted automatically. A fresh install builds all infra VMs once (`hydrix-firstboot-vms`),
+restarted automatically. The installer prebuilds the router, router-stable and builder (required)
+and the git VM (optional), so a lockdown first boot needs no network for them; a fresh install
+then builds or links all infra VMs once (`hydrix-firstboot-vms`),
 and autostart goes through `hydrix-microvm-autostart-<name>`.
 
 A **coupled** VM is placed in `config.microvm.vms`: the host build includes its runner and
