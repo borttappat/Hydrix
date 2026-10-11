@@ -223,6 +223,8 @@ in {
         | ${pkgs.gnugrep}/bin/grep -iE "data.control|data_device|primary.selection|primary_selection" \
         || echo "(none found -- wayland-info unavailable or waypipe isn't forwarding these globals)"
       echo ""
+      echo "Note: the host runs this VM under a Wayland security context, so"
+      echo "data-control is normally absent and the watchers below exit at once."
       echo "Note: only data-control-protocol changes (below) are passively"
       echo "observable by a bystander process like this one. Regular Ctrl+C/"
       echo "Ctrl+V (wl_data_device) is only ever pushed to whichever client"

@@ -16,6 +16,8 @@
 #   VM:   waypipe --vsock --socket PORT server  (connects out to host CID 2 on PORT)
 #   The host starts listening first, then sends waypipe-reconnect on vsock:14509
 #   so the VM dials in. The listener does not check the peer CID.
+#   The client runs with --secctx hydrix-<registry key>: Hyprland offers the VM's
+#   applications only its unprivileged protocol whitelist.
 #   No socat needed - waypipe speaks vsock natively.
 #
 {
@@ -73,6 +75,10 @@
       exit 1
     fi
 
+    # Registry key (browsing, pentest-task1, ...): the VM's identity towards Hyprland.
+    KEY=$(${pkgs.jq}/bin/jq -r --arg v "$VM" \
+      'to_entries[] | select(.value.vmName == $v) | .key' "${VM_REGISTRY}" | head -1)
+
     # Per-VM port: CID 106 → 14606, CID 103 → 14603, etc.
     PORT=$((14600 + CID - 100))
 
@@ -115,8 +121,12 @@
       _t_cycle_start=$(date +%s.%N)
       echo "[timing] cycle $_cycle start: $(date +%H:%M:%S.%N)"
 
-      # 1. Start host waypipe listener in the background.
-      ${pkgs.waypipe}/bin/waypipe --vsock --socket "$PORT" --compress none --threads 4 --video h264,sw client &
+      # 1. Start host waypipe listener in the background. --secctx makes Hyprland treat the
+      #    VM's applications as sandboxed: no screencopy, data-control, virtual keyboard,
+      #    input-method, layer-shell or foreign-toplevel, only ordinary window protocols and
+      #    the regular clipboard (filtered by hypr-clip-guard).
+      ${pkgs.waypipe}/bin/waypipe --vsock --socket "$PORT" --compress none --threads 4 --video h264,sw \
+        --secctx "hydrix-$KEY" client &
       WAYPIPE_PID=$!
 
       # 2. Poll until host vsock socket is actually open - no blind sleep.
