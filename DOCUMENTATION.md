@@ -1289,9 +1289,10 @@ them.
 `/var/lib/microvms/<name>/current` (the image `microvm@<name>` boots). `rebuild -a` also
 runs `shard -b` on every infra VM that has been built on the machine before, and every
 `rebuild` lists running VMs whose `current` differs from the image they booted. Nothing is
-restarted automatically. The installer prebuilds the router, router-stable and builder (required)
-and the git VM (optional), so a lockdown first boot needs no network for them; a fresh install
-then builds or links all infra VMs once (`hydrix-firstboot-vms`),
+restarted automatically. A fresh install builds or links every enabled infra VM, coupled VM and
+autostart VM once (`hydrix-firstboot-vms`; the list is `hydrix.microvmHost.firstbootVms`). The
+installer prebuilds that same list while the live system is online (router, router-stable and
+builder required, the rest best-effort), so a lockdown first boot only links them from the store,
 and autostart goes through `hydrix-microvm-autostart-<name>`.
 
 A **coupled** VM is placed in `config.microvm.vms`: the host build includes its runner and

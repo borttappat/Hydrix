@@ -76,6 +76,8 @@
   decoupledVMs = lib.filterAttrs (name: vmCfg: !(isCoupled name vmCfg)) enabledVMs;
   decoupledAutostartVMs = lib.filterAttrs (_: v: v.autostart) decoupledVMs;
   infraVMs = lib.filterAttrs (name: _: vmClass name == "infra") enabledVMs;
+  # Built and linked once on a fresh install (hydrix-firstboot-vms, prebuilt by the installer).
+  firstbootVMs = coupledVMs // infraVMs // decoupledAutostartVMs;
 
   # Filter VMs that have any secrets to provision
   vmsWithSecrets = lib.filterAttrs (_: v: v.enable && v.secrets != []) allVms;
@@ -233,6 +235,8 @@ in {
   imports = [./vm-elastic.nix];
 
   config = lib.mkMerge [
+    {hydrix.microvmHost.firstbootVms = lib.attrNames firstbootVMs;}
+
     # byName.<registry name> applies to this machine's VM of that name.
     (let
       registry = config.hydrix.networking.vmRegistry;
@@ -794,7 +798,7 @@ in {
                     fi
                   ''}
                 '')
-                (coupledVMs // infraVMs // decoupledAutostartVMs))}
+                firstbootVMs)}
 
               mkdir -p /var/lib/hydrix
               touch /var/lib/hydrix/.firstboot-vms-done

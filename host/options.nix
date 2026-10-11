@@ -747,6 +747,17 @@ in {
         };
       };
 
+      firstbootVms = lib.mkOption {
+        type = lib.types.listOf lib.types.str;
+        readOnly = true;
+        description = ''
+          VMs hydrix-firstboot-vms builds and links on a fresh install: every enabled infra
+          VM, coupled VM and autostart VM. Set by the framework; the installer reads it to
+          prebuild the same set while the live system is online, so a lockdown first boot
+          only links them from the store.
+        '';
+      };
+
       byName = lib.mkOption {
         type = lib.types.attrsOf lib.types.deferredModule;
         default = {};

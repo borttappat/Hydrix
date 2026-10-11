@@ -3482,7 +3482,7 @@ EOF
 
     success "NixOS installed"
 
-    # Pre-build essential microVMs (router, router-stable, builder; git VM optional)
+    # Pre-build the first-boot VMs (router, router-stable, builder required; the rest best-effort)
     # If the flake uses a local path: for hydrix that doesn't exist on the live ISO,
     # create a temporary symlink so nix can resolve it during eval.
     local _hydrix_symlink=""
@@ -3525,13 +3525,21 @@ prebuild_microvms() {
         "microvm-builder:Builder VM (lockdown mode builds)"
     )
 
-    # Optional VMs: a failure is not fatal. The git VM is the only way to clone or push
-    # (the host holds no GitHub credential), and the first boot is offline in lockdown, so
-    # prebuilding it lets hydrix-firstboot-vms link it from the store.
-    # Add "microvm-browsing:Browsing VM" here to pre-build during install
-    local optional_vms=(
-        "microvm-gitsync:Git VM (clone, push, pull)"
-    )
+    # Every other VM the first boot sets up (hydrix.microvmHost.firstbootVms: enabled infra,
+    # coupled and autostart VMs, the git VM among them). The first boot is offline in
+    # lockdown, so building them now lets hydrix-firstboot-vms link them from the store. A
+    # failure here is not fatal: the VM can be built later with `shard builder build <vm>`.
+    local optional_vms=() firstboot_vms="" vm
+    firstboot_vms=$(nix eval --raw \
+        "$config_dir#nixosConfigurations.${CONFIG[serial]}.config.hydrix.microvmHost.firstbootVms" \
+        --apply 'builtins.concatStringsSep " "' 2>/dev/null) \
+        || warn "Could not list the first-boot VMs; only the required ones are prebuilt"
+    for vm in $firstboot_vms; do
+        case " ${critical_vms[*]%%:*} " in
+            *" $vm "*) ;;
+            *) optional_vms+=("$vm:$vm") ;;
+        esac
+    done
 
     local critical_failed=()
     local optional_failed=0
