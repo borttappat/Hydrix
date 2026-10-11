@@ -24,14 +24,9 @@
   audioEnabled = config.hydrix.microvm.audio.enable or false;
   notifyForwardEnabled = config.hydrix.microvm.notifyForward.enable or false;
   notifyForwardPort = 14518;
-  # Derive title prefix from vmType (e.g. "browsing"), not storeName/hostname:
-  # vmType is set directly by each profile's own default.nix, independent of the
-  # per-machine-suffixed flake-attribute name (storeName) or any custom hostname
-  # a task slot might set for engagement stealth naming, so it always matches the
-  # registry key Hyprland's windowrules are generated from (see hydrix.networking
-  # .vmRegistry / theming/wm/hyprland/hyprland.nix).
-  titlePrefix = config.hydrix.vmType;
-  titlePrefixArg = "--title-prefix \"[${titlePrefix}] \"";
+  # Name the notification relay reports (informational: the host resolves the VM from its
+  # vsock CID). The window title prefix is set by the host's waypipe client, not here.
+  vmLabel = config.hydrix.vmType;
   # Per-VM waypipe port derived from vsock CID: CID 106 → port 14606
   # Avoids collision when multiple VMs are connected simultaneously.
   # Falls back to 0 (port 14500) in non-microVM contexts (waypipe unused there).
@@ -48,7 +43,7 @@
       import dbus.mainloop.glib
       from gi.repository import GLib
 
-      VM_NAME = "${titlePrefix}"
+      VM_NAME = "${vmLabel}"
       HOST_CID = 2
       HOST_PORT = ${toString notifyForwardPort}
       URGENCY_NAMES = {0: "low", 1: "normal", 2: "critical"}
@@ -343,7 +338,6 @@ in {
           --threads 4 \
           --video h264,sw \
           --display waypipe-0 \
-          ${titlePrefixArg} \
           server -- sleep infinity
       '';
     };
