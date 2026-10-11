@@ -15,7 +15,7 @@
 #   HOST: waypipe --vsock --socket PORT client  (listens on vsock:PORT, forwards to Hyprland)
 #   VM:   waypipe --vsock --socket PORT server  (connects out to host CID 2 on PORT)
 #   The host starts listening first, then sends waypipe-reconnect on vsock:14509
-#   so the VM dials in. The listener does not check the peer CID.
+#   so the VM dials in. The listener accepts only that VM's CID (waypipeHost patch).
 #   The client runs with --secctx hydrix-<registry key> (Hyprland offers the VM's
 #   applications only its unprivileged protocol whitelist) and sets the "[<key>] " window
 #   title prefix itself.
@@ -29,6 +29,12 @@
 }: let
   VM_REGISTRY = "/etc/hydrix/vm-registry.json";
   username = config.hydrix.username;
+
+  # Host-side waypipe: client mode accepts a vsock connection only from the CID given in
+  # --socket CID:port (stock waypipe ignores the CID there and accepts any VM).
+  waypipeHost = pkgs.waypipe.overrideAttrs (old: {
+    patches = (old.patches or []) ++ [./waypipe-vsock-peer-cid.patch];
+  });
 
   # Nix-computed defaults for vm-select theming (mirrors vault-pick / wofi-launcher)
   vmSelectFontFamily = config.hydrix.graphical.font.family;
@@ -117,6 +123,18 @@
     # Loop: maintain the host-side waypipe listener.
     # Correct ordering: start listening FIRST, then tell VM to connect.
     _cycle=0
+    # The listener lives only while its VM runs: however the VM stops (shard -S, a shutdown
+    # inside the VM, a crash), the watcher ends this script and, through the trap, waypipe.
+    # systemd keeps the invocation symlink exactly while the unit runs (no D-Bus call).
+    (
+      exec {tick}<> <(:)
+      while [[ -L "/run/systemd/units/invocation:microvm@$VM.service" ]]; do
+        read -rt 5 -u "$tick" || true
+      done
+      echo "$VM stopped; closing its waypipe listener"
+      kill -TERM $$
+    ) &
+
     while true; do
       _cycle=$((_cycle + 1))
       _t_cycle_start=$(date +%s.%N)
@@ -128,7 +146,8 @@
       #    the regular clipboard (filtered by hypr-clip-guard). --title-prefix is applied
       #    here, not in the VM: window rules, borders and clipboard groups key on "[<key>] ",
       #    so the VM cannot drop it or claim another VM's.
-      ${pkgs.waypipe}/bin/waypipe --vsock --socket "$PORT" --compress none --threads 4 --video h264,sw \
+      #    --socket CID:PORT: only this VM may connect (patched waypipe, waypipeHost).
+      ${waypipeHost}/bin/waypipe --vsock --socket "$CID:$PORT" --compress none --threads 4 --video h264,sw \
         --secctx "hydrix-$KEY" --title-prefix "[$KEY] " client &
       WAYPIPE_PID=$!
 
@@ -748,7 +767,7 @@ in
       vmSelect
       vmPushDisplayMode
       exitWayland
-      pkgs.waypipe
+      waypipeHost
       pkgs.socat
       pkgs.cliphist
       pkgs.wl-clipboard

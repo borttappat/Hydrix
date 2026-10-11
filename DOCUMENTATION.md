@@ -2352,7 +2352,7 @@ hydrix.vmThemeSync = {
 };
 ```
 
-**Window detection:** The daemon identifies VM windows by title prefix `[<vmtype>]` (e.g., `[browsing] firefox`).
+**Window detection:** The daemon identifies VM windows by title prefix `[<registry key>]` (e.g., `[browsing] firefox`), which the host's waypipe client sets.
 
 #### `focusOverrideColor` - Legacy Option
 
@@ -4143,13 +4143,31 @@ VM apps appear as individual windows on the host desktop with no visible border 
 **Architecture:**
 
 ```
-VM side (waypipe server):                   Host side (waypipe client):
-  App -> WAYLAND_DISPLAY=waypipe-0             waypipe --vsock --socket <PORT> client
-  waypipe --vsock --socket <PORT> server        ↑ listens; VM connects to this
-    -> connects to host vsock:<PORT>           forwards to $WAYLAND_DISPLAY
+VM side (waypipe server):                   Host side (waypipe client, patched):
+  App -> WAYLAND_DISPLAY=waypipe-0             waypipe --vsock --socket <CID>:<PORT> \
+  waypipe --vsock --socket <PORT> server          --secctx hydrix-<key> --title-prefix "[<key>] " client
+    -> connects to host vsock:<PORT>           ↑ listens; only that VM's CID is accepted
 ```
 
 The VM's waypipe server connects *out* to the host (VM→HOST vsock works because `vhost_vsock` is loaded on the host). The host's waypipe client listens on a per-VM vsock port.
+
+**The host decides a VM's identity and rights, never the VM** (`<key>` is the VM's registry name:
+`browsing`, `pentest`, `pentest-task1`, ...):
+- `--secctx hydrix-<key>`: Hyprland treats the VM's applications as sandboxed (Wayland security
+  context) and offers them only its unprivileged protocols: windows, input, the regular clipboard,
+  dmabuf. No screencopy, data-control, virtual keyboard/pointer, input-method, layer-shell, gamma or
+  foreign-toplevel, so a VM cannot capture the screen, read the clipboard in the background or
+  type into host windows.
+- `--title-prefix "[<key>] "`: set on the host side, so a VM cannot omit it or claim another VM's.
+  Window rules, borders, focus mode and clipboard groups key on it.
+- `--socket <CID>:<PORT>`: stock waypipe ignores the CID in client mode and accepts any VM; the host
+  builds waypipe with `theming/wm/hyprland/waypipe-vsock-peer-cid.patch`, which drops (and logs
+  `Rejected vsock connection from CID ...`) any connection from another VM's CID. VMs keep the stock
+  waypipe.
+- Inside a VM, `wl-copy`/`wl-paste` have no data-control and fall back to a small focus window
+  (it stays empty when clip-guard blocks the read).
+
+Audit and reasoning: hydrix-config `investigations/vm-attack-surface/waypipe-2026-10-11.md`.
 
 **Session lifecycle:**
 
@@ -4194,7 +4212,7 @@ Runs as root because starting/stopping system services requires it. STATUS retur
 **`waypipe-vsock.service`** - runs as the user, started on-demand by display-mode. Connects outward to the host (CID 2) on the per-VM waypipe port (`14600 + CID - 100`). Key details:
 - `ExecStartPre`: creates `/run/user/1000/` and removes any stale `waypipe-0` socket from a previous session
 - `--display waypipe-0`: creates the Wayland proxy socket that apps inside the VM connect to via `WAYLAND_DISPLAY=waypipe-0`
-- `--title-prefix "[vmname] "`: derived at build time from `hydrix.vmType` (e.g. `[browsing] `), **not** from the VM's hostname/`storeName` - those now carry the per-machine serial suffix (`microvm-browsing-<serial>`, see [§ VM Naming and Machine Identity](#vm-naming-and-machine-identity)), which would break the title match below if used directly. `vmType` is set independently by each profile's own `default.nix`, so it stays a clean, machine-independent name (`browsing`, `pentest`, ...) regardless of the per-machine flake-attribute name. This prefix is how the host compositor routes VM windows to the correct workspace via `for_window` rules
+- No `--title-prefix`: the host's waypipe client sets it (see Architecture above)
 - `Restart=always`, `RestartSec=5s`: self-heals if the tunnel drops
 
 **`waypipe-launch.service`** - runs as the user, listens on vsock:14508. Receives one-line app launch commands from the host. On receipt:
@@ -4205,11 +4223,12 @@ Runs as root because starting/stopping system services requires it. STATUS retur
 ### waypipe - Host-Side Scripts
 
 **`waypipe-connect <vm-name>`** - establishes and maintains the host-side tunnel:
-1. Looks up the VM's CID from `/etc/hydrix/vm-registry.json`
+1. Looks up the VM's CID and registry key from `/etc/hydrix/vm-registry.json`
 2. Kills any stale waypipe process on the per-VM port
-3. Starts `waypipe --vsock --socket PORT client` (listening for VM's outbound connection)
-4. After 1s (background), pushes `waypipe` mode to the VM via vsock:14509
-5. Restart loop: if waypipe exits (VM disconnect/restart), restarts it automatically - requires `waypipe client || true` so the `set -euo pipefail` wrapper does not exit on non-zero waypipe exit
+3. Starts the patched `waypipe --vsock --socket CID:PORT --secctx hydrix-<key> --title-prefix "[<key>] " client` (listening for that VM's outbound connection only)
+4. Sends `waypipe-reconnect` to the VM via vsock:14509 and waits for `STATUS` to confirm the tunnel
+5. Restart loop: if waypipe exits, restarts it automatically - requires `waypipe client || true` so the `set -euo pipefail` wrapper does not exit on non-zero waypipe exit
+6. A watcher ends the script, and with it the listener, as soon as `microvm@<vm>` stops, however it stopped (`shard -S`, a shutdown inside the VM, a crash). Changes to these flags apply when the listener restarts: `shard -R <vm>`
 
 **`hypr-ws-app <command>`** - workspace-aware app launcher:
 1. Detects focused workspace via `hyprctl activeworkspace -j`
@@ -4222,15 +4241,14 @@ Runs as root because starting/stopping system services requires it. STATUS retur
 
 ### waypipe - Window Routing
 
-VM windows are routed to the correct workspace by the compositor via title-prefix matching. The title prefix is set by `waypipe --title-prefix "[browsing] "` in `waypipe-vsock.service`. Compositor config:
+VM windows are routed to the correct workspace by the compositor via title-prefix matching. The title prefix is set by the host's waypipe client (`--title-prefix "[<registry key>] "`, `waypipe-connect`), so task slots carry their own key (`[pentest-task1] `). Compositor config:
 
-```nix
-# windowrulev2 in modules/hyprland.nix
-windowrulev2 = [
-  "workspace 3, title:^\[browsing\]"
-  "workspace 2, title:^\[pentest\]"
-  # etc - generated from vm-registry at build time
-];
+```
+# generated by Hydrix theming/wm/hyprland/hyprland.nix from the VM registry
+windowrule = workspace 3, match:title ^\[browsing\]
+windowrule = workspace 2, match:title ^\[pentest\]
+windowrule = workspace 2, match:title ^\[pentest-task1\]
+# etc
 ```
 
 Rules are generated at build time from `vm-registry.json` so adding a new profile VM automatically adds the corresponding window routing rule after a rebuild.
@@ -4720,7 +4738,7 @@ The `hypr-clip-guard` Hyprland C++ plugin hooks all clipboard delivery methods i
 | VM-A → VM-B, bridge armed | **Allowed once** (`Mod+Shift+P`, see One-Shot Cross-VM Bridge below) |
 | microVM ↔ libvirt VM | **Blocked** (libvirt VMs are their own group, see below) |
 
-"Host" means any window without a `[vm-name]` title prefix. VM group identity comes from the waypipe `--title-prefix "[vm-name] "` convention - the plugin extracts the group from the window title, falling back to PID/PPID lineage for windowless clients (e.g. `wl-paste` through waypipe).
+A VM's group is its registry key (`browsing`, `pentest-task1`, ...), read from the client's process: every VM application reaches Hyprland through that VM's host waypipe client, whose command line (`--secctx hydrix-<key>`, set by `waypipe-connect`) names the group. Nothing the VM sends decides it, and it holds for windowless clients too (e.g. `wl-paste` through waypipe). Each task slot is its own group, isolated from pentest and the other slots. "Host" means any other client; for those the plugin still uses the window title (a host window has no `[vm-name]` prefix), falling back to PID/PPID lineage.
 
 **Libvirt VMs (virt-manager/virt-viewer):** these have no waypipe title prefix to tag them with, since libvirt controls the window title, not Hydrix. Without special handling they'd fall through to the untagged "host" default and become an unrestricted bridge between otherwise isolated microVM groups, since any group can always reach "host" and "host" can always reach whatever's currently focused. Instead, `classifyWindow()` checks window **class** first: any window whose class contains `virt-manager`, `virt-viewer`, or `remote-viewer` is tagged into its own `"libvirt"` group before falling back to the title-prefix check, so it's isolated from every microVM group exactly like microVM groups are isolated from each other. No changes to the allow/block policy itself were needed, correct tagging alone was sufficient.
 

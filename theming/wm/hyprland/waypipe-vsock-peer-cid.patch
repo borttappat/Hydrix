@@ -1,0 +1,76 @@
+--- a/src/main.rs
++++ b/src/main.rs
+@@ -1555,6 +1555,11 @@
+     let link_fd = loop {
+         let res = socket::accept(channel_socket.as_raw_fd());
+         match res {
++            Ok(conn_fd) if !vsock_peer_allowed(conn_fd, socket_path) => {
++                // SAFETY: freshly accepted file descriptor, closed right here
++                drop(unsafe { OwnedFd::from_raw_fd(conn_fd) });
++                continue;
++            }
+             Ok(conn_fd) => {
+                 break unsafe {
+                     // SAFETY: freshly created file descriptor, exclusively captured here
+@@ -1592,6 +1597,7 @@
+ /** Inner function for `run_client_multi`, used to ensure its cleanup always runs */
+ fn run_client_inner(
+     channel_socket: &OwnedFd,
++    socket_path: &SocketSpec,
+     command: Option<&[&OsStr]>,
+     conn_args: &[&OsStr],
+     wayland_display: &OsStr,
+@@ -1711,6 +1717,10 @@
+ 
+         let res = socket::accept(channel_socket.as_raw_fd());
+         match res {
++            Ok(conn_fd) if !vsock_peer_allowed(conn_fd, socket_path) => {
++                // SAFETY: freshly accepted file descriptor, closed right here
++                drop(unsafe { OwnedFd::from_raw_fd(conn_fd) });
++            }
+             Ok(conn_fd) => {
+                 // note: since no reconnection is done, we do not need to
+                 // keep track of a subprocess
+@@ -1742,6 +1752,34 @@
+     Ok(cmd_child)
+ }
+ 
++/** Client mode with `--vsock --socket CID:port`: accept connections only from that CID.
++ * Without an explicit CID (the spec defaults to VMADDR_CID_HOST) any peer is accepted. */
++#[cfg(target_os = "linux")]
++fn vsock_peer_allowed(fd: RawFd, spec: &SocketSpec) -> bool {
++    let SocketSpec::VSock(v) = spec else {
++        return true;
++    };
++    if v.cid == VMADDR_CID_HOST {
++        return true;
++    }
++    match socket::getpeername::<socket::VsockAddr>(fd) {
++        Ok(addr) if addr.cid() == v.cid => true,
++        Ok(addr) => {
++            error!(
++                "Rejected vsock connection from CID {}, expected {}",
++                addr.cid(),
++                v.cid
++            );
++            false
++        }
++        Err(_) => false,
++    }
++}
++#[cfg(not(target_os = "linux"))]
++fn vsock_peer_allowed(_fd: RawFd, _spec: &SocketSpec) -> bool {
++    true
++}
++
+ /** `waypipe-client` logic for the multiple connection case */
+ fn run_client_multi(
+     command: Option<&[&std::ffi::OsStr]>,
+@@ -1769,6 +1807,7 @@
+     let mut connections = BTreeMap::new();
+     let cmd_child = run_client_inner(
+         &channel_socket,
++        socket_path,
+         command,
+         &conn_args,
+         wayland_display,
