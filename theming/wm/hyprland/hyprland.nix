@@ -29,7 +29,7 @@
 
   clipGuardPlugin = pkgs.hyprlandPlugins.mkHyprlandPlugin {
     pluginName = "hypr-clip-guard";
-    version = "0.3.0";
+    version = "0.4.0";
     src = ./plugins/hypr-clip-guard;
     nativeBuildInputs = [pkgs.cmake];
     meta.description = "VM clipboard isolation for Hyprland";

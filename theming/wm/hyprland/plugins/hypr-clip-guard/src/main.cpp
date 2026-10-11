@@ -18,6 +18,7 @@
 #include <atomic>
 #include <array>
 #include <cstdio>
+#include <cctype>
 #include <ctime>
 #include <sys/time.h>
 
@@ -136,7 +137,14 @@ static bool isLibvirtViewerClass(const std::string& cls) {
         || cls.find("remote-viewer") != std::string::npos;
 }
 
+static pid_t getPid(wl_client* cl);
+static wl_client* clientFromWindow(PHLWINDOW w);
+static std::string vmGroupFromProcess(pid_t pid);
+
 static std::string classifyWindow(PHLWINDOW w) {
+    // A VM window's group comes from its host waypipe process; its title is VM-controlled.
+    if (auto g = vmGroupFromProcess(getPid(clientFromWindow(w))); !g.empty())
+        return g;
     if (isLibvirtViewerClass(w->m_class))
         return "libvirt";
     return extractVmGroup(w->m_title);
@@ -168,6 +176,49 @@ static pid_t getPpid(pid_t pid) {
     }
     fclose(f);
     return ppid;
+}
+
+// VM applications reach Hyprland through the host's per-VM waypipe client, which the host
+// starts with --secctx hydrix-<key> (theming/wm/hyprland/waypipe.nix). That process, not
+// anything the VM sends, names the group, so it holds for windowless clients too.
+static std::string vmGroupFromProcess(pid_t pid) {
+    if (pid <= 0)
+        return "";
+    char path[64];
+    snprintf(path, sizeof(path), "/proc/%d/cmdline", pid);
+    FILE* f = fopen(path, "rb");
+    if (!f)
+        return "";
+    std::string cmdline;
+    char        buf[4096];
+    size_t      n;
+    while ((n = fread(buf, 1, sizeof(buf), f)) > 0 && cmdline.size() < 65536)
+        cmdline.append(buf, n);
+    fclose(f);
+
+    std::string prev;
+    size_t      start = 0;
+    while (start < cmdline.size()) {
+        size_t      end = cmdline.find('\0', start);
+        std::string arg = cmdline.substr(start, end == std::string::npos ? std::string::npos : end - start);
+        std::string value;
+        if (prev == "--secctx")
+            value = arg;
+        else if (arg.rfind("--secctx=", 0) == 0)
+            value = arg.substr(9);
+        if (value.rfind("hydrix-", 0) == 0 && value.size() > 7) {
+            std::string key = value.substr(7);
+            for (char c : key)
+                if (!(std::islower((unsigned char)c) || std::isdigit((unsigned char)c) || c == '-'))
+                    return "";
+            return key;
+        }
+        prev = arg;
+        if (end == std::string::npos)
+            break;
+        start = end + 1;
+    }
+    return "";
 }
 
 static wl_client* clientFromWindow(PHLWINDOW w) {
@@ -277,6 +328,11 @@ static std::string groupForClient(wl_client* cl) {
     if (it != s_clientGroup.end())
         return it->second;
     pid_t pid = getPid(cl);
+    if (auto g = vmGroupFromProcess(pid); !g.empty()) {
+        s_clientGroup[cl] = g;
+        trackClientForCleanup(cl, 0, g);
+        return g;
+    }
     if (pid > 0) {
         auto pit = s_pidGroup.find(pid);
         if (pit != s_pidGroup.end()) {
@@ -306,6 +362,11 @@ static std::string groupForRecipient(wl_client* cl) {
     if (it != s_clientGroup.end())
         return it->second;
     pid_t pid = getPid(cl);
+    if (auto g = vmGroupFromProcess(pid); !g.empty()) {
+        s_clientGroup[cl] = g;
+        trackClientForCleanup(cl, 0, g);
+        return g;
+    }
     if (pid > 0) {
         auto pit = s_pidGroup.find(pid);
         if (pit != s_pidGroup.end()) {
@@ -830,7 +891,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
         .fn    = handleHyprctl,
     });
 
-    return {"hypr-clip-guard", "VM clipboard isolation", "hydrix", "0.3.0"};
+    return {"hypr-clip-guard", "VM clipboard isolation", "hydrix", "0.4.0"};
 }
 
 APICALL EXPORT void PLUGIN_EXIT() {
