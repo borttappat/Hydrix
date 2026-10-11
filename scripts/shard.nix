@@ -1813,11 +1813,12 @@
                       continue
                   fi
                   echo ""
+                  # Everything is in the store now, so rebuild applies it without network.
                   log "To apply:"
                   if [[ "$current_spec" == "lockdown" ]]; then
-                      echo "  sudo nixos-rebuild switch --flake ''${FLAKE_DIR}#$(detect_host_config)"
+                      echo "  rebuild"
                   else
-                      echo "  sudo nixos-rebuild switch --flake ''${FLAKE_DIR}#$(detect_host_config) --specialisation ''${current_spec}"
+                      echo "  rebuild ''${current_spec}"
                   fi
               else
                   local vm_name
