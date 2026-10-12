@@ -4170,6 +4170,12 @@ The VM's waypipe server connects *out* to the host (VM→HOST vsock works becaus
   builds waypipe with `theming/wm/hyprland/waypipe-vsock-peer-cid.patch`, which drops (and logs
   `Rejected vsock connection from CID ...`) any connection from another VM's CID. VMs keep the stock
   waypipe.
+- The host client runs sandboxed, as the transient user unit `waypipe-client-<key>`
+  (`systemd-run` from `waypipe-connect`): no view of `$HOME` or `/run/user` except the compositor
+  socket, a private `/tmp` (its security-context socket), a read-only system, no network (Unix
+  and vsock sockets only), a syscall filter and no writable-executable memory. It still decodes
+  the VM's h264 stream (kept for CPU), so this sandbox is what contains a decoder bug.
+  `systemd-analyze --user security waypipe-client-<key>` shows the exposure score.
 - Inside a VM, `wl-copy`/`wl-paste` have no data-control and fall back to a small focus window
   (it stays empty when clip-guard blocks the read).
 - VM windows cannot fullscreen, maximize or focus themselves, nor grab host keybinds
