@@ -58,6 +58,19 @@
     );
   vmSelectWidth = toString config.hydrix.graphical.ui.rofiWidth;
 
+  # Ends waypipe-connect (pid $2) once microvm@$1 stops. systemd keeps the invocation
+  # symlink exactly while the unit runs; read -t on an idle pipe is a fork-free sleep.
+  waypipeConnectWatch = pkgs.writeShellScript "waypipe-connect-watch" ''
+    exec {tick}<> <(:)
+    while [[ -L "/run/systemd/units/invocation:microvm@$1.service" ]] && kill -0 "$2" 2>/dev/null; do
+      read -rt 5 -u "$tick" || true
+    done
+    if kill -0 "$2" 2>/dev/null; then
+      echo "$1 stopped; closing its waypipe listener"
+      kill -TERM "$2"
+    fi
+  '';
+
   # ── waypipe-connect ────────────────────────────────────────────────────────
   waypipeConnect = pkgs.writeShellScriptBin "waypipe-connect" ''
     set -euo pipefail
@@ -126,14 +139,8 @@
     # The listener lives only while its VM runs: however the VM stops (shard -S, a shutdown
     # inside the VM, a crash), the watcher ends this script and, through the trap, waypipe.
     # systemd keeps the invocation symlink exactly while the unit runs (no D-Bus call).
-    (
-      exec {tick}<> <(:)
-      while [[ -L "/run/systemd/units/invocation:microvm@$VM.service" ]]; do
-        read -rt 5 -u "$tick" || true
-      done
-      echo "$VM stopped; closing its waypipe listener"
-      kill -TERM $$
-    ) &
+    # A separate script, so it never shows up as a second "waypipe-connect <vm>".
+    ${waypipeConnectWatch} "$VM" "$$" &
 
     while true; do
       _cycle=$((_cycle + 1))
