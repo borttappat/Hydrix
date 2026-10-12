@@ -1293,7 +1293,11 @@ restarted automatically. A fresh install builds or links every enabled infra VM,
 autostart VM once (`hydrix-firstboot-vms`; the list is `hydrix.microvmHost.firstbootVms`). The
 installer prebuilds that same list while the live system is online (router, router-stable and
 builder required, the rest best-effort), so a lockdown first boot only links them from the store,
-and autostart goes through `hydrix-microvm-autostart-<name>`.
+and autostart goes through `hydrix-microvm-autostart-<name>`. A VM that shuts itself down (`poweroff`, and also
+`reboot`, since QEMU runs with `-no-reboot`) stays off; only a crash restarts it automatically
+(`microvm@` runs with `Restart=on-failure`). Restart a VM with `shard -R <vm>`. Both the built runner
+(`current`) and the one a running VM booted from (`booted`) are garbage-collection roots
+(`/nix/var/nix/gcroots/microvm/`), so a rebuild plus a GC never deletes a running VM's runner.
 
 A **coupled** VM is placed in `config.microvm.vms`: the host build includes its runner and
 activation relinks its `current`. Each VM's class (infra, profile, or task) is populated

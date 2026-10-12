@@ -443,6 +443,16 @@ in {
         # stay root:root.
         ++ (lib.mapAttrsToList (name: _: "z /var/lib/microvms/${name} 0755 microvm kvm -")
           enabledVMs)
+        # GC roots for every VM's runners. `shard -b` roots `current` through its out-link,
+        # but nothing rooted `booted`: once a running VM was rebuilt, a garbage collection
+        # could delete the runner it still runs from (and its microvm-shutdown). Nix follows
+        # one symlink from a root, so these keep both alive.
+        ++ ["d /nix/var/nix/gcroots/microvm 0755 root root -"]
+        ++ lib.concatLists (lib.mapAttrsToList (name: _: [
+            "L+ /nix/var/nix/gcroots/microvm/${name} - - - - /var/lib/microvms/${name}/current"
+            "L+ /nix/var/nix/gcroots/microvm/booted-${name} - - - - /var/lib/microvms/${name}/booted"
+          ])
+          enabledVMs)
         # Parent dir per enabled VM - virtiofsd needs this path to exist at start.
         ++ (lib.mapAttrsToList (name: _: "d /run/hydrix-secrets/${name} 0700 root root -")
           (lib.filterAttrs (_: v: v.enable) cfg.vms))
@@ -502,6 +512,19 @@ in {
               chmod 755 /var/lib/microvms/${name}/config
             '';
           }) (lib.filterAttrs (_: v: v.enable) cfg.vms)))
+
+        # A VM that powers itself off stays off: QEMU runs with -no-reboot and exits 0 on a
+        # guest poweroff (and reboot), which upstream's Restart=always turned into a restart
+        # 5 seconds later. A crash (non-zero exit) still restarts it. Restart a VM with
+        # `shard -R`.
+        # "-": a stop command that cannot run (no booted runner) must not count as a failure;
+        # systemd then sends QEMU SIGTERM, and after a guest poweroff QEMU has already exited.
+        {
+          "microvm@".serviceConfig = {
+            Restart = lib.mkForce "on-failure";
+            ExecStop = lib.mkForce "-/var/lib/microvms/%i/booted/bin/microvm-shutdown";
+          };
+        }
 
         # Router MicroVM needs to run as root for VFIO PCI passthrough.
         # asDropin: these extend upstream's microvm@.service template; as full
