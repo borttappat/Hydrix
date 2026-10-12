@@ -58,6 +58,30 @@
     );
   vmSelectWidth = toString config.hydrix.graphical.ui.rofiWidth;
 
+  # The host waypipe client parses everything a VM sends (Wayland messages, compressed buffers,
+  # an h264 stream decoded by libavcodec), so it runs as a transient user service with no view
+  # of $HOME or /run/user except the compositor socket, a private /tmp (its security-context
+  # socket lives there), a read-only system, no network (only Unix and vsock sockets) and a
+  # syscall filter. /dev/dri stays visible for dmabuf.
+  waypipeSandbox = lib.concatMapStringsSep " " (p: "-p ${lib.escapeShellArg p}") [
+    "ProtectSystem=strict"
+    "ProtectHome=tmpfs"
+    "PrivateTmp=yes"
+    "NoNewPrivileges=yes"
+    "RestrictAddressFamilies=AF_UNIX AF_VSOCK"
+    "RestrictNamespaces=yes"
+    "RestrictRealtime=yes"
+    "RestrictSUIDSGID=yes"
+    "LockPersonality=yes"
+    "MemoryDenyWriteExecute=yes"
+    "SystemCallArchitectures=native"
+    "SystemCallFilter=@system-service"
+    "ProtectKernelTunables=yes"
+    "ProtectKernelModules=yes"
+    "ProtectControlGroups=yes"
+    "ProtectClock=yes"
+  ];
+
   # Ends waypipe-connect (pid $2) once microvm@$1 stops. systemd keeps the invocation
   # symlink exactly while the unit runs; read -t on an idle pipe is a fork-free sleep.
   waypipeConnectWatch = pkgs.writeShellScript "waypipe-connect-watch" ''
@@ -118,9 +142,14 @@
 
     echo "Connecting waypipe for $VM (CID $CID, port $PORT)..."
 
+    # The host waypipe client runs sandboxed as this transient user unit (waypipeSandbox).
+    UNIT="waypipe-client-$KEY"
+    WAYLAND_SOCK="''${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/''${WAYLAND_DISPLAY:-wayland-1}"
+
     WAYPIPE_PID=""
     cleanup() {
       [[ -n "''${WAYPIPE_PID:-}" ]] && kill "''${WAYPIPE_PID}" 2>/dev/null || true
+      systemctl --user stop "$UNIT" 2>/dev/null || true
       exit 0
     }
     trap cleanup INT TERM
@@ -154,8 +183,14 @@
       #    here, not in the VM: window rules, borders and clipboard groups key on "[<key>] ",
       #    so the VM cannot drop it or claim another VM's.
       #    --socket CID:PORT: only this VM may connect (patched waypipe, waypipeHost).
-      ${waypipeHost}/bin/waypipe --vsock --socket "$CID:$PORT" --compress none --threads 4 --video h264,sw \
-        --secctx "hydrix-$KEY" --title-prefix "[$KEY] " client &
+      #    Sandboxed unit; its output still reaches this script's log (--pipe).
+      systemctl --user stop "$UNIT" 2>/dev/null || true
+      systemctl --user reset-failed "$UNIT" 2>/dev/null || true
+      systemd-run --user --quiet --collect --pipe --unit="$UNIT" \
+        --setenv=WAYLAND_DISPLAY="$WAYLAND_SOCK" --setenv=XDG_RUNTIME_DIR=/tmp \
+        -p "BindPaths=$WAYLAND_SOCK" ${waypipeSandbox} \
+        ${waypipeHost}/bin/waypipe --vsock --socket "$CID:$PORT" --compress none --threads 4 --video h264,sw \
+        --secctx "hydrix-$KEY" --title-prefix "[$KEY] " client </dev/null &
       WAYPIPE_PID=$!
 
       # 2. Poll until host vsock socket is actually open - no blind sleep.
@@ -173,6 +208,7 @@
       if [[ "$_host_ready" -eq 0 ]]; then
         echo "Host vsock listener on port $PORT did not open (5s); retrying..." >&2
         kill "$WAYPIPE_PID" 2>/dev/null || true
+        systemctl --user stop "$UNIT" 2>/dev/null || true
         WAYPIPE_PID=""
         sleep 1
         continue
