@@ -4151,7 +4151,8 @@ VM apps appear as individual windows on the host desktop with no visible border 
 ```
 VM side (waypipe server):                   Host side (waypipe client, patched):
   App -> WAYLAND_DISPLAY=waypipe-0             waypipe --vsock --socket <CID>:<PORT> \
-  waypipe --vsock --socket <PORT> server          --secctx hydrix-<key> --title-prefix "[<key>] " client
+  waypipe --vsock --socket <PORT> server          --title-prefix "[<key>] " client
+                                                (WAYLAND_DISPLAY = hydrix-secctx socket)
     -> connects to host vsock:<PORT>           ↑ listens; only that VM's CID is accepted
 ```
 
@@ -4159,11 +4160,16 @@ The VM's waypipe server connects *out* to the host (VM→HOST vsock works becaus
 
 **The host decides a VM's identity and rights, never the VM** (`<key>` is the VM's registry name:
 `browsing`, `pentest`, `pentest-task1`, ...):
-- `--secctx hydrix-<key>`: Hyprland treats the VM's applications as sandboxed (Wayland security
-  context) and offers them only its unprivileged protocols: windows, input, the regular clipboard,
-  dmabuf. No screencopy, data-control, virtual keyboard/pointer, input-method, layer-shell, gamma or
-  foreign-toplevel, so a VM cannot capture the screen, read the clipboard in the background or
-  type into host windows.
+- Security context: `hydrix-secctx` (Hydrix `theming/wm/hyprland/secctx/`, Rust), started by
+  `waypipe-connect` outside the sandbox, creates a Wayland security context (app id
+  `hydrix-<key>`) and holds it open; the waypipe client gets only that context's socket
+  (`$XDG_RUNTIME_DIR/hydrix-secctx/<key>.sock`) as `WAYLAND_DISPLAY`, never the compositor
+  socket. Hyprland treats every connection through it as sandboxed and offers only its
+  unprivileged protocols: windows, input, the regular clipboard, dmabuf. No screencopy,
+  data-control, virtual keyboard/pointer, input-method, layer-shell, gamma or foreign-toplevel,
+  for the VM's applications and for the waypipe process itself, so neither a VM nor an exploited
+  host waypipe can capture the screen, read the clipboard in the background or type into host
+  windows.
 - `--title-prefix "[<key>] "`: set on the host side, so a VM cannot omit it or claim another VM's.
   Window rules, borders, focus mode and clipboard groups key on it.
 - `--socket <CID>:<PORT>`: stock waypipe ignores the CID in client mode and accepts any VM; the host
@@ -4242,7 +4248,7 @@ Runs as root because starting/stopping system services requires it. STATUS retur
 **`waypipe-connect <vm-name>`** - establishes and maintains the host-side tunnel:
 1. Looks up the VM's CID and registry key from `/etc/hydrix/vm-registry.json`
 2. Kills any stale waypipe process on the per-VM port
-3. Starts the patched `waypipe --vsock --socket CID:PORT --secctx hydrix-<key> --title-prefix "[<key>] " client` (listening for that VM's outbound connection only)
+3. Starts `hydrix-secctx` (security context for `hydrix-<key>`), then the patched `waypipe --vsock --socket CID:PORT --title-prefix "[<key>] " client` in the sandboxed unit, with only the security-context socket (listening for that VM's outbound connection only)
 4. Sends `waypipe-reconnect` to the VM via vsock:14509 and waits for `STATUS` to confirm the tunnel
 5. Restart loop: if waypipe exits, restarts it automatically - requires `waypipe client || true` so the `set -euo pipefail` wrapper does not exit on non-zero waypipe exit
 6. A watcher ends the script, and with it the listener, as soon as `microvm@<vm>` stops, however it stopped (`shard -S`, a shutdown inside the VM, a crash). Changes to these flags apply when the listener restarts: `shard -R <vm>`
@@ -4755,7 +4761,7 @@ The `hypr-clip-guard` Hyprland C++ plugin hooks all clipboard delivery methods i
 | VM-A → VM-B, bridge armed | **Allowed once** (`Mod+Shift+P`, see One-Shot Cross-VM Bridge below) |
 | microVM ↔ libvirt VM | **Blocked** (libvirt VMs are their own group, see below) |
 
-A VM's group is its registry key (`browsing`, `pentest-task1`, ...), read from the client's process: every VM application reaches Hyprland through that VM's host waypipe client, whose command line (`--secctx hydrix-<key>`, set by `waypipe-connect`) names the group. Nothing the VM sends decides it, and it holds for windowless clients too (e.g. `wl-paste` through waypipe). Each task slot is its own group, isolated from pentest and the other slots. "Host" means any other client; for those the plugin still uses the window title (a host window has no `[vm-name]` prefix), falling back to PID/PPID lineage.
+A VM's group is its registry key (`browsing`, `pentest-task1`, ...), read from the client's process: every VM application reaches Hyprland through that VM's host waypipe client, whose command line (`--title-prefix "[<key>] "`, set by `waypipe-connect`) names the group. Nothing the VM sends decides it, and it holds for windowless clients too (e.g. `wl-paste` through waypipe). Each task slot is its own group, isolated from pentest and the other slots. "Host" means any other client; for those the plugin still uses the window title (a host window has no `[vm-name]` prefix), falling back to PID/PPID lineage.
 
 **Libvirt VMs (virt-manager/virt-viewer):** these have no waypipe title prefix to tag them with, since libvirt controls the window title, not Hydrix. Without special handling they'd fall through to the untagged "host" default and become an unrestricted bridge between otherwise isolated microVM groups, since any group can always reach "host" and "host" can always reach whatever's currently focused. Instead, `classifyWindow()` checks window **class** first: any window whose class contains `virt-manager`, `virt-viewer`, or `remote-viewer` is tagged into its own `"libvirt"` group before falling back to the title-prefix check, so it's isolated from every microVM group exactly like microVM groups are isolated from each other. No changes to the allow/block policy itself were needed, correct tagging alone was sufficient.
 
