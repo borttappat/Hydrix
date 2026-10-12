@@ -29,6 +29,14 @@ in {
   imports = [ ./hyprland.nix ./wofi.nix ./waypipe.nix ];
 
   config = lib.mkIf (cfg.enable && config.hydrix.hyprland.enable) {
+    # hydrix.hyprland.fromUnstable: compositor, plugins and portal from one nixpkgs, so
+    # plugin headers always match the running Hyprland.
+    nixpkgs.overlays = lib.mkIf config.hydrix.hyprland.fromUnstable [
+      (final: prev: {
+        inherit (final.unstable) hyprland hyprlandPlugins xdg-desktop-portal-hyprland;
+      })
+    ];
+
     programs.hyprland = {
       enable = true;
       # Always the XWayland-capable build: it is the one in the binary cache,

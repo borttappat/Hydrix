@@ -1157,6 +1157,19 @@ in {
       '';
     };
 
+    fromUnstable = lib.mkOption {
+      type = lib.types.bool;
+      default = false;
+      description = ''
+        Take Hyprland, its plugin set (hyprlandPlugins: hy3, mkHyprlandPlugin for
+        hypr-clip-guard) and xdg-desktop-portal-hyprland from nixpkgs-unstable instead of
+        the system nixpkgs, as one set so plugins always build against the running
+        compositor. Applied as an overlay, so every `pkgs.hyprland` (hyprctl in scripts)
+        follows. All from the binary cache. For a newer Hyprland than the system channel
+        ships (e.g. crash fixes) without moving the whole system to unstable.
+      '';
+    };
+
     workspaceColors = lib.mkOption {
       type = lib.types.attrsOf lib.types.str;
       default = {};
