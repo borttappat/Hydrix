@@ -626,6 +626,32 @@
       }
 
       # Stop microVM
+      # Ask a VM's windows to close before the VM goes down. Cutting a client off with live
+      # surfaces (Firefox) has crashed Hyprland 0.55 during its teardown (a use-after-free in
+      # wl_client_destroy); closed windows tear down in order. Best effort: a window that
+      # stays open (a close-tabs prompt) does not hold up the stop.
+      vm_windows() {
+          hyprctl clients -j 2>/dev/null | jq -r --arg t "vm-$1" --arg p "[$1] " \
+              '.[] | select(((.tags // []) | map(rtrimstr("*")) | index($t)) or (.title | startswith($p))) | .address'
+      }
+      close_vm_windows() {
+          local vm_name="$1" key addrs addr i
+          [[ -n "''${HYPRLAND_INSTANCE_SIGNATURE:-}" ]] && command -v hyprctl >/dev/null 2>&1 || return 0
+          key=$(jq -r --arg v "$vm_name" 'to_entries[] | select(.value.vmName == $v) | .key' "$VM_REGISTRY" 2>/dev/null | head -1)
+          [[ -n "$key" ]] || return 0
+          addrs=$(vm_windows "$key")
+          [[ -n "$addrs" ]] || return 0
+          log "Closing ''${key} windows..."
+          while IFS= read -r addr; do
+              hyprctl dispatch closewindow "address:$addr" >/dev/null 2>&1 || true
+          done <<< "$addrs"
+          for i in $(seq 1 20); do
+              [[ -z "$(vm_windows "$key")" ]] && return 0
+              sleep 0.25
+          done
+          log_warn "Some ''${key} windows did not close (after ''${i} checks); stopping anyway"
+      }
+
       cmd_stop() {
           local vm_name="$1"
 
@@ -649,6 +675,7 @@
           local start
           start=$(timer_start)
 
+          is_headless "$vm_name" || close_vm_windows "$vm_name"
           sudo systemctl stop "microvm@''${vm_name}.service"
 
           # Wait for service to fully stop
@@ -724,6 +751,7 @@
           fi
 
           if is_running "$vm_name"; then
+              is_headless "$vm_name" || close_vm_windows "$vm_name"
               log "Stopping service..."
               sudo systemctl stop "microvm@''${vm_name}.service"
 
