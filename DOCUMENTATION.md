@@ -1295,7 +1295,9 @@ installer prebuilds that same list while the live system is online (router, rout
 builder required, the rest best-effort), so a lockdown first boot only links them from the store,
 and autostart goes through `hydrix-microvm-autostart-<name>`. A VM that shuts itself down (`poweroff`, and also
 `reboot`, since QEMU runs with `-no-reboot`) stays off; only a crash restarts it automatically
-(`microvm@` runs with `Restart=on-failure`). Restart a VM with `shard -R <vm>`. Both the built runner
+(`microvm@` runs with `Restart=on-failure`). Restart a VM with `shard -R <vm>`. `shard -S`/`-R` first ask the VM's
+windows to close and wait up to 5 seconds: Hyprland 0.55 can crash tearing down a client that is
+cut off with live surfaces (Firefox), and windows that close themselves tear down in order. Both the built runner
 (`current`) and the one a running VM booted from (`booted`) are garbage-collection roots
 (`/nix/var/nix/gcroots/microvm/`), so a rebuild plus a GC never deletes a running VM's runner.
 
