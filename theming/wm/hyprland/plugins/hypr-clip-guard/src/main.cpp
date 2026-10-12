@@ -296,15 +296,15 @@ static void trackClientForCleanup(wl_client* cl, pid_t pid, const std::string& g
 
 static void tagClient(wl_client* cl, const std::string& group) {
     s_clientGroup[cl] = group;
-    if (group != "host") {
-        pid_t pid = getPid(cl);
-        if (pid > 0) {
-            s_pidGroup[pid] = group;
-            trackClientForCleanup(cl, pid, group);
-            pid_t ppid = getPpid(pid);
-            if (ppid > 1)
-                s_pidGroup[ppid] = group;
-        }
+    pid_t pid = group != "host" ? getPid(cl) : 0;
+    // Every cached client gets a destroy listener: a stale entry would hand its group to
+    // the next client allocated at the same address.
+    trackClientForCleanup(cl, pid, group);
+    if (pid > 0) {
+        s_pidGroup[pid] = group;
+        pid_t ppid = getPpid(pid);
+        if (ppid > 1)
+            s_pidGroup[ppid] = group;
     }
 }
 
@@ -922,7 +922,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
         .fn    = handleHyprctl,
     });
 
-    return {"hypr-clip-guard", "VM clipboard isolation", "hydrix", "0.5.1"};
+    return {"hypr-clip-guard", "VM clipboard isolation", "hydrix", "0.5.2"};
 }
 
 APICALL EXPORT void PLUGIN_EXIT() {
