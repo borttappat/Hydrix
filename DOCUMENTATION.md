@@ -4170,6 +4170,11 @@ The VM's waypipe server connects *out* to the host (VM→HOST vsock works becaus
   waypipe.
 - Inside a VM, `wl-copy`/`wl-paste` have no data-control and fall back to a small focus window
   (it stays empty when clip-guard blocks the read).
+- VM windows cannot fullscreen, maximize or focus themselves, nor grab host keybinds
+  (keyboard-shortcuts-inhibit): generated window rules for `[<key>]` titles plus hypr-clip-guard,
+  which identifies VM windows by process (untitled ones too), suppresses those requests and tags
+  them `hydrix-vm` and `vm-<key>` (focus borders use the tag). Your own `Mod+F` still fullscreens
+  a VM window; a VM app's own fullscreen (a video player, F11) does not.
 
 Audit and reasoning: hydrix-config `investigations/vm-attack-surface/waypipe-2026-10-11.md`.
 

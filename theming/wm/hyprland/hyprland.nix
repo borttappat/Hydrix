@@ -29,7 +29,7 @@
 
   clipGuardPlugin = pkgs.hyprlandPlugins.mkHyprlandPlugin {
     pluginName = "hypr-clip-guard";
-    version = "0.4.0";
+    version = "0.5.1";
     src = ./plugins/hypr-clip-guard;
     nativeBuildInputs = [pkgs.cmake];
     meta.description = "VM clipboard isolation for Hyprland";
@@ -50,6 +50,16 @@
       "windowrule = workspace ${toString v.workspace}, match:title ^\\[${key}\\]")
     vmRegistry
   );
+
+  # VM windows cannot fullscreen, maximize or focus themselves, and cannot grab host keybinds.
+  # Titled windows ("[<key>] ", set by the host's waypipe client) are covered from the moment
+  # they open; hypr-clip-guard covers untitled ones by process (suppressed events, hydrix-vm tag).
+  vmKeys = lib.attrNames (lib.filterAttrs (_: v: (v.hasDisplay or true) && v.workspace != null) vmRegistry);
+  vmGuardRules = lib.optionalString (vmKeys != []) ''
+    windowrule = suppress_event fullscreen maximize activate activatefocus fullscreenoutput, match:title ^\[(${lib.concatStringsSep "|" vmKeys})\]
+    windowrule = no_shortcuts_inhibit 1, match:title ^\[(${lib.concatStringsSep "|" vmKeys})\]
+    windowrule = no_shortcuts_inhibit 1, match:tag hydrix-vm
+  '';
 
   workspaceColors = config.hydrix.hyprland.workspaceColors;
   workspaceColorRules = lib.concatStringsSep "\n" (
@@ -91,6 +101,8 @@
     # ── VM window routing (generated from vmRegistry) ─────────────────────────
     ${vmWindowRules}
 
+    # ── VM window restrictions ────────────────────────────────────────────────
+    ${vmGuardRules}
     # ── Per-workspace active border color overrides ───────────────────────────
     ${workspaceColorRules}
 
@@ -449,8 +461,13 @@
         _apply_neutral
         return
       fi
-      title=$(printf '%s' "$aw" | ${pkgs.jq}/bin/jq -r '.title // empty')
-      profile=$(echo "$title" | sed -n 's/^\[\([^]]*\)\].*/\1/p')
+      # A VM window's tag (vm-<key>, set by hypr-clip-guard from its process) wins over the
+      # title, which a VM window may leave empty.
+      profile=$(printf '%s' "$aw" | ${pkgs.jq}/bin/jq -r '[.tags[]? | select(startswith("vm-")) | sub("^vm-"; "") | rtrimstr("*")][0] // empty')
+      if [ -z "$profile" ]; then
+        title=$(printf '%s' "$aw" | ${pkgs.jq}/bin/jq -r '.title // empty')
+        profile=$(echo "$title" | sed -n 's/^\[\([^]]*\)\].*/\1/p')
+      fi
       if [ -n "$profile" ]; then _apply "$(_grad "$(_border_vm "$profile")")"
       else _apply "$(_grad "$(_border_host)")"; fi
     }

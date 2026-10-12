@@ -19,6 +19,7 @@
 #include <array>
 #include <cstdio>
 #include <cctype>
+#include <format>
 #include <ctime>
 #include <sys/time.h>
 
@@ -101,6 +102,7 @@ static std::string jsonEscape(const std::string& s) {
 }
 
 static CHyprSignalListener s_windowOpenListener;
+static CHyprSignalListener s_windowOpenEarlyListener;
 static CHyprSignalListener s_windowTitleListener;
 static CHyprSignalListener s_windowCloseListener;
 
@@ -140,6 +142,8 @@ static bool isLibvirtViewerClass(const std::string& cls) {
 static pid_t getPid(wl_client* cl);
 static wl_client* clientFromWindow(PHLWINDOW w);
 static std::string vmGroupFromProcess(pid_t pid);
+static std::string vmGroupFromCmdline(pid_t pid);
+static pid_t       getPpid(pid_t pid);
 
 static std::string classifyWindow(PHLWINDOW w) {
     // A VM window's group comes from its host waypipe process; its title is VM-controlled.
@@ -148,6 +152,15 @@ static std::string classifyWindow(PHLWINDOW w) {
     if (isLibvirtViewerClass(w->m_class))
         return "libvirt";
     return extractVmGroup(w->m_title);
+}
+
+// waypipe's client serves each forwarded application from a "client-conn" child whose
+// command line has no --secctx; the flag is on its parent.
+static std::string vmGroupFromProcess(pid_t pid) {
+    if (auto g = vmGroupFromCmdline(pid); !g.empty())
+        return g;
+    pid_t ppid = getPpid(pid);
+    return ppid > 1 ? vmGroupFromCmdline(ppid) : "";
 }
 
 static pid_t getPid(wl_client* cl) {
@@ -181,7 +194,7 @@ static pid_t getPpid(pid_t pid) {
 // VM applications reach Hyprland through the host's per-VM waypipe client, which the host
 // starts with --secctx hydrix-<key> (theming/wm/hyprland/waypipe.nix). That process, not
 // anything the VM sends, names the group, so it holds for windowless clients too.
-static std::string vmGroupFromProcess(pid_t pid) {
+static std::string vmGroupFromCmdline(pid_t pid) {
     if (pid <= 0)
         return "";
     char path[64];
@@ -293,6 +306,23 @@ static void tagClient(wl_client* cl, const std::string& group) {
                 s_pidGroup[ppid] = group;
         }
     }
+}
+
+// VM windows, identified by process like clipboard groups (titles may be absent or late):
+// they may not fullscreen, maximize or activate themselves, and get tags the config's rules
+// (no_shortcuts_inhibit) and the border daemon key on. Static title rules cannot see a
+// window without a title; these bits are checked on every later client request.
+static void onWindowOpenEarly(PHLWINDOW w) {
+    if (!w)
+        return;
+    auto g = vmGroupFromProcess(getPid(clientFromWindow(w)));
+    if (g.empty())
+        return;
+    w->m_suppressedEvents |= Desktop::View::SUPPRESS_FULLSCREEN | Desktop::View::SUPPRESS_MAXIMIZE | Desktop::View::SUPPRESS_ACTIVATE |
+        Desktop::View::SUPPRESS_ACTIVATE_FOCUSONLY | Desktop::View::SUPPRESS_FULLSCREEN_OUTPUT;
+    const auto addr = std::format("address:0x{:x}", (uintptr_t)w.get());
+    HyprlandAPI::invokeHyprctlCommand("dispatch", "tagwindow +hydrix-vm " + addr);
+    HyprlandAPI::invokeHyprctlCommand("dispatch", "tagwindow +vm-" + g + " " + addr);
 }
 
 static void onWindowOpen(PHLWINDOW w) {
@@ -825,6 +855,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     HyprlandAPI::addNotification(handle, "[clip-guard] loaded for Hyprland " + ver.tag, CHyprColor{0.2, 0.8, 0.4, 1.0}, 3000);
 
     s_windowOpenListener  = Event::bus()->m_events.window.open.listen(onWindowOpen);
+    s_windowOpenEarlyListener = Event::bus()->m_events.window.openEarly.listen(onWindowOpenEarly);
     s_windowTitleListener = Event::bus()->m_events.window.title.listen(onWindowTitle);
     s_windowCloseListener = Event::bus()->m_events.window.close.listen(onWindowClose);
 
@@ -891,7 +922,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
         .fn    = handleHyprctl,
     });
 
-    return {"hypr-clip-guard", "VM clipboard isolation", "hydrix", "0.4.0"};
+    return {"hypr-clip-guard", "VM clipboard isolation", "hydrix", "0.5.1"};
 }
 
 APICALL EXPORT void PLUGIN_EXIT() {
@@ -909,6 +940,7 @@ APICALL EXPORT void PLUGIN_EXIT() {
         s_hookWlrInit->unhook();
 
     s_windowOpenListener.reset();
+    s_windowOpenEarlyListener.reset();
     s_windowTitleListener.reset();
     s_windowCloseListener.reset();
 
