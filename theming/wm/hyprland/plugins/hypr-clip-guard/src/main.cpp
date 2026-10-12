@@ -11,6 +11,12 @@
 #include <hyprland/src/event/EventBus.hpp>
 
 #include <hyprland/src/helpers/varlist/VarList.hpp>
+#if __has_include(<hyprland/src/desktop/state/WindowState.hpp>)
+#include <hyprland/src/desktop/state/WindowState.hpp>
+#define CLIPGUARD_WINDOWS() Desktop::windowState()->windows() // Hyprland 0.56+
+#else
+#define CLIPGUARD_WINDOWS() g_pCompositor->m_windows
+#endif
 #include <wayland-server-core.h>
 #include <cstring>
 #include <unordered_map>
@@ -859,7 +865,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     s_windowTitleListener = Event::bus()->m_events.window.title.listen(onWindowTitle);
     s_windowCloseListener = Event::bus()->m_events.window.close.listen(onWindowClose);
 
-    for (auto& w : g_pCompositor->m_windows) {
+    for (auto& w : CLIPGUARD_WINDOWS()) {
         if (!w)
             continue;
         auto* cl = clientFromWindow(w);
