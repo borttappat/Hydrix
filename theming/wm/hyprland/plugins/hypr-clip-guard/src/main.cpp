@@ -192,7 +192,7 @@ static pid_t getPpid(pid_t pid) {
 }
 
 // VM applications reach Hyprland through the host's per-VM waypipe client, which the host
-// starts with --secctx hydrix-<key> (theming/wm/hyprland/waypipe.nix). That process, not
+// starts with --title-prefix "[<key>] " (theming/wm/hyprland/waypipe.nix). That process, not
 // anything the VM sends, names the group, so it holds for windowless clients too.
 static std::string vmGroupFromCmdline(pid_t pid) {
     if (pid <= 0)
@@ -214,13 +214,13 @@ static std::string vmGroupFromCmdline(pid_t pid) {
     while (start < cmdline.size()) {
         size_t      end = cmdline.find('\0', start);
         std::string arg = cmdline.substr(start, end == std::string::npos ? std::string::npos : end - start);
-        std::string value;
-        if (prev == "--secctx")
-            value = arg;
-        else if (arg.rfind("--secctx=", 0) == 0)
-            value = arg.substr(9);
-        if (value.rfind("hydrix-", 0) == 0 && value.size() > 7) {
-            std::string key = value.substr(7);
+        // `--title-prefix "[<key>] "` (current) or `--secctx hydrix-<key>` (older listeners).
+        std::string key;
+        if (prev == "--title-prefix" && arg.size() > 3 && arg[0] == '[' && arg.back() == ' ' && arg[arg.size() - 2] == ']')
+            key = arg.substr(1, arg.size() - 3);
+        else if (prev == "--secctx" && arg.rfind("hydrix-", 0) == 0)
+            key = arg.substr(7);
+        if (!key.empty()) {
             for (char c : key)
                 if (!(std::islower((unsigned char)c) || std::isdigit((unsigned char)c) || c == '-'))
                     return "";
@@ -922,7 +922,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
         .fn    = handleHyprctl,
     });
 
-    return {"hypr-clip-guard", "VM clipboard isolation", "hydrix", "0.5.2"};
+    return {"hypr-clip-guard", "VM clipboard isolation", "hydrix", "0.6.0"};
 }
 
 APICALL EXPORT void PLUGIN_EXIT() {
