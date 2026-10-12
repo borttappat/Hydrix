@@ -16,9 +16,9 @@
 #   VM:   waypipe --vsock --socket PORT server  (connects out to host CID 2 on PORT)
 #   The host starts listening first, then sends waypipe-reconnect on vsock:14509
 #   so the VM dials in. The listener accepts only that VM's CID (waypipeHost patch).
-#   The client runs with --secctx hydrix-<registry key> (Hyprland offers the VM's
-#   applications only its unprivileged protocol whitelist) and sets the "[<key>] " window
-#   title prefix itself.
+#   The client reaches Hyprland only through a security context (hydrix-secctx, app id
+#   hydrix-<registry key>), so Hyprland offers it only its unprivileged protocol whitelist,
+#   and it sets the "[<key>] " window title prefix itself.
 #   No socat needed - waypipe speaks vsock natively.
 #
 {
@@ -57,6 +57,17 @@
       else builtins.floor ((ui.cornerRadius or 2) * (ui.pillRadiusScale or 2.0))
     );
   vmSelectWidth = toString config.hydrix.graphical.ui.rofiWidth;
+
+  # Creates the Wayland security context outside the sandbox (secctx/, Rust): the sandboxed
+  # waypipe client gets only that context's socket, so no connection it makes, an exploited one
+  # included, ever reaches Hyprland's privileged protocols.
+  secctxHelper = pkgs.rustPlatform.buildRustPackage {
+    pname = "hydrix-secctx";
+    version = "0.1.0";
+    src = ./secctx;
+    cargoLock.lockFile = ./secctx/Cargo.lock;
+    meta.description = "Create a Wayland security context and hold it open";
+  };
 
   # The host waypipe client parses everything a VM sends (Wayland messages, compressed buffers,
   # an h264 stream decoded by libavcodec), so it runs as a transient user service with no view
@@ -142,14 +153,22 @@
 
     echo "Connecting waypipe for $VM (CID $CID, port $PORT)..."
 
-    # The host waypipe client runs sandboxed as this transient user unit (waypipeSandbox).
+    # The host waypipe client runs sandboxed as this transient user unit (waypipeSandbox),
+    # and reaches Hyprland only through a security-context socket that hydrix-secctx creates
+    # and holds open here, outside the unit. Every connection through it is sandboxed: VM apps
+    # and the waypipe process itself get only Hyprland's unprivileged protocols.
     UNIT="waypipe-client-$KEY"
-    WAYLAND_SOCK="''${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/''${WAYLAND_DISPLAY:-wayland-1}"
+    SECCTX_DIR="''${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/hydrix-secctx"
+    SECCTX_SOCK="$SECCTX_DIR/$KEY.sock"
+    mkdir -p "$SECCTX_DIR"
+    chmod 0700 "$SECCTX_DIR"
 
     WAYPIPE_PID=""
+    SECCTX_PID=""
     cleanup() {
       [[ -n "''${WAYPIPE_PID:-}" ]] && kill "''${WAYPIPE_PID}" 2>/dev/null || true
       systemctl --user stop "$UNIT" 2>/dev/null || true
+      [[ -n "''${SECCTX_PID:-}" ]] && kill "''${SECCTX_PID}" 2>/dev/null || true
       exit 0
     }
     trap cleanup INT TERM
@@ -168,6 +187,13 @@
     # The listener lives only while its VM runs: however the VM stops (shard -S, a shutdown
     # inside the VM, a crash), the watcher ends this script and, through the trap, waypipe.
     # systemd keeps the invocation symlink exactly while the unit runs (no D-Bus call).
+    exec {secctx_out}< <(exec ${secctxHelper}/bin/hydrix-secctx --app-id "hydrix-$KEY" --socket "$SECCTX_SOCK" --instance "$VM")
+    SECCTX_PID=$!
+    if ! read -r -t 5 -u "$secctx_out" _ready || [[ "$_ready" != ready ]]; then
+      echo "hydrix-secctx did not create the security context for $VM" >&2
+      cleanup
+    fi
+
     # A separate script, so it never shows up as a second "waypipe-connect <vm>".
     ${waypipeConnectWatch} "$VM" "$$" &
 
@@ -176,10 +202,10 @@
       _t_cycle_start=$(date +%s.%N)
       echo "[timing] cycle $_cycle start: $(date +%H:%M:%S.%N)"
 
-      # 1. Start host waypipe listener in the background. --secctx makes Hyprland treat the
-      #    VM's applications as sandboxed: no screencopy, data-control, virtual keyboard,
-      #    input-method, layer-shell or foreign-toplevel, only ordinary window protocols and
-      #    the regular clipboard (filtered by hypr-clip-guard). --title-prefix is applied
+      # 1. Start host waypipe listener in the background. Through the hydrix-secctx socket,
+      #    Hyprland treats everything from this client as sandboxed: no screencopy, data-control,
+      #    virtual keyboard, input-method, layer-shell or foreign-toplevel, only ordinary window
+      #    protocols and the regular clipboard (filtered by hypr-clip-guard). --title-prefix is applied
       #    here, not in the VM: window rules, borders and clipboard groups key on "[<key>] ",
       #    so the VM cannot drop it or claim another VM's.
       #    --socket CID:PORT: only this VM may connect (patched waypipe, waypipeHost).
@@ -187,10 +213,10 @@
       systemctl --user stop "$UNIT" 2>/dev/null || true
       systemctl --user reset-failed "$UNIT" 2>/dev/null || true
       systemd-run --user --quiet --collect --pipe --unit="$UNIT" \
-        --setenv=WAYLAND_DISPLAY="$WAYLAND_SOCK" --setenv=XDG_RUNTIME_DIR=/tmp \
-        -p "BindPaths=$WAYLAND_SOCK" ${waypipeSandbox} \
+        --setenv=WAYLAND_DISPLAY="$SECCTX_SOCK" --setenv=XDG_RUNTIME_DIR=/tmp \
+        -p "BindPaths=$SECCTX_SOCK" ${waypipeSandbox} \
         ${waypipeHost}/bin/waypipe --vsock --socket "$CID:$PORT" --compress none --threads 4 --video h264,sw \
-        --secctx "hydrix-$KEY" --title-prefix "[$KEY] " client </dev/null &
+        --title-prefix "[$KEY] " client </dev/null &
       WAYPIPE_PID=$!
 
       # 2. Poll until host vsock socket is actually open - no blind sleep.
