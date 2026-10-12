@@ -1,0 +1,14 @@
+[package]
+name = "hydrix-secctx"
+version = "0.1.0"
+edition = "2021"
+description = "Create a Wayland security context and hold it open"
+license = "MIT"
+
+[dependencies]
+wayland-client = "0.31"
+wayland-protocols = { version = "0.32", features = ["client", "staging"] }
+
+[profile.release]
+strip = true
+lto = true
