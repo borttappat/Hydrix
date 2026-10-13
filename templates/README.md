@@ -318,7 +318,7 @@ profiles/browsing/
 ├── meta.nix           # Identity data (read by flake at eval time, NOT a NixOS module)
 ├── default.nix        # NixOS module: colorscheme, RAM, vCPUs, packages, extra hosts
 └── packages/
-    └── default.nix   # Managed by vm-sync - do not edit manually
+    └── default.nix   # imports every other *.nix file here (vm-sync pulls land here)
 ```
 
 **meta.nix** is a plain Nix attribute set (no `{ config, lib, ... }:` header). It is imported directly by the flake to build `vm-registry.json` without evaluating any NixOS configuration:

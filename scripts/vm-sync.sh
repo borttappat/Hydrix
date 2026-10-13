@@ -241,48 +241,42 @@ cmd_status() {
     done
 }
 
-# Regenerate default.nix for a profile's packages
+# Write a profile's packages/default.nix. It imports every other *.nix file in its
+# directory itself, so the content never depends on which packages are there.
 regenerate_default() {
     local vm_type="$1"
     local packages_dir="$PROFILES_DIR/$vm_type/packages"
     local default_file="$packages_dir/default.nix"
 
-    # Ensure directory exists
     mkdir -p "$packages_dir"
-
-    # Collect package files
-    local package_files=()
-    for pkg_file in "$packages_dir"/*.nix; do
-        [[ ! -f "$pkg_file" ]] && continue
-        [[ "$(basename "$pkg_file")" == "default.nix" ]] && continue
-        package_files+=("$(basename "$pkg_file" .nix)")
-    done
-
-    # Write default.nix as a NixOS module
     cat > "$default_file" << 'EOF'
 # Custom packages for PROFILE profile
-# Managed by vm-sync - regenerated when packages are added/removed
+#
+# Every *.nix file in this directory except this one is a package expression
+# `{ pkgs }: <derivation>`, installed in the VM. Nothing to list here: vm-sync pull drops
+# files in this directory, and a file added by hand only needs `git add` so the flake sees it.
 #
 # Workflow:
-#   1. In VM:  vm-dev build https://github.com/owner/repo
-#   2. In VM:  vm-sync push --name repo
+#   1. In VM:   vm-dev build https://github.com/owner/repo
+#   2. In VM:   vm-sync push --name repo
 #   3. On host: vm-sync pull repo --target PROFILE
-#   4. Rebuild: shard build micro<name>
+#   4. Rebuild: shard -r PROFILE
 #
-{ config, lib, pkgs, ... }:
-
 {
-  environment.systemPackages = [
+  lib,
+  pkgs,
+  ...
+}: let
+  packageFiles =
+    lib.filterAttrs
+    (name: type: type == "regular" && name != "default.nix" && lib.hasSuffix ".nix" name)
+    (builtins.readDir ./.);
+in {
+  environment.systemPackages =
+    lib.mapAttrsToList (name: _: import (./. + "/${name}") {inherit pkgs;}) packageFiles;
+}
 EOF
-    # Replace PROFILE placeholder
     sed -i "s/PROFILE/$vm_type/g" "$default_file"
-
-    for pkg_name in "${package_files[@]}"; do
-        echo "    (import ./${pkg_name}.nix { inherit pkgs; })" >> "$default_file"
-    done
-
-    echo "  ];" >> "$default_file"
-    echo "}" >> "$default_file"
 }
 
 # Find VM with staged package

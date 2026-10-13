@@ -13,7 +13,7 @@ let meta = import ./meta.nix; in
     ../../modules/vm-packages.nix
     # Profile-specific packages
     ./packages.nix
-    # Custom packages (added via vm-sync pull — do not edit manually)
+    # Custom packages: every *.nix file in ./packages (vm-sync pull, or copied in by hand)
     ./packages
     # Note: waypipe-vm.nix is auto-included by the Hydrix framework (vm-base.nix)
     # for all profile VMs. No explicit import needed here.

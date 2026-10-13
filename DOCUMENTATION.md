@@ -3498,9 +3498,10 @@ The `vm-sync pull` command:
    Anything else is refused.
 3. Shows the staged `package.nix` (control characters stripped) and asks y/N, since the package
    is built on the host.
-4. Copies it to your user config's profile (never through a symlink), regenerates
-   `packages/default.nix` (each package as `import ./<name>.nix { inherit pkgs; }` in
-   `environment.systemPackages`), stages both for git tracking, and sends `unstage` to the VM.
+4. Copies it to your user config's profile (never through a symlink) as
+   `packages/<name>.nix`; `packages/default.nix` imports every other `*.nix` file in that
+   directory into `environment.systemPackages`, so hand-copied package files work too.
+   Stages both for git tracking and sends `unstage` to the VM.
 
 When the host evaluates the package, `fetchTree` resolves the pinned nixpkgs by its hash: free
 when it is already in the store, otherwise fetched (through the builder VM in lockdown mode). A

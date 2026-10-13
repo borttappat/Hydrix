@@ -434,33 +434,42 @@ stage_package() {
     fi
 }
 
-# Regenerate default.nix for a profile
+# Write a profile's packages/default.nix. It imports every other *.nix file in its
+# directory itself, so the content never depends on which packages are there.
 regenerate_default() {
     local vm_type="$1"
     local packages_dir="$PROFILES_DIR/$vm_type/packages"
     local default_file="$packages_dir/default.nix"
 
-    # Collect package files
-    local package_files=()
-    for pkg_file in "$packages_dir"/*.nix; do
-        [[ ! -f "$pkg_file" ]] && continue
-        [[ "$(basename "$pkg_file")" == "default.nix" ]] && continue
-        package_files+=("$(basename "$pkg_file" .nix)")
-    done
-
-    # Write default.nix
-    cat > "$default_file" << EOF
-# Auto-generated package list for $vm_type profile
-# Managed by vm-sync - do not edit manually
-{ pkgs }:
-[
+    mkdir -p "$packages_dir"
+    cat > "$default_file" << 'EOF'
+# Custom packages for PROFILE profile
+#
+# Every *.nix file in this directory except this one is a package expression
+# `{ pkgs }: <derivation>`, installed in the VM. Nothing to list here: vm-sync pull drops
+# files in this directory, and a file added by hand only needs `git add` so the flake sees it.
+#
+# Workflow:
+#   1. In VM:   vm-dev build https://github.com/owner/repo
+#   2. In VM:   vm-sync push --name repo
+#   3. On host: vm-sync pull repo --target PROFILE
+#   4. Rebuild: shard -r PROFILE
+#
+{
+  lib,
+  pkgs,
+  ...
+}: let
+  packageFiles =
+    lib.filterAttrs
+    (name: type: type == "regular" && name != "default.nix" && lib.hasSuffix ".nix" name)
+    (builtins.readDir ./.);
+in {
+  environment.systemPackages =
+    lib.mapAttrsToList (name: _: import (./. + "/${name}") {inherit pkgs;}) packageFiles;
+}
 EOF
-
-    for pkg_name in "${package_files[@]}"; do
-        echo "  (import ./${pkg_name}.nix { inherit pkgs; })" >> "$default_file"
-    done
-
-    echo "]" >> "$default_file"
+    sed -i "s/PROFILE/$vm_type/g" "$default_file"
 }
 
 # Pull package from staging to profile(s)
