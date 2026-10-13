@@ -11,6 +11,8 @@ let meta = import ./meta.nix; in
   imports = [
     # Core VM packages (editors, shell, utils) — shared across all VMs
     ../../modules/vm-packages.nix
+    # Trimmed guest kernel, off until enabled below (hydrix.vmKernel)
+    ../../modules/vm-kernel.nix
     # Profile-specific packages
     ./packages.nix
     # Custom packages: every *.nix file in ./packages (vm-sync pull, or copied in by hand)
@@ -18,6 +20,10 @@ let meta = import ./meta.nix; in
     # Note: waypipe-vm.nix is auto-included by the Hydrix framework (vm-base.nix)
     # for all profile VMs. No explicit import needed here.
   ];
+
+  # Trimmed guest kernel (modules/vm-kernel.nix): strips bluetooth, wifi, USB peripheral,
+  # sound and GPU drivers. Compiled locally on the first build, so off by default.
+  # hydrix.vmKernel.enable = true;
 
   # =========================================================================
   # VM IDENTITY & COLORS

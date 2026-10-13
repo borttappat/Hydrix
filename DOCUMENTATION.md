@@ -848,6 +848,7 @@ When you have a working `hydrix-config` on one machine and want to bring a secon
 │   ├── vim.nix                  # Editor configuration
 │   ├── firefox.nix              # Host Firefox toggle and user-agent
 │   ├── obsidian.nix             # Host Obsidian toggle and vault paths
+│   ├── vm-kernel.nix            # Trimmed guest kernel, opt-in per VM (hydrix.vmKernel)
 │   ├── repos.nix                # Git repos, declared once (host clones, git VM, VM views)
 │   └── vms.nix                  # Per-VM settings shared by every machine (byName)
 ├── profiles/                    # Graphical VM customizations (overlay on Hydrix base)
@@ -906,6 +907,24 @@ User profiles are layered ON TOP of Hydrix base profiles. You get all base funct
   '';
 }
 ```
+
+### Trimmed Guest Kernel (`modules/vm-kernel.nix`)
+
+VMs only see virtio devices, so a VM can run a kernel without bluetooth, wifi, USB peripheral,
+sound and vendor GPU drivers. `modules/vm-kernel.nix` builds one from `linuxPackages_latest`.
+It is off by default: the trimmed kernel is compiled locally (not in the binary cache), once,
+then reused by every VM that enables it with the same settings. The comms, lurking and
+`_template` profiles import it already; to turn it on, uncomment in the profile's `default.nix`:
+
+```nix
+hydrix.vmKernel.enable = true;
+```
+
+For another VM, add `../../modules/vm-kernel.nix` to its `imports` first. Each hardware class
+stays stripped unless the VM owns that hardware: `hydrix.vmKernel.wireless` (a VFIO WiFi VM),
+`usbPeripherals` (a VM receiving USB devices), `bluetooth`, `sound` (a VM with `audio = true`)
+and `graphics`. The module is yours: add or remove kernel symbols in its lists as needed. Apply
+with `shard -bR <vm>`.
 
 ### Flake Location Detection
 
