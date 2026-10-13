@@ -32,7 +32,7 @@ let
     cat > $out/share/wayland-sessions/hyprland-hydrix.desktop << 'EOF'
     [Desktop Entry]
     Name=Hyprland
-    Comment=Hyprland via hyprland-launch (systemd-cat wrapped start-hyprland)
+    Comment=Hyprland via hyprland-launch (supervised, logs to the journal)
     Exec=/run/current-system/sw/bin/hyprland-launch
     Type=Application
     DesktopNames=Hyprland

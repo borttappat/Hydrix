@@ -118,6 +118,8 @@
       # own explicit reload; the implicit inotify-based reload is redundant
       # and can race it.
       disable_autoreload = true
+      # hyprland-launch supervises Hyprland in place of start-hyprland.
+      disable_watchdog_warning = true
     }
 
     ${lib.optionalString xwaylandEnabled ''
