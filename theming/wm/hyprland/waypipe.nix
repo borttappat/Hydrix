@@ -134,6 +134,15 @@
     KEY=$(${pkgs.jq}/bin/jq -r --arg v "$VM" \
       'to_entries[] | select(.value.vmName == $v) | .key' "${VM_REGISTRY}" | head -1)
 
+    # Without hypr-clip-guard (fallback session, plugin failed to load) the VM would share one
+    # clipboard with the host and every other VM.
+    if ! ${pkgs.hyprland}/bin/hyprctl plugin list 2>/dev/null | grep -q '^Plugin hypr-clip-guard '; then
+      echo "hypr-clip-guard is not loaded: not connecting $VM" >&2
+      ${pkgs.libnotify}/bin/notify-send -u critical "waypipe" \
+        "hypr-clip-guard is not loaded: $KEY windows stay off (no clipboard isolation)" 2>/dev/null || true
+      exit 1
+    fi
+
     # Per-VM port: CID 106 → 14606, CID 103 → 14603, etc.
     PORT=$((14600 + CID - 100))
 
