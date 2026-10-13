@@ -109,7 +109,7 @@ in {
 
             # Editors
             v = "vim";
-            nano = "vim";
+            nano = "vim"; #we do a little trolling
             vn = "vim notes.txt";
 
             # Navigation
