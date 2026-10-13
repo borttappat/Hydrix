@@ -99,6 +99,22 @@ done
 log() { echo ":: $*"; }
 err() { echo "!! $*" >&2; }
 
+# Tidy activation output: drop os-prober's lsblk noise (it globs
+# /dev/mapper/* and lsblk complains about every non-match), and split
+# switch-to-configuration's comma-joined unit lists one unit per line.
+filter_activation() {
+    awk '
+        /^lsblk: \/dev\/mapper\// { next }
+        match($0, /the following [a-z ]*units[a-z ]*: /) {
+            print substr($0, 1, RSTART + RLENGTH - 2)
+            n = split(substr($0, RSTART + RLENGTH), units, /, /)
+            for (i = 1; i <= n; i++) print "    " units[i]
+            fflush(); next
+        }
+        { print; fflush() }
+    '
+}
+
 if [[ -n "$BUILD_TAG" ]] && [[ ! "$BUILD_TAG" =~ ^[a-zA-Z0-9:_.-]+$ ]]; then
     err "--tag: only letters, numbers, ':', '_', '.', '-' allowed (got: $BUILD_TAG)"
     exit 1
@@ -251,7 +267,8 @@ do_build_via_builder() {
     fi
 
     # Run the builder switch which does build + apply
-    if shard "${builder_args[@]}"; then
+    shard "${builder_args[@]}" 2>&1 | filter_activation
+    if [[ ${PIPESTATUS[0]} -eq 0 ]]; then
         return 0
     else
         err "Builder switch failed"
@@ -435,7 +452,8 @@ do_build() {
     [[ -n "$out_link" ]] && cleanup="$cleanup; rm -rf '$(dirname "$out_link")'"
     trap "$cleanup" RETURN
 
-    nh "${nh_args[@]}" 2>&1 | tee "$tmpfile" && exit_code=0 || exit_code=${PIPESTATUS[0]}
+    nh "${nh_args[@]}" 2>&1 | filter_activation | tee "$tmpfile"
+    exit_code=${PIPESTATUS[0]}
 
     if [[ $exit_code -ne 0 ]]; then
         # base_verb is always boot/build (never activates), so a nonzero
@@ -460,7 +478,8 @@ do_build() {
             log "Activating specialisation: $spec"
             # This is the only live activation of the rebuild, so its exit
             # code is the real activation-failure signal.
-            if sudo "$spec_path/bin/switch-to-configuration" "$verb"; then
+            sudo "$spec_path/bin/switch-to-configuration" "$verb" 2>&1 | filter_activation
+            if [[ ${PIPESTATUS[0]} -eq 0 ]]; then
                 :
             elif $IGNORE_ACTIVATION; then
                 log "Specialisation activation had failures (ignored, -i)"
@@ -510,8 +529,13 @@ report_outdated_vms() {
         [[ "$(readlink "$dir/current")" != "$(readlink "$dir/booted")" ]] && outdated+=("$vm")
     done
     if [[ ${#outdated[@]} -gt 0 ]]; then
-        log "Running VMs on an older build: ${outdated[*]}"
-        log "  restart to apply: shard -R ${outdated[*]}"
+        echo
+        log "Running VMs on an older build:"
+        for vm in "${outdated[@]}"; do
+            log "  $vm"
+        done
+        log "Restart to apply:"
+        log "  shard -R ${outdated[*]}"
     fi
 }
 
