@@ -24,7 +24,7 @@
     extraPackages = with pkgs; [ dejavu_fonts noto-fonts-color-emoji ];
 
     # Packages installed in microVMs
-    vmPackages = with pkgs; [ iosevka tamzen scientifica gohufont font-awesome noto-fonts noto-fonts-emoji ];
+    vmPackages = with pkgs; [ iosevka tamzen scientifica gohufont font-awesome noto-fonts noto-fonts-color-emoji ];
 
     # ─── Font family and size ──────────────────────────────────────────
     # Set here for a shared default across all machines, or override per
