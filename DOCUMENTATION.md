@@ -2615,9 +2615,11 @@ shard list                                             # List all VMs
 shard -l <name>            | shard logs <name>         # View logs
 
 # Data Management
-shard snapshot create <name> <snap>  # Create snapshot
-shard snapshot list <name>           # List snapshots
-shard snapshot revert <name> <snap>  # Revert to snapshot
+shard backup create <name> [backup] # Back up all volumes (VM stopped; reflink on btrfs)
+shard backup list [name]             # List backups
+shard backup restore <name> <backup> # Restore a backup (VM stopped)
+shard backup delete <name> <backup>  # Delete a backup
+# Any shard command on a VM with backups warns about them on exit
 shard -p <name>            | shard purge <name>        # Delete all data (fresh start)
 shard gc                                               # List/delete orphaned VM directories (see below)
 
@@ -2626,6 +2628,68 @@ shard encrypt-setup <name>           # Manual pre-provision (build auto-sets thi
 shard -s <name>            | shard start <name>        # Prompts for passphrase, then starts normally
 shard -S <name>            | shard stop <name>         # Stops VM and locks volume automatically
 ```
+
+### Backups (`shard backup`)
+
+A backup is a copy of a stopped VM's persistent volumes, restorable later over the live ones.
+
+```bash
+shard backup create dev before-upgrade   # name defaults to a timestamp (YYYY-MM-DD-HHMMSS)
+shard backup list [dev]                  # name, creation time, size
+shard backup restore dev before-upgrade  # lists what it replaces, asks for 'yes' (-f skips)
+shard backup delete dev before-upgrade   # asks for 'yes' (-f skips)
+```
+
+**What is copied:** every regular `*.qcow2`, `*.luks` and `*.img` file in
+`/var/lib/microvms/<vm>/` (home, `docker.qcow2`, `storage.qcow2`, NetworkManager state, ...)
+except `nix-overlay.qcow2`, which is rebuilt from the store. `home.luks` is copied as the
+encrypted container, so a backup of an encrypted VM stays encrypted at rest and needs no
+passphrase. The `.qcow2` names are historical: microvm.nix creates raw ext4 images, which is
+why internal qcow2 snapshots cannot work and backups copy whole files instead.
+
+**Where:** `/var/lib/microvms/.backups/<vm>/<name>/`, each holding the volume files and a `meta`
+file (creation time, bound engagement). The `<vm>` directories are world-listable so any
+`shard` command can count backups without sudo; each backup directory is root-only (`0700`).
+The leading dot keeps `.backups` out of `shard gc`.
+
+**How the copy works:** `cp --reflink=auto`, with ownership, mode and timestamps preserved.
+
+| Filesystem under `/var/lib/microvms` | Create and restore |
+|---|---|
+| btrfs (`@microvms` subvolume, fresh installs) | Instant reflink: the backup shares blocks with the live volume and only diverging blocks take space |
+| ext4 (migrated installs) or other | Full copy that keeps holes, so it costs the data actually written; a free-space check runs first |
+
+On btrfs a backup is a rollback point, not protection against losing the disk, since it shares
+storage with the volume it came from. `@microvms` is mounted `nodatacow`, so every file there is
+NOCOW and btrfs can clone between them (it refuses to clone between NOCOW and COW files; on a
+custom layout where only some volumes have `chattr +C`, `cp` silently falls back to a full copy).
+The first write to a shared block of a NOCOW file is copied once, a small fragmentation cost.
+
+**Safety rules:**
+
+- Create and restore refuse while the VM runs or its LUKS mapping (`/dev/mapper/vm-<vm>-home`)
+  is open: volumes are only consistent with the VM stopped.
+- Create writes into `<name>.partial/` and renames it when every file is copied, so an
+  interrupted backup never lists; leftovers are removed on the next create for that VM.
+- Restore copies each volume next to the live one (`<file>.restore-tmp`) and renames it over
+  the original. Live volumes missing from the backup are left alone with a warning, and a
+  mismatch between the backup's home (`home.qcow2`/`home.luks`) and the built VM's encryption
+  setting is flagged before the prompt.
+- Task slots: the backup records the engagement bound to the slot, and restore refuses unless
+  that same engagement is bound now, so one engagement's data never lands in another's slot.
+- `shard -p` and `shard pentest end` leave backups alone; `shard gc` does not touch them either,
+  so backups of a removed VM stay until deleted with `shard backup delete`.
+
+**Accumulation warning:** every `shard` command that names a VM (any flag or word form,
+shorthand or engagement name) ends with a line per touched VM that has backups:
+
+```
+:: microvm-dev-<serial> has 2 backups (oldest 2026-10-13): shard backup list microvm-dev-<serial>
+```
+
+`backup create` shows it too; `backup list`, `restore` and `delete` do not, since they already
+show the backups. The notice is collected as names resolve and printed from an `EXIT` trap, so it
+appears after the command's own output, and it never changes the command's exit status.
 
 ### Cleaning Up Orphaned VM Directories (`shard gc`)
 
@@ -2685,7 +2749,7 @@ shard start pentest
 **Notes:**
 
 - Any existing `home.qcow2` is **not** migrated - it remains on disk and can be mounted manually for data recovery (see below), then deleted once you've confirmed the encrypted volume is working
-- Snapshots (`shard snapshot`) do not apply to encrypted volumes - use a filesystem-level backup of `home.luks` while the mapper is closed instead
+- `shard backup` covers `home.luks` too: it is copied still encrypted, with the VM stopped and the mapper closed
 - On **btrfs** hosts: disable copy-on-write on the container file to prevent fragmentation: `sudo chattr +C /var/lib/microvms/<name>/home.luks` (must be set before first write)
 
 **Recovering data from the old qcow2:**
@@ -2918,7 +2982,7 @@ shard pentest purge google        # delete an engagement's data, active or archi
 shard pentest list                # slots, bindings, archived engagements
 ```
 
-`end` moves the slot's home volume (qcow2, with its snapshots, or LUKS container) into the archive, so the slot starts empty for the next engagement. Binding refuses a slot that still holds an unbound volume: `--adopt` binds that volume to the new engagement instead, `shard -p taskN` deletes it. Engagement names are lowercase letters, digits, `-` and `_`, and cannot shadow a VM name or `shard pentest` subcommand.
+`end` moves the slot's home volume (qcow2 or LUKS container) into the archive, so the slot starts empty for the next engagement. Binding refuses a slot that still holds an unbound volume: `--adopt` binds that volume to the new engagement instead, `shard -p taskN` deletes it. Engagement names are lowercase letters, digits, `-` and `_`, and cannot shadow a VM name or `shard pentest` subcommand.
 
 **Task slot table** (defaults):
 

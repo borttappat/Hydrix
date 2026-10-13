@@ -906,7 +906,8 @@
           local vm_name="''${1:-}"
 
           if [[ -n "$vm_name" ]]; then
-              systemctl status "microvm@''${vm_name}.service" --no-pager
+              # Exits 3 for a stopped VM, which is a status, not a failure
+              systemctl status "microvm@''${vm_name}.service" --no-pager || true
 
               # If running, also show switch status
               if is_running "$vm_name" && ! is_headless "$vm_name"; then
@@ -1057,61 +1058,258 @@
           fi
       }
 
-      # Snapshot management
-      cmd_snapshot() {
-          local action="$1"
-          local vm_name="$2"
-          local snap_name="''${3:-}"
-          local qcow2_path="/var/lib/microvms/''${vm_name}/home.qcow2"
+      # Backups: stopped-VM copies of every persistent volume, LUKS containers included
+      # (copied still encrypted). cp --reflink=auto clones extents on btrfs (the @microvms
+      # subvolume, nodatacow on both sides so the clone is allowed), making create and restore
+      # instant; elsewhere it is a full, hole-preserving copy. On btrfs a backup shares
+      # blocks with the live volume: a rollback point, not protection against disk loss.
+      readonly BACKUP_ROOT="/var/lib/microvms/.backups"
 
-          if [[ ! -f "$qcow2_path" ]]; then
-              log_error "No home.qcow2 found for ''${vm_name}"
-              log_error "Path: $qcow2_path"
+      # Persistent volumes in a VM directory; nix-overlay is rebuilt from the store, so skipped
+      backup_volumes() {
+          local f
+          for f in "$1"/*.qcow2 "$1"/*.luks "$1"/*.img; do
+              [[ -f "$f" && ! -L "$f" && "$(basename "$f")" != "nix-overlay.qcow2" ]] && echo "$f"
+          done
+          return 0
+      }
+
+      backup_is_btrfs() {
+          [[ "$(stat -f -c %T /var/lib/microvms 2>/dev/null)" == "btrfs" ]]
+      }
+
+      # backup_space_ok <file>...: room for a full copy, always true on btrfs (reflinks)
+      backup_space_ok() {
+          backup_is_btrfs && return 0
+          local need avail
+          need=$(sudo du -cB1 "$@" | tail -1 | cut -f1)
+          avail=$(df -B1 --output=avail /var/lib/microvms | tail -1 | tr -d ' ')
+          if (( need >= avail )); then
+              log_error "Not enough space: need $(numfmt --to=iec "$need"), $(numfmt --to=iec "$avail") free"
+              return 1
+          fi
+      }
+
+      # Volumes are only consistent with the VM stopped and its LUKS mapping closed
+      backup_vm_idle() {
+          local vm_name="$1"
+          if is_running "$vm_name"; then
+              log_error "''${vm_name} is running. Stop it first: shard -S ''${vm_name}"
+              return 1
+          fi
+          if [[ -b "/dev/mapper/vm-''${vm_name}-home" ]]; then
+              log_error "Encrypted volume of ''${vm_name} is still unlocked (/dev/mapper/vm-''${vm_name}-home)"
+              log "Lock it with: sudo cryptsetup luksClose vm-''${vm_name}-home"
+              return 1
+          fi
+      }
+
+      backup_meta() {
+          sudo cat "$1/meta" 2>/dev/null | sed -n "s/^$2=//p" || true
+      }
+
+      backup_create() {
+          local vm_name="$1" name="''${2:-}"
+          [[ -z "$name" ]] && name=$(date +%F-%H%M%S)
+          local vm_dir="/var/lib/microvms/''${vm_name}"
+          local dest="''${BACKUP_ROOT}/''${vm_name}/''${name}"
+
+          if [[ ! "$name" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$ || "$name" == *.partial ]]; then
+              log_error "Invalid backup name: $name (letters, digits, '.', '_', '-')"
+              return 1
+          fi
+          local vols
+          vols=$(backup_volumes "$vm_dir")
+          if [[ -z "$vols" ]]; then
+              log_error "No persistent volumes found for ''${vm_name} in $vm_dir"
+              return 1
+          fi
+          backup_vm_idle "$vm_name" || return 1
+          if sudo test -e "$dest"; then
+              log_error "Backup $name of ''${vm_name} already exists"
+              return 1
+          fi
+          local -a files
+          mapfile -t files <<< "$vols"
+          backup_space_ok "''${files[@]}" || return 1
+
+          local mode="full copy"
+          backup_is_btrfs && mode="btrfs reflink"
+          log "Backing up ''${BOLD}''${vm_name}''${NC} as ''${BOLD}''${name}''${NC} (''${mode})..."
+
+          # Copied into <name>.partial and renamed at the end, so an interrupted
+          # copy never lists as a backup; leftovers are cleared on the next create
+          # Listable without sudo (backup_notices), each backup itself root-only
+          sudo install -d -m 755 "$BACKUP_ROOT" "''${BACKUP_ROOT}/''${vm_name}"
+          sudo find "''${BACKUP_ROOT}/''${vm_name}" -mindepth 1 -maxdepth 1 -name '*.partial' -exec rm -rf -- {} +
+          sudo install -d -m 700 "''${dest}.partial"
+          local f
+          for f in "''${files[@]}"; do
+              echo -e "  ''${DIM}$(basename "$f")''${NC}"
+              if ! sudo cp --reflink=auto --preserve=mode,ownership,timestamps -- "$f" "''${dest}.partial/"; then
+                  sudo rm -rf -- "''${dest}.partial"
+                  log_error "Copy of $f failed, backup discarded"
+                  return 1
+              fi
+          done
+          printf 'created=%s\nengagement=%s\n' "$(date '+%F %T')" "$(engagement_of_slot "$vm_name")" \
+              | sudo tee "''${dest}.partial/meta" >/dev/null
+          sudo mv -T -- "''${dest}.partial" "$dest"
+          log_success "Backup created: $dest"
+      }
+
+      backup_list() {
+          local vm_filter="''${1:-}" vm_dir backup any=0
+          printf "''${BOLD}%-40s %-24s %-20s %8s''${NC}\n" "VM" "BACKUP" "CREATED" "SIZE"
+          while IFS= read -r vm_dir; do
+              [[ -n "$vm_filter" && "$(basename "$vm_dir")" != "$vm_filter" ]] && continue
+              while IFS= read -r backup; do
+                  any=1
+                  printf "%-40s %-24s %-20s %8s\n" "$(basename "$vm_dir")" "$(basename "$backup")" \
+                      "$(backup_meta "$backup" created)" "$(sudo du -sh "$backup" | cut -f1)"
+              done < <(sudo find "$vm_dir" -mindepth 1 -maxdepth 1 -type d ! -name '*.partial' | sort)
+          done < <(sudo find "$BACKUP_ROOT" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | sort)
+          [[ $any -eq 0 ]] && echo -e "  ''${DIM}(no backups)''${NC}"
+          backup_is_btrfs && echo -e "\n  ''${DIM}Sizes on btrfs include blocks shared with the live volumes.''${NC}"
+          return 0
+      }
+
+      backup_restore() {
+          local vm_name="$1" name="$2" force="''${3:-}"
+          local vm_dir="/var/lib/microvms/''${vm_name}"
+          local src="''${BACKUP_ROOT}/''${vm_name}/''${name}"
+
+          if ! sudo test -d "$src" || [[ "$name" == *.partial || "$name" == */* ]]; then
+              log_error "No backup $name for ''${vm_name} (see: shard backup list ''${vm_name})"
+              return 1
+          fi
+          if [[ ! -d "$vm_dir" ]]; then
+              log_error "$vm_dir does not exist. Build the VM first: shard -b ''${vm_name}"
+              return 1
+          fi
+          backup_vm_idle "$vm_name" || return 1
+
+          # A task slot's data belongs to one engagement; never restore it into another's slot
+          local saved current
+          saved=$(backup_meta "$src" engagement)
+          current=$(engagement_of_slot "$vm_name")
+          if [[ "$saved" != "$current" ]]; then
+              log_error "Backup belongs to engagement ''${saved:-none}, ''${vm_name} is bound to ''${current:-none}"
+              [[ -n "$saved" ]] && log "Bind it first: shard pentest ''${saved}"
               return 1
           fi
 
+          local -a files
+          mapfile -t files < <(sudo find "$src" -mindepth 1 -maxdepth 1 -type f ! -name meta -printf '%f\n' | sort)
+          if [[ ''${#files[@]} -eq 0 ]]; then
+              log_error "Backup $name contains no volumes"
+              return 1
+          fi
+
+          echo -e "''${YELLOW}Restoring ''${BOLD}''${name}''${NC}''${YELLOW} over the current volumes of ''${BOLD}''${vm_name}''${NC}''${YELLOW}:''${NC}"
+          local f
+          for f in "''${files[@]}"; do
+              if [[ -f "$vm_dir/$f" ]]; then echo "  $f (replaces current)"; else echo "  $f (new)"; fi
+          done
+          while IFS= read -r f; do
+              [[ -z "$f" ]] && continue
+              [[ " ''${files[*]} " == *" $(basename "$f") "* ]] || log_warn "$(basename "$f") is not in the backup, left as is"
+          done <<< "$(backup_volumes "$vm_dir")"
+          if grep -q "/dev/mapper/vm-''${vm_name}-home" "$vm_dir/current/bin/microvm-run" 2>/dev/null; then
+              [[ " ''${files[*]} " == *" home.luks "* ]] || log_warn "The built VM expects an encrypted home, this backup has no home.luks"
+          elif [[ " ''${files[*]} " == *" home.luks "* ]]; then
+              log_warn "This backup has an encrypted home, the built VM does not use encryption"
+          fi
+          echo ""
+
+          if [[ "$force" != "--force" && "$force" != "-f" ]]; then
+              echo -e "''${RED}Current data in these volumes will be lost.''${NC}"
+              read -rp "Type 'yes' to confirm: " confirm
+              [[ "$confirm" != "yes" ]] && { log "Aborted"; return 1; }
+          fi
+
+          local -a paths=()
+          for f in "''${files[@]}"; do paths+=("$src/$f"); done
+          backup_space_ok "''${paths[@]}" || return 1
+
+          # Each volume is copied next to the live one, then renamed over it
+          for f in "''${files[@]}"; do
+              if ! sudo cp --reflink=auto --preserve=mode,ownership,timestamps -- "$src/$f" "$vm_dir/$f.restore-tmp"; then
+                  sudo rm -f -- "$vm_dir/$f.restore-tmp"
+                  log_error "Copy of $f failed; volumes already restored stay restored"
+                  return 1
+              fi
+              sudo mv -f -T -- "$vm_dir/$f.restore-tmp" "$vm_dir/$f"
+          done
+          log_success "Restored ''${vm_name} from ''${name}"
+          echo -e "  ''${DIM}Start with:''${NC} shard -s ''${vm_name}"
+      }
+
+      backup_delete() {
+          local vm_name="$1" name="$2" force="''${3:-}"
+          local target="''${BACKUP_ROOT}/''${vm_name}/''${name}"
+          if [[ -z "$name" || "$name" == */* || "$name" == .* ]] || ! sudo test -d "$target"; then
+              log_error "No backup $name for ''${vm_name} (see: shard backup list ''${vm_name})"
+              return 1
+          fi
+          if [[ "$force" != "--force" && "$force" != "-f" ]]; then
+              echo -e "''${YELLOW}Delete backup ''${BOLD}''${name}''${NC}''${YELLOW} of ''${vm_name}?''${NC}"
+              read -rp "Type 'yes' to confirm: " confirm
+              [[ "$confirm" != "yes" ]] && { log "Aborted"; return 1; }
+          fi
+          sudo rm -rf -- "$target"
+          sudo rmdir -- "''${BACKUP_ROOT}/''${vm_name}" 2>/dev/null || true
+          log_success "Deleted backup $name of ''${vm_name}"
+      }
+
+      # EXIT trap: one warning per VM this run touched that has backups, so they are
+      # not left to pile up unnoticed
+      backup_notices() {
+          local file="''${BACKUP_NOTICE_FILE:-}" vm dir b count oldest
+          [[ -n "$file" && -s "$file" ]] || { [[ -n "$file" ]] && rm -f "$file"; return 0; }
+          while IFS= read -r vm; do
+              dir="''${BACKUP_ROOT}/''${vm}"
+              [[ -d "$dir" ]] || continue
+              count=0 oldest=""
+              while IFS= read -r b; do
+                  count=$((count + 1))
+                  [[ -z "$oldest" ]] && oldest=$(stat -c %y "$b" | cut -d' ' -f1)
+              done < <(find "$dir" -mindepth 1 -maxdepth 1 -type d ! -name '*.partial' -printf '%T@ %p\n' 2>/dev/null | sort -n | cut -d' ' -f2-)
+              (( count > 0 )) || continue
+              log_warn "''${vm} has ''${count} backup$( (( count > 1 )) && echo s) (oldest ''${oldest}): shard backup list ''${vm}" >&2
+          done < <(sort -u "$file")
+          rm -f "$file"
+          return 0
+      }
+
+      cmd_backup() {
+          local action="''${1:-help}"
           case "$action" in
               create)
-                  [[ -z "$snap_name" ]] && { log_error "Usage: shard snapshot create <vm> <name>"; return 1; }
-                  if is_running "$vm_name"; then
-                      log_error "Cannot create snapshot while VM is running. Stop it first."
-                      return 1
-                  fi
-                  log "Creating snapshot '${""}''${BOLD}''${snap_name}''${NC}' for ''${vm_name}..."
-                  sudo qemu-img snapshot -c "$snap_name" "$qcow2_path"
-                  log_success "Snapshot created"
+                  [[ -z "''${2:-}" ]] && { log_error "Usage: shard backup create <vm> [name]"; return 1; }
+                  backup_create "$2" "''${3:-}"
                   ;;
-              list)
-                  log "Snapshots for ''${BOLD}''${vm_name}''${NC}:"
-                  sudo qemu-img snapshot -l "$qcow2_path" 2>/dev/null || echo "  (no snapshots)"
-                  ;;
-              revert)
-                  [[ -z "$snap_name" ]] && { log_error "Usage: shard snapshot revert <vm> <name>"; return 1; }
-                  if is_running "$vm_name"; then
-                      log_error "Cannot revert while VM is running. Stop it first."
-                      return 1
-                  fi
-                  log "Reverting to snapshot '${""}''${BOLD}''${snap_name}''${NC}'..."
-                  sudo qemu-img snapshot -a "$snap_name" "$qcow2_path"
-                  log_success "Reverted to $snap_name"
+              list) backup_list "''${2:-}" ;;
+              restore)
+                  [[ -z "''${3:-}" ]] && { log_error "Usage: shard backup restore <vm> <name> [-f]"; return 1; }
+                  backup_restore "$2" "$3" "''${4:-}"
                   ;;
               delete)
-                  [[ -z "$snap_name" ]] && { log_error "Usage: shard snapshot delete <vm> <name>"; return 1; }
-                  log "Deleting snapshot '${""}''${BOLD}''${snap_name}''${NC}'..."
-                  sudo qemu-img snapshot -d "$snap_name" "$qcow2_path"
-                  log_success "Snapshot deleted"
+                  [[ -z "''${3:-}" ]] && { log_error "Usage: shard backup delete <vm> <name> [-f]"; return 1; }
+                  backup_delete "$2" "$3" "''${4:-}"
                   ;;
               *)
-                  echo -e "''${BOLD}shard snapshot''${NC} - Manage qcow2 snapshots"
+                  echo -e "''${BOLD}shard backup''${NC} - Back up and restore a VM's persistent volumes"
                   echo ""
-                  echo "  create <vm> <name>   Create a snapshot (VM must be stopped)"
-                  echo "  list <vm>            List all snapshots"
-                  echo "  revert <vm> <name>   Revert to a snapshot (VM must be stopped)"
-                  echo "  delete <vm> <name>   Delete a snapshot"
+                  echo "  create <vm> [name]          Back up every volume (VM stopped; name defaults to a timestamp)"
+                  echo "  list [vm]                   List backups"
+                  echo "  restore <vm> <name> [-f]    Replace the VM's volumes with a backup (VM stopped)"
+                  echo "  delete <vm> <name> [-f]     Delete a backup"
                   echo ""
-                  echo "Note: Snapshots are stored inside the home.qcow2 file."
-                  echo "      For BTRFS snapshots of the entire VM, use:"
-                  echo "      sudo btrfs subvolume snapshot /var/lib/microvms/<vm> /path/to/backup"
+                  echo "Stored in $BACKUP_ROOT/<vm>/<name>/. nix-overlay.qcow2 is skipped (rebuilt"
+                  echo "from the store); LUKS containers stay encrypted. On btrfs, create and restore"
+                  echo "are instant reflinks sharing blocks with the live volumes; elsewhere they"
+                  echo "are full copies. Every shard command on a VM with backups lists them on exit."
                   ;;
           esac
       }
@@ -1677,7 +1875,18 @@
       # Resolve a short target name (VM registry key, engagement name, infra
       # alias, or an already-full microvm-* name) to its real per-machine VM name.
       # Used by every host-side command, word or flag form alike.
+      # Every VM name a command touches passes through here, so this is where VMs get
+      # noted for the exit-time backup notice (backup_notices)
       resolve_vm_name() {
+          local vm
+          vm=$(_resolve_vm_name "$1")
+          if [[ -n "$vm" && -n "''${BACKUP_NOTICE_FILE:-}" ]]; then
+              echo "$vm" >> "$BACKUP_NOTICE_FILE"
+          fi
+          echo "$vm"
+      }
+
+      _resolve_vm_name() {
           local target="$1"
           case "$target" in
               router)
@@ -2154,7 +2363,7 @@
           [[ "$1" =~ ^[a-z0-9][a-z0-9_-]{0,31}$ ]]
       }
 
-      # Home volume files present in a slot directory (qcow2 snapshots live inside the file)
+      # Home volume files present in a slot directory
       slot_volumes() {
           local f
           for f in "$1/home.qcow2" "$1/home.luks"; do
@@ -2440,7 +2649,8 @@
             bridge and subnet, isolated from every other VM network by the router
           - Binding and ending never rebuild; bindings are stored in
             $ENGAGEMENTS_FILE, archived volumes in $ENGAGEMENT_ARCHIVE
-          - Snapshots (plain qcow2 slots only): shard snapshot create/revert <slot> <name>
+          - Backups: shard backup create/restore <engagement> <name>, restorable only
+            while the same engagement is bound to the slot
       EOF
       }
 
@@ -3112,7 +3322,7 @@
           -p | purge <name> [-f]  Delete all persistent data (fresh start)
           gc [-f]                 List (and, with confirmation, delete) /var/lib/microvms/
                                   directories with no matching VM in the current flake
-          snapshot <action>       Manage qcow2 snapshots (create/list/revert/delete)
+          backup <action>         Back up/restore a stopped VM's volumes (create/list/restore/delete)
 
       ''${BOLD}FLAGS COMBINE, IN ORDER''${NC}
           shard -bs browsing              build then start, one VM
@@ -3157,9 +3367,9 @@
           # Restart (for kernel/initrd changes)
           shard -bR browsing
 
-          # Snapshots (VM must be stopped)
-          shard snapshot create browsing before-update
-          shard snapshot revert browsing before-update
+          # Backups (VM must be stopped)
+          shard backup create browsing before-update
+          shard backup restore browsing before-update
 
           # Purge and start fresh (deletes all persistent data)
           shard -p dev
@@ -3323,6 +3533,9 @@
 
       # Main
       main() {
+          BACKUP_NOTICE_FILE=$(mktemp -t shard-backup-notice.XXXXXX)
+          trap backup_notices EXIT
+
           if [[ $# -lt 1 ]]; then
               usage
               exit 0
@@ -3462,10 +3675,12 @@
                   set -- "$(resolve_vm_name "$1")" "''${@:2}"
                   cmd_encrypt_setup "$@"
                   ;;
-              snapshot|snap)
-                  [[ $# -lt 1 ]] && { cmd_snapshot help; exit 0; }
+              backup)
+                  [[ $# -lt 1 ]] && { cmd_backup help; exit 0; }
+                  # The backup commands that already show or change backups skip the notice
+                  [[ "$1" == "create" ]] || { rm -f "$BACKUP_NOTICE_FILE"; BACKUP_NOTICE_FILE=""; }
                   [[ $# -ge 2 ]] && set -- "$1" "$(resolve_vm_name "$2")" "''${@:3}"
-                  cmd_snapshot "$@"
+                  cmd_backup "$@"
                   ;;
               *)
                   log_error "Unknown command: $cmd"
@@ -3530,8 +3745,8 @@
     complete -c shard -n __fish_use_subcommand -a test -d 'Full workflow smoke test'
     complete -c shard -n __fish_use_subcommand -a purge -d 'Delete all persistent data'
     complete -c shard -n __fish_use_subcommand -a gc -d 'Clean up orphaned VM directories'
-    complete -c shard -n __fish_use_subcommand -a snapshot -d 'Manage qcow2 snapshots'
-    complete -c shard -n __fish_use_subcommand -a snap -d 'Alias for snapshot'
+    complete -c shard -n __fish_use_subcommand -a backup -d 'Back up/restore VM volumes'
+    complete -c shard -n "__fish_seen_subcommand_from backup; and not __fish_seen_subcommand_from create list restore delete" -a "create list restore delete"
     complete -c shard -n __fish_use_subcommand -a encrypt-setup -d 'Set up LUKS-encrypted home volume'
     complete -c shard -n __fish_use_subcommand -a help -d 'Show usage'
 
@@ -3540,7 +3755,7 @@
     # flag-prefixed first token, or after any still-word-based subcommand that
     # takes a VM name.
     complete -c shard -n __shard_first_is_flag -a "(__shard_vm_names)"
-    complete -c shard -n "__fish_seen_subcommand_from status logs console app purge encrypt-setup snapshot snap test switch switch-status" -a "(__shard_vm_names)"
+    complete -c shard -n "__fish_seen_subcommand_from status logs console app purge encrypt-setup backup test switch switch-status" -a "(__shard_vm_names)"
   '';
 in
   pkgs.symlinkJoin {
