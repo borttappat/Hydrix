@@ -99,19 +99,82 @@ done
 log() { echo ":: $*"; }
 err() { echo "!! $*" >&2; }
 
-# Tidy activation output: drop os-prober's lsblk noise (it globs
-# /dev/mapper/* and lsblk complains about every non-match), and split
-# switch-to-configuration's comma-joined unit lists one unit per line.
+COLOR=0
+[[ -t 1 ]] && COLOR=1
+
+# Tidy activation output. Drops routine noise (os-prober's warning and its
+# lsblk errors from globbing /dev/mapper/*, the inhibitor check, the per-user
+# reload notice) and collects switch-to-configuration's comma-joined unit
+# lists into nh-style STOPPED/RELOADED/RESTARTED/STARTED/SKIPPED/FAILED
+# blocks. The summary prints before the next ":: " log line, or at the end.
 filter_activation() {
-    awk '
-        /^lsblk: \/dev\/mapper\// { next }
-        match($0, /the following [a-z ]*units[a-z ]*: /) {
-            print substr($0, 1, RSTART + RLENGTH - 2)
-            n = split(substr($0, RSTART + RLENGTH), units, /, /)
-            for (i = 1; i <= n; i++) print "    " units[i]
-            fflush(); next
+    awk -v color="$COLOR" '
+        function c(code, s) { return color ? "\033[" code "m" s "\033[0m" : s }
+        function add(b, list, scope, isnew,   n, i, u, k) {
+            n = split(list, parts, /, /)
+            for (i = 1; i <= n; i++) {
+                u = parts[i]; k = b SUBSEP u
+                if (!(k in seen)) { seen[k] = 1; units[b, ++count[b]] = u }
+                if (scope == "user") user[k] = 1; else sys[k] = 1
+                if (isnew) fresh[k] = 1
+                if (length(u) > width) width = length(u)
+            }
+            pending = 1
         }
+        function block(b, title, tag, code,   n, i, j, t, u, k, d) {
+            n = count[b]
+            if (!n) return
+            for (i = 1; i <= n; i++) sorted[i] = units[b, i]
+            for (i = 2; i <= n; i++) {
+                t = sorted[i]
+                for (j = i - 1; j >= 1 && sorted[j] > t; j--) sorted[j + 1] = sorted[j]
+                sorted[j + 1] = t
+            }
+            print ""
+            print c("1", title)
+            for (i = 1; i <= n; i++) {
+                u = sorted[i]; k = b SUBSEP u
+                d = (k in sys) ? ((k in user) ? "system, user" : "system") : "user"
+                if (k in fresh) d = d ", new"
+                if (b == "stop" && (("start" SUBSEP u) in seen)) d = d ", started again"
+                printf "[%s] %-*s  %s\n", c(code, tag), width, u, d
+            }
+        }
+        function flush() {
+            if (!pending) return
+            block("stop", "STOPPED", "S", "31")
+            block("reload", "RELOADED", "L", "33")
+            block("restart", "RESTARTED", "R", "33")
+            block("start", "STARTED", "A", "32")
+            block("skip", "SKIPPED", "-", "2")
+            block("fail", "FAILED", "!", "1;31")
+            print ""
+            delete seen; delete units; delete count
+            delete sys; delete user; delete fresh
+            width = 0; pending = 0
+            fflush()
+        }
+        function list(   s) { s = $0; sub(/^.*the following [a-z ]+: /, "", s); return s }
+        function scope() { return ($0 ~ /the following user units/) ? "user" : "system" }
+
+        /^lsblk: \/dev\/mapper\//                                 { next }
+        /^Warning: os-prober will be executed/                    { next }
+        /^Its output will be used to detect bootable binaries/    { next }
+        /^Checking switch inhibitors\.\.\. done$/                 { next }
+        /^reloading user units for /                              { next }
+
+        /^stopping the following (user )?units: /                 { add("stop", list(), scope()); next }
+        /^NOT restarting the following changed (user )?units: /   { add("skip", list(), scope()); next }
+        /^reloading the following (user )?units: /                { add("reload", list(), scope()); next }
+        /^restarting the following (user )?units: /               { add("restart", list(), scope()); next }
+        /^restarting sysinit-reactivation\.target$/               { add("restart", "sysinit-reactivation.target", "system"); next }
+        /^starting the following (user )?units: /                 { add("start", list(), scope()); next }
+        /^the following new units were started: /                 { add("start", list(), "system", 1); next }
+        /^warning: the following (user )?units failed: /          { add("fail", list(), scope()); next }
+
+        /^(\033\[[0-9;]*m)*::/ { flush() }
         { print; fflush() }
+        END { flush() }
     '
 }
 
