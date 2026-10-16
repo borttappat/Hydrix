@@ -1783,7 +1783,7 @@ which is not built per machine. The git boundary:
 | Who | Does | From |
 |---|---|---|
 | Host | Holds every clone, makes every commit | `hydrix.repos.entries`, `ensure-repos` |
-| Git VM (gitsync) | Only holder of the GitHub key; push, pull, fetch, status | entries with `push = true` |
+| Git VM (gitsync) | Only holder of the GitHub key; clone, push, pull, fetch, status | entries with `push = true` |
 | Other VMs | Edit working trees, cannot commit | `microvmHost.vms.<vm>.repos` in the machine config |
 
 ```nix
@@ -1819,7 +1819,12 @@ hydrix.microvmHost.byName.dev.repos = [ "hydrix-config" ];
   `shard git clone|push|pull|fetch|status|repos <name>` on vsock 14512, refusing undeclared
   names; `clone` only fills an empty, host-shared directory. Its
   SSH key arrives from `secrets/github.yaml` through `hydrix.secrets.github.vms` (default: the
-  git VM only).
+  git VM only). Nothing is pushed until you run `shard git push`, and the remote repo must
+  exist (create it on GitHub; an SSH key cannot). `shard git auth` is only for the optional `gh`
+  CLI (`hydrix.gitsync.gh.enable`).
+- **Repos that hold secrets**: a declared repo can stay local (`clone = false`, no remote) for
+  as long as you like. The password database (`~/vault`) is safe to push once it needs a key
+  file as well as the master password ([Key file](#key-file-optional)).
 - **VM views** (`microvmHost.vms.<vm>.repos`): the host's working tree at the same path, read-write,
   with `hydrix.repos.readOnlyPaths` (default `.git`, `.claude`) read-only on the host side. See
   [Host Repos](#host-repos-hostrepos). `hostRepos` is the low-level form for paths that

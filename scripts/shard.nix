@@ -2863,7 +2863,7 @@
           fetch <repo>       Fetch from all remotes
           status <repo>      Show git status and recent commits
           repos              List available repos
-          auth               Open console for gh auth login
+          auth               Console for gh auth login (only with hydrix.gitsync.gh.enable)
 
       ''${BOLD}EXAMPLES''${NC}
           # List available repos
@@ -2878,8 +2878,8 @@
           # Pull latest changes
           shard git pull Hydrix
 
-          # First-time setup: authenticate with GitHub
-          shard git auth
+      The git VM pushes with the SSH key from secrets/github.yaml (hydrix.secrets.githubSecretsFile);
+      'shard git auth' is only for the optional gh CLI login.
       EOF
       }
 
