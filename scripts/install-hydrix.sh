@@ -3098,7 +3098,7 @@ init_sops_during_install() {
                 chmod 700 /mnt/var/lib/sops-nix
                 cp "$master_tmp" /mnt/var/lib/sops-nix/master-age-key.txt
                 chmod 600 /mnt/var/lib/sops-nix/master-age-key.txt
-                printf 'creation_rules:\n  - path_regex: .*\\.(yaml|json)$\n    age:\n      - %s\n' \
+                printf 'creation_rules:\n  - path_regex: .*\\.(yaml|json|key)$\n    age:\n      - %s\n' \
                     "$master_pubkey" > "$sops_yaml"
                 SOPS_MASTER_PUBKEY="$master_pubkey"
                 log "  Master key generated: secrets/master-age-key.age"

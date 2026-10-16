@@ -118,7 +118,7 @@ create_sops_config() {
 
     cat > "$sops_file" << EOF
 creation_rules:
-  - path_regex: .*\\.(yaml|json)\$
+  - path_regex: .*\\.(yaml|json|key)\$
     age:
       - $AGE_PUBKEY
 EOF

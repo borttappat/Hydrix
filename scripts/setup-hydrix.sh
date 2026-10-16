@@ -1676,7 +1676,7 @@ init_sops_and_wifi() {
                 sudo chmod 700 /var/lib/sops-nix
                 sudo cp "$master_tmp" /var/lib/sops-nix/master-age-key.txt
                 sudo chmod 600 /var/lib/sops-nix/master-age-key.txt
-                printf 'creation_rules:\n  - path_regex: .*\\.(yaml|json)$\n    age:\n      - %s\n' \
+                printf 'creation_rules:\n  - path_regex: .*\\.(yaml|json|key)$\n    age:\n      - %s\n' \
                     "$master_pubkey" > "$sops_yaml"
                 log "  Master key generated: secrets/master-age-key.age"
                 log "  Created secrets/.sops.yaml"
