@@ -472,6 +472,26 @@ in {
         '';
       };
 
+      vault.vms = lib.mkOption {
+        type = lib.types.listOf lib.types.str;
+        default = ["microvm-vault"];
+        description = ''
+          MicroVMs that receive the vault key file (vaultKeyFile), as
+          /mnt/vm-secrets/vault/vault.key. Only the vault VM by default.
+        '';
+      };
+
+      vaultKeyFile = lib.mkOption {
+        type = lib.types.nullOr lib.types.path;
+        default = null;
+        description = ''
+          Path to the sops-encrypted vault key file in your hydrix-config repo, stored as a
+          binary sops file named *.key (secrets/vault.key) so it decrypts to the exact bytes;
+          .sops.yaml's creation rule and hydrix-sops-setup --rekey cover *.key. Delivered to the vault VM only; enable it there with
+          hydrix.vault.agent.keyFile = "/mnt/vm-secrets/vault/vault.key".
+        '';
+      };
+
       files = lib.mkOption {
         type = lib.types.attrsOf (lib.types.submodule {
           options = {

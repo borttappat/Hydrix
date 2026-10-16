@@ -88,6 +88,13 @@ in {
           };
         };
       })
+      (lib.mkIf (cfg.vaultKeyFile != null) {
+        vault = lib.mkDefault {
+          file = cfg.vaultKeyFile;
+          vmDir = "vault";
+          outFile = "vault.key";
+        };
+      })
       (lib.mkIf (cfg.wifiSecretsFile != null) {
         wifi = lib.mkDefault {
           file = cfg.wifiSecretsFile;

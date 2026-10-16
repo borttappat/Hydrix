@@ -54,7 +54,7 @@
       else
         [ -d "''${XDG_RUNTIME_DIR:?}/hydrix-vault" ] || mkdir -m 700 "$XDG_RUNTIME_DIR/hydrix-vault"
         printf '%s\n' "$req" | hydrix-vault-backend --db "$VAULT_DB" \
-          --session-file "$XDG_RUNTIME_DIR/hydrix-vault/session" --timeout "$VAULT_TIMEOUT"
+          --session-file "$XDG_RUNTIME_DIR/hydrix-vault/session" --timeout "$VAULT_TIMEOUT"${lib.optionalString (cfg.keyFile != null) " --key-file ${lib.escapeShellArg cfg.keyFile}"}
       fi
     }
 
@@ -307,6 +307,14 @@ in {
       type = lib.types.str;
       default = "/home/${user}/vault/Passwords.kdbx";
       description = "Database path for the host backend (the vault VM sees the same directory as /var/lib/vault).";
+    };
+    keyFile = lib.mkOption {
+      type = lib.types.nullOr lib.types.str;
+      default = null;
+      description = ''
+        Key file for the host backend (backend = "host"), required with the master password.
+        Must be readable by the user. The vault VM has its own, hydrix.vault.agent.keyFile.
+      '';
     };
     vmCid = lib.mkOption {
       type = lib.types.int;

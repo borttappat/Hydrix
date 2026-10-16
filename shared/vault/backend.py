@@ -7,6 +7,10 @@ free-text field is base64-encoded.
 The master password lives in one tmpfs file only (`--session-file`: /run/vault-session in the
 vault VM, $XDG_RUNTIME_DIR for the host backend), mode 0600. It reaches keepassxc-cli on stdin,
 never on a command line, and is never logged or echoed. LOCK and an idle timeout delete it.
+
+With `--key-file`, every database operation also needs that file (KeePassXC composite key):
+a copied database is useless without it. A configured key file that is missing is an error,
+never a fallback to the password alone (db-create would otherwise write a new key file).
 """
 
 import argparse
@@ -98,13 +102,20 @@ class FileSession:
 
 
 class Vault:
-    def __init__(self, db, session):
-        self.db, self.session = db, session
+    def __init__(self, db, session, key_file=None):
+        self.db, self.session, self.key_file = db, session, key_file
+
+    def key_args(self, flag="-k"):
+        if not self.key_file:
+            return []
+        if not os.path.isfile(self.key_file):
+            raise Fail("key file missing (hydrix.vault.agent.keyFile)")
+        return [flag, self.key_file]
 
     def run(self, args, password, extra=(), check=True):
         """keepassxc-cli with the master password (and any extra secrets) on stdin."""
         stdin = "\n".join([password, *extra]) + "\n"
-        res = subprocess.run([KPCLI, args[0], "-q", *args[1:]], input=stdin,
+        res = subprocess.run([KPCLI, args[0], "-q", *self.key_args(), *args[1:]], input=stdin,
                              capture_output=True, text=True, timeout=60)
         if check and res.returncode != 0:
             raise Fail(clean(res.stderr.splitlines()[0] if res.stderr else "keepassxc-cli failed"))
@@ -166,7 +177,8 @@ class Vault:
         if len(password) < 8:
             raise Fail("master password too short")
         os.makedirs(os.path.dirname(self.db), exist_ok=True)
-        res = subprocess.run([KPCLI, "db-create", "-q", "-p", self.db], input=f"{password}\n{password}\n",
+        res = subprocess.run([KPCLI, "db-create", "-q", "-p", *self.key_args("--set-key-file"), self.db],
+                             input=f"{password}\n{password}\n",
                              capture_output=True, text=True, timeout=120)
         if res.returncode != 0:
             raise Fail(clean(res.stderr or "db-create failed"))
@@ -303,6 +315,7 @@ def main():
     ap.add_argument("--db", required=True)
     ap.add_argument("--timeout", type=int, default=300)
     ap.add_argument("--session-file", required=True)
+    ap.add_argument("--key-file", help="key file, part of the composite key (optional)")
     ap.add_argument("--expire", action="store_true", help="only drop an idle session, then exit")
     opts = ap.parse_args()
 
@@ -312,7 +325,7 @@ def main():
             session.get()
             return
         line = sys.stdin.readline(MAX_REQUEST)
-        out = handle(Vault(opts.db, session), line)
+        out = handle(Vault(opts.db, session, opts.key_file), line)
         sys.stdout.write("\n".join(["OK", *out]) + "\n")
     except Fail as e:
         sys.stdout.write(f"ERROR {e}\n")

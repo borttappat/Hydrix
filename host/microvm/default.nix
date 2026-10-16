@@ -43,13 +43,17 @@
   # VMs that get the GitHub key automatically (hydrix.secrets.github.vms, the git VM by
   # default); host/repos.nix rejects "github" listed by hand.
   githubVms = lib.optionals (secretsCfg.githubSecretsFile != null) secretsCfg.github.vms;
+  # VMs that get the vault key file automatically (hydrix.secrets.vault.vms, the vault VM).
+  vaultKeyVms = lib.optionals (secretsCfg.vaultKeyFile != null) secretsCfg.vault.vms;
 
   # Merge: knownVms auto-enabled with defaults; explicit cfg.vms entries override.
   allVms =
     lib.mapAttrs (name: v:
       v
       // {
-        secrets = lib.unique ((v.secrets or []) ++ lib.optional (builtins.elem name githubVms) "github");
+        secrets = lib.unique ((v.secrets or [])
+          ++ lib.optional (builtins.elem name githubVms) "github"
+          ++ lib.optional (builtins.elem name vaultKeyVms) "vault");
       })
     ((lib.genAttrs cfg.knownVms (_: {
         enable = true;
