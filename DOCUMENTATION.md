@@ -3449,7 +3449,7 @@ vault / vault-pick (host, Hydrix host/passwords.nix)
 |--------|-------|
 | Compromised host session or compositor | Sees the master password as it is typed and every copied secret |
 | Host root | Can read the vault VM's memory |
-| Weak master password | The file's protection is only as strong as the password |
+| Weak master password | Without a key file, the file's protection is only as strong as the password |
 
 #### Setup
 
@@ -3457,6 +3457,46 @@ vault / vault-pick (host, Hydrix host/passwords.nix)
    (`"microvm-vault" = { autostart = true; };` under `hydrix.microvmHost.vms`).
 2. `rebuild`, then `shard -bR vault`.
 3. Press `Mod+P` (or run `vault`): set a master password, and the database is created.
+
+#### Key file (optional)
+
+A key file makes the database need the master password **and** a file that never leaves your
+machines in plain form (KeePassXC composite key). A copied `Passwords.kdbx` (a git remote, a
+backup, a stolen laptop image) is then useless on its own, however weak the password. The key
+is a sops secret in hydrix-config, `secrets/vault.key`, decrypted on the host at boot and
+delivered to the vault VM only (`hydrix.secrets.vault.vms`); no other VM gets it.
+
+`hydrix-sops-setup --vault-key` stores the key (master key unlocked first). Paths are absolute.
+
+| Situation | Command |
+|-----------|---------|
+| No database yet | `hydrix-sops-setup --vault-key`, then enable (below); the first `vault` creates the database with the key |
+| Existing database, no key file | `hydrix-sops-setup --vault-key --add-to ~/vault/Passwords.kdbx` |
+| Existing database with its own key file | `hydrix-sops-setup --vault-key --from /path/to/its.key` |
+
+Then enable it and restart the VM:
+
+```nix
+# machine config
+hydrix.secrets.vaultKeyFile = ../secrets/vault.key;
+# infra/vault/default.nix
+hydrix.vault.agent.keyFile = "/mnt/vm-secrets/vault/vault.key";
+```
+
+`rebuild && shard -bR vault`, and commit `secrets/vault.key` (sops-encrypted, safe to commit).
+The host backend takes the same file through `hydrix.passwords.keyFile`, a path your user can
+read.
+
+The helper never loses anything of yours. It refuses to replace an existing
+`secrets/vault.key` (a database may depend on it), edits a database only after the key is
+stored and verified and a copy of the database is saved to `$XDG_RUNTIME_DIR`, and shreds your
+`--from` file or that copy only when you answer `y`. The random key it generates itself lives
+in tmpfs and is always shredded once stored. If the vault agent is configured with a key file
+that is missing, every request fails rather than falling back to the password alone.
+
+Keep in mind: losing both `secrets/vault.key` and the sops master key makes the database
+unopenable. Older password-only copies (earlier commits of `~/vault`) stay as strong as the
+master password they were made with; change it (`keepassxc-cli db-edit -p`) when adding a key.
 
 #### Between machines
 
@@ -3480,6 +3520,8 @@ the master password against offline guessing.
 | "vault VM unreachable (shard -s vault)" | The VM is not running, or its agent is not: `shard -i vault`, then `shard -bR vault` |
 | "the vault VM runs an older agent" | The VM was not rebuilt after an update: `shard -bR vault` |
 | "wrong password" on a machine meant to start fresh | An old `Passwords.kdbx` is still in `~/vault`; move it aside |
+| "wrong password" with the right password | The database and the agent disagree about the key file: one uses `secrets/vault.key`, the other does not (both `vaultKeyFile` and `agent.keyFile` set, `shard -bR vault` after enabling) |
+| "key file missing" | `agent.keyFile` is set but the key did not arrive: `sudo systemctl status hydrix-sops-decrypt-vault`, master key unlocked, `vaultKeyFile` set |
 | `Mod+P` shows an error and "Press any key to close" | The message is the backend's; the table above covers the common ones |
 
 ---

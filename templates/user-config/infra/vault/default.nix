@@ -46,6 +46,9 @@ in {
   hydrix.vault.agent = {
     enable = true;
     database = "${vaultDir}/Passwords.kdbx";
+    # Key file required with the master password (hydrix-sops-setup --vault-key, and
+    # hydrix.secrets.vaultKeyFile in the machine config).
+    # keyFile = "/mnt/vm-secrets/vault/vault.key";
   };
 
   users.users.vault = {

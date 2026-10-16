@@ -171,10 +171,15 @@
     # For WiFi credentials:
     #   wifi-sync add SSID PASSWORD      (creates secrets/wifi.yaml on first save)
     #
+    # Optional vault key file (password database needs it plus the master password):
+    #   hydrix-sops-setup --vault-key    (writes secrets/vault.key; also set
+    #                                     hydrix.vault.agent.keyFile in infra/vault)
+    #
     secrets = {
       enable = false;
       # githubSecretsFile = ../secrets/github.yaml;
       # wifiSecretsFile   = ../secrets/wifi.yaml;
+      # vaultKeyFile      = ../secrets/vault.key;
     };
 
   
