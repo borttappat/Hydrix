@@ -13,6 +13,10 @@
   # Hardware graphics: mesa/llvmpipe for alacritty GL rendering
   hardware.graphics.enable = true;
 
+  # Resident alacritty per VM: a new terminal (Mod+Return) opens as a window of it at once.
+  # Its terminals share one process, so they all close if it exits.
+  # hydrix.microvm.terminalDaemon.enable = true;
+
   environment.variables = {
     EDITOR = config.hydrix.editor;
     VISUAL = config.hydrix.editor;
