@@ -848,6 +848,7 @@
     windowrule = rounding ${lkRounding}, match:class ^(wofi)$
     windowrule = no_anim 1,             match:class ^(wofi)$
     layerrule = no_anim 1, match:namespace ^(wofi)$
+    layerrule = no_anim 1, match:namespace ^(eww-dashboard)$
     ${layerBlur}
 
     ${lib.optionalString config.hydrix.hyprland.hideBorderOnSingleWindow ''

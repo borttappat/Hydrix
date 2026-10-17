@@ -640,6 +640,65 @@
     '';
   };
 
+  # History for the CPU and TRAFFIC graphs, kept outside the dashboard so a
+  # reopened dashboard (monitor hotplug, eww reload) draws the last
+  # graphRange seconds at once; eww's own graph widget keeps its samples
+  # inside the widget and loses them on close. One sample per graphStep
+  # seconds, emitted as bar heights in px, left-padded with zeros: CPU
+  # against 100%, traffic against its own peak in the window, which is also
+  # emitted formatted (net_peak) for the TRAFFIC title. Traffic comes from
+  # eww-net-stats, which reads the router snapshot router_stats keeps fresh,
+  # so it changes every 10s and holds in between.
+  graphHeight = 90;
+  graphStep = 2;
+  graphRange = 120;
+  ewwGraphHistory = pkgs.writeShellApplication {
+    name = "eww-graph-history";
+    runtimeInputs = [pkgs.jq pkgs.coreutils ewwNetStats];
+    text = ''
+      n=${toString (graphRange / graphStep)}
+      cpu=()
+      net=()
+      prev_total=0
+      prev_idle=0
+      tick=0
+      traffic=0
+      while :; do
+        read -r _ user nice sys idle iowait irq softirq steal _ < /proc/stat
+        total=$(( user + nice + sys + idle + iowait + irq + softirq + steal ))
+        idle_all=$(( idle + iowait ))
+        if [ "$prev_total" -gt 0 ] && [ "$total" -gt "$prev_total" ]; then
+          cpu+=("$(( 100 * (total - prev_total - idle_all + prev_idle) / (total - prev_total) ))")
+          if [ $(( tick % 5 )) -eq 0 ]; then
+            traffic=$(eww-net-stats 2>/dev/null | jq -r '.total // 0' 2>/dev/null) || traffic=0
+          fi
+          tick=$(( tick + 1 ))
+          net+=("''${traffic:-0}")
+          if [ "''${#cpu[@]}" -gt "$n" ]; then
+            cpu=("''${cpu[@]:1}")
+            net=("''${net[@]:1}")
+          fi
+          jq -nc --argjson n "$n" --argjson h ${toString graphHeight} \
+            --argjson cpu "[$(IFS=,; echo "''${cpu[*]}")]" \
+            --argjson net "[$(IFS=,; echo "''${net[*]}")]" '
+            def pad: [range($n - length) | 0] + .;
+            def fmt:
+              if . >= 1048576 then "\(. / 1048576 | floor)MB/s"
+              elif . >= 1024 then "\(. / 1024 | floor)KB/s"
+              else "\(.)B/s"
+              end;
+            ($net | max // 0) as $m
+            | {cpu: ($cpu | map([[. , 0] | max, 100] | min | . * $h / 100 | round) | pad),
+               net: ($net | map(if $m > 0 then . * $h / $m | round else 0 end) | pad),
+               net_peak: ($m | fmt)}'
+        fi
+        prev_total=$total
+        prev_idle=$idle_all
+        sleep ${toString graphStep}
+      done
+    '';
+  };
+
   # Opens the wallpaper layer (if enabled) and then one dashboard per
   # monitor (or per internal panel, see dashboard.monitors), sized to the
   # left half of that monitor below its reserved zones. Re-syncs on monitor
@@ -648,12 +707,14 @@
   # exclusive zone is part of that size. Debounced like waybarMonitorWatch in
   # modules/hyprland.nix.
   #
-  # With dashboard.workspace set, every monitor gets a size entry and a
-  # dashboard is open only on the monitor currently showing that workspace,
-  # so it follows the workspace between monitors. A runtime workspace rule per
-  # monitor widens that workspace's left gaps_out to the dashboard's edge so
-  # tiled windows keep to the right half. The rule is a `hyprctl keyword`, dropped on config
-  # reload, which the configreloaded re-sync puts back.
+  # With dashboard.workspace set, every monitor gets a dashboard, and only
+  # the one on the monitor currently showing that workspace is shown (the
+  # dash_on variable), so it follows the workspace between monitors. Hidden
+  # dashboards stay open: nothing is rebuilt on a workspace switch. A runtime
+  # workspace rule per monitor widens that workspace's left gaps_out to the
+  # dashboard's edge so tiled windows keep to the right half. The rule is a
+  # `hyprctl keyword`, dropped on config reload, which the configreloaded
+  # re-sync puts back.
   ewwDashboardWatch = pkgs.writeShellApplication {
     name = "eww-dashboard-watch";
     runtimeInputs = [pkgs.eww pkgs.hyprland pkgs.jq pkgs.socat pkgs.gnugrep pkgs.coreutils];
@@ -673,27 +734,26 @@
       open_dashboard() {
         for _ in 1 2 3 4 5 6; do
           eww open dashboard --id "dashboard-$1" --screen "$1" \
-            --arg width="$2" --arg height="$3" 2>/dev/null && return 0
+            --arg mon="$1" --arg width="$2" --arg height="$3" 2>/dev/null && return 0
           sleep 0.5
         done
       }
 
-      # Opens each dashboard whose monitor shows the pinned workspace (or
-      # always, when not pinned) and closes the rest. Idempotent.
+      # Opens any missing dashboard, then shows each one whose monitor shows
+      # the pinned workspace (every one, when not pinned) and hides the rest.
+      # Idempotent.
       update_visibility() {
-        local mons open active
+        local mons open on
         mons=$(hyprctl monitors -j)
         open=$(eww active-windows 2>/dev/null || true)
         while read -r mon width height; do
-          active=$(jq -r --arg m "$mon" '.[] | select(.name == $m) | .activeWorkspace.id' <<< "$mons")
-          if [ -z "$_ws" ] || [ "$active" = "$_ws" ]; then
-            if ! grep -q "^dashboard-$mon:" <<< "$open"; then
-              open_dashboard "$mon" "$width" "$height" || true
-            fi
-          elif grep -q "^dashboard-$mon:" <<< "$open"; then
-            eww close "dashboard-$mon" 2>/dev/null || true
+          [ -n "$mon" ] || continue
+          if ! grep -q "^dashboard-$mon:" <<< "$open"; then
+            open_dashboard "$mon" "$width" "$height" || true
           fi
         done < "$_state"
+        on=$(jq -c --arg ws "$_ws" '[.[] | select($ws == "" or (.activeWorkspace.id | tostring) == $ws) | {(.name): true}] | add // {}' <<< "$mons")
+        eww update "dash_on=$on" 2>/dev/null || true
       }
 
       # With "if-changed", leaves open dashboards alone when no size changed.
@@ -814,34 +874,54 @@
         :initial "[]"
         `eww-git-status`)
 
+      (deflisten graph_hist
+        :initial "{\"cpu\":[],\"net\":[]}"
+        `eww-graph-history`)
+
       (defpoll weather
         :interval "60s"
         :initial "{\"stale\":false,\"locations\":[]}"
         `eww-weather`)
 
-      ;; Sized per monitor by eww-dashboard-watch (left half, below waybar).
-      (defwindow dashboard [width height]
+      ;; Monitors whose dashboard is shown, as {"<monitor>": true}; set by
+      ;; eww-dashboard-watch.
+      (defvar dash_on "{}")
+
+      ;; One per monitor, opened by eww-dashboard-watch and kept open. Sized
+      ;; by its content (width/height: left half, below waybar), so a hidden
+      ;; dashboard shrinks the layer to a 1px column in the screen gap, which
+      ;; covers nothing, while its widgets and their polls stay alive.
+      (defwindow dashboard [mon width height]
         :monitor 0
         :geometry (geometry
           :x "${toString (gaps - shadowRoom)}px"
           :y "-${toString shadowRoom}px"
-          :width "''${width}px"
-          :height "''${height}px"
+          :width "1px"
+          :height "1px"
           :anchor "top left")
         :exclusive false
         :stacking "fg" ;; above windows, see the header of modules/eww.nix
         :namespace "eww-dashboard" ;; target of the layer blur rule in modules/hyprland.nix
         :focusable false
-        (dashboard))
+        (dashboard :mon mon :width width :height height))
 
-      (defwidget dashboard []
-        (box
-          :class "dash-root"
-          :orientation "h"
-          :space-evenly true
-          :spacing ${toString gaps}
-          (dash-column (vm-status-widget) (exit-nodes-widget) (router-widget) (traffic-widget))
-          (dash-column (git-widget) (todo-widget) (weather-widget) (cpu-widget))))
+      ;; Appears at once and slides out to the left, the way its workspace
+      ;; leaves. Sliding in stutters: the hidden tree is unmapped and must be
+      ;; mapped again, and every frame resizes the whole layer.
+      (defwidget dashboard [mon width height]
+        (revealer
+          :reveal {dash_on[mon] ?: false}
+          :transition {(dash_on[mon] ?: false) ? "none" : "slideright"}
+          :duration "400ms"
+          (box
+            :class "dash-root"
+            :width width
+            :height height
+            :orientation "h"
+            :space-evenly true
+            :spacing ${toString gaps}
+            (dash-column (vm-status-widget) (exit-nodes-widget) (router-widget) (traffic-widget))
+            (dash-column (git-widget) (todo-widget) (weather-widget) (cpu-widget)))))
 
       (defwidget dash-column []
         (box
@@ -1050,16 +1130,19 @@
           :visible {net_stats.wan.iface != ""}
           (block-title
             :text "TRAFFIC"
-            :aside {"all " + arraylength(net_stats.vms) + " bridges, down + up · " + net_stats.total_fmt})
-          (graph
-            :class "graph net-graph"
-            :height 90
-            :value {net_stats.total}
-            :min 0
-            :dynamic true
-            :time-range "120s"
-            :thickness 1.5
-            :line-style "round")))
+            :aside {"all " + arraylength(net_stats.vms) + " bridges, down + up · " + net_stats.total_fmt + " · peak " + (graph_hist.net_peak ?: "0B/s")})
+          (history-graph :class "net-graph" :values {graph_hist.net})))
+
+      ;; One bar per graph_hist sample (eww-graph-history), oldest on the left.
+      ;; Drawn from that list rather than eww's graph widget, so the history
+      ;; survives the dashboard being reopened.
+      (defwidget history-graph [class values]
+        (box
+          :class "graph ''${class}"
+          :height ${toString graphHeight}
+          :spacing 1
+          (for h in values
+            (box :class {h > 0 ? "graph-bar" : "graph-bar empty"} :valign "end" :hexpand true :height h))))
 
       (defwidget cpu-widget []
         (box
@@ -1069,16 +1152,7 @@
           (block-title
             :text "CPU"
             :aside {"load " + loadavg + " · " + arraylength(EWW_CPU.cores) + " threads · " + round(EWW_CPU.avg, 0) + "%"})
-          (graph
-            :class "graph cpu-graph"
-            :height 90
-            :value {EWW_CPU.avg}
-            :min 0
-            :max 100
-            :dynamic false
-            :time-range "120s"
-            :thickness 1.5
-            :line-style "round")))
+          (history-graph :class "cpu-graph" :values {graph_hist.cpu})))
 
       (defwidget git-widget []
         (box
@@ -1418,10 +1492,12 @@
       .graph {
         margin-top: 4px;
       }
-      .cpu-graph,
-      .net-graph {
-        color: $color4;
-        background-color: rgba($color4, 0.12);
+      .graph-bar {
+        background-color: $color4;
+      }
+      /* GTK draws a 0px bar 1px tall */
+      .graph-bar.empty {
+        background-color: transparent;
       }
 
 
@@ -1718,6 +1794,7 @@ in {
         ewwWeather
         todo
         ewwTodoListen
+        ewwGraphHistory
         ewwDashboardWatch
       ];
 
