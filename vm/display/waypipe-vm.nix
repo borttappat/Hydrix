@@ -24,6 +24,20 @@
   audioEnabled = config.hydrix.microvm.audio.enable or false;
   notifyForwardEnabled = config.hydrix.microvm.notifyForward.enable or false;
   notifyForwardPort = 14518;
+  terminalDaemon = config.hydrix.microvm.terminalDaemon.enable or false;
+  terminalSocket = "/run/user/1000/alacritty-daemon.sock";
+  # The environment apps launched through waypipe-launch get, shared with the terminal daemon
+  # so its windows' shells start the same way.
+  appEnv =
+    {
+      XDG_RUNTIME_DIR = "/run/user/1000";
+      WAYLAND_DISPLAY = "waypipe-0";
+      HOME = "/home/${username}";
+      USER = username;
+      PATH = "/etc/profiles/per-user/${username}/bin:/run/current-system/sw/bin:/nix/var/nix/profiles/default/bin";
+      ELECTRON_OZONE_PLATFORM_HINT = "auto";
+    }
+    // lib.optionalAttrs audioEnabled {PULSE_SERVER = "unix:/run/user/1000/pulse/host-native";};
   # Name the notification relay reports (informational: the host resolves the VM from its
   # vsock CID). The window title prefix is set by the host's waypipe client, not here.
   vmLabel = config.hydrix.vmType;
@@ -406,6 +420,34 @@ in {
     };
   };
 
+  # ── alacritty-daemon — resident terminal (hydrix.microvm.terminalDaemon) ──
+  # Starts with waypipe-vsock (wantedBy) and stops or restarts with it (partOf): the daemon's
+  # Wayland connection runs through that waypipe server.
+  systemd.services.alacritty-daemon = lib.mkIf terminalDaemon {
+    description = "Resident alacritty: new terminals open as its windows";
+    wantedBy = ["waypipe-vsock.service"];
+    after = ["waypipe-vsock.service"];
+    partOf = ["waypipe-vsock.service"];
+    # mkForce: NixOS sets PATH for every service; the terminals' shells get the app PATH.
+    environment = appEnv // {PATH = lib.mkForce appEnv.PATH;};
+    serviceConfig = {
+      User = username;
+      WorkingDirectory = "/home/${username}";
+      # The waypipe socket appears a moment after waypipe-vsock starts.
+      ExecStartPre = pkgs.writeShellScript "alacritty-daemon-wait" ''
+        for _i in $(seq 1 50); do
+          [[ -S /run/user/1000/waypipe-0 ]] && exit 0
+          sleep 0.2
+        done
+        exit 1
+      '';
+      ExecStart = "${pkgs.alacritty}/bin/alacritty --daemon --socket ${terminalSocket}";
+      ExecStopPost = "${pkgs.coreutils}/bin/rm -f ${terminalSocket}";
+      Restart = "on-failure";
+      RestartSec = "2s";
+    };
+  };
+
   # ── waypipe-launch (14508) — on-demand, started by display-mode ──────────
   # Receives app launch commands from host, runs them with waypipe display.
   systemd.services.waypipe-launch = {
@@ -450,6 +492,15 @@ in {
           export PATH="/etc/profiles/per-user/${username}/bin:/run/current-system/sw/bin:/nix/var/nix/profiles/default/bin"
           export ELECTRON_OZONE_PLATFORM_HINT=auto
           ${lib.optionalString audioEnabled ''export PULSE_SERVER="unix:/run/user/1000/pulse/host-native"''}
+          ${lib.optionalString terminalDaemon ''
+            # A new window of the resident alacritty (hydrix.microvm.terminalDaemon) opens at
+            # once; arguments create-window does not accept fall through to a normal start.
+            if [[ "''${ARGS[0]}" == alacritty && -S ${terminalSocket} ]] \
+              && alacritty msg --socket ${terminalSocket} create-window "''${ARGS[@]:1}" >>/tmp/waypipe-launch.log 2>&1; then
+              echo "launched: ''${ARGS[*]} (terminal daemon)"
+              exit 0
+            fi
+          ''}
           ${pkgs.util-linux}/bin/setsid "''${ARGS[@]}" </dev/null >>/tmp/waypipe-launch.log 2>&1 &
           echo "launched: ''${ARGS[*]}"
         ''}',nofork

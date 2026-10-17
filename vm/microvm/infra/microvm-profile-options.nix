@@ -22,6 +22,12 @@
       description = "Forward VM desktop notifications (org.freedesktop.Notifications) to the host over vsock instead of rendering them locally. The VM has no notification daemon otherwise, so notify-send and app notifications silently fail unless this is on. The host only accepts notifications from VMs whose meta.nix sets notifyForward = true, so set this from that same value.";
     };
 
+    terminalDaemon.enable = lib.mkOption {
+      type = lib.types.bool;
+      default = false;
+      description = "Keep one alacritty running in the VM (alacritty --daemon) while waypipe is connected, so a new terminal (hypr-ws-app/Mod+Return, shard -a <vm> alacritty) opens as a window of that process at once instead of starting alacritty. Terminals share the process: if it exits, they all close. Launches it cannot serve fall back to a normal start.";
+    };
+
     vcpu = lib.mkOption {
       type = lib.types.int;
       default = 2;
