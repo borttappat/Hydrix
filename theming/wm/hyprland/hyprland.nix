@@ -94,7 +94,6 @@
     # Export HYPRLAND_INSTANCE_SIGNATURE to systemd so hypr-vm-borders-init
     # and other WantedBy services can call hyprctl without needing exec-once.
     exec-once = systemctl --user set-environment HYPRLAND_INSTANCE_SIGNATURE=$HYPRLAND_INSTANCE_SIGNATURE
-    exec-once = hypr-focus-daemon
     exec-once = vm-push-display-mode
     exec-once = waypipe-connect-all
 
@@ -445,22 +444,31 @@
   hyprFocusDaemon = pkgs.writeShellScriptBin "hypr-focus-daemon" ''
     source ${borderColors}
     _grad() { echo "rgba($1) rgba($(_border_base)) $BORDER_ANGLE"; }
-    _apply() { ${pkgs.hyprland}/bin/hyprctl keyword general:col.active_border "$1" 2>/dev/null || true; }
+    # $1 gradient, $2 address of the focused window. The global option alone reaches the
+    # focused window only at the next focus change (one switch late), so the window's own
+    # active_border_color is set too. Hyprland 0.55's setprop skips the first token of a
+    # colour value, hence "skip"; a version without that bug drops it as an invalid colour.
+    _apply() {
+      local cmd="keyword general:col.active_border $1"
+      [ -n "''${2:-}" ] && cmd="$cmd ; dispatch setprop address:$2 active_border_color skip $1"
+      ${pkgs.hyprland}/bin/hyprctl --batch "$cmd" >/dev/null 2>&1 || true
+    }
     # Paints the active border with the inactive-border color (wal color0, as
     # written by hypr-apply-colors), so a window left behind on an unfocused
     # workspace stops looking focused.
-    _apply_neutral() { _apply "rgba($(_wal color0 1a1b26ff))"; }
+    _apply_neutral() { _apply "rgba($(_wal color0 1a1b26ff))" "''${1:-}"; }
     # Hyprland keeps its last real window as "active" when focus moves to an
     # empty workspace -- no activewindow event fires, so check on every
     # workspace/monitor-focus event too whether the reported active window is
     # actually on the now-focused workspace.
     _recompute() {
-      local aw aw_ws active_ws title profile
+      local aw aw_ws active_ws title profile addr
       aw=$(${pkgs.hyprland}/bin/hyprctl activewindow -j 2>/dev/null)
       aw_ws=$(printf '%s' "$aw" | ${pkgs.jq}/bin/jq -r '.workspace.id // empty' 2>/dev/null)
       active_ws=$(${pkgs.hyprland}/bin/hyprctl activeworkspace -j 2>/dev/null | ${pkgs.jq}/bin/jq -r '.id // empty')
       if [ -z "$aw_ws" ] || [ "$aw_ws" != "$active_ws" ]; then
-        _apply_neutral
+        _apply_neutral "$addr"
+      addr=$(printf '%s' "$aw" | ${pkgs.jq}/bin/jq -r '.address // empty' 2>/dev/null)
         return
       fi
       # A VM window's tag (vm-<key>, set by hypr-clip-guard from its process) wins over the
@@ -470,8 +478,8 @@
         title=$(printf '%s' "$aw" | ${pkgs.jq}/bin/jq -r '.title // empty')
         profile=$(echo "$title" | sed -n 's/^\[\([^]]*\)\].*/\1/p')
       fi
-      if [ -n "$profile" ]; then _apply "$(_grad "$(_border_vm "$profile")")"
-      else _apply "$(_grad "$(_border_host)")"; fi
+      if [ -n "$profile" ]; then _apply "$(_grad "$(_border_vm "$profile")")" "$addr"
+      else _apply "$(_grad "$(_border_host)")" "$addr"; fi
     }
     _sig() {
       local sig="''${HYPRLAND_INSTANCE_SIGNATURE:-}"
@@ -487,7 +495,9 @@
         [ -z "$SIG" ] && exit 1
         SOCKET="''${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/hypr/$SIG/.socket2.sock"
         while true; do
-          ${pkgs.socat}/bin/socat - "UNIX-CONNECT:$SOCKET" 2>/dev/null \
+          # -u: socket to stdout only. Never reading stdin keeps the daemon running when it is
+          # started from a terminal (a background job reading the tty gets stopped).
+          ${pkgs.socat}/bin/socat -u "UNIX-CONNECT:$SOCKET" - 2>/dev/null \
             | ${pkgs.gnugrep}/bin/grep --line-buffered -E '^(activewindow|workspace|focusedmon)>>' \
             | while IFS= read -r _line; do
                 _recompute
@@ -590,6 +600,23 @@ in
         Unit = {
           Description = "Initialize Hyprland VM window border rules";
           After = ["hyprland-session.target"];
+      # Focus border colours. A user service rather than exec-once: home-manager restarts it
+      # when a rebuild changes it, and hyprland-session.target (restarted with every Hyprland
+      # start) restarts it after a compositor restart.
+      systemd.user.services.hypr-focus-daemon = {
+        Unit = {
+          Description = "Hyprland focus border colours (hypr-focus-daemon)";
+          After = ["hyprland-session.target"];
+          PartOf = ["hyprland-session.target"];
+        };
+        Service = {
+          ExecStart = "${hyprFocusDaemon}/bin/hypr-focus-daemon";
+          Restart = "on-failure";
+          RestartSec = 2;
+        };
+        Install.WantedBy = ["hyprland-session.target"];
+      };
+
           PartOf = ["hyprland-session.target"];
         };
         Service = {
