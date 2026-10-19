@@ -17,9 +17,6 @@
     # Anonymous file sharing
     onionshare
 
-    # Fallback browser (regular firefox, clearnet)
-    firefox
-
     # TUI file manager
     ranger
 
