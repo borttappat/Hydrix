@@ -2558,10 +2558,10 @@ runtime DPI wrapper needed. That file sets `font.size` from `hydrix.graphical.fo
 directly, but deliberately leaves `font.normal.family` unset -- alacritty resolves it
 via fontconfig's `monospace` alias instead, which `theming/graphical/native-theme.nix`
 points at `hydrix.graphical.font.family` (see "Stylix (Opt-in Theming)" above for why
-this indirection exists and what changes if Stylix is enabled). Firefox is the one app
-that still needs a runtime wrapper (`firefox-dpi`), because Firefox's own scaling
-doesn't follow the compositor scale automatically - it reads the scale via
-`hyprctl monitors` at launch time (see `theming/programs/firefox.nix`).
+this indirection exists and what changes if Stylix is enabled). Firefox follows the
+compositor scale per monitor too, including VM windows over waypipe, so its launcher
+(`theming/programs/firefox.nix`) sets no scale; it only removes the
+`layout.css.devPixelsPerPx` pin that older launchers wrote into existing profiles.
 
 ### VM Font Pipeline
 

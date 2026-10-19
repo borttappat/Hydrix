@@ -448,16 +448,7 @@
     fi
 
     # Send command to VM's waypipe-launch service (vsock:14508).
-    # For Firefox: inject HYDRIX_FF_SCALE so firefox-hydrix in the VM uses the
-    # host monitor's scale (compositor fractional scale, not X11 DPI).
-    LAUNCH_CMD="$*"
-    if [[ "''${1:-}" == "firefox" ]]; then
-      HOST_SCALE=$(${pkgs.hyprland}/bin/hyprctl monitors -j 2>/dev/null \
-        | ${pkgs.jq}/bin/jq -r '[.[] | select(.focused)][0].scale // .[0].scale // 1.0' \
-        2>/dev/null || echo "1.0")
-      LAUNCH_CMD="env HYDRIX_FF_SCALE=$HOST_SCALE $*"
-    fi
-    printf '%s\n' "$LAUNCH_CMD" \
+    printf '%s\n' "$*" \
       | ${pkgs.socat}/bin/socat -T 10 - VSOCK-CONNECT:"$CID":14508
   '';
 

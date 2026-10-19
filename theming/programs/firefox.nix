@@ -91,8 +91,8 @@
   fontSize = fontCfg.overrides.firefox or (builtins.floor (fontCfg.size * (fontCfg.relations.firefox or 1.2)));
   headerFontSize = fontCfg.overrides.firefoxHeader or (builtins.floor (fontCfg.size * 1.9));
 
-  # Firefox launcher: applies host DPI scale, waits on home-manager, then
-  # runs pywalfox. Parameterized so it can wrap any Firefox derivation
+  # Firefox launcher: waits on home-manager, clears legacy fixed-scale prefs,
+  # then runs pywalfox. Parameterized so it can wrap any Firefox derivation
   # (needed for HM .override support).
   mkFirefoxHydrix = firefoxPkg:
     pkgs.writeShellScriptBin "firefox-hydrix" ''
@@ -109,48 +109,19 @@
         sleep 1
       done
 
-      # Priority: HYDRIX_FF_SCALE env (set by host when launching in VM) >
-      #           HYPRLAND_INSTANCE_SIGNATURE (native Hyprland session)
-      scale_factor=""
-      if [ -n "''${HYDRIX_FF_SCALE:-}" ]; then
-          scale_factor="$HYDRIX_FF_SCALE"
-      elif [ -n "''${HYPRLAND_INSTANCE_SIGNATURE:-}" ]; then
-          # Running directly under Hyprland - read scale from compositor
-          scale_factor=$(${pkgs.hyprland}/bin/hyprctl monitors -j 2>/dev/null \
-              | ${pkgs.jq}/bin/jq -r '[.[] | select(.focused)][0].scale // .[0].scale // 1.0' \
-              2>/dev/null || echo "1.0")
-      fi
-
-      if [ -n "$scale_factor" ] && [ -d "$FF_PROFILE" ]; then
-          # Check if scale factor changed (avoid unnecessary writes)
-          current_scale=""
-          [ -f "$FF_DPI_MARKER" ] && current_scale=$(cat "$FF_DPI_MARKER" 2>/dev/null)
-
-          if [ "$scale_factor" != "$current_scale" ]; then
-              # Handle Home Manager symlink: user.js may be a symlink to read-only Nix store
-              if [ -L "$FF_USER_JS" ]; then
-                  # Copy contents and replace symlink with writable file
-                  symlink_target=$(readlink "$FF_USER_JS")
-                  rm "$FF_USER_JS"
-                  if [ -f "$symlink_target" ]; then
-                      cp "$symlink_target" "$FF_USER_JS"
-                      chmod u+w "$FF_USER_JS"
-                  else
-                      touch "$FF_USER_JS"
-                  fi
-              # Also fix permissions if file exists but is read-only
-              elif [ -f "$FF_USER_JS" ] && [ ! -w "$FF_USER_JS" ]; then
-                  chmod u+w "$FF_USER_JS"
+      # Scaling follows the compositor per monitor (Wayland preferred/fractional
+      # buffer scale), so layout.css.devPixelsPerPx must stay unset: a fixed
+      # value pins every window to one scale. Profiles from the launcher's
+      # earlier pin-at-launch scaling carry the pref and a .dpi-scale marker;
+      # strip both once, while Firefox is not running (it rewrites prefs.js
+      # on exit, so editing it under a live instance would not stick).
+      if [ -f "$FF_DPI_MARKER" ] && [ ! -L "$FF_PROFILE/lock" ]; then
+          for f in "$FF_USER_JS" "$FF_PROFILE/prefs.js"; do
+              if [ -f "$f" ] && [ ! -L "$f" ] && [ -w "$f" ]; then
+                  ${pkgs.gnused}/bin/sed -i '/layout\.css\.devPixelsPerPx/d' "$f"
               fi
-
-              # Update user.js with new scale factor
-              # Remove any existing devPixelsPerPx line and append new one
-              if [ -f "$FF_USER_JS" ]; then
-                  ${pkgs.gnused}/bin/sed -i '/layout\.css\.devPixelsPerPx/d' "$FF_USER_JS"
-              fi
-              echo "user_pref(\"layout.css.devPixelsPerPx\", \"$scale_factor\");" >> "$FF_USER_JS"
-              echo "$scale_factor" > "$FF_DPI_MARKER"
-          fi
+          done
+          rm -f "$FF_DPI_MARKER"
       fi
 
       # Launch Firefox in background, then run pywalfox update in parallel
