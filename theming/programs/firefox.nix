@@ -91,7 +91,13 @@
   fontSize = fontCfg.overrides.firefox or (builtins.floor (fontCfg.size * (fontCfg.relations.firefox or 1.2)));
   headerFontSize = fontCfg.overrides.firefoxHeader or (builtins.floor (fontCfg.size * 1.9));
 
+  # Changes whenever the declared extension set does; see FF_EXT_MARKER below.
+  extSettingsHash =
+    builtins.hashString "sha256" (builtins.unsafeDiscardStringContext
+      (builtins.toJSON (config.programs.firefox.policies.ExtensionSettings or {})));
+
   # Firefox launcher: waits on home-manager, clears legacy fixed-scale prefs,
+  # resets add-on state when the declared extensions change,
   # then runs pywalfox. Parameterized so it can wrap any Firefox derivation
   # (needed for HM .override support).
   mkFirefoxHydrix = firefoxPkg:
@@ -124,6 +130,21 @@
           rm -f "$FF_DPI_MARKER"
       fi
 
+      # Firefox's add-on state in the profile (installed copies, registry,
+      # granted permissions) is runtime state the policy never rewrites, so
+      # it can drift from the declared ExtensionSettings and keep an
+      # extension missing or without its host permissions. Whenever the
+      # declared set changes, drop that state so Firefox reinstalls every
+      # extension from the policy, as on a fresh profile. Extension data
+      # (storage, settings) is keyed by UUIDs in prefs.js and survives.
+      FF_EXT_MARKER="$FF_PROFILE/.hydrix-extensions"
+      if [ -d "$FF_PROFILE" ] && [ ! -L "$FF_PROFILE/lock" ] \
+          && [ "$(cat "$FF_EXT_MARKER" 2>/dev/null)" != "${extSettingsHash}" ]; then
+          rm -rf "$FF_PROFILE/extensions" "$FF_PROFILE/extensions.json" \
+              "$FF_PROFILE/addonStartup.json.lz4" "$FF_PROFILE/extension-preferences.json"
+          echo "${extSettingsHash}" > "$FF_EXT_MARKER"
+      fi
+
       # Launch Firefox in background, then run pywalfox update in parallel
       ${lib.getExe firefoxPkg} "$@" &
       FF_PID=$!
@@ -150,7 +171,7 @@
       wait "$FF_PID"
     '';
 
-  # Wrapped Firefox with the DPI/pywalfox launcher as the default firefox
+  # Wrapped Firefox with the Hydrix launcher as the default firefox
   # command. Supports .override for Home Manager compatibility (HM injects
   # policies/PKCS11).
   mkFirefoxWrapped = firefoxPkg: let
