@@ -856,13 +856,6 @@
       windowrule = border_size 0, match:float 0, match:workspace w[tv1]
     ''}
 
-    # VM windows forwarded via waypipe - titles start with [vm-name].
-    # Blur and alpha compositing are recomputed on every frame during scrolling;
-    # disabling them removes GPU overhead that causes scroll jank.
-    windowrule = no_blur 1,                          match:title ^\[
-    windowrule = opacity 1.0 override 1.0 override, match:title ^\[
-    windowrule = no_anim 1,                          match:title ^\[
-
     ${config.hydrix.hyprland.extraBinds}
   '';
 

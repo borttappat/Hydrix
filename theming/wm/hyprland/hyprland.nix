@@ -47,17 +47,19 @@
   vmWindowRules = lib.concatStringsSep "\n" (
     lib.mapAttrsToList (key: v:
       lib.optionalString ((v.hasDisplay or true) && v.workspace != null)
-      "windowrule = workspace ${toString v.workspace}, match:title ^\\[${key}\\]")
+      "windowrule = workspace ${toString v.workspace}, match:title ^\\[${key}\\].*")
     vmRegistry
   );
 
+  # Hyprland matches match:title against the whole title (RE2 FullMatch), so every title
+  # pattern here ends in .* to act as a prefix match.
   # VM windows cannot fullscreen, maximize or focus themselves, and cannot grab host keybinds.
   # Titled windows ("[<key>] ", set by the host's waypipe client) are covered from the moment
   # they open; hypr-clip-guard covers untitled ones by process (suppressed events, hydrix-vm tag).
   vmKeys = lib.attrNames (lib.filterAttrs (_: v: (v.hasDisplay or true) && v.workspace != null) vmRegistry);
   vmGuardRules = lib.optionalString (vmKeys != []) ''
-    windowrule = suppress_event fullscreen maximize activate activatefocus fullscreenoutput, match:title ^\[(${lib.concatStringsSep "|" vmKeys})\]
-    windowrule = no_shortcuts_inhibit 1, match:title ^\[(${lib.concatStringsSep "|" vmKeys})\]
+    windowrule = suppress_event fullscreen maximize activate activatefocus fullscreenoutput, match:title ^\[(${lib.concatStringsSep "|" vmKeys})\].*
+    windowrule = no_shortcuts_inhibit 1, match:title ^\[(${lib.concatStringsSep "|" vmKeys})\].*
     windowrule = no_shortcuts_inhibit 1, match:tag hydrix-vm
   '';
 
