@@ -8,6 +8,8 @@
 #   VM          -> its registry focusBorder, or its dynamicColorMap key when
 #                  hydrix-focus is on (marker file present) or it has none
 #   task slots  -> their base profile (pentest-task1 -> pentest)
+#   VM labels   -> their registry key (pentest-google -> pentest-task1, from the live label
+#                  map waypipe-connect keeps in $XDG_RUNTIME_DIR/hydrix-vm-labels)
 # Colors are rrggbbaa without '#'.
 {
   config,
@@ -52,9 +54,16 @@ in
       esac
       _wal "$key"
     }
-    # First gradient stop for a VM (registry key).
+    # Registry key of a VM label (an engagement-named task slot); a key maps to itself.
+    _border_key() {
+      local f="''${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/hydrix-vm-labels/$1"
+      case "$1" in *[!a-z0-9_-]* | "") echo "$1"; return ;; esac
+      if [ -f "$f" ]; then cat "$f"; else echo "$1"; fi
+    }
+    # First gradient stop for a VM (registry key or live label).
     _border_vm() {
       local c
+      set -- "$(_border_key "$1")"
       if [ -f "$BORDER_MARKER" ]; then _border_dynamic "$1"; return; fi
       c=$(${pkgs.jq}/bin/jq -r --arg p "$1" '.[$p].focusBorder // empty' "$BORDER_REGISTRY" 2>/dev/null)
       if [ -n "$c" ]; then _rgba "$c"; else _border_dynamic "$1"; fi

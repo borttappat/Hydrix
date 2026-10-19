@@ -104,6 +104,9 @@
 
     # ── VM window restrictions ────────────────────────────────────────────────
     ${vmGuardRules}
+    # Rules for live VM labels that differ from their key (engagement-named task slots),
+    # written at runtime by waypipe-connect.
+    source = ~/.config/hypr/vm-labels.conf
     # ── Per-workspace active border color overrides ───────────────────────────
     ${workspaceColorRules}
 
@@ -597,6 +600,9 @@ in
         _dir="$HOME/.config/hypr"
         mkdir -p "$_dir"
         _stamp="$_dir/.hydrix-generated-stamp"
+        # Sourced by hydrix-generated.conf (written by waypipe-connect at runtime); Hyprland
+        # reports a missing sourced file as an error, so it exists before any reload.
+        [ -e "$_dir/vm-labels.conf" ] || : > "$_dir/vm-labels.conf"
         if [ "$(cat "$_stamp" 2>/dev/null)" != "${hyprlandGeneratedConf}" ]; then
           # Unconditional, not just the symlink case: a stale root-owned or
           # read-only regular file here also makes cp fail with EACCES. rm
