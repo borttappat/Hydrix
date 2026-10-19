@@ -2749,7 +2749,7 @@
           # A ready vsock port only proves the guest's own network is up - it says
           # nothing about the router this VM depends on for DNS/internet, which can
           # still be reconnecting to WiFi after a cold host boot. Retry network
-          # commands instead of failing on the first attempt; PUSH/PULL/FETCH/SYNC
+          # commands instead of failing on the first attempt; CLONE/PUSH/PULL/FETCH
           # are all safe to retry. REPOS/STATUS/PING don't touch the network, so a
           # real failure there won't fix itself with time.
           local output rc=0
@@ -2757,7 +2757,7 @@
           local total_timeout=120
           [[ "$cmd" == CLONE* ]] && total_timeout=900
           case "$cmd" in
-              CLONE*|PUSH*|PULL*|FETCH*|SYNC*)
+              CLONE*|PUSH*|PULL*|FETCH*)
                   local attempt max_attempts=5 retry_delay=15
                   for ((attempt = 1; attempt <= max_attempts; attempt++)); do
                       rc=0

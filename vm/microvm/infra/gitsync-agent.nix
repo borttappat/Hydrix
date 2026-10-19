@@ -7,9 +7,10 @@
 # fresh on every boot; or `gh auth login` with hydrix.gitsync.gh.enable.
 #
 # vsock 14512 (one command per connection, from `shard git`):
-#   CLONE|PUSH|PULL|FETCH|STATUS|SYNC <repo>, REPOS, PING
+#   CLONE|PUSH|PULL|FETCH|STATUS <repo>, REPOS, PING
 # CLONE fills the host's empty directory for a declared repo: the host holds no GitHub
-# credential, so this is how ensure-repos clones.
+# credential, so this is how ensure-repos clones. The VM never commits: commits are made on
+# the host, this VM only moves them.
 # vsock 14513: BUSY/IDLE, answers only once the network is up (the host's readiness gate).
 {
   config,
@@ -68,7 +69,13 @@
       PULL)
         repo_dir "$rest"
         echo "OK pulling $rest"
-        if git pull 2>&1; then echo "DONE"; else echo "ERROR pull failed"; fi
+        # Fast-forward only: a merge would be a commit made here. Diverged branches are joined
+        # on the host (shard git fetch, then merge or rebase there).
+        if git pull --ff-only 2>&1; then
+          echo "DONE"
+        else
+          echo "ERROR pull failed (not a fast-forward? shard git fetch $rest, then merge or rebase on the host)"
+        fi
         ;;
       FETCH)
         repo_dir "$rest"
@@ -118,24 +125,12 @@
         echo "OK cloning $rest"
         if git clone --quiet "$url" "$repo_path" 2>&1; then echo "DONE"; else echo "ERROR clone failed"; fi
         ;;
-      SYNC)
-        # Commit all changes then push (vault sync)
-        repo_dir "$rest"
-        echo "OK syncing $rest"
-        git add -A
-        if ! git diff --cached --quiet; then
-          git commit -m "sync $(date +%Y-%m-%dT%H:%M)" 2>&1
-        else
-          echo "(nothing to commit)"
-        fi
-        if push; then echo "DONE"; else echo "ERROR push failed"; fi
-        ;;
       PING)
         echo "PONG"
         ;;
       *)
         echo "ERROR unknown command: $cmd"
-        echo "Commands: CLONE <repo>, PUSH <repo>, PULL <repo>, FETCH <repo>, SYNC <repo>, STATUS <repo>, REPOS, PING"
+        echo "Commands: CLONE <repo>, PUSH <repo>, PULL <repo>, FETCH <repo>, STATUS <repo>, REPOS, PING"
         ;;
     esac
   '';

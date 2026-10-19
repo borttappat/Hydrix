@@ -1819,7 +1819,9 @@ hydrix.microvmHost.byName.dev.repos = [ "hydrix-config" ];
   `shard git clone|push|pull|fetch|status|repos <name>` on vsock 14512, refusing undeclared
   names; `clone` only fills an empty, host-shared directory. Its
   SSH key arrives from `secrets/github.yaml` through `hydrix.secrets.github.vms` (default: the
-  git VM only). Nothing is pushed until you run `shard git push`, and the remote repo must
+  git VM only). It never commits: `pull` is fast-forward only, so diverged branches are
+  joined on the host (`shard git fetch`, then merge or rebase there). Nothing is pushed until
+  you run `shard git push`, and the remote repo must
   exist (create it on GitHub; an SSH key cannot). `shard git auth` is only for the optional `gh`
   CLI (`hydrix.gitsync.gh.enable`).
 - **Repos that hold secrets**: a declared repo can stay local (`clone = false`, no remote) for
