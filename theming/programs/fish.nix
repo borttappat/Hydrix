@@ -18,7 +18,21 @@
   fishCfg = config.hydrix.graphical.fish;
 in {
   config = lib.mkIf config.hydrix.graphical.enable {
-    home-manager.users.${username} = {pkgs, ...}: {
+    home-manager.users.${username} = {
+      pkgs,
+      config,
+      ...
+    }: let
+      # fzf and zoxide's fish integrations, generated once at build time and sourced, instead of
+      # running `fzf --fish` and `zoxide init fish` in every new shell (each a program start,
+      # slow over the VMs' virtiofs store). Follows the home-manager settings it replaces.
+      integrations = pkgs.runCommand "hydrix-fish-integrations.fish" {} ''
+        touch $out
+        ${lib.optionalString config.programs.fzf.enable "${lib.getExe config.programs.fzf.package} --fish >> $out"}
+        ${lib.optionalString config.programs.zoxide.enable
+          "${lib.getExe config.programs.zoxide.package} init fish ${lib.escapeShellArgs config.programs.zoxide.options} >> $out"}
+      '';
+    in {
       programs.fish = {
         enable = lib.mkDefault true;
 
@@ -35,61 +49,64 @@ in {
           ''}
         '';
 
-        interactiveShellInit = ''
-          # Blank line between prompts (skip before first)
-          function __add_newline --on-event fish_prompt
-            if set -q __first_prompt_done
-              echo
-            else
-              set -g __first_prompt_done 1
+        interactiveShellInit = lib.mkMerge [
+          (lib.mkBefore "source ${integrations}")
+          ''
+            # Blank line between prompts (skip before first)
+            function __add_newline --on-event fish_prompt
+              if set -q __first_prompt_done
+                echo
+              else
+                set -g __first_prompt_done 1
+              end
             end
-          end
 
-          # fzf colors from pywal (transparent bg, terminal palette)
-          if test -f ~/.cache/wal/colors
-            set -l colors (head -9 ~/.cache/wal/colors)
-            set -gx FZF_DEFAULT_OPTS "--color=fg:$colors[8],bg:-1,hl:$colors[5],fg+:$colors[8],bg+:$colors[9],hl+:$colors[5],info:$colors[7],prompt:$colors[5],pointer:$colors[6],marker:$colors[4],spinner:$colors[7],header:$colors[9]"
-          end
+            # fzf colors from pywal (transparent bg, terminal palette)
+            if test -f ~/.cache/wal/colors
+              set -l colors (head -9 ~/.cache/wal/colors)
+              set -gx FZF_DEFAULT_OPTS "--color=fg:$colors[8],bg:-1,hl:$colors[5],fg+:$colors[8],bg+:$colors[9],hl+:$colors[5],info:$colors[7],prompt:$colors[5],pointer:$colors[6],marker:$colors[4],spinner:$colors[7],header:$colors[9]"
+            end
 
-          # Register directory save event handler
-          functions -q __save_last_dir; or source ~/.config/fish/functions/__save_last_dir.fish
+            # Register directory save event handler
+            functions -q __save_last_dir; or source ~/.config/fish/functions/__save_last_dir.fish
 
-          ${lib.optionalString fishCfg.viKeyBindings "fish_vi_key_bindings"}
+            ${lib.optionalString fishCfg.viKeyBindings "fish_vi_key_bindings"}
 
-          # Source fzf bindings explicitly to ensure Ctrl+R is available
-          if test -f ${pkgs.fzf}/share/fish/vendor_functions.d/fzf_key_bindings.fish
-            source ${pkgs.fzf}/share/fish/vendor_functions.d/fzf_key_bindings.fish
-          end
+            # Source fzf bindings explicitly to ensure Ctrl+R is available
+            if test -f ${pkgs.fzf}/share/fish/vendor_functions.d/fzf_key_bindings.fish
+              source ${pkgs.fzf}/share/fish/vendor_functions.d/fzf_key_bindings.fish
+            end
 
-          # Ctrl+R history search in both vi modes
-          bind -M insert \cr fzf-history-widget
-          bind -M default \cr fzf-history-widget
+            # Ctrl+R history search in both vi modes
+            bind -M insert \cr fzf-history-widget
+            bind -M default \cr fzf-history-widget
 
-          ${lib.optionalString (!isVM) ''
-            # Lockdown-aware git wrapper: routes push/pull/fetch through gitsync VM
-            function git --wraps git
-              if contains -- $argv[1] push pull fetch
-                if test -f /etc/HYDRIX_MODE
-                  and grep -q "MODE=lockdown" /etc/HYDRIX_MODE
-                  set -l toplevel (command git rev-parse --show-toplevel 2>/dev/null)
-                  if test -n "$toplevel"
-                    set -l repo_name (basename $toplevel)
-                    echo -e "\033[33m::\033[0m Lockdown mode - routing through git-sync VM."
-                    read -P "Use git-sync VM for $argv[1] $repo_name? [Y/n] " confirm
-                    if test -z "$confirm" -o "$confirm" = Y -o "$confirm" = y
-                      shard git $argv[1] $repo_name
-                      return $status
-                    else
-                      echo "Cancelled."
-                      return 1
+            ${lib.optionalString (!isVM) ''
+              # Lockdown-aware git wrapper: routes push/pull/fetch through gitsync VM
+              function git --wraps git
+                if contains -- $argv[1] push pull fetch
+                  if test -f /etc/HYDRIX_MODE
+                    and grep -q "MODE=lockdown" /etc/HYDRIX_MODE
+                    set -l toplevel (command git rev-parse --show-toplevel 2>/dev/null)
+                    if test -n "$toplevel"
+                      set -l repo_name (basename $toplevel)
+                      echo -e "\033[33m::\033[0m Lockdown mode - routing through git-sync VM."
+                      read -P "Use git-sync VM for $argv[1] $repo_name? [Y/n] " confirm
+                      if test -z "$confirm" -o "$confirm" = Y -o "$confirm" = y
+                        shard git $argv[1] $repo_name
+                        return $status
+                      else
+                        echo "Cancelled."
+                        return 1
+                      end
                     end
                   end
                 end
+                command git $argv
               end
-              command git $argv
-            end
-          ''}
-        '';
+            ''}
+          ''
+        ];
 
         functions =
           {
@@ -122,16 +139,17 @@ in {
           };
       };
 
-      # Zoxide (smart cd)
+      # Zoxide (smart cd). Its fish integration is sourced from `integrations` above.
       programs.zoxide = {
         enable = lib.mkDefault true;
-        enableFishIntegration = lib.mkDefault true;
+        enableFishIntegration = lib.mkDefault false;
       };
 
-      # FZF (fuzzy finder) - colors set dynamically from pywal in interactiveShellInit
+      # FZF (fuzzy finder) - colors set dynamically from pywal in interactiveShellInit. Its fish
+      # integration is sourced from `integrations` above.
       programs.fzf = {
         enable = lib.mkDefault true;
-        enableFishIntegration = lib.mkDefault true;
+        enableFishIntegration = lib.mkDefault false;
       };
     };
   };

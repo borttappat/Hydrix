@@ -130,9 +130,15 @@ in {
     environment.systemPackages = [ pkgs.starship ];
 
     home-manager.users.${username} = { lib, pkgs, ... }: {
-      programs.fish.interactiveShellInit = lib.mkAfter ''
-        ${pkgs.starship}/bin/starship init fish | source
-      '';
+      # The full init script, generated at build time: `starship init fish | source` would start
+      # starship twice in every new shell (slow over a VM's virtiofs store). PATH puts this
+      # starship first, so the script calls the store binary.
+      programs.fish.interactiveShellInit = let
+        starshipInit = pkgs.runCommand "starship-init.fish" {} ''
+          PATH=${pkgs.starship}/bin:$PATH starship init fish --print-full-init > $out
+        '';
+      in
+        lib.mkAfter "source ${starshipInit}";
 
       home.activation.starshipConfig = lib.hm.dag.entryAfter ["writeBoundary"] ''
         _dir="$HOME/.config"
