@@ -28,6 +28,18 @@
       description = "Keep one alacritty running in the VM (alacritty --daemon) while waypipe is connected, so a new terminal (hypr-ws-app/Mod+Return, shard -a <vm> alacritty) opens as a window of that process at once instead of starting alacritty. Terminals share the process: if it exits, they all close. Launches it cannot serve fall back to a normal start.";
     };
 
+    storeCache = lib.mkOption {
+      type = lib.types.enum ["auto" "always"];
+      default = "auto";
+      description = ''
+        virtiofs cache mode for the VM's read-only view of the host /nix/store. "auto" makes
+        the guest revalidate file attributes with the host, a round trip on many lookups, which
+        slows every program start. "always" lets the guest keep them: store paths never change,
+        but a path the guest looked up before the host built it can stay invisible to it for a
+        while, so test live switches (shard -r) with it before relying on it.
+      '';
+    };
+
     vcpu = lib.mkOption {
       type = lib.types.int;
       default = 2;

@@ -151,11 +151,10 @@ in {
       # ===== Virtiofs tuning =====
       # Default spawns `nproc` threads per share, wasteful when idle
       virtiofsd.threadPoolSize = 2;
-      # Use auto cache mode: kernel re-validates on mtime change, keeping
-      # mutable shares (wal colors, hydrix-config) coherent with the host.
-      # /nix/store files have stable mtimes so they stay cached indefinitely,
-      # no regression vs "always" for immutable data.
-      virtiofsd.extraArgs = ["--cache" "auto"];
+      # Cache mode per share (microvm.shares.*.cache, default "auto": the guest revalidates
+      # attributes with the host, keeping mutable shares such as wal colors and hydrix-config
+      # coherent). No global --cache here: virtiofsd takes the last one, which would override
+      # the store share's hydrix.microvm.storeCache.
 
       # Disable graphics for headless operation (serial console only)
       graphics.enable = false;
@@ -197,6 +196,7 @@ in {
             mountPoint = "/nix/.ro-store";
             proto = "virtiofs";
             readOnly = true;
+            cache = config.hydrix.microvm.storeCache;
           }
         ]
         ++ [

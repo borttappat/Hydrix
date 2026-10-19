@@ -17,6 +17,11 @@
   # Its terminals share one process, so they all close if it exits.
   # hydrix.microvm.terminalDaemon.enable = true;
 
+  # The guest keeps its cached view of the read-only /nix/store instead of re-checking every
+  # file with the host: much faster program starts (shells, prompts). Store paths never
+  # change, so the cache cannot go stale. See hydrix.microvm.storeCache.
+  # hydrix.microvm.storeCache = "always";
+
   environment.variables = {
     EDITOR = config.hydrix.editor;
     VISUAL = config.hydrix.editor;
@@ -41,6 +46,7 @@
     gnugrep
     gnused
     gawk
+    busybox
 
     # Media
     feh
