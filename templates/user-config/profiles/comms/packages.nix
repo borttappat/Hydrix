@@ -18,9 +18,6 @@
       '';
     })
 
-    # Web browser for web-based comms (fallback)
-    firefox
-
     # TUI file manager (for attachments)
     ranger
 
