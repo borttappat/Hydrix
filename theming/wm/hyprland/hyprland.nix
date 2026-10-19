@@ -453,10 +453,33 @@
       [ -n "''${2:-}" ] && cmd="$cmd ; dispatch setprop address:$2 active_border_color skip $1"
       ${pkgs.hyprland}/bin/hyprctl --batch "$cmd" >/dev/null 2>&1 || true
     }
-    # Paints the active border with the inactive-border color (wal color0, as
-    # written by hypr-apply-colors), so a window left behind on an unfocused
-    # workspace stops looking focused.
-    _apply_neutral() { _apply "rgba($(_wal color0 1a1b26ff))" "''${1:-}"; }
+    # No window is focused on the focused workspace: every window on a visible workspace gets
+    # the neutral border, the inactive-border colour (wal color0, as written by
+    # hypr-apply-colors), as both its active and inactive colour. Hyprland 0.55 can draw one
+    # of them as focused, and gives them an inactive colour equal to their last active
+    # gradient while no window has focus; a setprop override outranks both. Each gets its
+    # active colour back from _apply when it is focused again.
+    _apply_neutral() {
+      local neutral cmd a
+      neutral="rgba($(_wal color0 1a1b26ff))"
+      cmd="keyword general:col.active_border $neutral"
+      for a in $(${pkgs.hyprland}/bin/hyprctl clients -j 2>/dev/null | ${pkgs.jq}/bin/jq -r \
+          --argjson vis "$(${pkgs.hyprland}/bin/hyprctl monitors -j 2>/dev/null | ${pkgs.jq}/bin/jq -c '[.[].activeWorkspace.id]')" \
+          '.[] | select(.workspace.id as $w | $vis | index($w)) | .address' 2>/dev/null); do
+        cmd="$cmd ; dispatch setprop address:$a active_border_color skip $neutral"
+        cmd="$cmd ; dispatch setprop address:$a inactive_border_color skip $neutral"
+      done
+      ${pkgs.hyprland}/bin/hyprctl --batch "$cmd" >/dev/null 2>&1 || true
+    }
+    # Inactive overrides from _apply_neutral keep the old color0 after a colorscheme change.
+    _refresh_inactive() {
+      local neutral cmd="" a
+      neutral="rgba($(_wal color0 1a1b26ff))"
+      for a in $(${pkgs.hyprland}/bin/hyprctl clients -j 2>/dev/null | ${pkgs.jq}/bin/jq -r '.[].address' 2>/dev/null); do
+        cmd="$cmd ; dispatch setprop address:$a inactive_border_color skip $neutral"
+      done
+      [ -n "$cmd" ] && ${pkgs.hyprland}/bin/hyprctl --batch "''${cmd# ; }" >/dev/null 2>&1 || true
+    }
     # Hyprland keeps its last real window as "active" when focus moves to an
     # empty workspace -- no activewindow event fires, so check on every
     # workspace/monitor-focus event too whether the reported active window is
@@ -465,10 +488,10 @@
       local aw aw_ws active_ws title profile addr
       aw=$(${pkgs.hyprland}/bin/hyprctl activewindow -j 2>/dev/null)
       aw_ws=$(printf '%s' "$aw" | ${pkgs.jq}/bin/jq -r '.workspace.id // empty' 2>/dev/null)
+      addr=$(printf '%s' "$aw" | ${pkgs.jq}/bin/jq -r '.address // empty' 2>/dev/null)
       active_ws=$(${pkgs.hyprland}/bin/hyprctl activeworkspace -j 2>/dev/null | ${pkgs.jq}/bin/jq -r '.id // empty')
       if [ -z "$aw_ws" ] || [ "$aw_ws" != "$active_ws" ]; then
-        _apply_neutral "$addr"
-      addr=$(printf '%s' "$aw" | ${pkgs.jq}/bin/jq -r '.address // empty' 2>/dev/null)
+        _apply_neutral
         return
       fi
       # A VM window's tag (vm-<key>, set by hypr-clip-guard from its process) wins over the
@@ -498,8 +521,11 @@
           # -u: socket to stdout only. Never reading stdin keeps the daemon running when it is
           # started from a terminal (a background job reading the tty gets stopped).
           ${pkgs.socat}/bin/socat -u "UNIX-CONNECT:$SOCKET" - 2>/dev/null \
-            | ${pkgs.gnugrep}/bin/grep --line-buffered -E '^(activewindow|workspace|focusedmon)>>' \
+            | ${pkgs.gnugrep}/bin/grep --line-buffered -E '^(activewindow|workspace|focusedmon|configreloaded)>>' \
             | while IFS= read -r _line; do
+                # A reload (hypr-apply-colors on every colour change) leaves the focused
+                # window's setprop gradient in the old colours.
+                case "$_line" in configreloaded*) _refresh_inactive ;; esac
                 _recompute
               done
           sleep 1
