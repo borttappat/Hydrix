@@ -620,12 +620,6 @@ in
         fi
       '';
 
-      # VM window border rules — oneshot that seeds vm-borders.conf and applies
-      # windowrule keywords for all VMs that have focusBorder set.
-      systemd.user.services.hypr-vm-borders-init = {
-        Unit = {
-          Description = "Initialize Hyprland VM window border rules";
-          After = ["hyprland-session.target"];
       # Focus border colours. A user service rather than exec-once: home-manager restarts it
       # when a rebuild changes it, and hyprland-session.target (restarted with every Hyprland
       # start) restarts it after a compositor restart.
@@ -643,6 +637,12 @@ in
         Install.WantedBy = ["hyprland-session.target"];
       };
 
+      # VM window border rules — oneshot that seeds vm-borders.conf and applies
+      # windowrule keywords for all VMs that have focusBorder set.
+      systemd.user.services.hypr-vm-borders-init = {
+        Unit = {
+          Description = "Initialize Hyprland VM window border rules";
+          After = ["hyprland-session.target"];
           PartOf = ["hyprland-session.target"];
         };
         Service = {
