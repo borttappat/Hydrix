@@ -5333,6 +5333,82 @@ window and falls into the same isolation group automatically - the mechanism ope
 the Wayland-vs-X11 distinction entirely. Verify live with `hyprctl clipguard` while BurpSuite
 is open; its client should show up tagged `pentest`, not `host`.
 
+### Session logging and the engagement workspace
+
+Every interactive terminal in the pentest VM (and task slots, which build on this profile)
+records automatically, so command output is never lost. `profiles/pentest/logging.nix`
+seeds the workspace and wires the recorder:
+
+- `~/engagement/{logs,scans,loot,creds}` is created on first boot (`creds` is `0700`).
+  Recordings land in `~/engagement/logs/`.
+- On terminal open, fish execs into `asciinema rec`, writing `<timestamp>-<hex>.cast`.
+  asciinema runs the real fish inside, which skips re-recording (guarded by `$HYDRIX_REC`).
+  The VT console (`TERM=linux`) is not recorded.
+- On exit, the cast is rendered to a clean plain-text twin (`.txt`) with `asciinema convert`,
+  which emulates a terminal, so an interactive shell's prompt and command-line redraws come
+  out as a readable transcript. Raw `script` plus ANSI stripping cannot linearize those,
+  which is why the recorder is asciinema rather than `script`.
+- A red `[REC]` shows in the prompt while recording (a starship `env_var` module keyed on
+  `$HYDRIX_REC_FILE`, placed after the path and before the time).
+
+| Command | Purpose |
+|---------|---------|
+| `rec-text [file.cast]` | Print a recording as clean text (defaults to the current session) |
+| `asciinema play <file.cast>` | Replay a recording |
+| `stop-recording` | End the current recording, drop to a plain shell in the same terminal |
+| `start-recording` | Begin a fresh recording in the current terminal |
+
+`cat` of the current session's live cast is intercepted (a scoped fish function) to show a
+clean text render instead of looping on the still-growing file; every other `cat` is
+unchanged.
+
+### Multiplexer (zellij)
+
+`zj` launches zellij, generating a `hydrix` theme from the live wal colors
+(`~/.cache/wal/colors.json`) into `~/.cache/zellij/` on each launch, falling back to the base
+config if wal has not run yet. Session serialization is on, so panes survive a restart.
+Relaunch after `walrgb` to repaint. zellij is not auto-started, so the default terminal stays
+a cleanly-logged plain shell.
+
+### Malleable engagement config (no rebuild)
+
+Several per-engagement settings are writable at runtime rather than baked into the build, so
+they can be retargeted mid-engagement. All are seeded with sane defaults and inherited by task
+slots.
+
+**Kerberos** (`krb5.nix`): `KRB5_CONFIG` points at a writable `~/.config/krb5/krb5.conf`
+(seeded with `rdns = false`, `forwardable = true`, no DNS realm/KDC discovery), so `kinit`,
+impacket and netexec can be aimed at a domain controller without a rebuild.
+
+| Command | Purpose |
+|---------|---------|
+| `krb5-set <REALM> <KDC_IP> [DOMAIN]` | Aim the config at a target (realm uppercased, domain defaults to lowercased realm) |
+| `krb5-edit` / `krb5-show` / `krb5-reset` | Edit, print, or restore the default |
+
+**Targets** (`targets-cli.nix`): `targets.nix` holds the stable targets baked into dnsmasq at
+build time; this adds a writable dnsmasq conf-dir (`/var/lib/hydrix-targets`, wired via
+`conf-dir` in `default.nix`) for ad-hoc entries. The dir is on tmpfs, so runtime targets are
+session scoped; put anything permanent in `targets.nix`. Each change restarts dnsmasq (sudo).
+
+| Command | Purpose |
+|---------|---------|
+| `target-add <ip> <domain>` | Resolve `<domain>` and `*.<domain>` to `<ip>` |
+| `target-rm <domain>` | Drop a runtime target |
+| `target-list` / `target-clear` | List or clear runtime targets |
+
+**Proxychains** (`proxychains.nix`): `PROXYCHAINS_CONF_FILE` points at a writable
+`~/.config/proxychains.conf` (seeded with a socks5 default), editable with `proxychains-edit`.
+`proxychains-ng` is installed.
+
+**Lab SSH** (`ssh-labs.nix`): relaxes host-key checking (`StrictHostKeyChecking no`,
+`UserKnownHostsFile /dev/null`) for RFC1918 ranges only (10/8, 172.16/12, 192.168/16), so
+throwaway lab targets do not clutter `known_hosts` or block on changed keys. Public hosts keep
+strict checking. Delivered via `programs.ssh.extraConfig`, prepended before the `Host *`
+defaults so the match wins.
+
+Terminal scrollback is set to Alacritty's maximum (100000 lines) framework-wide, so long tool
+output stays in the buffer; see `theming/programs/alacritty.nix`.
+
 ---
 
 ## Key Files
