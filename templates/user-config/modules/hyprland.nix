@@ -582,6 +582,9 @@
     # the framework layer's wildcard `monitor = ,preferred,auto,1` so a monitor
     # with a saved position is no longer an unmatched case for that fallback.
     source = ~/.config/hypr/monitor-layout.conf
+    # eww-dashboard-watch's workspace gaps rule (modules/eww.nix), kept here so
+    # `hyprctl reload` does not drop it.
+    source = ~/.config/hypr/eww-dashboard.conf
 
     # ── Startup ────────────────────────────────────────────────────────────────
     exec-once = systemctl --user set-environment WAYLAND_DISPLAY=$WAYLAND_DISPLAY
@@ -1038,6 +1041,7 @@ in {
         # monitor-layout owns this file after first run; only seed it so the
         # `source` line in hyprland.conf doesn't fail before that first run.
         [ -f "$_dir/monitor-layout.conf" ] || echo "# monitor-layout: no saved positions yet" > "$_dir/monitor-layout.conf"
+        [ -f "$_dir/eww-dashboard.conf" ] || : > "$_dir/eww-dashboard.conf"
       '';
 
       home.activation.hyprlandConfig = lib.hm.dag.entryBetween ["reloadHyprland"] ["hyprlandKeymap"] ''

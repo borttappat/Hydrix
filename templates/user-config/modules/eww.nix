@@ -640,6 +640,22 @@
     '';
   };
 
+  # deflisten source for dash_on, written by eww-dashboard-watch.
+  dashOnFile = "\${XDG_RUNTIME_DIR}/eww-dashboard/dash-on.json";
+  ewwDashOnListen = pkgs.writeShellApplication {
+    name = "eww-dash-on-listen";
+    runtimeInputs = [pkgs.inotify-tools pkgs.coreutils];
+    text = ''
+      file="${dashOnFile}"
+      mkdir -p "$(dirname "$file")"
+      cat "$file" 2>/dev/null || echo '{}'
+      inotifywait -m -q -e moved_to --format '%f' "$(dirname "$file")" \
+        | while IFS= read -r f; do
+            [ "$f" = "$(basename "$file")" ] && { cat "$file" 2>/dev/null || echo '{}'; }
+          done
+    '';
+  };
+
   # History for the CPU and TRAFFIC graphs, kept outside the dashboard so a
   # reopened dashboard (monitor hotplug, eww reload) draws the last
   # graphRange seconds at once; eww's own graph widget keeps its samples
@@ -702,19 +718,23 @@
   # Opens the wallpaper layer (if enabled) and then one dashboard per
   # monitor (or per internal panel, see dashboard.monitors), sized to the
   # left half of that monitor below its reserved zones. Re-syncs on monitor
-  # hotplug and on Hyprland config reloads, which drop the runtime workspace
-  # rule below, and resizes when waybar's layer opens or closes, since its
+  # hotplug and resizes when waybar's layer opens or closes, since its
   # exclusive zone is part of that size. Debounced like waybarMonitorWatch in
   # modules/hyprland.nix.
   #
   # With dashboard.workspace set, every monitor gets a dashboard, and only
   # the one on the monitor currently showing that workspace is shown (the
   # dash_on variable), so it follows the workspace between monitors. Hidden
-  # dashboards stay open: nothing is rebuilt on a workspace switch. A runtime
+  # dashboards stay open: nothing is rebuilt on a workspace switch. A
   # workspace rule per monitor widens that workspace's left gaps_out to the
-  # dashboard's edge so tiled windows keep to the right half. The rule is a
-  # `hyprctl keyword`, dropped on config reload, which the configreloaded
-  # re-sync puts back.
+  # dashboard's edge so tiled windows keep to the right half. It is applied
+  # with `hyprctl keyword` and also written to ~/.config/hypr/eww-dashboard.conf
+  # (sourced by modules/hyprland.nix), so the `hyprctl reload` of every colour
+  # change keeps it instead of letting windows spread over the dashboard.
+  #
+  # dash_on goes through a file (a deflisten) rather than `eww update`:
+  # `eww reload`, run on every colour change, resets defvars to their initial
+  # value, and the reopened dashboards would stay hidden.
   ewwDashboardWatch = pkgs.writeShellApplication {
     name = "eww-dashboard-watch";
     runtimeInputs = [pkgs.eww pkgs.hyprland pkgs.jq pkgs.socat pkgs.gnugrep pkgs.coreutils];
@@ -723,6 +743,7 @@
       _ws="${lib.optionalString (dash.workspace != null) (toString dash.workspace)}"
       # "<monitor> <width> <height>" per dashboard, written by sync_dashboards.
       _state="''${XDG_RUNTIME_DIR}/eww-dashboard-watch-monitors"
+      _hyprconf="$HOME/.config/hypr/eww-dashboard.conf"
 
       # The daemon is eww.service. Any client call that cannot reach it (it
       # stops answering while reloading) otherwise starts a daemon of its own,
@@ -753,7 +774,10 @@
           fi
         done < "$_state"
         on=$(jq -c --arg ws "$_ws" '[.[] | select($ws == "" or (.activeWorkspace.id | tostring) == $ws) | {(.name): true}] | add // {}' <<< "$mons")
-        eww update "dash_on=$on" 2>/dev/null || true
+        if [ "$on" != "$(cat "${dashOnFile}" 2>/dev/null)" ]; then
+          mkdir -p "$(dirname "${dashOnFile}")"
+          echo "$on" > "${dashOnFile}.tmp" && mv "${dashOnFile}.tmp" "${dashOnFile}"
+        fi
       }
 
       # With "if-changed", leaves open dashboards alone when no size changed.
@@ -773,13 +797,17 @@
         done || true
         : > "$_state"
         if [ -n "$new" ]; then echo "$new" > "$_state"; fi
+        : > "$_hyprconf.tmp"
         if [ -n "$_ws" ]; then
           read -r gt gr gb _ <<< "$(hyprctl getoption general:gaps_out -j | jq -r '.custom')"
           while read -r mon w _; do
             [ -n "$mon" ] || continue
-            hyprctl keyword workspace "r[$_ws-$_ws]m[$mon],gapsout:$gt $gr $gb $(( w / 2 + ${toString gapsIn} ))" > /dev/null
+            rule="r[$_ws-$_ws]m[$mon],gapsout:$gt $gr $gb $(( w / 2 + ${toString gapsIn} ))"
+            echo "workspace = $rule" >> "$_hyprconf.tmp"
+            hyprctl keyword workspace "$rule" > /dev/null
           done <<< "$rows"
         fi
+        mv "$_hyprconf.tmp" "$_hyprconf"
         update_visibility
       }
 
@@ -817,7 +845,7 @@
 
       while IFS= read -r line <&3; do
         case "$line" in
-          monitoradded*|monitorremoved*|configreloaded*)
+          monitoradded*|monitorremoved*)
             touch "$_force"
             debounced_sync
             ;;
@@ -885,7 +913,9 @@
 
       ;; Monitors whose dashboard is shown, as {"<monitor>": true}; set by
       ;; eww-dashboard-watch.
-      (defvar dash_on "{}")
+      (deflisten dash_on
+        :initial "{}"
+        `eww-dash-on-listen`)
 
       ;; One per monitor, opened by eww-dashboard-watch and kept open. Sized
       ;; by its content (width/height: left half, below waybar), so a hidden
@@ -1794,6 +1824,7 @@ in {
         ewwWeather
         todo
         ewwTodoListen
+        ewwDashOnListen
         ewwGraphHistory
         ewwDashboardWatch
       ];
