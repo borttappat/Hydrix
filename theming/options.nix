@@ -1147,8 +1147,15 @@ in {
   # MULTIPLEXER OPTIONS
   # =========================================================================
 
-  options.hydrix.zellij.enable =
-    lib.mkEnableOption "zellij multiplexer, themed from wal colors (impl also gated on graphical)";
+  options.hydrix.zellij.enable = lib.mkOption {
+    type = lib.types.bool;
+    default = config.hydrix.graphical.enable;
+    description = ''
+      zellij multiplexer, themed from wal colors. Defaults on for graphical
+      systems; the implementation is also gated on graphical, so headless
+      systems never pull it in.
+    '';
+  };
 
   # =========================================================================
   # WINDOW MANAGER OPTIONS
