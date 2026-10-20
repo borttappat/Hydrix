@@ -33,6 +33,7 @@ in {
     ../programs/zathura.nix
     ../programs/firefox.nix
     ../programs/gtk.nix
+    ../programs/zellij.nix
   ];
 
   config = lib.mkIf config.hydrix.graphical.enable {

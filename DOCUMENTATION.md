@@ -5364,13 +5364,16 @@ unchanged.
 
 ### Multiplexer (zellij)
 
-`zj` launches zellij, generating a `hydrix` theme from the live wal colors
-(`~/.cache/wal/colors.json`) into `~/.cache/zellij/` on each launch, falling back to the base
-config if wal has not run yet. A running zellij server keeps the theme it started with (status
-bar included), so `zj` restarts the `main` session when the generated theme changed (for
-example after `walrgb`) to pick up the new colors, and serialized panes resurrect; when the
-theme is unchanged it just attaches. zellij is not auto-started, so the default terminal stays
-a cleanly-logged plain shell.
+zellij is the framework multiplexer (`hydrix.zellij.enable`, a `theming/programs/zellij.nix`
+module gated on graphical; enabled config-wide in `modules/common.nix`), themed from wal.
+`zellij-apply-colors` regenerates `~/.config/zellij/config.kdl` (options plus an inline
+`hydrix` theme from `~/.cache/wal/colors.json`), and `refresh-colors` calls it on every
+colorscheme change, so both bare `zellij` and `zj` read wal-themed config. zellij has no live
+theme reload (the server loads its theme at session start), so `zj` restarts its `main` session
+when the generated config changed (for example after `walrgb`) to repaint; serialized panes
+resurrect. `zj` is the launcher (regenerate theme, restart `main` if colors changed, attach);
+bare `zellij` is the raw tool. It is not auto-started, so the default terminal stays a
+cleanly-logged plain shell.
 
 ### Malleable engagement config (no rebuild)
 

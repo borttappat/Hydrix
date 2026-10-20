@@ -31,6 +31,9 @@
   hydrix.graphical.keyboard.layout  = lib.mkDefault "@XKB_LAYOUT@";
   hydrix.graphical.keyboard.variant = lib.mkDefault "@XKB_VARIANT@";
 
+  # zellij as the multiplexer, themed from wal (impl self-gates on graphical).
+  hydrix.zellij.enable = lib.mkDefault true;
+
   # ─── Editor and pager defaults ───────────────────────────────────────
   environment.variables = {
     BAT_THEME = "ansi";

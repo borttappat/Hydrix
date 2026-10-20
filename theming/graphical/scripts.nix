@@ -153,6 +153,12 @@
         write-alacritty-colors
     fi
 
+    # === Multiplexer (zellij) ===
+    # Regenerate the themed config; running sessions repaint on relaunch (zj).
+    if command -v zellij-apply-colors >/dev/null 2>&1; then
+        zellij-apply-colors 2>/dev/null || true
+    fi
+
     # Send wal escape sequences to terminals (host only - VMs use live_config_reload)
     # VMs don't need sequences because alacritty imports colors-runtime.toml
     WAL_SEQUENCES="$HOME/.cache/wal/sequences"

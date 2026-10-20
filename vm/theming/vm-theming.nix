@@ -47,6 +47,11 @@
       swaync-apply-colors 2>/dev/null || true
     fi
 
+    # Multiplexer (zellij): regenerate themed config; relaunch (zj) repaints.
+    if command -v zellij-apply-colors >/dev/null 2>&1; then
+      zellij-apply-colors 2>/dev/null || true
+    fi
+
     # Firefox via pywalfox last — all other color state must be written first
     if command -v pywalfox >/dev/null 2>&1; then
       pywalfox update 2>/dev/null || true
