@@ -212,6 +212,11 @@
     printf '$lockBg = rgba(%sff)\n$lockFg = rgba(%sff)\n$lockAccent = rgba(%sff)\n$lockWrong = rgba(%sff)\n' \
       "''${color0#\#}" "''${color7#\#}" "''${color4#\#}" "''${color1#\#}" > "$LOCK_OUT"
 
+    ${hyprVmBorders}/bin/hypr-vm-borders refresh
+    if command -v hydrix-vm-label-rules >/dev/null 2>&1; then hydrix-vm-label-rules || true; fi
+    # Window colours are setprop overrides, which a reload keeps: recolour them first so the
+    # old palette is never drawn after the reload.
+    ${hyprFocusDaemon}/bin/hypr-focus-daemon reapply
     ${pkgs.hyprland}/bin/hyprctl reload 2>/dev/null || true
     # CSS-only reload through waybar's reload_style_on_change watch on
     # style.css (which imports colors.css). SIGUSR2 would rebuild every module,
@@ -337,11 +342,13 @@
         if [[ ! -f "$CONF" ]]; then _generate > "$CONF"; touch "$STATE"
         elif [[ -f "$STATE" ]]; then _generate > "$CONF"; fi
         if [[ -f "$STATE" ]]; then _tag_existing; _apply_keyword; fi ;;
+      # The rules carry wal's baseColor, so hypr-apply-colors rewrites them before its reload.
+      refresh) [[ -f "$STATE" ]] && _generate > "$CONF" || true ;;
       on)  mkdir -p "$(dirname "$CONF")"; _generate > "$CONF"; touch "$STATE"; _tag_existing; _apply_keyword ;;
       off) : > "$CONF"; rm -f "$STATE"; ${pkgs.hyprland}/bin/hyprctl reload 2>/dev/null || true ;;
       toggle) [[ -f "$STATE" ]] && exec "$0" off || exec "$0" on ;;
       status) [[ -f "$STATE" ]] && echo "on" || echo "off" ;;
-      *) echo "Usage: hypr-vm-borders [on|off|toggle|status|init]" >&2; exit 1 ;;
+      *) echo "Usage: hypr-vm-borders [on|off|toggle|status|init|refresh]" >&2; exit 1 ;;
     esac
   '';
 
@@ -448,66 +455,91 @@
 
   hyprFocusDaemon = pkgs.writeShellScriptBin "hypr-focus-daemon" ''
     source ${borderColors}
+    HC=${pkgs.hyprland}/bin/hyprctl
+    JQ=${pkgs.jq}/bin/jq
     _grad() { echo "rgba($1) rgba($(_border_base)) $BORDER_ANGLE"; }
-    # $1 gradient, $2 address of the focused window. The global option alone reaches the
-    # focused window only at the next focus change (one switch late), so the window's own
-    # active_border_color is set too. Hyprland 0.55's setprop skips the first token of a
-    # colour value, hence "skip"; a version without that bug drops it as an invalid colour.
-    _apply() {
-      local cmd="keyword general:col.active_border $1"
-      [ -n "''${2:-}" ] && cmd="$cmd ; dispatch setprop address:$2 active_border_color skip $1"
-      ${pkgs.hyprland}/bin/hyprctl --batch "$cmd" >/dev/null 2>&1 || true
+    # "<address> <profile>" per client ($1: only that address), profile empty for host
+    # windows. A VM window's tag (vm-<key>, set by hypr-clip-guard from its process) wins
+    # over the title, which a VM window may leave empty.
+    _clients() {
+      $HC clients -j 2>/dev/null | $JQ -r --arg a "''${1:-}" '.[] | select($a == "" or .address == $a)
+        | "\(.address) \(([.tags[]? | select(startswith("vm-")) | sub("^vm-"; "") | rtrimstr("*")][0])
+            // ((.title // "") | capture("^\\[(?<p>[^\\]]+)\\]").p) // "")"' 2>/dev/null
     }
+    # Every window carries its own active colour (setprop), set when it opens, so focusing
+    # it fades straight to that colour. Hyprland fades from the current colour to the new
+    # target on every change, so a colour corrected after focus visibly restarts the fade.
+    # The global col.active_border stays the host gradient from colors.conf.
+    # Hyprland 0.55's setprop skips the first token of a colour value, hence "skip"; a
+    # version without that bug drops it as an invalid colour.
+    declare -A _set=()
+    _assign() {
+      local cmd="" addr profile g
+      while read -r addr profile; do
+        [ -n "$addr" ] || continue
+        if [ -n "$profile" ]; then g=$(_grad "$(_border_vm "$profile")"); else g=$(_grad "$(_border_host)"); fi
+        [ "''${_set[$addr]:-}" = "$g" ] && continue
+        _set[$addr]=$g
+        cmd="$cmd ; dispatch setprop address:$addr active_border_color skip $g"
+      done
+      [ -n "$cmd" ] && $HC --batch "''${cmd# ; }" >/dev/null 2>&1 || true
+    }
+    _assign_all() {
+      _set=()
+      _assign < <(_clients)
+    }
+    # Only where no reload just set it from colors.conf: a border keyword re-lays out every
+    # monitor's windows.
+    _set_global() { $HC keyword general:col.active_border "$(_grad "$(_border_host)")" >/dev/null 2>&1 || true; }
     # No window is focused on the focused workspace: every window on a visible workspace gets
     # the neutral border, the inactive-border colour (wal color0, as written by
     # hypr-apply-colors), as both its active and inactive colour. Hyprland 0.55 can draw one
     # of them as focused, and gives them an inactive colour equal to their last active
-    # gradient while no window has focus; a setprop override outranks both. Each gets its
-    # active colour back from _apply when it is focused again.
+    # gradient while no window has focus; a setprop override outranks both. Their own active
+    # colours come back with the next focused window.
+    _neutral=0
     _apply_neutral() {
-      local neutral cmd a
+      local neutral cmd="" a
       neutral="rgba($(_wal color0 1a1b26ff))"
-      cmd="keyword general:col.active_border $neutral"
-      for a in $(${pkgs.hyprland}/bin/hyprctl clients -j 2>/dev/null | ${pkgs.jq}/bin/jq -r \
-          --argjson vis "$(${pkgs.hyprland}/bin/hyprctl monitors -j 2>/dev/null | ${pkgs.jq}/bin/jq -c '[.[].activeWorkspace.id]')" \
+      for a in $($HC clients -j 2>/dev/null | $JQ -r \
+          --argjson vis "$($HC monitors -j 2>/dev/null | $JQ -c '[.[].activeWorkspace.id]')" \
           '.[] | select(.workspace.id as $w | $vis | index($w)) | .address' 2>/dev/null); do
+        [ "''${_set[$a]:-}" = "$neutral" ] && continue
+        _set[$a]=$neutral
         cmd="$cmd ; dispatch setprop address:$a active_border_color skip $neutral"
         cmd="$cmd ; dispatch setprop address:$a inactive_border_color skip $neutral"
       done
-      ${pkgs.hyprland}/bin/hyprctl --batch "$cmd" >/dev/null 2>&1 || true
+      [ -n "$cmd" ] && $HC --batch "''${cmd# ; }" >/dev/null 2>&1 || true
+      _neutral=1
     }
     # Inactive overrides from _apply_neutral keep the old color0 after a colorscheme change.
     _refresh_inactive() {
       local neutral cmd="" a
       neutral="rgba($(_wal color0 1a1b26ff))"
-      for a in $(${pkgs.hyprland}/bin/hyprctl clients -j 2>/dev/null | ${pkgs.jq}/bin/jq -r '.[].address' 2>/dev/null); do
+      for a in $($HC clients -j 2>/dev/null | $JQ -r '.[].address' 2>/dev/null); do
         cmd="$cmd ; dispatch setprop address:$a inactive_border_color skip $neutral"
       done
-      [ -n "$cmd" ] && ${pkgs.hyprland}/bin/hyprctl --batch "''${cmd# ; }" >/dev/null 2>&1 || true
+      [ -n "$cmd" ] && $HC --batch "''${cmd# ; }" >/dev/null 2>&1 || true
     }
     # Hyprland keeps its last real window as "active" when focus moves to an
     # empty workspace -- no activewindow event fires, so check on every
     # workspace/monitor-focus event too whether the reported active window is
     # actually on the now-focused workspace.
     _recompute() {
-      local aw aw_ws active_ws title profile addr
-      aw=$(${pkgs.hyprland}/bin/hyprctl activewindow -j 2>/dev/null)
-      aw_ws=$(printf '%s' "$aw" | ${pkgs.jq}/bin/jq -r '.workspace.id // empty' 2>/dev/null)
-      addr=$(printf '%s' "$aw" | ${pkgs.jq}/bin/jq -r '.address // empty' 2>/dev/null)
-      active_ws=$(${pkgs.hyprland}/bin/hyprctl activeworkspace -j 2>/dev/null | ${pkgs.jq}/bin/jq -r '.id // empty')
+      local aw aw_ws active_ws addr
+      aw=$($HC activewindow -j 2>/dev/null)
+      aw_ws=$(printf '%s' "$aw" | $JQ -r '.workspace.id // empty' 2>/dev/null)
+      addr=$(printf '%s' "$aw" | $JQ -r '.address // empty' 2>/dev/null)
+      active_ws=$($HC activeworkspace -j 2>/dev/null | $JQ -r '.id // empty')
       if [ -z "$aw_ws" ] || [ "$aw_ws" != "$active_ws" ]; then
         _apply_neutral
-        return
+      elif [ "$_neutral" = 1 ]; then
+        _neutral=0
+        _assign < <(_clients)
+      else
+        # Normally a no-op: catches a window whose tag or title arrived after it opened.
+        _assign < <(_clients "$addr")
       fi
-      # A VM window's tag (vm-<key>, set by hypr-clip-guard from its process) wins over the
-      # title, which a VM window may leave empty.
-      profile=$(printf '%s' "$aw" | ${pkgs.jq}/bin/jq -r '[.tags[]? | select(startswith("vm-")) | sub("^vm-"; "") | rtrimstr("*")][0] // empty')
-      if [ -z "$profile" ]; then
-        title=$(printf '%s' "$aw" | ${pkgs.jq}/bin/jq -r '.title // empty')
-        profile=$(echo "$title" | sed -n 's/^\[\([^]]*\)\].*/\1/p')
-      fi
-      if [ -n "$profile" ]; then _apply "$(_grad "$(_border_vm "$profile")")" "$addr"
-      else _apply "$(_grad "$(_border_host)")" "$addr"; fi
     }
     _sig() {
       local sig="''${HYPRLAND_INSTANCE_SIGNATURE:-}"
@@ -517,22 +549,28 @@
       echo "$sig"
     }
     case "''${1:-}" in
-      reapply) _recompute ;;
+      reapply) _set_global; _refresh_inactive; _assign_all; _recompute ;;
       *)
         SIG=$(_sig)
         [ -z "$SIG" ] && exit 1
         SOCKET="''${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/hypr/$SIG/.socket2.sock"
         while true; do
+          _set_global
+          _assign_all
+          _recompute
           # -u: socket to stdout only. Never reading stdin keeps the daemon running when it is
           # started from a terminal (a background job reading the tty gets stopped).
-          ${pkgs.socat}/bin/socat -u "UNIX-CONNECT:$SOCKET" - 2>/dev/null \
-            | ${pkgs.gnugrep}/bin/grep --line-buffered -E '^(activewindow|workspace|focusedmon|configreloaded)>>' \
-            | while IFS= read -r _line; do
-                # A reload (hypr-apply-colors on every colour change) leaves the focused
-                # window's setprop gradient in the old colours.
-                case "$_line" in configreloaded*) _refresh_inactive ;; esac
-                _recompute
-              done
+          # Process substitution keeps the loop, and _set with it, in this shell.
+          while IFS= read -r _line; do
+            case "$_line" in
+              openwindow\>\>*) _a=''${_line#openwindow>>}; _assign < <(_clients "0x''${_a%%,*}") ;;
+              closewindow\>\>*) unset "_set[0x''${_line#closewindow>>}]"; continue ;;
+              # A reload (hypr-apply-colors on every colour change) brings new colours.
+              configreloaded*) _refresh_inactive; _assign_all ;;
+            esac
+            _recompute
+          done < <(${pkgs.socat}/bin/socat -u "UNIX-CONNECT:$SOCKET" - 2>/dev/null \
+            | ${pkgs.gnugrep}/bin/grep --line-buffered -E '^(activewindow|workspace|focusedmon|configreloaded|openwindow|closewindow)>>')
           sleep 1
         done ;;
     esac

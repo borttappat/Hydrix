@@ -141,9 +141,10 @@
   # ~/.config/hypr/vm-labels.conf (sourced by hydrix-generated.conf): window rules for live
   # labels that differ from their key, which the build-time rules (matching "[<key>]") miss:
   # workspace, the same restrictions as vmGuardRules, and the key's border while hypr-vm-borders
-  # is on. Rewritten from the label map on every connect and disconnect; new rules are also
-  # applied at once with hyprctl keyword.
-  vmLabelRules = pkgs.writeShellScript "hydrix-vm-label-rules" ''
+  # is on. Rewritten from the label map on every connect and disconnect, and by
+  # hypr-apply-colors on every colour change (the border rules carry wal's baseColor); new rules
+  # are also applied at once with hyprctl keyword.
+  vmLabelRules = pkgs.writeShellScriptBin "hydrix-vm-label-rules" ''
     set -euo pipefail
     # shellcheck source=/dev/null
     source ${borderColors}
@@ -257,7 +258,7 @@
       systemctl --user stop "$UNIT" 2>/dev/null || true
       [[ -n "''${SECCTX_PID:-}" ]] && kill "''${SECCTX_PID}" 2>/dev/null || true
       rm -f "$LABEL_MAP/$LABEL"
-      ${vmLabelRules} || true
+      ${vmLabelRules}/bin/hydrix-vm-label-rules || true
       exit 0
     }
     trap cleanup INT TERM
@@ -290,7 +291,7 @@
       [[ -f "$f" && "$(cat "$f")" == "$KEY" ]] && rm -f "$f"
     done
     printf '%s\n' "$KEY" > "$LABEL_MAP/$LABEL"
-    ${vmLabelRules} "$LABEL" || true
+    ${vmLabelRules}/bin/hydrix-vm-label-rules "$LABEL" || true
 
     # A separate script, so it never shows up as a second "waypipe-connect <vm>".
     ${waypipeConnectWatch} "$VM" "$$" &
@@ -924,6 +925,7 @@ in
     environment.systemPackages = [
       waypipeConnect
       vmLabel
+      vmLabelRules
       waypipeConnectAll
       hyprWsApp
       vmSelect
