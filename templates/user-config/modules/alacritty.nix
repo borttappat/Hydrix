@@ -12,6 +12,7 @@
 #   cursor.blinkTimeout    = 0            (0 = never stop blinking)
 #   cursor.blinkInterval   = 500
 #   selection.saveToClipboard = true
+#   scrollback                = 10000           (lines, Alacritty caps at 100000)
 #
 # Opacity is set via hydrix.graphical.ui.opacity.overlay in graphical.nix.
 
@@ -27,4 +28,9 @@
 
   # ── Selection ──────────────────────────────────────────────────────────────
   hydrix.graphical.alacritty.selection.saveToClipboard = lib.mkDefault true;
+
+  # ── Scrollback ───────────────────────────────────────────────────────────────
+  # Lines of history kept in the buffer (held in RAM). Bump toward 100000 to
+  # avoid losing long command output.
+  # hydrix.graphical.alacritty.scrollback = lib.mkDefault 100000;
 }
