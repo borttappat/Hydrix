@@ -261,9 +261,10 @@ differs per machine (router WiFi secret, autostarts) and override with plain ass
 ### USB devices (framework, `host/usb.nix`)
 
 The host never binds USB storage (`hydrix.usb.blockHostStorage`, default on; the fallback
-specialisation turns it off). Plugging in a stick only notifies; `usb attach <busid> <vm>`
-hands the whole device to a microVM whose `meta.nix` sets `usbPassthrough = true` (or a libvirt
-domain) after a y/N prompt. Devices a VM should always have, such as a USB WiFi adapter for
+specialisation turns it off). Plugging in a stick only notifies (the notification stays until
+clicked or unplugged); `usb attach <busid> <vm>` hands the whole device to a microVM whose
+`meta.nix` sets `usbPassthrough = true` (or a libvirt domain) after a y/N prompt. For a trusted
+stick, `usb host on` lets the host read USB storage until `usb host off` or reboot. Devices a VM should always have, such as a USB WiFi adapter for
 pentest, go in its `meta.nix` as `usbDevices = [ "148f:5572" ];` (vendor:product from `lsusb`).
 
 ---

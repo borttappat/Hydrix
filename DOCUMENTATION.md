@@ -3295,7 +3295,7 @@ shard start microvm-usb-sandbox
 
 The host blocks `usb_storage` and `uas` (initrd included, `hydrix.usb.blockHostStorage`,
 default on; set it false in a fallback specialisation so install media works). Plugging a
-stick in only sends a notification, which stays until clicked. Nothing attaches without an
+stick in only sends a notification, which stays until clicked or the stick is unplugged. Nothing attaches without an
 explicit command that shows the device and target and asks y/N:
 
 ```bash

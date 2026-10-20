@@ -40,6 +40,7 @@
 
   notifyScript = pkgs.writeShellScript "hydrix-usb-notify" ''
     busid=''${1%%:*}
+    dev=$(readlink -f "/sys/bus/usb/devices/$busid" || true)
     product=$(cat "/sys/bus/usb/devices/$busid/product" 2>/dev/null || echo "USB storage")
     if [ -d /sys/module/usb_storage ]; then
       body="$product ($busid). Host USB storage is ON (usb host on): the host kernel reads it.
@@ -49,8 +50,14 @@
     To pass it to a VM: usb attach $busid <vm>"
     fi
     # Critical: swaync keeps it until clicked (timeout-critical 0; it ignores -t 0), so a
-    # stick plugged in while away is not missed.
-    ${pkgs.libnotify}/bin/notify-send -a usb -u critical "USB storage plugged in" "$body"
+    # stick plugged in while away is not missed. Unplugging closes it: wait for the device's
+    # removal event (no polling), then close it by ID. Clicking it first is harmless.
+    id=$(${pkgs.libnotify}/bin/notify-send -p -a usb -u critical "USB storage plugged in" "$body")
+    if [ -n "$dev" ] && [ -n "$id" ]; then
+      ${pkgs.systemd}/bin/udevadm wait --removed "$dev" || true
+      ${pkgs.systemd}/bin/busctl --user call org.freedesktop.Notifications /org/freedesktop/Notifications \
+        org.freedesktop.Notifications CloseNotification u "$id" || true
+    fi
   '';
 
   usbCli = pkgs.writeShellScriptBin "usb" ''
@@ -290,10 +297,8 @@ in {
       '';
       systemd.user.services."hydrix-usb-notify@" = {
         description = "Notify about plugged-in USB storage %i";
-        serviceConfig = {
-          Type = "oneshot";
-          ExecStart = "${notifyScript} %i";
-        };
+        # Runs until the stick is unplugged, then closes its notification.
+        serviceConfig.ExecStart = "${notifyScript} %i";
       };
     })
   ]);
