@@ -35,7 +35,9 @@
   notifyScript = pkgs.writeShellScript "hydrix-usb-notify" ''
     busid=''${1%%:*}
     product=$(cat "/sys/bus/usb/devices/$busid/product" 2>/dev/null || echo "USB storage")
-    ${pkgs.libnotify}/bin/notify-send -a usb "USB storage plugged in" \
+    # Critical: swaync keeps it until clicked (timeout-critical 0; it ignores -t 0), so a
+    # stick plugged in while away is not missed.
+    ${pkgs.libnotify}/bin/notify-send -a usb -u critical "USB storage plugged in" \
       "$product ($busid), not mounted on the host.
     To pass it to a VM: usb attach $busid <vm>"
   '';
