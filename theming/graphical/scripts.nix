@@ -231,7 +231,8 @@
       "blue = \"" + (.colors.color12 // .colors.color4) + "\"\n" +
       "magenta = \"" + (.colors.color13 // .colors.color5) + "\"\n" +
       "cyan = \"" + (.colors.color14 // .colors.color6) + "\"\n" +
-      "white = \"" + (.colors.color15 // .colors.color7) + "\""
+      "white = \"" + (.colors.color15 // .colors.color7) + "\"" +
+      ${import ../programs/alacritty-runtime-colors.nix "(.special.background // .colors.color0)"}
     ' "$WAL_COLORS" > "$ALACRITTY_COLORS.tmp" && mv "$ALACRITTY_COLORS.tmp" "$ALACRITTY_COLORS"
   '';
 

@@ -170,7 +170,8 @@
       "blue = \"" + (.colors.color12 // .colors.color4) + "\"\n" +
       "magenta = \"" + (.colors.color13 // .colors.color5) + "\"\n" +
       "cyan = \"" + (.colors.color14 // .colors.color6) + "\"\n" +
-      "white = \"" + (.colors.color15 // .colors.color7) + "\""
+      "white = \"" + (.colors.color15 // .colors.color7) + "\"" +
+      ${import ../theming/programs/alacritty-runtime-colors.nix "(.special.background // .colors.color0)"}
     ' "$WAL_COLORS" > "$RUNTIME_TOML.tmp"
     ${pkgs.coreutils}/bin/mv "$RUNTIME_TOML.tmp" "$RUNTIME_TOML"
     ${pkgs.coreutils}/bin/chown $USERNAME:users "$RUNTIME_TOML"
@@ -589,7 +590,8 @@ in {
             "blue = \"" + (.colors.color12 // .colors.color4) + "\"\n" +
             "magenta = \"" + (.colors.color13 // .colors.color5) + "\"\n" +
             "cyan = \"" + (.colors.color14 // .colors.color6) + "\"\n" +
-            "white = \"" + (.colors.color15 // .colors.color7) + "\""
+            "white = \"" + (.colors.color15 // .colors.color7) + "\"" +
+            ${import ../theming/programs/alacritty-runtime-colors.nix "(.special.background // .colors.color0)"}
           ' "$WAL_COLORS" > "$ALACRITTY_COLORS.tmp" && \
           ${pkgs.coreutils}/bin/mv "$ALACRITTY_COLORS.tmp" "$ALACRITTY_COLORS"
         '')
