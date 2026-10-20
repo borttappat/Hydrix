@@ -16,6 +16,7 @@ let
         "$schema" = 'https://starship.rs/config-schema.json'
 
         format = """
+        ''${env_var.HYDRIX_REC}\
         $username\
         $hostname\
         $directory\
@@ -32,6 +33,13 @@ let
 
         # Blank line handled by fish's __add_newline function
         add_newline = false
+
+        # Recording indicator: shown only in shells where the session recorder
+        # set HYDRIX_REC (see profiles/pentest/logging.nix).
+        [env_var.HYDRIX_REC]
+        variable = "HYDRIX_REC"
+        format = '[\[REC\]]($style) '
+        style = "bold red"
 
         [jobs]
         symbol = ""
