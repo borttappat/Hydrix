@@ -355,6 +355,7 @@
   # Uncomment to enable libvirt/QEMU/virt-manager (pentest VMs, Windows VMs, etc.)
   # hydrix.libvirt.enable = true;
   # hydrix.libvirt.grabKey = "65507,65513";  # Left Ctrl+Alt - find keysyms with `xev`
+  # hydrix.libvirt.console.chromeless = true;  # VM windows without decoration/menus; tap Alt to show them
   # hydrix.libvirt.defaultBridge = "br-libvirt"; # deploy-vm default; needs the "libvirt" network in flake.nix
 
   # Router console (`shard -c router`): autologin, passwordless sudo. The user's

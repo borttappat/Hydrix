@@ -1,0 +1,75 @@
+--- a/virtManager/vmwindow.py
++++ b/virtManager/vmwindow.py
+@@ -22,6 +22,11 @@
+ 
+ 
+ class vmmVMWindow(vmmGObjectUI):
++    # Hydrix: menu bar and toolbar shown. Chromeless windows start with them
++    # hidden; a lone tap of _HYDRIX_MENU_KEY (a Gdk key name) toggles them.
++    _hydrix_chrome = True
++    _HYDRIX_MENU_KEY = "@menuKey@"
++
+     __gsignals__ = {
+         "customize-finished": (vmmGObjectUI.RUN_FIRST, None, [object]),
+         "closed": (vmmGObjectUI.RUN_FIRST, None, []),
+@@ -149,6 +154,39 @@
+         self._refresh_vm_state()
+         self.activate_default_page()
+ 
++        if not self.is_customize_dialog:
++            self._hydrix_setup_chromeless()
++
++    # Hydrix: no window decoration, menu bar and toolbar hidden until the menu
++    # key is tapped on its own (like Alt in Firefox). Key events still reach
++    # the guest: these handlers only watch and never consume them.
++    def _hydrix_setup_chromeless(self):
++        self._hydrix_chrome = False
++        self._hydrix_menu_tap = False
++        self.topwin.set_decorated(False)
++        self._hydrix_apply_chrome()
++        self.topwin.connect("key-press-event", self._hydrix_key_press_cb)
++        self.topwin.connect("key-release-event", self._hydrix_key_release_cb)
++
++    def _hydrix_apply_chrome(self):
++        fs = self.widget("details-menu-view-fullscreen").get_active()
++        show = self._hydrix_chrome and not fs
++        self.widget("details-menubar").set_visible(show)
++        self.widget("toolbar-box").set_visible(
++            show and self.widget("details-menu-view-toolbar").get_active()
++        )
++
++    def _hydrix_key_press_cb(self, src, event):
++        self._hydrix_menu_tap = Gdk.keyval_name(event.keyval) == self._HYDRIX_MENU_KEY
++        return False
++
++    def _hydrix_key_release_cb(self, src, event):
++        if self._hydrix_menu_tap and Gdk.keyval_name(event.keyval) == self._HYDRIX_MENU_KEY:
++            self._hydrix_chrome = not self._hydrix_chrome
++            self._hydrix_apply_chrome()
++        self._hydrix_menu_tap = False
++        return False
++
+     @property
+     def conn(self):
+         return self.vm.conn
+@@ -301,7 +339,7 @@
+         active = src.get_active()
+         self.config.set_details_show_toolbar(active)
+         fsactive = self.widget("details-menu-view-fullscreen").get_active()
+-        self.widget("toolbar-box").set_visible(active and not fsactive)
++        self.widget("toolbar-box").set_visible(active and not fsactive and self._hydrix_chrome)
+ 
+     def details_console_changed(self, src):
+         if self.ignoreDetails:
+@@ -651,9 +689,9 @@
+         self.widget("control-fullscreen").set_active(do_fullscreen)
+         self._console.vmwindow_set_fullscreen(do_fullscreen)
+ 
+-        self.widget("details-menubar").set_visible(not do_fullscreen)
++        self.widget("details-menubar").set_visible(not do_fullscreen and self._hydrix_chrome)
+ 
+-        show_toolbar = not do_fullscreen
++        show_toolbar = not do_fullscreen and self._hydrix_chrome
+         if not self.widget("details-menu-view-toolbar").get_active():
+             show_toolbar = False  # pragma: no cover
+         self.widget("toolbar-box").set_visible(show_toolbar)

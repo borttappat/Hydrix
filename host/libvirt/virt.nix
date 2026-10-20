@@ -1,6 +1,24 @@
 # Virtualization configuration (for hosts, not VMs)
 { config, pkgs, lib, ... }:
 let
+  consoleCfg = config.hydrix.libvirt.console;
+
+  # hydrix.libvirt.console.chromeless: VM windows without decoration, menu bar or toolbar
+  # until menuKey is tapped (virt-manager-chromeless.patch, Python only).
+  virtManager =
+    if consoleCfg.chromeless
+    then
+      pkgs.virt-manager.overrideAttrs (old: {
+        patches = (old.patches or []) ++ [./virt-manager-chromeless.patch];
+        postPatch =
+          (old.postPatch or "")
+          + ''
+            substituteInPlace virtManager/vmwindow.py \
+              --replace-fail '@menuKey@' ${lib.escapeShellArg consoleCfg.menuKey}
+          '';
+      })
+    else pkgs.virt-manager;
+
   buildBaseScript = pkgs.writeShellScriptBin "build-base" ''
     # Build base images for VM deployment
     #
@@ -434,7 +452,7 @@ let
           <model type='virtio'/>
         </interface>
         <graphics type='spice'><listen type='none'/></graphics>
-        <video><model type='qxl'/></video>
+        <video><model type='qxl' vgamem='65536'/></video>
         <channel type='spicevmc'>
           <target type='virtio' name='com.redhat.spice.0'/>
         </channel>
@@ -535,7 +553,9 @@ let
             --disk "path=$vm_disk,format=qcow2,bus=virtio,cache=writeback"
             --network "bridge=$VM_BRIDGE,model=virtio"
             --graphics spice,listen=none
-            --video qxl
+            # 64 MB framebuffer: the default 16 MB cannot hold a 2880x1800 desktop, which kept
+            # full-screen guests below the panel's resolution.
+            --video model.type=qxl,model.vgamem=65536
             --channel spicevmc
             --vsock cid.auto=yes
             --os-variant nixos-unstable
@@ -702,7 +722,7 @@ in
       deployVmScript
     ] ++ (with pkgs; [
       qemu_kvm
-      virt-manager
+      virtManager
       virt-viewer
       libvirt
       libosinfo

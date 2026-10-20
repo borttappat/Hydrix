@@ -4178,6 +4178,28 @@ hydrix.libvirt.defaultBridge = "br-libvirt";
 
 After `rebuild`, `br-libvirt` exists on the host and the router serves `192.168.130.0/24` (gateway and DNS `.253`, DHCP `.10`-`.200`), isolated from every other VM network and assignable to a Mullvad exit like any other. For VMs created by hand in virt-manager, set the NIC's network source to "Bridge device" `br-libvirt`; Windows needs the virtio-win drivers for a `virtio` NIC, or use `e1000e`. A test target on `br-pentest` shares the pentest VM's subnet, so the pentest VM reaches it directly, and it follows pentest's routing.
 
+**Console windows** (`hydrix.libvirt.console`, opt-in): with `chromeless = true`, virt-manager's VM
+windows (console and details) have no window decoration, menu bar or toolbar, so a guest's
+console looks like any other tiled window with the normal Hyprland border. Tap `menuKey` on its own
+(default `Alt_L`, a Gdk key name) to show or hide the menu bar and toolbar, as with Alt in Firefox.
+The tap still reaches the guest, so pick a key the guest ignores (e.g. `Menu`) if a lone Alt does
+something there. Leaving the console's keyboard and pointer grab uses `hydrix.libvirt.grabKey`
+(Left Ctrl+Alt by default), after which Hyprland keybinds work again. It is a small patch to
+virt-manager's `vmwindow.py` (Hydrix `host/libvirt/virt-manager-chromeless.patch`, Python only),
+applied only when the option is on.
+
+```nix
+hydrix.libvirt.console.chromeless = true;
+hydrix.libvirt.console.menuKey = "Alt_L";   # default
+hydrix.libvirt.grabKey = "65515";           # Super_L releases the grab
+```
+
+Guests resize to the window (`resize-guest`, set in virt-manager's dconf by Hydrix). `deploy-vm`
+gives new VMs a 64 MB qxl framebuffer (`vgamem`): the old 16 MB default cannot hold a 2880x1800
+desktop, so a guest could not reach the laptop panel's resolution. For an existing VM, set it while
+the VM is shut off: `virsh edit <vm>`, and in `<video><model type='qxl' .../>` set
+`vgamem='65536'`.
+
 ---
 
 ## Shell

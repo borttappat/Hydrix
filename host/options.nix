@@ -427,6 +427,31 @@ in {
         '';
       };
 
+      console = {
+        chromeless = lib.mkOption {
+          type = lib.types.bool;
+          default = false;
+          description = ''
+            virt-manager VM windows (console and details) without window decoration,
+            menu bar or toolbar, so they look like any other tiled window. A lone tap of
+            menuKey shows or hides the menu bar and toolbar. Patches virt-manager's
+            vmwindow.py (pure Python, nothing to compile). Leaving the console's keyboard
+            grab still uses grabKey.
+          '';
+        };
+        menuKey = lib.mkOption {
+          type = lib.types.str;
+          default = "Alt_L";
+          example = "Menu";
+          description = ''
+            Gdk key name (as `Gdk.keyval_name` reports it, e.g. Alt_L, Menu, F10) that,
+            tapped on its own, toggles the menu bar and toolbar of a chromeless VM window.
+            The key still reaches the guest, so a guest that reacts to a lone Alt tap
+            (Windows, Firefox) will see it too; pick a key the guest ignores if that matters.
+          '';
+        };
+      };
+
       defaultBridge = lib.mkOption {
         type = lib.types.nullOr lib.types.str;
         default = null;
