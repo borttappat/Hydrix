@@ -5366,8 +5366,10 @@ unchanged.
 
 `zj` launches zellij, generating a `hydrix` theme from the live wal colors
 (`~/.cache/wal/colors.json`) into `~/.cache/zellij/` on each launch, falling back to the base
-config if wal has not run yet. Session serialization is on, so panes survive a restart.
-Relaunch after `walrgb` to repaint. zellij is not auto-started, so the default terminal stays
+config if wal has not run yet. A running zellij server keeps the theme it started with (status
+bar included), so `zj` restarts the `main` session when the generated theme changed (for
+example after `walrgb`) to pick up the new colors, and serialized panes resurrect; when the
+theme is unchanged it just attaches. zellij is not auto-started, so the default terminal stays
 a cleanly-logged plain shell.
 
 ### Malleable engagement config (no rebuild)
