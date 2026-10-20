@@ -2315,16 +2315,15 @@ Without this, the virtiofs mount would be empty on first boot and VMs would have
 
 The focus border is the window border color shown **on the host** when a VM application window is focused. It is entirely independent from what colors the VM uses internally, you can have a VM running `nord` internally while its host-side border is bright orange.
 
-#### Priority Chain
-
-The focus daemon resolves the border color using this priority order:
+Every active border is a gradient from a first stop to `focusDaemon.baseColor` (wal key,
+default `color4`) at `focusDaemon.gradientAngle` (default 45). The first stop:
 
 ```
-1. focusBorder (named color or hex, set in VM profile)   <- always wins if set
-2. focusOverrideColor (hex, legacy <- only when hydrix-focus on)
-3. focus daemon mode:
-     static  <- reads color4 from VM's colorscheme JSON
-     dynamic <- reads a configurable key from the host's live wal cache
+host window          -> wal hostColor (default color3)
+VM window            -> its focusBorder, or its dynamicColorMap wal key when
+                        hydrix-focus is on or it has no focusBorder
+task slot            -> its base profile (pentest-task1 -> pentest)
+engagement label     -> its slot's registry key (pentest-google -> pentest-task1)
 ```
 
 #### `focusBorder` - Primary Option
@@ -2351,68 +2350,57 @@ Named colors: `red`, `orange`, `yellow`, `green`, `cyan`, `blue`, `purple`, `pin
 
 **Why `meta.nix` and not `default.nix`?** The host flake reads `focusBorder` at evaluation time to populate `vmRegistry` (→ `/etc/hydrix/vm-registry.json`). `meta.nix` is a plain Nix attrset with zero evaluation cost. Reading it from `hydrix.vmThemeSync.focusBorder` in `default.nix` would force full NixOS evaluation of every VM config during every host rebuild, which causes OOM on systems with limited RAM.
 
-The `hydrix.vmThemeSync.focusBorder` option in `default.nix` still exists and is read by the Python focus daemons at runtime, keep it in sync with `meta.nix`.
+#### `dynamicColorMap` and `hydrix-focus`
 
-When `focusBorder` is set, it is always active and bypasses both the static/dynamic daemon modes and the `hydrix-focus` override toggle entirely.
+`hydrix.vmThemeSync.focusDaemon.dynamicColorMap` maps a profile to a wal colour key, so its
+border shifts with every wallpaper change. Defaults: pentest `color1`, browsing `color2`,
+comms `color5`, dev `color6`, lurking `color7`; anything else gets `baseColor`.
 
-#### Focus Daemon Modes (fallback when `focusBorder` is unset)
-
-| Mode | Color Source | Use Case |
-|------|-------------|----------|
-| `static` | VM profile's colorscheme JSON (`color4`) | Fixed tones per VM, shifts only when colorscheme changes |
-| `dynamic` | Host's live wal cache (configurable color key) | Border shifts with every wallpaper change |
-
-**Default dynamic color map:**
-
-| VM Type | Color Key | Typical result |
-|---------|-----------|----------------|
-| pentest | color1 | Red tones |
-| browsing | color2 | Green tones |
-| comms | color3 | Yellow tones |
-| dev | color5 | Magenta tones |
-| lurking | color6 | Cyan tones |
-
-Override in your machine config:
 ```nix
-hydrix.vmThemeSync = {
-  enable = true;
-  focusDaemon.mode = "dynamic";
-  dynamicColorMap = {
-    pentest = "color1";
-    browsing = "color4";
-  };
+hydrix.vmThemeSync.focusDaemon = {
+  dynamicColorMap = { pentest = "color1"; browsing = "color4"; };
+  baseColor = "color4";
+  hostColor = "color3";
+  gradientAngle = 45;
 };
-```
-
-**Window detection:** The daemon identifies VM windows by title prefix `[<registry key>]` (e.g., `[browsing] firefox`), which the host's waypipe client sets.
-
-#### `focusOverrideColor` - Legacy Option
-
-Hex-only predecessor to `focusBorder`. Only active when `hydrix-focus on` is toggled:
-
-```nix
-# profiles/pentest/default.nix
-hydrix.vmThemeSync.focusOverrideColor = "#FF5555";
 ```
 
 | Command | Effect |
 |---------|--------|
-| `hydrix-focus on` | Enable override colors |
-| `hydrix-focus off` | Revert to static/dynamic mode |
+| `hydrix-focus on` | Every VM uses its `dynamicColorMap` colour, `focusBorder` ignored |
+| `hydrix-focus off` | Back to `focusBorder` where set |
 | `hydrix-focus toggle` | Toggle (default action) |
 | `hydrix-focus status` | Show current state |
 
-Prefer `focusBorder` for new profiles - it is simpler, always active, and supports named colors.
+The state is a marker file (`~/.cache/hydrix/focus-override-active`); toggling re-applies
+the focused window's border and the notification borders at once.
 
-#### Enabling
+#### How it is drawn
 
-In your machine config:
-```nix
-hydrix.vmThemeSync.enable = true;
-hydrix.vmThemeSync.focusDaemon.mode = "dynamic";
-```
+`hypr-focus-daemon` (Hydrix `theming/wm/hyprland/hyprland.nix`) runs as a systemd user
+service, part of `hyprland-session.target`: home-manager restarts it when a rebuild changes
+it, and every Hyprland start (including a supervisor restart) starts it again. It follows
+Hyprland's event socket (`socat -u`) and on each focus change sets the global
+`col.active_border` plus the focused window's own `active_border_color`, in one
+`hyprctl --batch`; the global option alone reaches a window only at the next focus change.
+When the focused workspace has no focused window (an empty workspace, on any monitor), every
+window on a visible workspace gets the neutral border (wal `color0`) instead, so no other
+monitor keeps a stale focus colour.
 
-Import `vmThemeSyncModule` in your flake for both the host and all VMs.
+The colour logic is one shell library, `theming/wm/hyprland/border-colors.nix`, sourced by the
+daemon, `hypr-vm-borders` and swaync's notification borders. Change border logic there only.
+
+**Window detection:** a VM window is recognised by its title prefix `[<label>]` (the registry
+key, or `<profile>-<engagement>` for a bound task slot), which the host's waypipe client sets.
+
+**Static per-VM borders** (`hypr-vm-borders on|off|toggle`): window rules
+(`border_color ..., match:tag vm-<key>`, in `~/.config/hypr/vm-borders.conf`) that keep each
+VM window's `focusBorder` even when unfocused.
+
+**Hyprland 0.55 notes:** `setprop` colour values need a dummy first token
+(`dispatch setprop address:X active_border_color skip <gradient>`), as 0.55 skips the first
+one; the `hyprctl setprop` CLI form does not work. There is no way to unset a per-window
+border colour, which is why the neutral path overrides instead.
 
 ---
 
@@ -3005,10 +2993,34 @@ shard -a google alacritty
 shard pentest end google          # stop, archive the volume, free the slot
 shard pentest task2 google        # resume the archived data into any free slot
 shard pentest purge google        # delete an engagement's data, active or archived
-shard pentest list                # slots, bindings, archived engagements
+shard pentest list                # slots, bindings, labels, archived engagements
 ```
 
+`shard -b`, `-s`, `-R` or `-r` on a stopped slot with no engagement, run at a terminal, asks
+`Engagement name for task2 (empty: leave unbound)` and binds the answer as
+`shard pentest task2 <name>` would. If the slot already holds an unbound volume (built or
+started while unbound), the prompt says so and the name keeps that volume (`--adopt`). An
+empty answer leaves the slot unbound; scripts and other non-interactive runs are never asked.
+
 `end` moves the slot's home volume (qcow2 or LUKS container) into the archive, so the slot starts empty for the next engagement. Binding refuses a slot that still holds an unbound volume: `--adopt` binds that volume to the new engagement instead, `shard -p taskN` deletes it. Engagement names are lowercase letters, digits, `-` and `_`, and cannot shadow a VM name or `shard pentest` subcommand.
+
+**Window labels:** a bound slot's windows show its engagement, not the slot: `[pentest-google]`
+instead of `[pentest-task1]` (`<profile>-<engagement>`). The same label names its clipboard
+group, its notifications (`[pentest-google] summary`) and its row in `shard -i` and
+`shard pentest list`. The registry key stays the VM's identity everywhere else (units, sockets,
+vsock, build-time rules), so binding never needs a rebuild:
+- `hydrix-vm-label <key>` (Hydrix `theming/wm/hyprland/waypipe.nix`) resolves the label: the
+  key, or `<profile>-<engagement>` for a bound task slot. A label that would equal another
+  registry key falls back to the key.
+- `waypipe-connect` takes the label when it connects, sets the title prefix `[<label>] ` and
+  records `label -> key` in `$XDG_RUNTIME_DIR/hydrix-vm-labels/<label>` (removed on disconnect).
+  Border, focus and notification code map a label back to its key there, so colours still come
+  from the slot's registry entry.
+- Window rules for labels that differ from their key (workspace, the VM guard rules, the VM
+  border) go to `~/.config/hypr/vm-labels.conf`, sourced by the generated config, and are applied
+  at once with `hyprctl keyword`. The file is rewritten on every connect and disconnect, so the
+  rules survive `hyprctl reload` and vanish with the connection.
+- A rebind takes effect at the next connection (`shard -R`, or a waypipe reconnect).
 
 **Task slot table** (defaults):
 
@@ -3906,6 +3918,18 @@ VM /nix/.rw-store (qcow2) ──┘
 - **Upper layer:** `/nix/.rw-store`, thin-provisioned qcow2 (starts near 0, grows as VM builds packages)
 - **Merged:** `/nix/store`, VM sees all host paths plus its own builds
 
+### Store Cache (`storeCache`)
+
+`hydrix.microvm.storeCache` sets the virtiofs cache mode of the store share only (other shares
+keep their own):
+
+| Value | Behaviour |
+|-------|-----------|
+| `"auto"` (default) | The guest revalidates file attributes with the host, a round trip on many lookups. Every program start pays for it (shells, prompts, terminals). |
+| `"always"` | The guest keeps its cached view. Store paths never change, so it cannot go stale; a path the guest looked up before the host built it can stay invisible for a while, so test live switches (`shard -r`) once with it. |
+
+Where to set it, per VM or for all of them, and how to check it: [VM Terminal Speed](#vm-terminal-speed-opt-in-settings).
+
 ### Filesystem Shares
 
 **Rule:** anything a VM shares with the host is either read-only to the VM, enforced by the
@@ -4150,6 +4174,40 @@ After `rebuild`, `br-libvirt` exists on the host and the router serves `192.168.
 
 Fish shell with babelfish for fast environment variable sourcing.
 
+Shell integrations are generated at build time and sourced, instead of running a program in
+every new shell: fzf (`fzf --fish`) and zoxide (`zoxide init fish`) in Hydrix
+`theming/programs/fish.nix`, following `programs.fzf`/`programs.zoxide`, and starship
+(`starship init fish --print-full-init`) in the template's `modules/starship.nix`. Each of those
+starts is slow over a VM's virtiofs store, so this mostly speeds up VM terminals.
+
+### VM Terminal Speed (opt-in settings)
+
+Two VM options make terminals in VMs open faster. Both are **off in the framework**; the
+template's `modules/vm-packages.nix` (imported by every profile VM) lists them commented out,
+so a new config decides for itself:
+
+```nix
+# modules/vm-packages.nix: every profile VM (lib.mkDefault, so a profile can override)
+hydrix.microvm.terminalDaemon.enable = lib.mkDefault true;
+hydrix.microvm.storeCache = lib.mkDefault "always";
+```
+
+```nix
+# profiles/<name>/default.nix: one VM differs (a plain assignment beats mkDefault)
+hydrix.microvm.terminalDaemon.enable = false;
+hydrix.microvm.storeCache = "auto";
+```
+
+| Option | Default | On | Trade-off |
+|--------|---------|----|-----------|
+| `hydrix.microvm.terminalDaemon.enable` | `false` | A resident `alacritty --daemon` in the VM; `Mod+Return` / `shard -a <vm> alacritty` open a window of it at once (`alacritty msg create-window`) | One alacritty process stays running while waypipe is connected; its windows share that process, so if it exits (crash, `shard -R`) they all close. Launches it cannot serve start alacritty normally. |
+| `hydrix.microvm.storeCache` | `"auto"` | `"always"`: the guest keeps its view of the host store instead of revalidating every lookup | A store path the guest looked up before the host built it can stay invisible for a while; test a live switch (`shard -r`) once. |
+
+Check what a VM has: `nix eval .#nixosConfigurations.<vm>.config.hydrix.microvm.terminalDaemon.enable`
+(and `.storeCache`). Changes need a VM restart: `shard -bR <vm>`. The service is
+`alacritty-daemon` in the VM (`systemctl status alacritty-daemon`), see
+[waypipe - VM-Side Services](#waypipe---vm-side-services) and [Store Cache](#store-cache-storecache).
+
 ### Abbreviations & Aliases
 
 The Hydrix framework provides several shell abbreviations for common commands:
@@ -4376,12 +4434,20 @@ Runs as root because starting/stopping system services requires it. STATUS retur
 2. Runs the command with `WAYLAND_DISPLAY=waypipe-0`, `XDG_RUNTIME_DIR=/run/user/1000`, and correct nix profile `PATH`
 3. Uses `setsid` to detach the launched app from the socat connection - the app keeps running after socat closes
 
+**`alacritty-daemon.service`** (opt-in, `hydrix.microvm.terminalDaemon.enable`) - one resident
+`alacritty --daemon` per VM, started and stopped with `waypipe-vsock` (its Wayland connection
+runs through it), with the same environment as `waypipe-launch`. An `alacritty` launch
+(`Mod+Return`, `shard -a <vm> alacritty`) becomes `alacritty msg create-window`, which opens at
+once instead of starting alacritty; arguments `create-window` does not accept fall back to a
+normal start. Its terminals share one process, so they all close if it exits. Enabling and
+disabling it: [VM Terminal Speed](#vm-terminal-speed-opt-in-settings).
+
 ### waypipe - Host-Side Scripts
 
 **`waypipe-connect <vm-name>`** - establishes and maintains the host-side tunnel:
 1. Looks up the VM's CID and registry key from `/etc/hydrix/vm-registry.json`
 2. Kills any stale waypipe process on the per-VM port
-3. Starts `hydrix-secctx` (security context for `hydrix-<key>`), then the patched `waypipe --vsock --socket CID:PORT --title-prefix "[<key>] " client` in the sandboxed unit, with only the security-context socket (listening for that VM's outbound connection only)
+3. Starts `hydrix-secctx` (security context for `hydrix-<key>`), then the patched `waypipe --vsock --socket CID:PORT --title-prefix "[<label>] " client` in the sandboxed unit (label: the key, or `<profile>-<engagement>` for a bound task slot), with only the security-context socket (listening for that VM's outbound connection only)
 4. Sends `waypipe-reconnect` to the VM via vsock:14509 and waits for `STATUS` to confirm the tunnel
 5. Restart loop: if waypipe exits, restarts it automatically - requires `waypipe client || true` so the `set -euo pipefail` wrapper does not exit on non-zero waypipe exit
 6. A watcher ends the script, and with it the listener, as soon as `microvm@<vm>` stops, however it stopped (`shard -S`, a shutdown inside the VM, a crash). Changes to these flags apply when the listener restarts: `shard -R <vm>`
@@ -4397,29 +4463,29 @@ Runs as root because starting/stopping system services requires it. STATUS retur
 
 ### waypipe - Window Routing
 
-VM windows are routed to the correct workspace by the compositor via title-prefix matching. The title prefix is set by the host's waypipe client (`--title-prefix "[<registry key>] "`, `waypipe-connect`), so task slots carry their own key (`[pentest-task1] `). Compositor config:
+VM windows are routed to the correct workspace by the compositor via title-prefix matching. The title prefix is set by the host's waypipe client (`--title-prefix "[<label>] "`, `waypipe-connect`): the registry key, so task slots carry their own key (`[pentest-task1] `), or `<profile>-<engagement>` for a slot bound to an engagement (`[pentest-google] `, rules for those come from `~/.config/hypr/vm-labels.conf`, see [Task Slots](#task-slots-per-engagement-vms)). Compositor config:
 
 ```
 # generated by Hydrix theming/wm/hyprland/hyprland.nix from the VM registry
-windowrule = workspace 3, match:title ^\[browsing\]
-windowrule = workspace 2, match:title ^\[pentest\]
-windowrule = workspace 2, match:title ^\[pentest-task1\]
+windowrule = workspace 3, match:title ^\[browsing\].*
+windowrule = workspace 2, match:title ^\[pentest\].*
+windowrule = workspace 2, match:title ^\[pentest-task1\].*
 # etc
 ```
+
+The trailing `.*` is required: Hyprland matches the whole title.
 
 Rules are generated at build time from `vm-registry.json` so adding a new profile VM automatically adds the corresponding window routing rule after a rebuild.
 
 ### waypipe - Session Cleanup
 
-A persistent `WAYLAND_DISPLAY` in the systemd user environment after the compositor exits causes problems for anything gated on `ConditionEnvironment=!WAYLAND_DISPLAY`. The session wrapper handles cleanup:
+A persistent `WAYLAND_DISPLAY` in the systemd user environment after the compositor exits causes problems for anything gated on `ConditionEnvironment=!WAYLAND_DISPLAY`.
 
-**`hyprland-session`** - wrapper script that starts the compositor and on exit:
-1. Kill all `waypipe-connect` processes
-2. Push `stop` to all running VMs via vsock:14509 (VMs stop display services, return to neutral state)
-3. Unset `WAYLAND_DISPLAY` and `DISPLAY` from the systemd user environment
-4. Drop back to TTY
-
-**`exit-wayland`** - can be called from any terminal to perform the same cleanup without killing the compositor, then sends the compositor an exit signal.
+**`exit-wayland`** - ends the session cleanly from any terminal:
+1. Kills all `waypipe-connect` processes and host waypipe clients
+2. Pushes `stop` to all running VMs via vsock:14509 in the background (VMs stop display services, return to neutral state)
+3. Unsets `WAYLAND_DISPLAY` and `DISPLAY` from the systemd user environment
+4. Exits the compositor (`hyprctl dispatch exit`), which ends `hyprland-launch`
 
 ### Adding a New Profile VM
 
@@ -4843,10 +4909,30 @@ hydrix.hyprland.enable = true;  # Wayland, VM apps forwarded via waypipe
 | Lockscreen | hyprlock |
 | VM forwarding | waypipe |
 
-Start the session:
-```bash
-hyprland-session   # cleans up waypipe + env on exit
-```
+Start the session with `hyprland-launch` (what greetd and SDDM run, also from a TTY). It
+pipes Hyprland's output to the journal (`journalctl --user -t hyprland`) and supervises it:
+
+- A crash restarts Hyprland with the regular config, instead of `start-hyprland`'s safe mode
+  (upstream's example config) that waits for a click on "Load config".
+- Two crashes within a minute of starting switch to a minimal fallback config: a terminal, a
+  launcher and window management, no plugins and no VM integration (`waypipe-connect`
+  refuses VMs there, since hypr-clip-guard is absent). A missing config starts it too.
+- Two quick crashes of the fallback end the session.
+- Exit status 0 (the `exit` dispatcher) and SIGTERM/SIGHUP (logout) end the session as usual.
+
+`misc:disable_watchdog_warning` is set, since the session is not started by `start-hyprland`.
+
+### Hyprland Version
+
+Hyprland follows the system nixpkgs (0.55.x on 26.05). `hydrix.hyprland.fromUnstable = true`
+takes Hyprland, its plugin set (`hyprlandPlugins`, which hypr-clip-guard builds against) and
+`xdg-desktop-portal-hyprland` from nixpkgs-unstable as one overlay, so plugin headers always
+match the running compositor and every `pkgs.hyprland` (`hyprctl` in scripts) follows. All
+from the binary cache. Use it for a newer Hyprland (e.g. crash fixes) without moving the whole
+system to unstable.
+
+Window rules on 0.55 match the whole title (RE2 FullMatch): a prefix match needs a trailing
+`.*` (`match:title ^\[browsing\].*`), or it only matches a window titled exactly `[browsing]`.
 
 ### Module Overview
 
@@ -4894,7 +4980,7 @@ The `hypr-clip-guard` Hyprland C++ plugin hooks all clipboard delivery methods i
 | VM-A → VM-B, bridge armed | **Allowed once** (`Mod+Shift+P`, see One-Shot Cross-VM Bridge below) |
 | microVM ↔ libvirt VM | **Blocked** (libvirt VMs are their own group, see below) |
 
-A VM's group is its registry key (`browsing`, `pentest-task1`, ...), read from the client's process: every VM application reaches Hyprland through that VM's host waypipe client, whose command line (`--title-prefix "[<key>] "`, set by `waypipe-connect`) names the group. Nothing the VM sends decides it, and it holds for windowless clients too (e.g. `wl-paste` through waypipe). Each task slot is its own group, isolated from pentest and the other slots. "Host" means any other client; for those the plugin still uses the window title (a host window has no `[vm-name]` prefix), falling back to PID/PPID lineage.
+A VM's group is its label (`browsing`, `pentest-task1`, or `pentest-google` for a slot bound to an engagement), read from the client's process: every VM application reaches Hyprland through that VM's host waypipe client, whose command line (`--title-prefix "[<label>] "`, set by `waypipe-connect`) names the group. Nothing the VM sends decides it, and it holds for windowless clients too (e.g. `wl-paste` through waypipe). Each task slot is its own group, isolated from pentest and the other slots. "Host" means any other client; for those the plugin still uses the window title (a host window has no `[vm-name]` prefix), falling back to PID/PPID lineage.
 
 **Libvirt VMs (virt-manager/virt-viewer):** these have no waypipe title prefix to tag them with, since libvirt controls the window title, not Hydrix. Without special handling they'd fall through to the untagged "host" default and become an unrestricted bridge between otherwise isolated microVM groups, since any group can always reach "host" and "host" can always reach whatever's currently focused. Instead, `classifyWindow()` checks window **class** first: any window whose class contains `virt-manager`, `virt-viewer`, or `remote-viewer` is tagged into its own `"libvirt"` group before falling back to the title-prefix check, so it's isolated from every microVM group exactly like microVM groups are isolated from each other. No changes to the allow/block policy itself were needed, correct tagging alone was sufficient.
 
@@ -5115,12 +5201,14 @@ can connect to vsock:14518 directly with arbitrary JSON. The `vm-notify-relay` u
 - **Caps urgency at `normal`** (`low` is kept), so a VM cannot pin sticky critical popups.
 - **Rate-limits per VM:** a per-VM `flock` held for one second after each notification;
   anything arriving meanwhile is dropped, not queued.
-- Calls `notify-send -u <urgency> --app-name=<app> --category=hydrix-vm-<vm> -- "[vm] summary" "body"`. The `--` and
+- Calls `notify-send -u <urgency> --app-name=<app> --category=hydrix-vm-<vm> -- "[label] summary" "body"`. The `--` and
   `--app-name=` form stop VM text that starts with `-` from being parsed as `notify-send`
   options (e.g. `--action` plus `--wait`, which would echo the user's click back to the VM).
-  The summary is tagged `[vm] `, matching waypipe's own window-title prefix, and the category
-  `hydrix-vm-<vm>` makes swaync draw that VM's border gradient (see "Notifications"). Both
-  come from the CID-resolved name; the VM cannot set a category through the relay.
+  The summary is tagged with the VM's label (`[vm] `, or `[pentest-google] ` for a task slot
+  bound to an engagement), matching waypipe's own window-title prefix, and the category
+  `hydrix-vm-<vm>` (always the registry key) makes swaync draw that VM's border gradient (see
+  "Notifications"). Both come from the CID-resolved name; the VM cannot set a category
+  through the relay.
 
 Only plain strings cross the boundary: icons, image data, hints and actions are dropped
 VM-side, and nothing flows back to the VM.

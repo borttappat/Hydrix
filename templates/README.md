@@ -390,7 +390,9 @@ All slots come from one block in `tasks/default.nix`:
 bridge `br-taskN`, subnet `192.168.<cid>.0/24` and router TAP `mv-router-taskN`, so the
 router isolates every slot from every other VM network. Engagements are bound with
 `shard pentest task1 <name>` and released with `shard pentest end <name>` (see
-`shard pentest help`); bindings are kept outside the flake.
+`shard pentest help`); bindings are kept outside the flake. Building or starting an unbound
+slot at a terminal asks for the name. A bound slot's windows show `[<profile>-<name>]`
+(e.g. `[pentest-google]`) instead of `[pentest-task1]`.
 
 ---
 

@@ -57,7 +57,7 @@ Things being actively worked on or not yet verified. Checked off once resolved a
 - **WiFi VFIO passthrough** - host has no direct internet in lockdown mode; all traffic routes through the router VM
 - **wifi-sync** - manage WiFi networks encrypted in `secrets/wifi.yaml` via the router VM over vsock; supports admin mode (add/pull/list/remove via router NM) and fallback mode (capture current host connection)
 
-- **Task pentest slots** - pre-declared isolated VM slots (task1-3) assignable to named engagements without a host rebuild
+- **Task pentest slots** - pre-declared isolated VM slots (task1-3) assignable to named engagements without a host rebuild; a bound slot's windows, clipboard group and notifications show the engagement (`[pentest-google]`)
 
 - **Per-VM Mullvad VPN, fail-closed** - each VM network can exit through a different Mullvad server; a network whose tunnel is down, never connected, or explicitly blocked has no route out at all, and its DNS goes through the same tunnel (never the uplink)
 - **Network isolation by default** - VM networks cannot reach each other, the host, or the physical LAN the router is connected to; source addresses are pinned per network (anti-spoofing) and the host never routes. `pentest-lan` grants a network LAN access or forwards an uplink port to a VM at runtime, scoped exceptions (`allowedAccessTo`, `lanControl.forwards`) are declared in config
@@ -68,8 +68,10 @@ Things being actively worked on or not yet verified. Checked off once resolved a
 - **Builder VM** - builds host and VM closures from inside a locked-down nix environment with internet via router VM
 - **Gitsync VM** - push and pull git repos from lockdown mode without host internet
 - **Hostsync VM** - secure file inbox from VMs to host
-- **Passwords** - KeePassXC in an offline vault VM (or on the host, or none: `hydrix.passwords.backend`), a floating fzf TUI on `Mod+P`, vsock-only access
+- **Passwords** - KeePassXC in an offline vault VM (or on the host, or none: `hydrix.passwords.backend`), a floating fzf TUI on `Mod+P`, vsock-only access, optional sops-delivered key file on top of the master password
 - **USB sandbox VM** - safe handling of untrusted USB storage inside an isolated VM
+
+- **Trimmed guest kernel** (opt-in per VM) - drops hardware classes a microVM never sees; template module `modules/vm-kernel.nix`
 
 - **Declarative boot modes** - lockdown (default), administrative, fallback as NixOS specialisations
 - **Stable fallback router** - immutable break-glass router VM for when the main router config breaks
@@ -77,7 +79,8 @@ Things being actively worked on or not yet verified. Checked off once resolved a
 Some more visual/graphical features:
 
 
-- **Hyprland** - the only supported compositor. VM apps forwarded as native windows via waypipe over vsock. Set `hydrix.hyprland.enable = true` in your machine config.
+- **Hyprland** - the only supported compositor. VM apps forwarded as native windows via waypipe over vsock. Set `hydrix.hyprland.enable = true` in your machine config. `hyprland-launch` restarts it after a crash and drops to a minimal fallback config if it keeps crashing.
+- **Fast VM terminals** - shell integrations generated at build time, plus two opt-in VM settings, both off by default and listed commented in the template's `modules/vm-packages.nix`: a resident alacritty per VM (`hydrix.microvm.terminalDaemon.enable`) and a cached store view (`hydrix.microvm.storeCache = "always"`). See [DOCUMENTATION.md § VM Terminal Speed](DOCUMENTATION.md#vm-terminal-speed-opt-in-settings)
 - **VM metrics polling** - status bar pulls live CPU, RAM, disk, uptime from each running VM via vsock
 - **Notification forwarding** - VM desktop notifications shown as tagged host popups over vsock, opt-in per VM via `hydrix.microvm.notifyForward.enable`
 - **Pywal colorscheme system** - three independent color layers per VM: declarative base scheme, live host wal-cache sync via virtiofs, and per-VM focus border color on the host
@@ -332,10 +335,17 @@ Hyprland window via waypipe.
 | VM forwarding | waypipe (vsock) |
 
 ```bash
-hyprland-launch                # start Hyprland session from TTY
+hyprland-launch              # start Hyprland session from TTY (greetd/SDDM run it too)
 hypr-ws-app alacritty        # launch app in VM on current workspace
 hypr-ws-app firefox
+exit-wayland                 # end the session cleanly from any terminal
 ```
+
+`hyprland-launch` logs to the journal (`journalctl --user -t hyprland`), restarts Hyprland after
+a crash, and switches to a minimal fallback config (terminal, launcher, no plugins, no VMs)
+after two quick crashes. Hyprland follows the system nixpkgs;
+`hydrix.hyprland.fromUnstable = true` takes it and its plugins from nixpkgs-unstable as one set.
+See [DOCUMENTATION.md § Wayland Stack](DOCUMENTATION.md#wayland-stack-hyprland).
 
 Keybindings live in `modules/hyprland.nix`.
 
