@@ -148,8 +148,9 @@ in {
             save_to_clipboard = alCfg.selection.saveToClipboard;
           };
 
-          # Scrollback buffer (Alacritty caps history at 100000).
-          scrolling.history = lib.mkDefault alCfg.scrollback;
+          # Scrollback buffer, large by default so long tool output is not lost
+          # (Alacritty caps history at 100000). Override like any other setting.
+          scrolling.history = lib.mkDefault 100000;
 
           # Terminal output may not write the clipboard (OSC 52): text printed
           # from a VM reply or a remote shell must never reach it.

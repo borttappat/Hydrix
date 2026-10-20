@@ -437,15 +437,6 @@ in {
       description = "Copy selected text to the system clipboard automatically.";
     };
 
-    alacritty.scrollback = lib.mkOption {
-      type = lib.types.int;
-      default = 10000;
-      description = ''
-        Lines of scrollback history kept in the buffer. Alacritty caps this at
-        100000. Held in RAM, so a large value trades memory for history.
-      '';
-    };
-
     ranger.extraMappings = lib.mkOption {
       type = lib.types.attrsOf lib.types.str;
       default = {};
