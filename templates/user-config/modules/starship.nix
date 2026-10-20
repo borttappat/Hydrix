@@ -37,7 +37,7 @@ let
         # Recording indicator: shown only in shells where the session recorder
         # set HYDRIX_REC (see profiles/pentest/logging.nix).
         [env_var.HYDRIX_REC]
-        variable = "HYDRIX_REC"
+        variable = "HYDRIX_REC_FILE"
         format = '[\[REC\]]($style) '
         style = "bold red"
 

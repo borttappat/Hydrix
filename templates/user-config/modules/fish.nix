@@ -80,18 +80,6 @@ in {
             test -d "$last_dir"; and cd "$last_dir"
           end
 
-          # Auto-resume recording if flag file exists
-          if test -f ~/.recording_active
-            and not set -q RECORDING_ACTIVE
-            set -l log_dir (cat ~/.recording_active)
-            set -l timestamp (date +%Y%m%d_%H%M%S)
-            set -gx RECORDING_FILE "$log_dir/session_$timestamp.cast"
-            set -gx RECORDING_ACTIVE 1
-            echo "[!] Recording to: $RECORDING_FILE"
-            asciinema rec "$RECORDING_FILE"
-            set -e RECORDING_ACTIVE
-            set -e RECORDING_FILE
-          end
         '';
 
         shellAbbrs =
@@ -231,41 +219,6 @@ in {
                 end
               end
               echo "Files sorted by extension in $target_dir"
-            '';
-
-            # Start asciinema recording
-            start_recording = ''
-              set -l log_dir $argv[1]
-              if test -z "$log_dir"
-                set log_dir ~/terminal_logs
-              end
-              mkdir -p $log_dir
-              echo "$log_dir" > ~/.recording_active
-              set -l timestamp (date +%Y%m%d_%H%M%S)
-              set -gx RECORDING_FILE "$log_dir/session_$timestamp.cast"
-              set -gx RECORDING_ACTIVE 1
-              echo "[!] Recording enabled - all new terminals will record"
-              echo "[!] Recording to: $RECORDING_FILE"
-              asciinema rec "$RECORDING_FILE"
-              set -e RECORDING_ACTIVE
-              set -e RECORDING_FILE
-            '';
-
-            # Stop recording
-            stop_recording = ''
-              if set -q RECORDING_ACTIVE
-                echo "[!] Stopping recording..."
-                echo "   Press Ctrl+D or type 'exit' to finish this session"
-                if test -f ~/.recording_active
-                  rm ~/.recording_active
-                end
-                exit
-              else if test -f ~/.recording_active
-                rm ~/.recording_active
-                echo "[!] Recording disabled for new terminals"
-              else
-                echo "[!] Recording was not active"
-              end
             '';
 
             # Extract various archive formats
