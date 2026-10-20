@@ -10,6 +10,12 @@
 #   usb attach <busid> <vm> [-y]   to a running microVM whose meta.nix sets
 #                                  usbPassthrough = true, or a libvirt domain
 #   usb detach <busid>             take it back (unmount inside the VM first)
+#   usb host on|off|status         let the host kernel read USB storage, on demand
+#
+# `usb host on` loads usb_storage/uas explicitly (modprobe --ignore-install skips the
+# block for the module it names), after a y/N: sticks then appear as /dev/sdX on the host,
+# for mounting there or virt-manager's own USB dialog. `usb host off` unloads them again
+# (refused while a USB disk is mounted). Nothing persists: every boot starts blocked.
 #
 # Inside a Hydrix microVM the device arrives read-only; `usb-rw <dev>` there
 # makes it writable. A fallback/recovery specialisation should set
@@ -35,16 +41,23 @@
   notifyScript = pkgs.writeShellScript "hydrix-usb-notify" ''
     busid=''${1%%:*}
     product=$(cat "/sys/bus/usb/devices/$busid/product" 2>/dev/null || echo "USB storage")
+    if [ -d /sys/module/usb_storage ]; then
+      body="$product ($busid). Host USB storage is ON (usb host on): the host kernel reads it.
+    Block it again: usb host off"
+    else
+      body="$product ($busid), not mounted on the host.
+    To pass it to a VM: usb attach $busid <vm>"
+    fi
     # Critical: swaync keeps it until clicked (timeout-critical 0; it ignores -t 0), so a
     # stick plugged in while away is not missed.
-    ${pkgs.libnotify}/bin/notify-send -a usb -u critical "USB storage plugged in" \
-      "$product ($busid), not mounted on the host.
-    To pass it to a VM: usb attach $busid <vm>"
+    ${pkgs.libnotify}/bin/notify-send -a usb -u critical "USB storage plugged in" "$body"
   '';
 
   usbCli = pkgs.writeShellScriptBin "usb" ''
     set -euo pipefail
-    export PATH=${lib.makeBinPath [pkgs.jq pkgs.socat pkgs.coreutils pkgs.gnugrep]}:$PATH
+    export PATH=${lib.makeBinPath [pkgs.jq pkgs.socat pkgs.coreutils pkgs.gnugrep pkgs.util-linux pkgs.libnotify]}:$PATH
+    MODPROBE=${pkgs.kmod}/bin/modprobe
+    BLOCKED=${lib.boolToString cfg.blockHostStorage}
     REGISTRY=/etc/hydrix/vm-registry.json
     STATE="''${XDG_RUNTIME_DIR:-/tmp}/hydrix-usb"
     LIBVIRT=qemu:///system
@@ -79,6 +92,22 @@
     qmp() {
       printf '{"execute":"qmp_capabilities"}\n%s\n' "$2" | sudo socat -t2 - "UNIX-CONNECT:$1"
     }
+    host_on() { [ -d /sys/module/usb_storage ]; }
+    host_mode() {
+      if [ "$BLOCKED" != true ]; then echo "allowed (hydrix.usb.blockHostStorage = false)"
+      elif host_on; then echo "ON until 'usb host off' or reboot"
+      else echo "blocked"; fi
+    }
+    # Host block devices (/dev/sdX) of a USB device, empty while the host does not read it.
+    host_disks() {
+      local b
+      for b in /sys/block/sd*; do
+        [ -e "$b" ] || continue
+        case "$(readlink -f "$b")" in */"$1"/*) echo "/dev/$(basename "$b")" ;; esac
+      done
+    }
+    # Mount points on a disk or its partitions
+    disk_mounts() { lsblk -nro MOUNTPOINTS "$1" 2>/dev/null | grep -v '^$' || true; }
     hostdev_xml() {
       printf "<hostdev mode='subsystem' type='usb' managed='yes'><source><address bus='%d' device='%d'/></source></hostdev>\n" \
         "$((10#$(attr "$1" busnum)))" "$((10#$(attr "$1" devnum)))"
@@ -102,9 +131,12 @@
             if [ "$node" = "$(devnode "$b")" ]; then at=$vm; else rm -f "$STATE/$b"; fi
           fi
           printf '  %-10s %s\n             attached: %s\n' "$b" "$(describe "$b")" "$at"
+          disks=$(host_disks "$b" | tr '\n' ' ')
+          [ -n "$disks" ] && printf '             on the host: %s\n' "$disks"
         done
         [ "$found" = 1 ] || echo "  (none)"
         echo
+        echo "Host USB storage: $(host_mode)"
         echo "microVMs accepting USB devices: $(jq -r '[to_entries[] | select(.value.usbPassthrough == true) | .key] | join(" ")' "$REGISTRY" 2>/dev/null)"
         echo "libvirt domains also work: usb attach <busid> <domain>"
         ;;
@@ -117,6 +149,9 @@
         is_storage "$busid" || die "$busid is not a USB storage device"
         [ -f "$STATE/$busid" ] && die "$busid is already attached to $(cut -d' ' -f2 "$STATE/$busid")"
         node=$(devnode "$busid")
+        for d in $(host_disks "$busid"); do
+          [ -z "$(disk_mounts "$d")" ] || die "$busid is mounted on the host ($d), unmount it first"
+        done
         vm=$(microvm_of "$target")
         if [ -n "$vm" ]; then
           kind=microvm
@@ -177,8 +212,44 @@
         echo "Detached $busid from $vm."
         ;;
 
+      host)
+        case "''${1:-status}" in
+          status)
+            echo "Host USB storage: $(host_mode)"
+            ;;
+          on)
+            [ "$BLOCKED" = true ] || die "host USB storage is not blocked in this boot mode"
+            host_on && { echo "Host USB storage is already on."; exit 0; }
+            echo "The host kernel will read every USB stick plugged in from now on: partition"
+            echo "tables and filesystems are parsed here, not in a VM. Use it for a stick you trust,"
+            echo "or one going to a libvirt VM through virt-manager. Until 'usb host off' or reboot."
+            if [ "''${2:-}" != -y ]; then
+              read -rp "Let the host read USB storage? [y/N] " answer
+              case "$answer" in y | Y | yes) ;; *) echo "Cancelled."; exit 1 ;; esac
+            fi
+            # usb_storage first: --ignore-install only applies to the module named.
+            sudo "$MODPROBE" --ignore-install usb_storage
+            sudo "$MODPROBE" --ignore-install uas
+            notify-send -a usb "Host USB storage ON" "Sticks appear as /dev/sdX on the host until 'usb host off' or reboot." || true
+            echo "Host USB storage is on. Plugged-in sticks appear as /dev/sdX (lsblk)."
+            ;;
+          off)
+            [ "$BLOCKED" = true ] || die "host USB storage is not blocked in this boot mode"
+            host_on || { echo "Host USB storage is already blocked."; exit 0; }
+            for d in $(lsblk -dnrpo NAME,TRAN | grep ' usb$' | cut -d' ' -f1); do
+              m=$(disk_mounts "$d")
+              [ -z "$m" ] || die "$d is mounted ($(tr '\n' ' ' <<< "$m")), unmount it first"
+            done
+            sudo "$MODPROBE" -r uas usb_storage || die "could not unload usb_storage (still in use?)"
+            notify-send -a usb "Host USB storage blocked" "USB sticks are no longer read by the host." || true
+            echo "Host USB storage is blocked again."
+            ;;
+          *) die "usage: usb host on [-y] | off | status" ;;
+        esac
+        ;;
+
       *)
-        echo "usage: usb list | attach <busid> <vm> [-y] | detach <busid>"
+        echo "usage: usb list | attach <busid> <vm> [-y] | detach <busid> | host on|off|status"
         exit 1
         ;;
     esac

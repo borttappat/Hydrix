@@ -3295,14 +3295,24 @@ shard start microvm-usb-sandbox
 
 The host blocks `usb_storage` and `uas` (initrd included, `hydrix.usb.blockHostStorage`,
 default on; set it false in a fallback specialisation so install media works). Plugging a
-stick in only sends a notification. Nothing attaches without an explicit command that shows
-the device and target and asks y/N:
+stick in only sends a notification, which stays until clicked. Nothing attaches without an
+explicit command that shows the device and target and asks y/N:
 
 ```bash
-usb list                         # storage devices, where attached, which VMs accept them
+usb list                         # storage devices, where attached, which VMs accept them, host mode
 usb attach <busid> usb-sandbox   # e.g. usb attach 4-1 usb-sandbox; -y skips the prompt
 usb detach <busid>               # unmount inside the VM first
+usb host on|off|status           # let the host kernel read USB storage, on demand
 ```
+
+**Host USB storage on demand** (`usb host on`): for a stick you trust, to mount it on the host or
+hand it to a libvirt VM through virt-manager's own USB dialog. After a warning and y/N it loads
+`usb_storage` and `uas` (`modprobe --ignore-install`, which skips the block for the module it
+names), so sticks appear as `/dev/sdX`, and sends a notification; plug-in notifications say the
+host reads the stick while it is on. `usb host off` unloads both modules again and refuses while
+a USB disk is mounted. Nothing persists: every boot starts blocked. `usb attach` refuses a stick
+that is mounted on the host. `usb attach <busid> <libvirt domain>` never needs host mode: it
+passes the whole device, and the guest parses it.
 
 Any microVM whose `meta.nix` sets `usbPassthrough = true` accepts devices this way (an xHCI
 controller plus QMP `device_add usb-host`); libvirt domains get a `virsh attach-device` USB
