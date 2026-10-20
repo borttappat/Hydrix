@@ -16,7 +16,6 @@ let
         "$schema" = 'https://starship.rs/config-schema.json'
 
         format = """
-        ''${env_var.HYDRIX_REC}\
         $username\
         $hostname\
         $directory\
@@ -27,6 +26,7 @@ let
         $git_status\
         $jobs\
         $cmd_duration\
+        ''${env_var.HYDRIX_REC}\
         $time\
         $line_break\
         $character"""
