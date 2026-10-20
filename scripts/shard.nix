@@ -316,6 +316,7 @@
       # Build microVM
       cmd_build() {
           local vm_name="$1"
+          engagement_prompt "$vm_name" || return 1
 
           # Auto-provision the LUKS-encrypted home volume before building, if this VM
           # declares hydrix.microvm.encryption.enable and doesn't have one yet. Runs
@@ -451,6 +452,7 @@
 
       cmd_start() {
           local vm_name="$1"
+          engagement_prompt "$vm_name" || return 1
 
           if is_running "$vm_name"; then
               log_error "''${vm_name} is already running"
@@ -738,6 +740,7 @@
       # Restart microVM
       cmd_restart() {
           local vm_name="$1"
+          engagement_prompt "$vm_name" || return 1
 
           log "Restarting ''${BOLD}''${vm_name}''${NC}..."
           local start
@@ -906,6 +909,12 @@
           local vm_name="''${1:-}"
 
           if [[ -n "$vm_name" ]]; then
+              local eng
+              eng=$(engagement_of_slot "$vm_name")
+              if [[ -n "$eng" ]]; then
+                  echo -e "''${BOLD}Engagement:''${NC} $eng, windows show [$(vm_label "$vm_name")]"
+                  echo ""
+              fi
               # Exits 3 for a stopped VM, which is a status, not a failure
               systemctl status "microvm@''${vm_name}.service" --no-pager || true
 
@@ -950,24 +959,32 @@
               # here, unlike a flake eval, which would return every machine's
               # nixosConfigurations.
               local declared
-              declared=$(jq -r '.[] | "\(.vmName) \(.cid)"' "$VM_REGISTRY" 2>/dev/null | sort -u)
+              declared=$(jq -r '.[] | "\(.vmName) \(.cid) \(.taskSlot // "-")"' "$VM_REGISTRY" 2>/dev/null | sort -u)
 
               if [[ -z "$declared" ]]; then
                   echo "No microVMs declared"
                   return
               fi
 
-              printf "  ''${DIM}%-30s %-10s %-6s''${NC}\n" "NAME" "STATUS" "CID"
-              echo "  ────────────────────────────────────────────────"
+              # Pad plain text before colouring it: printf counts escape bytes as width
+              local w
+              w=$(awk '{ if (length($1) > m) m = length($1) } END { print m }' <<< "$declared")
+              printf "  ''${DIM}%-*s %-8s %-4s %s''${NC}\n" "$w" "NAME" "STATUS" "CID" "ENGAGEMENT"
 
-              while IFS=' ' read -r vm cid; do
-                  local status
-                  if is_running "$vm"; then
-                      status="''${GREEN}running''${NC}"
-                  else
-                      status="''${DIM}stopped''${NC}"
+              while IFS=' ' read -r vm cid slot; do
+                  local status eng_str=""
+                  # Bound task slots: the engagement and the label their windows show
+                  if [[ "$slot" != "-" ]]; then
+                      local eng
+                      eng=$(engagement_of_slot "$vm")
+                      [[ -n "$eng" ]] && eng_str="$eng [$(vm_label "$vm")]"
                   fi
-                  printf "  %-30s %-18s %-6s\n" "$vm" "$status" "$cid"
+                  if is_running "$vm"; then
+                      status="''${GREEN}running ''${NC}"
+                  else
+                      status="''${DIM}stopped ''${NC}"
+                  fi
+                  printf "  %-*s %s %-4s %s\n" "$w" "$vm" "$status" "$cid" "$eng_str"
               done <<< "$declared"
 
               local orphans_raw orphan_count=0
@@ -2363,6 +2380,57 @@
           [[ "$1" =~ ^[a-z0-9][a-z0-9_-]{0,31}$ ]]
       }
 
+      # The label a VM's windows get (window title, clipboard group, notifications):
+      # <profile>-<engagement> for a bound task slot, else its registry key. Same rule as
+      # hydrix-vm-label, which waypipe-connect uses.
+      vm_label() {
+          local vm="$1" key="" slot="" eng cand
+          [[ -f "$VM_REGISTRY" ]] || { echo "$vm"; return; }
+          IFS=$'\t' read -r key slot < <(jq -r --arg v "$vm" \
+              '[to_entries[] | select(.value.vmName == $v)][0] // empty | "\(.key)\t\(.value.taskSlot // "")"' \
+              "$VM_REGISTRY" 2>/dev/null) || true
+          [[ -n "$key" ]] || { echo "$vm"; return; }
+          if [[ -n "$slot" ]]; then
+              eng=$(engagement_of_slot "$vm")
+              if engagement_name_valid "$eng"; then
+                  cand="''${key%-"$slot"}-$eng"
+                  if ! jq -e --arg k "$cand" 'has($k)' "$VM_REGISTRY" >/dev/null 2>&1; then
+                      key="$cand"
+                  fi
+              fi
+          fi
+          echo "$key"
+      }
+
+      # shard -b/-s/-R on a stopped, unbound task slot at a terminal: ask for an engagement
+      # name and bind it as shard pentest taskN <name> would. Empty leaves the slot unbound.
+      # A slot that already holds an unbound volume (built or started while unbound) gives
+      # that volume to the name, as --adopt would. Asks once per slot and run, never without
+      # a terminal. Fails when binding is refused, so the command stops there.
+      ENGAGEMENT_ASKED=" "
+      engagement_prompt() {
+          local vm="$1" slot name what adopt_flag=()
+          [[ -t 0 && -t 2 && -f "$VM_REGISTRY" ]] || return 0
+          [[ "$ENGAGEMENT_ASKED" == *" $vm "* ]] && return 0
+          slot=$(jq -r --arg v "$vm" '[.[] | select(.vmName == $v) | .taskSlot // empty][0] // empty' "$VM_REGISTRY" 2>/dev/null)
+          [[ -n "$slot" ]] || return 0
+          [[ -z "$(engagement_of_slot "$vm")" ]] || return 0
+          is_running "$vm" && return 0
+          ENGAGEMENT_ASKED+="$vm "
+          what="Engagement name for $slot"
+          if [[ -n "$(slot_volumes "/var/lib/microvms/$vm")" ]]; then
+              adopt_flag=(--adopt)
+              what="$what, keeps its unbound home volume"
+          fi
+          while true; do
+              read -r -p "$what (empty: leave unbound): " name || return 0
+              [[ -n "$name" ]] || return 0
+              if engagement_name_valid "$name"; then break; fi
+              log_error "Engagement names use lowercase letters, digits, - and _ (max 32 chars)"
+          done
+          ENGAGEMENT_BIND_QUIET=1 cmd_pentest_start "$slot" "$name" "''${adopt_flag[@]}"
+      }
+
       # Home volume files present in a slot directory
       slot_volumes() {
           local f
@@ -2372,19 +2440,21 @@
       }
 
       pentest_print_table() {
-          printf "''${BOLD}%-7s %-20s %-8s %-10s''${NC}\n" "SLOT" "ENGAGEMENT" "RUNNING" "VOLUME"
+          printf "''${BOLD}%-7s %-20s %-28s %-8s %-10s''${NC}\n" "SLOT" "ENGAGEMENT" "LABEL" "RUNNING" "VOLUME"
           local key vm
           while IFS=$'\t' read -r key vm; do
-              local eng running_str="-" vol_size="-" f
+              local eng label="-" running_str="-" vol_size="-" f
               eng=$(engagement_of_slot "$vm")
-              is_running "$vm" && running_str="''${GREEN}yes''${NC}"
+              [[ -n "$eng" ]] && label=$(vm_label "$vm")
+              is_running "$vm" && running_str="yes"
+              running_str=$(printf '%-8s' "$running_str")
+              [[ "$running_str" == yes* ]] && running_str="''${GREEN}$running_str''${NC}"
               f=$(slot_volumes "/var/lib/microvms/$vm" | head -1)
               if [[ -n "$f" ]]; then
                   vol_size=$(du -sh "$f" 2>/dev/null | cut -f1)
                   [[ -z "$eng" ]] && vol_size="$vol_size (unbound)"
               fi
-              # shellcheck disable=SC2059
-              printf "%-7s %-20s %-8b %-10s\n" "$key" "''${eng:--}" "$running_str" "$vol_size"
+              printf "%-7s %-20s %-28s %s %-10s\n" "$key" "''${eng:--}" "$label" "$running_str" "$vol_size"
           done < <(task_slots)
 
           local archived
@@ -2510,7 +2580,8 @@
           fi
 
           engagements_read | jq --arg v "$slot" --arg n "$name" '.slots[$v] = $n' | engagements_write
-          log_success "Engagement ''${BOLD}$name''${NC} bound to $slot_key"
+          log_success "Engagement ''${BOLD}$name''${NC} bound to $slot_key (windows show [$(vm_label "$slot")])"
+          [[ -n "''${ENGAGEMENT_BIND_QUIET:-}" ]] && return 0
           echo ""
           echo -e "  ''${DIM}Build:''${NC}  shard -b $name"
           echo -e "  ''${DIM}Start:''${NC}  shard -s $name"
