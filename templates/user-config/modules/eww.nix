@@ -25,6 +25,11 @@
 # Router data comes from router-stats-server on vsock 200:14506. Colors come
 # from ~/.cache/wal/colors.scss; fonts and geometry from hydrix.graphical.
 #
+# eww is patched (eww-reload-css.patch) with an `eww reload-css` command:
+# it loads the stylesheet into the running daemon, so open windows are
+# restyled in place. The eww-colors service runs it when colors.scss changes.
+# A plain `eww reload` rebuilds every window and resets every variable.
+#
 # Optional wallpaper-layer window (hydrix.eww.wallpaperLayer): a full-monitor
 # window stacked between swaybg/hyprpaper and normal apps. `image` is an
 # absolute filesystem path (read at runtime, not copied into the Nix store,
@@ -59,6 +64,11 @@
   ...
 }: let
   username = config.hydrix.username;
+  # `eww reload-css`: loads the stylesheet into the running daemon without reopening
+  # windows, so a colour change repaints the dashboard in place.
+  ewwPkg = pkgs.eww.overrideAttrs (old: {
+    patches = (old.patches or []) ++ [./eww-reload-css.patch];
+  });
   ui = config.hydrix.graphical.ui;
   sc = config.hydrix.graphical.scaling.computed;
   gaps = let
@@ -184,7 +194,7 @@
   # and the widget without waiting for the next poll.
   ewwVpnToggle = pkgs.writeShellApplication {
     name = "eww-vpn-toggle";
-    runtimeInputs = [pkgs.socat pkgs.jq pkgs.eww pkgs.libnotify ewwRouterStats ewwWgStatus];
+    runtimeInputs = [pkgs.socat pkgs.jq ewwPkg pkgs.libnotify ewwRouterStats ewwWgStatus];
     bashOptions = ["nounset" "pipefail"];
     text = ''
       vm="$1" action="$2"
@@ -733,11 +743,12 @@
   # change keeps it instead of letting windows spread over the dashboard.
   #
   # dash_on goes through a file (a deflisten) rather than `eww update`:
-  # `eww reload`, run on every colour change, resets defvars to their initial
-  # value, and the reopened dashboards would stay hidden.
+  # a full `eww reload` (eww runs one itself when a monitor is added) resets
+  # defvars to their initial value, and the reopened dashboards would stay
+  # hidden.
   ewwDashboardWatch = pkgs.writeShellApplication {
     name = "eww-dashboard-watch";
-    runtimeInputs = [pkgs.eww pkgs.hyprland pkgs.jq pkgs.socat pkgs.gnugrep pkgs.coreutils];
+    runtimeInputs = [ewwPkg pkgs.hyprland pkgs.jq pkgs.socat pkgs.gnugrep pkgs.coreutils];
     text = ''
       # dashboard.workspace, empty when the dashboards show on every workspace.
       _ws="${lib.optionalString (dash.workspace != null) (toString dash.workspace)}"
@@ -935,14 +946,12 @@
         :focusable false
         (dashboard :mon mon :width width :height height))
 
-      ;; Appears at once and slides out to the left, the way its workspace
-      ;; leaves. Sliding in stutters: the hidden tree is unmapped and must be
-      ;; mapped again, and every frame resizes the whole layer.
+      ;; Appears and disappears at once: a slide resizes the whole layer on
+      ;; every frame.
       (defwidget dashboard [mon width height]
         (revealer
           :reveal {dash_on[mon] ?: false}
-          :transition {(dash_on[mon] ?: false) ? "none" : "slideright"}
-          :duration "400ms"
+          :transition "none"
           (box
             :class "dash-root"
             :width width
@@ -1813,7 +1822,7 @@ in {
 
     home-manager.users.${username} = {lib, ...}: {
       home.packages = [
-        pkgs.eww
+        ewwPkg
         ewwRouterStats
         ewwWgStatus
         ewwVpnToggle
@@ -1863,8 +1872,8 @@ in {
         };
         Service = {
           Type = "oneshot";
-          # No daemon, nothing to reload (and `eww reload` must not start one).
-          ExecStart = "-${pkgs.eww}/bin/eww --no-daemonize reload";
+          # No daemon, nothing to reload (and the client must not start one).
+          ExecStart = "-${ewwPkg}/bin/eww --no-daemonize reload-css";
         };
       };
 
@@ -1876,7 +1885,7 @@ in {
         };
         Service = {
           Type = "simple";
-          ExecStart = "${pkgs.eww}/bin/eww daemon --no-daemonize";
+          ExecStart = "${ewwPkg}/bin/eww daemon --no-daemonize";
           Restart = "on-failure";
           RestartSec = 2;
         };
