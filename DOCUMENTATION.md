@@ -5375,6 +5375,11 @@ seeds the workspace and wires the recorder:
 
 | Command | Purpose |
 |---------|---------|
+| `rec` / `rec -c` | Show the current session's name and path |
+| `rec -l` | List sessions, oldest first (`*` marks this terminal) |
+| `rec -r <name>` | Rename the current session to `<name>.cast` (its `.txt` follows on exit) |
+| `rec -p [session]` | Print one session as text (default: current); a session is a name, a unique part of one, or a path |
+| `rec -a` | Print every session as text |
 | `rec-text [file.cast]` | Print a recording as clean text (defaults to the current session) |
 | `asciinema play <file.cast>` | Replay a recording |
 | `stop-recording` | End the current recording, drop to a plain shell in the same terminal |
