@@ -1,0 +1,47 @@
+--- a/crates/eww/src/app.rs
++++ b/crates/eww/src/app.rs
+@@ -47,6 +47,7 @@
+     UpdateVars(Vec<(VarName, DynVal)>),
+     PollVars(Vec<VarName>),
+     ReloadConfigAndCss(DaemonResponseSender),
++    ReloadCss(DaemonResponseSender),
+     OpenInspector,
+     OpenMany {
+         windows: Vec<(String, String)>,
+@@ -216,6 +217,15 @@
+ 
+                 sender.respond_with_error_list(errors)?;
+             }
++            DaemonCommand::ReloadCss(sender) => {
++                // Restyles the open windows in place: unlike ReloadConfigAndCss, no window is
++                // reopened and no variable or script is reset.
++                let errors: Vec<anyhow::Error> = match crate::config::scss::parse_scss_from_config(self.paths.get_config_dir()) {
++                    Ok((file_id, css)) => self.load_css(file_id, &css).err().into_iter().collect(),
++                    Err(e) => vec![e],
++                };
++                sender.respond_with_error_list(errors)?;
++            }
+             DaemonCommand::KillServer => {
+                 log::info!("Received kill command, stopping server!");
+                 self.stop_application();
+--- a/crates/eww/src/opts.rs
++++ b/crates/eww/src/opts.rs
+@@ -176,6 +176,10 @@
+     #[command(name = "reload", alias = "r")]
+     Reload,
+ 
++    /// Reload only the stylesheet, restyling open windows without reopening them
++    #[command(name = "reload-css")]
++    ReloadCss,
++
+     /// Kill the eww daemon
+     #[command(name = "kill", alias = "k")]
+     KillServer,
+@@ -295,6 +299,7 @@
+                 return with_response_channel(|sender| app::DaemonCommand::CloseWindows { windows, auto_reopen: false, sender });
+             }
+             ActionWithServer::Reload => return with_response_channel(app::DaemonCommand::ReloadConfigAndCss),
++            ActionWithServer::ReloadCss => return with_response_channel(app::DaemonCommand::ReloadCss),
+             ActionWithServer::ListWindows => return with_response_channel(app::DaemonCommand::ListWindows),
+             ActionWithServer::ListActiveWindows => return with_response_channel(app::DaemonCommand::ListActiveWindows),
+             ActionWithServer::ShowState { all } => {

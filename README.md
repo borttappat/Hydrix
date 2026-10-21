@@ -63,7 +63,7 @@ Things being actively worked on or not yet verified. Checked off once resolved a
 - **Network isolation by default** - VM networks cannot reach each other, the host, or the physical LAN the router is connected to; source addresses are pinned per network (anti-spoofing) and the host never routes. `pentest-lan` grants a network LAN access or forwards an uplink port to a VM at runtime, scoped exceptions (`allowedAccessTo`, `lanControl.forwards`) are declared in config
 
 - **Encrypted inter-VM file transfer** - files VM with per-bridge TAP access and vsock passphrase delivery; profiles opt out with `filesAccess = false`
-- **Standalone libvirt VMs** (Windows etc.) - attached to router-served bridges (`hydrix.libvirt.defaultBridge`), so they get the same DHCP, isolation and VPN options as microVMs
+- **Standalone libvirt VMs** (Windows etc.) - attached to router-served bridges (`hydrix.libvirt.defaultBridge`), so they get the same DHCP, isolation and VPN options as microVMs. `deploy-windows` creates a Windows 11 VM ready for the SPICE guest tools (virtio-win CD attached), `libvirt-tune <vm>` brings any VM to the same display and USB defaults, and `hydrix.libvirt.console.chromeless` gives their windows no menus or decoration
 
 - **Builder VM** - builds host and VM closures from inside a locked-down nix environment with internet via router VM
 - **Gitsync VM** - push and pull git repos from lockdown mode without host internet

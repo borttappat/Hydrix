@@ -19,6 +19,130 @@ let
       })
     else pkgs.virt-manager;
 
+  # The virtio-win ISO itself (the package unpacks it; its src is the ISO). Windows guests
+  # install the virtio drivers and the SPICE guest tools (QXL driver, SPICE agent) from it.
+  virtioWinIso = pkgs.virtio-win.src;
+  # Attached through a link outside /nix/store: virt-install looks every disk path up in a
+  # libvirt storage pool for its directory, and a pool over /nix/store has too many entries
+  # (and would be left behind). relabel=no: libvirt must not chown the read-only store file;
+  # it is world-readable already.
+  virtioWinLink = "/var/lib/hydrix/libvirt/virtio-win.iso";
+  virtioWinDisk = "path=${virtioWinLink},device=cdrom,bus=sata,readonly=on,source.seclabel.model=dac,source.seclabel.relabel=no";
+
+  # deploy-windows: a new Windows VM with the Hydrix display and USB defaults. The SPICE
+  # guest tools come from the attached virtio-win CD after setup; then the guest resolution
+  # follows the window.
+  deployWindowsScript = pkgs.writeShellScriptBin "deploy-windows" ''
+    set -euo pipefail
+    usage() {
+      cat <<EOF
+    Usage: deploy-windows --name <name> --iso <windows.iso> [options]
+
+      --memory <MB>     RAM (default 8192)
+      --vcpus <N>       vCPUs (default 4)
+      --disk <GB>       disk size (default 80)
+      --bridge <br>     network bridge (default: hydrix.libvirt.defaultBridge, else the
+                        libvirt "default" network)
+      --unattend <iso>  extra CD with autounattend.xml in its root; Windows Setup finds it
+                        on its own and runs unattended
+      --no-console      do not open the console window (it opens by default, in time for
+                        the "Press any key to boot from CD" prompt)
+
+    UEFI, TPM 2.0 and SATA disk (no driver needed during setup), e1000e NIC, QXL with a
+    64 MB framebuffer, no SPICE USB redirection (use: usb attach), and the virtio-win CD.
+    After Windows setup, run virtio-win-guest-tools.exe from that CD and reboot: the
+    display then follows the window size.
+    EOF
+    }
+    NAME="" ISO="" UNATTEND="" CONSOLE=1 MEM=8192 CPUS=4 DISK=80 BRIDGE=${lib.escapeShellArg (toString config.hydrix.libvirt.defaultBridge)}
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --name) NAME=$2; shift 2 ;;
+        --iso) ISO=$2; shift 2 ;;
+        --unattend) UNATTEND=$2; shift 2 ;;
+        --no-console) CONSOLE=0; shift ;;
+        --memory) MEM=$2; shift 2 ;;
+        --vcpus) CPUS=$2; shift 2 ;;
+        --disk) DISK=$2; shift 2 ;;
+        --bridge) BRIDGE=$2; shift 2 ;;
+        -h | --help) usage; exit 0 ;;
+        *) echo "deploy-windows: unknown argument $1" >&2; usage >&2; exit 1 ;;
+      esac
+    done
+    [ -n "$NAME" ] && [ -n "$ISO" ] || { usage >&2; exit 1; }
+    [ -f "$ISO" ] || { echo "deploy-windows: no such ISO: $ISO" >&2; exit 1; }
+    extra=()
+    if [ -n "$UNATTEND" ]; then
+      [ -f "$UNATTEND" ] || { echo "deploy-windows: no such ISO: $UNATTEND" >&2; exit 1; }
+      extra=(--disk "path=$(readlink -f "$UNATTEND"),device=cdrom,bus=sata,readonly=on")
+    fi
+    if [ -n "$BRIDGE" ]; then net="bridge=$BRIDGE,model=e1000e"; else net="network=default,model=e1000e"; fi
+    virt-install --connect qemu:///system \
+      --name "$NAME" --memory "$MEM" --vcpus "$CPUS" \
+      --os-variant win11 --boot uefi \
+      --tpm backend.type=emulator,backend.version=2.0,model=tpm-crb \
+      --disk "size=$DISK,format=qcow2,bus=sata" \
+      --cdrom "$(readlink -f "$ISO")" \
+      --disk "${virtioWinDisk}" \
+      "''${extra[@]}" \
+      --network "$net" \
+      --graphics spice,listen=none \
+      --video model.type=qxl,model.vgamem=65536 \
+      --channel spicevmc \
+      --redirdev none \
+      --noautoconsole
+    echo
+    # The VM boots as soon as it exists: open its console right away so the firmware's
+    # "Press any key to boot from CD" prompt is still on screen.
+    if [ "$CONSOLE" = 1 ] && [ -n "''${WAYLAND_DISPLAY:-''${DISPLAY:-}}" ]; then
+      setsid virt-manager --connect qemu:///system --show-domain-console "$NAME" >/dev/null 2>&1 &
+      echo "Created $NAME; its console is opening. Press a key there when it asks to boot from CD."
+    else
+      echo "Created $NAME. Open it: virt-manager --connect qemu:///system --show-domain-console $NAME"
+    fi
+    echo "After Windows setup: run virtio-win-guest-tools.exe from the virtio-win CD, then reboot."
+  '';
+
+  # libvirt-tune <vm>: give an existing VM (e.g. one made in the virt-manager wizard) the same
+  # defaults: 64 MB QXL framebuffer, no SPICE USB redirection, and the virtio-win CD for a
+  # Windows guest that has none. Shows the changes and asks first; the VM must be shut off.
+  libvirtTuneScript = pkgs.writeShellScriptBin "libvirt-tune" ''
+    set -euo pipefail
+    C=qemu:///system
+    vm=''${1:-}
+    [ -n "$vm" ] || { echo "usage: libvirt-tune <vm> [-y]" >&2; exit 1; }
+    state=$(virsh --connect $C domstate "$vm" 2>/dev/null) || { echo "libvirt-tune: no domain $vm" >&2; exit 1; }
+    [ "$state" = "shut off" ] || { echo "libvirt-tune: shut $vm down first (it is $state)" >&2; exit 1; }
+    xml=$(virsh --connect $C dumpxml --inactive "$vm")
+    todo=()
+    if grep -q "<model type='qxl'" <<< "$xml" && ! grep -q "vgamem='65536'" <<< "$xml"; then
+      todo+=("video: QXL framebuffer to 64 MB (vgamem 65536)")
+    fi
+    if grep -q "<redirdev " <<< "$xml"; then
+      todo+=("redirdev: remove SPICE USB redirection (USB goes in through: usb attach)")
+    fi
+    windows=0
+    grep -q 'microsoft.com/win' <<< "$xml" && windows=1
+    if [ "$windows" = 1 ] && ! grep -q 'virtio-win' <<< "$xml"; then
+      todo+=("cdrom: attach the virtio-win CD (guest tools: QXL driver, SPICE agent)")
+    fi
+    if [ ''${#todo[@]} -eq 0 ]; then echo "$vm already has the Hydrix defaults."; exit 0; fi
+    echo "Changes for $vm:"
+    printf '  - %s\n' "''${todo[@]}"
+    if [ "''${2:-}" != -y ]; then
+      read -rp "Apply? [y/N] " a
+      case "$a" in y | Y | yes) ;; *) echo "Cancelled."; exit 1 ;; esac
+    fi
+    for t in "''${todo[@]}"; do
+      case "$t" in
+        video:*) virt-xml --connect $C "$vm" --edit --video model.vgamem=65536 >/dev/null ;;
+        redirdev:*) virt-xml --connect $C "$vm" --remove-device --redirdev all >/dev/null ;;
+        cdrom:*) virt-xml --connect $C "$vm" --add-device --disk "${virtioWinDisk}" >/dev/null ;;
+      esac
+    done
+    echo "Done. In a Windows guest, run virtio-win-guest-tools.exe from the virtio-win CD once, then reboot."
+  '';
+
   buildBaseScript = pkgs.writeShellScriptBin "build-base" ''
     # Build base images for VM deployment
     #
@@ -557,6 +681,8 @@ let
             # full-screen guests below the panel's resolution.
             --video model.type=qxl,model.vgamem=65536
             --channel spicevmc
+            # No SPICE USB redirection channels: USB goes in only through `usb attach`.
+            --redirdev none
             --vsock cid.auto=yes
             --os-variant nixos-unstable
             --boot hd
@@ -654,6 +780,12 @@ in
   };
 
   config = lib.mkIf config.hydrix.libvirt.enable {
+    # virtio-win ISO at a stable path outside the store (see virtioWinLink).
+    systemd.tmpfiles.rules = [
+      "d /var/lib/hydrix/libvirt 0755 root root -"
+      "L+ ${virtioWinLink} - - - - ${virtioWinIso}"
+    ];
+
     # Resolve mbedtls security warning
     nixpkgs.config.permittedInsecurePackages = [ "mbedtls-2.28.10" ];
 
@@ -720,6 +852,8 @@ in
     environment.systemPackages = [
       buildBaseScript
       deployVmScript
+      deployWindowsScript
+      libvirtTuneScript
     ] ++ (with pkgs; [
       qemu_kvm
       virtManager
@@ -798,6 +932,9 @@ in
     home-manager.users.${config.hydrix.username}.dconf.settings = {
       "org/virt-manager/virt-manager/console" = {
         grab-keys = lib.mkDefault config.hydrix.libvirt.grabKey;
+        # No SPICE USB auto-redirect: a device plugged in while a console is open must not go
+        # to the guest by itself. USB reaches a VM only through `usb attach` (host/usb.nix).
+        auto-redirect = lib.mkDefault false;
       };
     };
   };

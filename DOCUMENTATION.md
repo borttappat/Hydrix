@@ -3314,6 +3314,14 @@ a USB disk is mounted. Nothing persists: every boot starts blocked. `usb attach`
 that is mounted on the host. `usb attach <busid> <libvirt domain>` never needs host mode: it
 passes the whole device, and the guest parses it.
 
+A stick pulled out without `usb detach` gets a new address when plugged back in. `usb list`,
+`usb attach` and `usb detach` release such stale attachments by the address recorded at attach
+time, including the entry left in the VM, so an old address can never pick up a different device.
+SPICE's own USB redirection is off (virt-manager `auto-redirect` false, and `deploy-vm` creates
+VMs with `--redirdev none`), so no device reaches a libvirt guest except through `usb attach`.
+Older VMs keep their `<redirdev type='spicevmc'>` entries, which are harmless with auto-redirect
+off; remove them with `virsh edit` to close that path completely.
+
 Any microVM whose `meta.nix` sets `usbPassthrough = true` accepts devices this way (an xHCI
 controller plus QMP `device_add usb-host`); libvirt domains get a `virsh attach-device` USB
 hostdev. In a Hydrix microVM, USB block devices arrive read-only (a guest udev rule);
@@ -4198,7 +4206,26 @@ Guests resize to the window (`resize-guest`, set in virt-manager's dconf by Hydr
 gives new VMs a 64 MB qxl framebuffer (`vgamem`): the old 16 MB default cannot hold a 2880x1800
 desktop, so a guest could not reach the laptop panel's resolution. For an existing VM, set it while
 the VM is shut off: `virsh edit <vm>`, and in `<video><model type='qxl' .../>` set
-`vgamem='65536'`.
+`vgamem='65536'`, or let `libvirt-tune` do it (below).
+
+**Windows VMs.** A guest only follows the window size with the SPICE guest tools installed (QXL
+display driver and SPICE agent); without them it keeps a fixed resolution and the console letterboxes
+it. Both come from the virtio-win ISO, which Hydrix takes from nixpkgs (`pkgs.virtio-win.src`, no
+download by hand):
+
+```bash
+deploy-windows --name win11 --iso ~/Downloads/Win11.iso   # --memory 8192 --vcpus 4 --disk 80 --bridge br-libvirt
+                                                          # --unattend <iso>: CD with autounattend.xml in its root
+libvirt-tune <vm>                                          # existing VM (shut off): shows changes, asks y/N
+```
+
+`deploy-windows` creates a Windows 11 VM with UEFI, TPM 2.0, a SATA disk (no driver needed during
+setup), an e1000e NIC on `hydrix.libvirt.defaultBridge`, QXL with a 64 MB framebuffer, no SPICE USB
+redirection, and the virtio-win CD attached, then opens the console at once so the firmware's
+"Press any key to boot from CD" prompt is still showing (`--no-console` skips that). `libvirt-tune` brings any existing VM (for example one
+made in virt-manager's wizard) to the same display and USB settings, and attaches the virtio-win CD
+to a Windows guest that has none. In Windows, once: run `virtio-win-guest-tools.exe` from that CD and
+reboot.
 
 ---
 

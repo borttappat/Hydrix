@@ -12,7 +12,7 @@
      __gsignals__ = {
          "customize-finished": (vmmGObjectUI.RUN_FIRST, None, [object]),
          "closed": (vmmGObjectUI.RUN_FIRST, None, []),
-@@ -149,6 +154,39 @@
+@@ -149,6 +154,51 @@
          self._refresh_vm_state()
          self.activate_default_page()
  
@@ -39,7 +39,19 @@
 +        )
 +
 +    def _hydrix_key_press_cb(self, src, event):
-+        self._hydrix_menu_tap = Gdk.keyval_name(event.keyval) == self._HYDRIX_MENU_KEY
++        # A tap only counts with no other modifier already held, so a combination such as
++        # Alt+AltGr (a grab key) never toggles the menus whatever the release order.
++        held = event.state & (
++            Gdk.ModifierType.SHIFT_MASK
++            | Gdk.ModifierType.CONTROL_MASK
++            | Gdk.ModifierType.MOD1_MASK
++            | Gdk.ModifierType.MOD4_MASK
++            | Gdk.ModifierType.MOD5_MASK
++            | Gdk.ModifierType.SUPER_MASK
++        )
++        self._hydrix_menu_tap = (
++            Gdk.keyval_name(event.keyval) == self._HYDRIX_MENU_KEY and not held
++        )
 +        return False
 +
 +    def _hydrix_key_release_cb(self, src, event):
@@ -52,7 +64,7 @@
      @property
      def conn(self):
          return self.vm.conn
-@@ -301,7 +339,7 @@
+@@ -301,7 +351,7 @@
          active = src.get_active()
          self.config.set_details_show_toolbar(active)
          fsactive = self.widget("details-menu-view-fullscreen").get_active()
@@ -61,7 +73,7 @@
  
      def details_console_changed(self, src):
          if self.ignoreDetails:
-@@ -651,9 +689,9 @@
+@@ -651,9 +701,9 @@
          self.widget("control-fullscreen").set_active(do_fullscreen)
          self._console.vmwindow_set_fullscreen(do_fullscreen)
  

@@ -115,15 +115,52 @@
     }
     # Mount points on a disk or its partitions
     disk_mounts() { lsblk -nro MOUNTPOINTS "$1" 2>/dev/null | grep -v '^$' || true; }
+    # libvirt hostdev for a device node /dev/bus/usb/BBB/DDD. Detach uses the node recorded at
+    # attach: after a replug the device has a new address and the old entry must still go.
     hostdev_xml() {
+      local bus=''${1%/*} dev=''${1##*/}
       printf "<hostdev mode='subsystem' type='usb' managed='yes'><source><address bus='%d' device='%d'/></source></hostdev>\n" \
-        "$((10#$(attr "$1" busnum)))" "$((10#$(attr "$1" devnum)))"
+        "$((10#''${bus##*/}))" "$((10#$dev))"
+    }
+    # Remove an attachment from its VM and forget it. Returns 1 if the VM no longer had it
+    # (stick pulled and the VM already dropped it, or the VM stopped).
+    release() {
+      local busid=$1 kind vm node rc=0
+      read -r kind vm node < "$STATE/$busid"
+      case "$kind" in
+        microvm)
+          if sock=$(qmp_sock "$vm"); then
+            qmp "$sock" "{\"execute\":\"device_del\",\"arguments\":{\"id\":\"usb-$busid\"}}" | grep -q '"return"' || rc=1
+          else
+            rc=1
+          fi
+          sudo chown root:root "$node" 2>/dev/null || true
+          ;;
+        libvirt)
+          virsh --connect "$LIBVIRT" detach-device "$vm" <(hostdev_xml "$node") --live >/dev/null 2>&1 || rc=1
+          ;;
+      esac
+      rm -f "$STATE/$busid"
+      return "$rc"
+    }
+    # A replug gives the device a new node: drop the old attachment, including its entry in
+    # the VM, so that address can never pick up a different device later.
+    prune_stale() {
+      local b=$1 node
+      [ -f "$STATE/$b" ] || return 0
+      read -r _ _ node < "$STATE/$b"
+      [ -e "/sys/bus/usb/devices/$b" ] && [ "$node" = "$(devnode "$b")" ] && return 0
+      release "$b" || true
     }
 
     cmd=''${1:-}
     shift || true
     case "$cmd" in
       list)
+        # Attachments whose stick was pulled or replugged are released first.
+        for f in "$STATE"/*; do
+          [ -f "$f" ] && prune_stale "$(basename "$f")"
+        done
         echo "USB storage devices:"
         found=0
         for d in /sys/bus/usb/devices/*; do
@@ -132,11 +169,7 @@
           [ -f "$d/idVendor" ] && is_storage "$b" || continue
           found=1
           at=-
-          if [ -f "$STATE/$b" ]; then
-            read -r _ vm node < "$STATE/$b"
-            # A replug gets a new device node: the old attachment is gone.
-            if [ "$node" = "$(devnode "$b")" ]; then at=$vm; else rm -f "$STATE/$b"; fi
-          fi
+          [ -f "$STATE/$b" ] && at=$(cut -d' ' -f2 "$STATE/$b")
           printf '  %-10s %s\n             attached: %s\n' "$b" "$(describe "$b")" "$at"
           disks=$(host_disks "$b" | tr '\n' ' ')
           [ -n "$disks" ] && printf '             on the host: %s\n' "$disks"
@@ -154,6 +187,7 @@
         [ -n "$busid" ] && [ -n "$target" ] || die "usage: usb attach <busid> <vm> [-y]"
         [ -d "/sys/bus/usb/devices/$busid" ] || die "no USB device $busid (see: usb list)"
         is_storage "$busid" || die "$busid is not a USB storage device"
+        prune_stale "$busid"
         [ -f "$STATE/$busid" ] && die "$busid is already attached to $(cut -d' ' -f2 "$STATE/$busid")"
         node=$(devnode "$busid")
         for d in $(host_disks "$busid"); do
@@ -189,7 +223,7 @@
             fi
             ;;
           libvirt)
-            virsh --connect "$LIBVIRT" attach-device "$vm" <(hostdev_xml "$busid") --live >/dev/null
+            virsh --connect "$LIBVIRT" attach-device "$vm" <(hostdev_xml "$node") --live >/dev/null
             ;;
         esac
         echo "$kind $vm $node" > "$STATE/$busid"
@@ -203,20 +237,12 @@
         busid=''${1:-}
         [ -n "$busid" ] || die "usage: usb detach <busid>"
         [ -f "$STATE/$busid" ] || die "$busid is not attached (see: usb list)"
-        read -r kind vm node < "$STATE/$busid"
-        case "$kind" in
-          microvm)
-            if sock=$(qmp_sock "$vm"); then
-              qmp "$sock" "{\"execute\":\"device_del\",\"arguments\":{\"id\":\"usb-$busid\"}}" >/dev/null || true
-            fi
-            sudo chown root:root "$node" 2>/dev/null || true
-            ;;
-          libvirt)
-            virsh --connect "$LIBVIRT" detach-device "$vm" <(hostdev_xml "$busid") --live >/dev/null || true
-            ;;
-        esac
-        rm -f "$STATE/$busid"
-        echo "Detached $busid from $vm."
+        vm=$(cut -d' ' -f2 "$STATE/$busid")
+        if release "$busid"; then
+          echo "Detached $busid from $vm."
+        else
+          echo "$busid was already gone from $vm (unplugged or VM stopped); forgot the attachment."
+        fi
         ;;
 
       host)
