@@ -416,6 +416,7 @@
         name = m._infraName;
         modules =
           [
+            ./modules/ca-distrust.nix # common.nix is not imported here
             (./infra + "/${m._infraName}/default.nix")
             {
               hydrix.microvm.usbPassthrough = {

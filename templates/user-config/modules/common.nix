@@ -9,6 +9,8 @@
 { config, lib, pkgs, ... }:
 
 {
+  imports = [ ./ca-distrust.nix ];
+
   hydrix = {
     # ─── Window manager stack ───────────────────────────────────────────
     # Start hyprland: hyprland-launch
