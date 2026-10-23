@@ -5,6 +5,7 @@
   shardApp = pkgs.writeShellApplication {
     name = "shard";
     runtimeInputs = with pkgs; [
+      age
       jq
       socat
       openssl
@@ -2979,6 +2980,15 @@
       # ============================================================================
       # Files: encrypted inter-VM file transfer via microvm-files
       # ============================================================================
+      #
+      # Data streams source VM :8888 -> files VM (relay) -> destination VM :8888
+      # as age(zstd(tar)), with nothing written to disk on the way. Per transfer
+      # the host makes an age X25519 identity: the source only gets the public
+      # recipient, the destination gets the identity over vsock, the files VM
+      # gets no key at all. The destination extracts into staging and only moves
+      # the result into place after the host has compared the ciphertext SHA-256
+      # reported by the source, the files VM and the destination.
+      # Protocol and checks: Hydrix vm/dev/xfer.py.
 
       FILES_VM_NAME="microvm-files"
       FILES_VM_CID=$(get_cid "$FILES_VM_NAME" 2>/dev/null || true); FILES_VM_CID="''${FILES_VM_CID:-212}"
@@ -2987,7 +2997,8 @@
 
       # Send a command to a VM via vsock, return the response.
       # vsock-cmd blocks until the handler exits and closes its end, with no total
-      # read timeout of its own - `timeout` provides the outer bound here.
+      # read timeout of its own - `timeout` provides the outer bound here
+      # (total_timeout 0 = no bound).
       vsock_query() {
           local cid="$1"
           local port="$2"
@@ -3000,10 +3011,11 @@
               | LC_ALL=C tr -d '\000-\010\013-\037\177'
       }
 
-      # Send a command to files VM via vsock 14505
+      # Send a command to files VM via vsock 14505: <msg> [connect_timeout] [total_timeout]
       files_vm_send() {
           local msg="$1"
-          vsock_query "$FILES_VM_CID" "$FILES_VSOCK_PORT" "$msg"
+          shift
+          vsock_query "$FILES_VM_CID" "$FILES_VSOCK_PORT" "$msg" "$@"
       }
 
       # Look up vsock CID for a given VM name.
@@ -3020,273 +3032,246 @@
           echo "$cid"
       }
 
-      # Files: transfer <src-vm>/<path> <dest-vm>/<dest-path>
-      cmd_files_transfer() {
-          local src_spec="$1"
-          local dst_spec="$2"
+      FILES_TMP=""
+      FILES_STOP_VM=false
+      FILES_BG_PIDS=()
+      FILES_ABORT=()
+      FILES_LAST_PID=""
 
-          local src_vm dst_vm src_path dst_path
-          src_vm=$(echo "$src_spec" | cut -d'/' -f1)
-          src_path=$(echo "$src_spec" | cut -d'/' -f2-)
-          dst_vm=$(echo "$dst_spec" | cut -d'/' -f1)
-          dst_path=$(echo "$dst_spec" | cut -d'/' -f2-)
+      # One `shard files` operation at a time: every VM listens on the same port.
+      files_lock() {
+          local lock="''${XDG_RUNTIME_DIR:-/tmp}/hydrix-files.lock"
+          exec {FILES_LOCK_FD}>"$lock"
+          flock -n "$FILES_LOCK_FD" || { log_error "Another shard files operation is running"; exit 1; }
+      }
 
-          # Resolve short names (e.g. "browsing" -> "microvm-browsing-<serial>")
-          src_vm="$(resolve_vm_name "$src_vm")"
-          dst_vm="$(resolve_vm_name "$dst_vm")"
-
-          local src_cid dst_cid
-          src_cid=$(get_vm_cid "$src_vm") || exit 1
-          dst_cid=$(get_vm_cid "$dst_vm") || exit 1
-
-          log "Files: ''${BOLD}''${src_vm}/''${src_path}''${NC} → ''${BOLD}''${dst_vm}/''${dst_path}''${NC}"
-
-          # Check that source and destination VMs are running
-          local missing_vms=""
-          if ! is_running "$src_vm"; then
-              missing_vms="''${missing_vms}source VM ($src_vm)''${missing_vms:+, }"
+      # EXIT trap: stop local helpers, ABORT every VM side (kills its helper and
+      # removes staged data; a no-op after a commit), stop a files VM we started.
+      files_cleanup() {
+          local pid ep
+          for pid in "''${FILES_BG_PIDS[@]}"; do
+              kill "$pid" 2>/dev/null || true
+          done
+          for ep in "''${FILES_ABORT[@]}"; do
+              vsock_query "''${ep% *}" "''${ep#* }" "ABORT" 3 10 >/dev/null 2>&1 || true
+          done
+          [[ -n "$FILES_TMP" ]] && rm -rf "$FILES_TMP"
+          if $FILES_STOP_VM; then
+              log "Stopping ''${FILES_VM_NAME}..."
+              systemctl stop "microvm@''${FILES_VM_NAME}.service" 2>/dev/null || true
           fi
-          if ! is_running "$dst_vm"; then
-              missing_vms="''${missing_vms}destination VM ($dst_vm)''${missing_vms:+, }"
-          fi
-          if [[ -n "$missing_vms" ]]; then
-              log_error "Required VM(s) not running: ''${missing_vms%+ }"
-              log_error "Start the missing VM(s) before transferring files."
-              exit 1
-          fi
+          backup_notices
+      }
 
-          # Generate per-transfer passphrase (stays in host memory only)
-          local passphrase
-          passphrase=$(openssl rand -base64 32)
+      files_begin() {
+          files_lock
+          FILES_TMP=$(mktemp -d -t shard-files.XXXXXX)
+          trap files_cleanup EXIT
+          trap 'exit 130' INT TERM
+      }
 
-          # Ensure files VM is running and its vsock agent is ready
-          local files_was_running=false
+      # The files VM only runs for a transfer: start it if needed, stop it on
+      # exit either way (it has no volumes, so a stop also wipes it).
+      files_vm_up() {
+          FILES_STOP_VM=true
           if ! systemctl is-active --quiet "microvm@''${FILES_VM_NAME}.service" 2>/dev/null; then
-              files_was_running=false
               log "Starting ''${FILES_VM_NAME}..."
               systemctl start "microvm@''${FILES_VM_NAME}.service" || {
                   log_error "Failed to start ''${FILES_VM_NAME}"
                   exit 1
               }
-          else
-              files_was_running=true
           fi
           local deadline=$(( $(date +%s) + 30 ))
-          while ! echo "PING" | vsock-cmd "$FILES_VM_CID" "$FILES_VSOCK_PORT" 2>/dev/null | grep -q "PONG"; do
+          until files_vm_send "PING" 3 5 2>/dev/null | grep -q "PONG"; do
               if (( $(date +%s) >= deadline )); then
                   log_error "Timeout waiting for ''${FILES_VM_NAME} vsock agent"
                   exit 1
               fi
               sleep 1
           done
-
-          local src_hash files_hash dst_hash
-
-          # Step 1: encrypt on source VM
-          log "Encrypting on ''${src_vm}..."
-          src_hash=$(vsock_query "$src_cid" "$VM_AGENT_PORT" "ENCRYPT $passphrase $src_path")
-          [[ "$src_hash" != SHA256=* ]] && { log_error "Encrypt failed: $src_hash"; exit 1; }
-          src_hash="''${src_hash#SHA256=}"
-
-          # Step 2: source VM starts HTTP server
-          vsock_query "$src_cid" "$VM_AGENT_PORT" "SERVE" | grep -q "READY" || {
-              log_error "Source VM failed to start HTTP server"
-              vsock_query "$src_cid" "$VM_AGENT_PORT" "CLEANUP" >/dev/null 2>&1
-              exit 1
-          }
-
-          # Determine source IP (static .10 on its bridge, derived from registry subnet)
-          local src_ip
-          src_ip=$(get_vm_ip "$src_vm")
-          [[ -z "$src_ip" ]] && { log_error "Unknown source VM IP for $src_vm (not in registry)"; exit 1; }
-
-          # Step 3: files VM fetches encrypted blob
-          log "Files VM fetching from ''${src_vm}..."
-          files_hash=$(files_vm_send "FETCH $src_ip xfer.enc" 60)
-          [[ "$files_hash" != SHA256=* ]] && {
-              log_error "Fetch failed: $files_hash"
-              vsock_query "$src_cid" "$VM_AGENT_PORT" "CLEANUP" >/dev/null 2>&1
-              exit 1
-          }
-          files_hash="''${files_hash#SHA256=}"
-
-          # Verify source and files VM got the same blob
-          if [[ "$src_hash" != "$files_hash" ]]; then
-              log_error "Checksum mismatch after fetch (src=$src_hash files=$files_hash)"
-              vsock_query "$src_cid" "$VM_AGENT_PORT" "CLEANUP" >/dev/null 2>&1
-              files_vm_send "CLEANUP_TMP xfer.enc" >/dev/null 2>&1
-              exit 1
-          fi
-          log "Checksum verified: ''${src_hash:0:16}..."
-
-          # Step 4: stop source HTTP server (passphrase not released yet)
-          vsock_query "$src_cid" "$VM_AGENT_PORT" "SERVE_STOP" >/dev/null 2>&1
-
-          # Step 5: dest VM prepares to receive
-          log "Preparing destination ''${dst_vm}..."
-          vsock_query "$dst_cid" "$VM_AGENT_PORT" "RECEIVE_PREPARE" | grep -q "READY" || {
-              log_error "Destination VM failed to prepare"
-              vsock_query "$src_cid" "$VM_AGENT_PORT" "CLEANUP" >/dev/null 2>&1
-              files_vm_send "CLEANUP_TMP xfer.enc" >/dev/null 2>&1
-              exit 1
-          }
-
-          # Determine destination IP (static .10 on its bridge, derived from registry subnet)
-          local dst_ip
-          dst_ip=$(get_vm_ip "$dst_vm")
-          [[ -z "$dst_ip" ]] && { log_error "Unknown destination VM IP for $dst_vm (not in registry)"; exit 1; }
-
-          # Step 6: files VM delivers encrypted blob to destination
-          log "Files VM delivering to ''${dst_vm}..."
-          dst_hash=$(files_vm_send "DELIVER $dst_ip xfer.enc" 60)
-          [[ "$dst_hash" != SHA256=* ]] && {
-              log_error "Deliver failed: $dst_hash"
-              vsock_query "$src_cid" "$VM_AGENT_PORT" "CLEANUP" >/dev/null 2>&1
-              vsock_query "$dst_cid" "$VM_AGENT_PORT" "RECEIVE_STOP" >/dev/null 2>&1
-              files_vm_send "CLEANUP_TMP xfer.enc" >/dev/null 2>&1
-              exit 1
-          }
-          dst_hash="''${dst_hash#SHA256=}"
-
-          # Verify three-way checksum
-          if [[ "$src_hash" != "$dst_hash" ]]; then
-              log_error "Checksum mismatch after delivery (src=$src_hash dst=$dst_hash)"
-              vsock_query "$src_cid" "$VM_AGENT_PORT" "CLEANUP" >/dev/null 2>&1
-              vsock_query "$dst_cid" "$VM_AGENT_PORT" "CLEANUP" >/dev/null 2>&1
-              files_vm_send "CLEANUP_TMP xfer.enc" >/dev/null 2>&1
-              exit 1
-          fi
-          log "Three-way checksum verified: ''${src_hash:0:16}..."
-
-          # Step 7: NOW release passphrase to dest VM for decryption
-          # extract_parent: dir to extract INTO (archive recreates the top-level name)
-          # dst_path IS the target directory: "wallpapers" → extract to ~/wallpapers/
-          # empty dst_path → extract directly into $HOME
-          local extract_parent decrypt_cmd
-          extract_parent="$dst_path"
-          if [[ -n "$extract_parent" ]]; then
-              decrypt_cmd="DECRYPT $passphrase shared/xfer.enc $extract_parent"
-          else
-              decrypt_cmd="DECRYPT $passphrase shared/xfer.enc"
-          fi
-          log "Decrypting on ''${dst_vm}..."
-          local decrypt_result
-          decrypt_result=$(vsock_query "$dst_cid" "$VM_AGENT_PORT" "$decrypt_cmd")
-          [[ "$decrypt_result" != "OK" ]] && {
-              log_error "Decrypt failed: $decrypt_result"
-              vsock_query "$src_cid" "$VM_AGENT_PORT" "CLEANUP" >/dev/null 2>&1
-              vsock_query "$dst_cid" "$VM_AGENT_PORT" "CLEANUP" >/dev/null 2>&1
-              exit 1
-          }
-
-          # Step 8: cleanup
-          vsock_query "$src_cid" "$VM_AGENT_PORT" "CLEANUP" >/dev/null 2>&1
-          vsock_query "$dst_cid" "$VM_AGENT_PORT" "CLEANUP" >/dev/null 2>&1
-          files_vm_send "CLEANUP_TMP xfer.enc" >/dev/null 2>&1
-
-          # Discard passphrase (already done, was only in local var)
-          passphrase=""
-
-          # Stop files VM if we started it for this transfer
-          if ! $files_was_running; then
-              log "Stopping ''${FILES_VM_NAME}..."
-              systemctl stop "microvm@''${FILES_VM_NAME}.service" 2>/dev/null || true
-          fi
-
-          log_success "Transfer complete: ''${dst_vm}:~/''${dst_path}"
       }
 
-      # Files: store <vm>/<path>
-      cmd_files_store() {
-          local src_spec="$1"
-          local src_vm dst_path src_path
+      files_b64() { printf '%s' "$1" | base64 -w0; }
+      files_human() { numfmt --to=iec --suffix=B "''${1:-0}"; }
 
-          src_vm=$(echo "$src_spec" | cut -d'/' -f1)
-          src_path=$(echo "$src_spec" | cut -d'/' -f2-)
-          src_vm="$(resolve_vm_name "$src_vm")"
+      # Run a vsock command in the background, raw reply into <out>. Sets FILES_LAST_PID.
+      files_bg() {
+          local out="$1" cid="$2" port="$3" msg="$4"
+          printf '%s\n' "$msg" | vsock-cmd "$cid" "$port" 10 >"$out" 2>/dev/null &
+          FILES_LAST_PID=$!
+          FILES_BG_PIDS+=("$FILES_LAST_PID")
+      }
 
-          local src_cid
+      # Reply lines are untrusted: control characters are stripped before use.
+      files_reply() { LC_ALL=C tr -d '\000-\010\013-\037\177' <"$1" 2>/dev/null || true; }
+      files_result() { files_reply "$1" | grep -E '^(OK|ERROR)' | tail -1 || true; }
+      files_field() { grep -o "$2=[^ ]*" <<<"$1" | head -1 | cut -d= -f2 || true; }
+      files_warnings() {
+          local line
+          files_reply "$2" | grep '^WARN: ' | while IFS= read -r line; do
+              log_warn "$1: ''${line#WARN: }"
+          done || true
+      }
+
+      # Wait until a background command reports LISTENING; prints that line.
+      files_wait_listening() {
+          local out="$1" pid="$2" vm="$3" line
+          local deadline=$(( $(date +%s) + 30 ))
+          while (( $(date +%s) < deadline )); do
+              line=$(files_reply "$out" | grep -E '^(LISTENING|ERROR)' | head -1 || true)
+              if [[ "$line" == LISTENING* ]]; then
+                  echo "$line"
+                  return 0
+              fi
+              if [[ "$line" == ERROR* ]]; then
+                  log_error "''${vm}: ''${line}"
+                  return 1
+              fi
+              if ! kill -0 "$pid" 2>/dev/null; then
+                  log_error "''${vm}: no reply from its files agent (vsock ''${VM_AGENT_PORT})"
+                  return 1
+              fi
+              sleep 0.2
+          done
+          log_error "''${vm}: files agent did not get ready"
+          return 1
+      }
+
+      # Wait for a background command; on a terminal, show the PROGRESS it reports.
+      files_wait_progress() {
+          local out="$1" pid="$2" bytes elapsed start=$SECONDS
+          while kill -0 "$pid" 2>/dev/null; do
+              if [[ -t 2 ]]; then
+                  bytes=$(files_reply "$out" | grep '^PROGRESS ' | tail -1 | cut -d' ' -f2 || true)
+                  elapsed=$(( SECONDS - start ))
+                  if [[ -n "$bytes" ]] && (( elapsed > 0 )); then
+                      printf '\r   %s streamed, %s/s ' "$(files_human "$bytes")" "$(files_human $(( bytes / elapsed )))" >&2
+                  fi
+              fi
+              sleep 1
+          done
+          [[ -t 2 ]] && printf '\r\033[K' >&2
+          wait "$pid" 2>/dev/null || true
+      }
+
+      # Split "<vm>/<path>" into FILES_VM and FILES_PATH (no trailing slashes).
+      files_split() {
+          FILES_VM="''${1%%/*}"
+          FILES_PATH=""
+          [[ "$1" == */* ]] && FILES_PATH="''${1#*/}"
+          while [[ "$FILES_PATH" == */ ]]; do FILES_PATH="''${FILES_PATH%/}"; done
+          FILES_VM="$(resolve_vm_name "$FILES_VM")"
+      }
+
+      # Fresh age identity for one operation, held only in this shell.
+      files_keypair() {
+          FILES_SECRET=$(age-keygen 2>/dev/null | grep '^AGE-SECRET-KEY-' || true)
+          [[ -n "$FILES_SECRET" ]] || { log_error "age-keygen failed"; exit 1; }
+          FILES_RECIPIENT=$(printf '%s\n' "$FILES_SECRET" | age-keygen -y)
+          FILES_ID=$(openssl rand -hex 8)
+      }
+
+      # Compare the free space a receiver reported with the source size.
+      files_check_space() {
+          local size="$1" free="$2" vm="$3"
+          if [[ -n "$size" && -n "$free" ]] && (( size > free )); then
+              log_error "Not enough space on ''${vm}: $(files_human "$size") to receive, $(files_human "$free") free"
+              exit 1
+          fi
+      }
+
+      # All ciphertext hashes must agree; prints the source hash.
+      files_verify() {
+          local src_hash="$1" h
+          [[ "$src_hash" =~ ^[0-9a-f]{64}$ ]] || { log_error "Source reported no checksum"; exit 1; }
+          shift
+          for h in "$@"; do
+              if [[ "$h" != "$src_hash" ]]; then
+                  log_error "Checksum mismatch: source ''${src_hash:0:16}..., got ''${h:0:16}... (nothing was written)"
+                  exit 1
+              fi
+          done
+          echo "$src_hash"
+      }
+
+      # Files: transfer <src-vm>/<path> <dest-vm>/<dest-path>
+      cmd_files_transfer() {
+          local src_vm src_path dst_vm dst_path name
+          files_split "$1"; src_vm="$FILES_VM"; src_path="$FILES_PATH"
+          files_split "$2"; dst_vm="$FILES_VM"; dst_path="$FILES_PATH"
+          name="''${src_path##*/}"
+          [[ -n "$src_path" ]] || { log_error "Name a path inside the source VM: <vm>/<path>"; exit 1; }
+          [[ "$src_vm" != "$dst_vm" ]] || { log_error "Source and destination are the same VM"; exit 1; }
+
+          local src_cid dst_cid src_ip dst_ip
           src_cid=$(get_vm_cid "$src_vm") || exit 1
-
-          # Derive the vm type (strip "microvm-" prefix)
-          local vm_type="''${src_vm#microvm-}"
-
-          log "Files: store ''${BOLD}''${src_vm}/''${src_path}''${NC} → files VM /storage/''${vm_type}/"
-
-          local passphrase
-          passphrase=$(openssl rand -base64 32)
-
-          # Ensure files VM is running and its vsock agent is ready
-          if ! systemctl is-active --quiet "microvm@''${FILES_VM_NAME}.service" 2>/dev/null; then
-              log "Starting ''${FILES_VM_NAME}..."
-              systemctl start "microvm@''${FILES_VM_NAME}.service" || { log_error "Failed to start ''${FILES_VM_NAME}"; exit 1; }
-          fi
-          local deadline=$(( $(date +%s) + 30 ))
-          while ! echo "PING" | vsock-cmd "$FILES_VM_CID" "$FILES_VSOCK_PORT" 2>/dev/null | grep -q "PONG"; do
-              if (( $(date +%s) >= deadline )); then
-                  log_error "Timeout waiting for ''${FILES_VM_NAME} vsock agent"
-                  exit 1
-              fi
-              sleep 1
-          done
-
-          # Encrypt on source VM
-          log "Encrypting on ''${src_vm}..."
-          local src_hash
-          src_hash=$(vsock_query "$src_cid" "$VM_AGENT_PORT" "ENCRYPT $passphrase $src_path")
-          [[ "$src_hash" != SHA256=* ]] && { log_error "Encrypt failed: $src_hash"; exit 1; }
-          src_hash="''${src_hash#SHA256=}"
-
-          vsock_query "$src_cid" "$VM_AGENT_PORT" "SERVE" | grep -q "READY" || {
-              vsock_query "$src_cid" "$VM_AGENT_PORT" "CLEANUP" >/dev/null 2>&1
-              log_error "Source VM failed to start HTTP server"; exit 1
-          }
-
-          local src_ip
+          dst_cid=$(get_vm_cid "$dst_vm") || exit 1
           src_ip=$(get_vm_ip "$src_vm")
-          [[ -z "$src_ip" ]] && { log_error "Unknown source VM IP for $src_vm (not in registry)"; exit 1; }
+          dst_ip=$(get_vm_ip "$dst_vm")
+          [[ -n "$src_ip" ]] || { log_error "Unknown IP for $src_vm (not in registry)"; exit 1; }
+          [[ -n "$dst_ip" ]] || { log_error "Unknown IP for $dst_vm (not in registry)"; exit 1; }
 
-          log "Files VM fetching..."
-          local files_hash
-          files_hash=$(files_vm_send "FETCH $src_ip xfer.enc" 60)
-          [[ "$files_hash" != SHA256=* ]] && {
-              vsock_query "$src_cid" "$VM_AGENT_PORT" "CLEANUP" >/dev/null 2>&1
-              log_error "Fetch failed: $files_hash"; exit 1
-          }
-          files_hash="''${files_hash#SHA256=}"
+          log "Origin:      ''${BOLD}''${src_vm}/''${src_path}''${NC}"
+          log "Destination: ''${BOLD}''${dst_vm}/''${dst_path}''${dst_path:+/}''${name}''${NC}"
 
-          if [[ "$src_hash" != "$files_hash" ]]; then
-              log_error "Checksum mismatch (src=$src_hash files=$files_hash)"
-              vsock_query "$src_cid" "$VM_AGENT_PORT" "CLEANUP" >/dev/null 2>&1
-              files_vm_send "CLEANUP_TMP xfer.enc" >/dev/null 2>&1
+          local missing_vms=""
+          is_running "$src_vm" || missing_vms+="source VM ($src_vm) "
+          is_running "$dst_vm" || missing_vms+="destination VM ($dst_vm) "
+          if [[ -n "$missing_vms" ]]; then
+              log_error "Required VM(s) not running: ''${missing_vms% }"
+              log_error "Start the missing VM(s) before transferring files."
               exit 1
           fi
 
-          vsock_query "$src_cid" "$VM_AGENT_PORT" "SERVE_STOP" >/dev/null 2>&1
-          vsock_query "$src_cid" "$VM_AGENT_PORT" "CLEANUP" >/dev/null 2>&1
+          files_begin
+          files_vm_up
+          FILES_ABORT=("$dst_cid $VM_AGENT_PORT" "$src_cid $VM_AGENT_PORT" "$FILES_VM_CID $FILES_VSOCK_PORT")
+          files_keypair
 
-          # Decrypt in-place on files VM (passphrase released here only)
-          log "Decrypting in files VM storage..."
-          local store_result
-          store_result=$(files_vm_send "STORE $passphrase $vm_type xfer.enc" 60)
-          passphrase=""
+          local dst_out="$FILES_TMP/dst" src_out="$FILES_TMP/src" relay_out="$FILES_TMP/relay"
+          local dst_pid src_pid relay_pid dst_ready src_ready size
 
-          [[ "$store_result" != "OK" ]] && {
-              log_error "Store decrypt failed: $store_result"
-              files_vm_send "CLEANUP_TMP xfer.enc" >/dev/null 2>&1
-              exit 1
-          }
+          # The destination gets the identity on a second line, never in a command field.
+          files_bg "$dst_out" "$dst_cid" "$VM_AGENT_PORT" \
+              "RECV $FILES_ID $(files_b64 "$name") $(files_b64 "$dst_path")"$'\n'"$FILES_SECRET"
+          dst_pid=$FILES_LAST_PID
+          FILES_SECRET=""
+          dst_ready=$(files_wait_listening "$dst_out" "$dst_pid" "$dst_vm") || exit 1
 
-          log_success "Stored to files VM: /storage/''${vm_type}/"
-      }
+          files_bg "$src_out" "$src_cid" "$VM_AGENT_PORT" "SEND $FILES_RECIPIENT $(files_b64 "$src_path")"
+          src_pid=$FILES_LAST_PID
+          src_ready=$(files_wait_listening "$src_out" "$src_pid" "$src_vm") || exit 1
+          size=$(files_field "$src_ready" SIZE)
+          files_check_space "$size" "$(files_field "$dst_ready" FREE)" "$dst_vm"
 
-      # Files: list [<vm-type>]
-      cmd_files_list() {
-          local vm_type="''${1:-}"
-          [[ "$vm_type" == microvm-* ]] && vm_type="''${vm_type#microvm-}"
+          log "Streaming $(files_human "$size") through ''${FILES_VM_NAME} (age-encrypted)..."
+          files_bg "$relay_out" "$FILES_VM_CID" "$FILES_VSOCK_PORT" "RELAY $src_ip $dst_ip"
+          relay_pid=$FILES_LAST_PID
+          files_wait_progress "$relay_out" "$relay_pid"
 
-          log "Files storage contents''${vm_type:+ ($vm_type)}:"
-          files_vm_send "LIST $vm_type" | grep -v "^END$" || true
+          local relay_res src_res dst_res hash
+          relay_res=$(files_result "$relay_out")
+          [[ "$relay_res" == OK* ]] || { log_error "''${FILES_VM_NAME}: ''${relay_res:-no reply}"; exit 1; }
+          wait "$src_pid" 2>/dev/null || true
+          src_res=$(files_result "$src_out")
+          [[ "$src_res" == OK* ]] || { log_error "''${src_vm}: ''${src_res:-no reply}"; exit 1; }
+          wait "$dst_pid" 2>/dev/null || true
+          dst_res=$(files_result "$dst_out")
+          files_warnings "$dst_vm" "$dst_out"
+          [[ "$dst_res" == OK* ]] || { log_error "''${dst_vm}: ''${dst_res:-no reply}"; exit 1; }
+
+          hash=$(files_verify "$(files_field "$src_res" SHA256)" \
+              "$(files_field "$relay_res" SHA256)" "$(files_field "$dst_res" SHA256)") || exit 1
+          log "Checksum verified on all three VMs: ''${hash:0:16}... ($(files_human "$(files_field "$dst_res" BYTES)") ciphertext)"
+
+          local commit
+          commit=$(vsock_query "$dst_cid" "$VM_AGENT_PORT" "COMMIT $FILES_ID $hash" 10 120)
+          [[ "$commit" == OK ]] || { log_error "''${dst_vm}: commit failed: ''${commit:-no reply}"; exit 1; }
+
+          local skipped
+          skipped=$(files_field "$dst_res" SKIPPED)
+          [[ "''${skipped:-0}" == 0 ]] || log_warn "''${skipped} link(s) or special file(s) were not transferred"
+          log_success "Transfer complete: ''${dst_vm}:''${dst_path}''${dst_path:+/}''${name}"
       }
 
       # Files: help
@@ -3298,28 +3283,29 @@
           shard files <command> [args]
 
       ''${BOLD}COMMANDS''${NC}
-          transfer <src-vm>/<path> <dest-vm>/<dest-path>
-              Encrypted transfer between VMs. Source files untouched.
-              Passphrase generated per-transfer, travels only via vsock.
-
-          store <vm>/<path>
-              Encrypt and store to files VM /storage/<vm-type>/.
-              Files VM decrypts in-place (passphrase released only after checksum OK).
-
-          list [<vm-type>]
-              List contents of /storage/ on files VM.
+          transfer <src-vm>/<path> <dest-vm>/<dest-dir>
+              Copy a file or directory into <dest-dir> (relative to the
+              destination's home; empty = home). Source stays untouched,
+              an existing <dest-dir>/<name> is never overwritten.
+              The files VM runs only for the transfer and is stopped (and
+              so wiped) when it ends, even if it was already running.
 
       ''${BOLD}SECURITY''${NC}
-          - Passphrase generated fresh per operation (openssl rand -base64 32)
-          - Passphrase travels ONLY via vsock, never over bridge networks
-          - File content on bridges is always encrypted ciphertext
-          - SHA256 verified at every hop before passphrase is released
-          - Source files always remain at their original path
+          - Streamed as age(zstd(tar)): X25519 + ChaCha20-Poly1305, every
+            64 KiB chunk and the end of the stream authenticated
+          - Fresh age identity per operation, made on the host: the source
+            gets only the public recipient, the receiver gets the identity
+            over vsock, the files VM never holds a key
+          - Ciphertext only on bridge networks; nothing stored in transit,
+            the files VM keeps no data and has no disk
+          - The receiver extracts into staging (regular files and dirs only)
+            and moves it into place only after the source, files VM and
+            receiver report the same ciphertext SHA-256
+          - Any failure or Ctrl-C aborts every side and drops staged data
 
       ''${BOLD}EXAMPLES''${NC}
           shard files transfer pentest/projects/google/artifacts comms/pentest/google
-          shard files store pentest/projects/google/artifacts
-          shard files list pentest
+          shard files transfer browsing/Downloads/report.pdf hostsync/
       EOF
       }
 
@@ -3331,9 +3317,6 @@
           case "$subcmd" in
               transfer) [[ $# -lt 2 ]] && { log_error "Usage: shard files transfer <src-vm>/<path> <dest-vm>/<path>"; exit 1; }
                         cmd_files_transfer "$@" ;;
-              store)    [[ $# -lt 1 ]] && { log_error "Usage: shard files store <vm>/<path>"; exit 1; }
-                        cmd_files_store "$@" ;;
-              list)     cmd_files_list "$@" ;;
               help|-h|--help) cmd_files_help ;;
               *)
                   log_error "Unknown files command: $subcmd"

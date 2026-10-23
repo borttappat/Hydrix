@@ -1,18 +1,19 @@
 # Hostsync infra VM - secure host file inbox
 #
-# Receives encrypted file transfers from the files VM and decrypts them
+# Receives encrypted file transfers through the files VM and decrypts them
 # into /mnt/host-inbox/, which is virtiofs-shared to ~/vm-inbox/ on the host.
 # No internet access. Only the files VM (192.168.214.2) can reach port 8888.
 #
 # Usage from host:
 #   shard files transfer <src-vm>/<path> hostsync/<dest-subdir>
-#   → files appear at ~/vm-inbox/<dest-subdir>/<filename>
+#   -> files appear at ~/vm-inbox/<dest-subdir>/<name>
 #
 #   Drop a file into ~/vm-inbox/, then:
-#   shard files transfer hostsync/<filename> <dst-vm>/<dest-path>
-#   → file delivered from inbox into destination VM
+#   shard files transfer hostsync/<name> <dst-vm>/<dest-path>
+#   -> delivered from the inbox into the destination VM
 #
-# vsock 14506: host ↔ hostsync (ENCRYPT, SERVE, RECEIVE_PREPARE, DECRYPT, CLEANUP, PING)
+# vsock 14506: the shared files agent (Hydrix vm/dev/files-agent.nix, imported
+# through `filesAgent = true` in meta.nix), rooted at the inbox.
 {
   config,
   lib,
@@ -24,208 +25,14 @@
   hostUsername = config.hydrix.username;
 
   inbox = "/mnt/host-inbox";
-
-  # One-shot HTTP GET server - serves xfer.enc to the files VM.
-  # Invoked by SERVE; exits after the first completed GET.
-  serveScript = pkgs.writeShellScript "hostsync-serve" ''
-        ${pkgs.python3}/bin/python3 - "${inbox}/xfer.enc" << 'PYEOF'
-    import sys, http.server, os
-
-    xfer_file = sys.argv[1]
-
-    class Handler(http.server.BaseHTTPRequestHandler):
-        def do_GET(self):
-            if self.path != '/xfer.enc':
-                self.send_response(404); self.end_headers(); return
-            size = os.path.getsize(xfer_file)
-            self.send_response(200)
-            self.send_header('Content-Length', str(size))
-            self.send_header('Content-Type', 'application/octet-stream')
-            self.end_headers()
-            with open(xfer_file, 'rb') as f:
-                while True:
-                    chunk = f.read(65536)
-                    if not chunk: break
-                    self.wfile.write(chunk)
-            raise SystemExit(0)
-        def log_message(self, *_): pass
-
-    http.server.HTTPServer(("", 8888), Handler).handle_request()
-    PYEOF
-  '';
-
-  # One-shot HTTP PUT listener - saves received blob to the inbox.
-  # Invoked by RECEIVE_PREPARE; exits after the first completed PUT.
-  receiveScript = pkgs.writeShellScript "hostsync-receive" ''
-        ${pkgs.python3}/bin/python3 - "${inbox}/xfer.enc" << 'PYEOF'
-    import sys, http.server, os
-
-    dest_file = sys.argv[1]
-    os.makedirs(os.path.dirname(dest_file), exist_ok=True)
-
-    class Handler(http.server.BaseHTTPRequestHandler):
-        def do_PUT(self):
-            if self.path != '/xfer.enc':
-                self.send_response(404); self.end_headers(); return
-            length = int(self.headers.get('Content-Length', 0))
-            with open(dest_file, 'wb') as f:
-                rem = length
-                while rem > 0:
-                    chunk = self.rfile.read(min(65536, rem))
-                    if not chunk: break
-                    f.write(chunk); rem -= len(chunk)
-            self.send_response(200); self.end_headers(); self.wfile.write(b'OK\n')
-            raise SystemExit(0)
-        def log_message(self, *_): pass
-
-    http.server.HTTPServer(("", 8888), Handler).handle_request()
-    PYEOF
-  '';
-
-  # vsock command handler - one connection per command (socat fork model).
-  # Protocol is compatible with the existing cmd_files_transfer flow:
-  #   ENCRYPT <pass> <path>  - encrypt inbox/<path> → inbox/xfer.enc, returns SHA256=<hash>
-  #   SERVE            - arms HTTP GET server serving xfer.enc, returns READY
-  #   SERVE_STOP       - kills HTTP GET server, returns OK
-  #   RECEIVE_PREPARE  - arms HTTP PUT listener, returns READY
-  #   RECEIVE_STOP     - kills listener, returns OK
-  #   DECRYPT <pass> <archive-ignored> <dest-subdir>
-  #                    - decrypts inbox/xfer.enc into inbox/<dest-subdir>/, returns OK
-  #   CLEANUP          - removes xfer.enc + kills all helpers, returns OK
-  #   CHECKSUM <path>  - sha256 of inbox/<path>, returns SHA256=<hash>
-  #   PING             - returns PONG
-  handlerScript = pkgs.writeShellScript "hostsync-handler" ''
-    set -euo pipefail
-    INBOX="${inbox}"
-    XFER_FILE="$INBOX/xfer.enc"
-    SERVE_PID_FILE="$INBOX/.serve.pid"
-    RECV_PID_FILE="$INBOX/.recv.pid"
-
-    mkdir -p "$INBOX"
-
-    read -r CMD REST
-
-    case "$CMD" in
-
-      PING)
-        echo "PONG"
-        ;;
-
-      ENCRYPT)
-        # ENCRYPT <passphrase> <source-path-relative-to-inbox>
-        PASSPHRASE=$(echo "$REST" | cut -d' ' -f1)
-        SOURCE=$(echo "$REST" | cut -d' ' -f2-)
-        SOURCE_FULL="$INBOX/$SOURCE"
-        rm -f "$XFER_FILE"
-        if [ -d "$SOURCE_FULL" ] || [ -f "$SOURCE_FULL" ]; then
-          ${pkgs.gnutar}/bin/tar --use-compress-program=${pkgs.gzip}/bin/gzip -cf - \
-            -C "$(${pkgs.coreutils}/bin/dirname "$SOURCE_FULL")" \
-            "$(${pkgs.coreutils}/bin/basename "$SOURCE_FULL")" \
-            | ${pkgs.openssl}/bin/openssl enc -aes-256-cbc -pbkdf2 \
-                -pass pass:"$PASSPHRASE" -out "$XFER_FILE"
-        else
-          echo "ERROR: source not found: $SOURCE_FULL"
-          exit 1
-        fi
-        HASH=$(${pkgs.coreutils}/bin/sha256sum "$XFER_FILE" | cut -d' ' -f1)
-        echo "SHA256=$HASH"
-        ;;
-
-      SERVE)
-        if [ -f "$SERVE_PID_FILE" ]; then
-          kill "$(cat "$SERVE_PID_FILE")" 2>/dev/null || true
-          rm -f "$SERVE_PID_FILE"
-        fi
-        ${serveScript} &
-        echo "$!" > "$SERVE_PID_FILE"
-        echo "READY"
-        ;;
-
-      SERVE_STOP)
-        if [ -f "$SERVE_PID_FILE" ]; then
-          kill "$(cat "$SERVE_PID_FILE")" 2>/dev/null || true
-          rm -f "$SERVE_PID_FILE"
-        fi
-        echo "OK"
-        ;;
-
-      RECEIVE_PREPARE)
-        # Kill any stale listener
-        if [ -f "$RECV_PID_FILE" ]; then
-          kill "$(cat "$RECV_PID_FILE")" 2>/dev/null || true
-          rm -f "$RECV_PID_FILE"
-        fi
-        ${receiveScript} &
-        echo "$!" > "$RECV_PID_FILE"
-        echo "READY"
-        ;;
-
-      RECEIVE_STOP)
-        if [ -f "$RECV_PID_FILE" ]; then
-          kill "$(cat "$RECV_PID_FILE")" 2>/dev/null || true
-          rm -f "$RECV_PID_FILE"
-        fi
-        echo "OK"
-        ;;
-
-      DECRYPT)
-        # DECRYPT <passphrase> <archive-path-ignored> [<dest-subdir>]
-        # archive-path is always xfer.enc in the inbox - field is ignored for
-        # compatibility with the generic cmd_files_transfer protocol.
-        PASSPHRASE=$(echo "$REST" | cut -d' ' -f1)
-        EXTRACT_PARENT=$(echo "$REST" | cut -d' ' -f3-)
-        if [ -z "$EXTRACT_PARENT" ]; then
-          EXTRACT_FULL="$INBOX"
-        else
-          EXTRACT_FULL="$INBOX/$EXTRACT_PARENT"
-        fi
-        mkdir -p "$EXTRACT_FULL"
-        # Decrypt first, then a checked extraction: the archive is authored
-        # by the source VM and lands on the host.
-        PLAIN=$(${pkgs.coreutils}/bin/mktemp -p "$INBOX" .decrypt.XXXXXX)
-        if ! ${pkgs.openssl}/bin/openssl enc -d -aes-256-cbc -pbkdf2 \
-              -pass pass:"$PASSPHRASE" -in "$XFER_FILE" -out "$PLAIN" 2>/dev/null; then
-          echo "ERROR: decrypt failed"
-        elif ! OUT=$(${config.hydrix.microvm.safeExtract} "$PLAIN" "$EXTRACT_FULL"); then
-          echo "$OUT"
-        else
-          echo "OK"
-        fi
-        rm -f "$PLAIN" "$XFER_FILE"
-        ;;
-
-      CLEANUP)
-        rm -f "$XFER_FILE"
-        if [ -f "$SERVE_PID_FILE" ]; then
-          kill "$(cat "$SERVE_PID_FILE")" 2>/dev/null || true
-          rm -f "$SERVE_PID_FILE"
-        fi
-        if [ -f "$RECV_PID_FILE" ]; then
-          kill "$(cat "$RECV_PID_FILE")" 2>/dev/null || true
-          rm -f "$RECV_PID_FILE"
-        fi
-        echo "OK"
-        ;;
-
-      CHECKSUM)
-        PATH_ARG="$REST"
-        PATH_FULL="$INBOX/$PATH_ARG"
-        if [ -f "$PATH_FULL" ]; then
-          HASH=$(${pkgs.coreutils}/bin/sha256sum "$PATH_FULL" | cut -d' ' -f1)
-          echo "SHA256=$HASH"
-        else
-          echo "ERROR: file not found: $PATH_FULL"
-          exit 1
-        fi
-        ;;
-
-      *)
-        echo "ERROR: unknown command: $CMD"
-        exit 1
-        ;;
-    esac
-  '';
 in {
+  hydrix.files.agent = {
+    root = inbox;
+    user = "hostsync";
+    openFirewall = false; # nftables below
+  };
+  hydrix.networking.vmSubnet = meta.subnet;
+
   microvm.vsock.cid = meta.vsockCid;
 
   microvm.interfaces = [
@@ -238,8 +45,9 @@ in {
 
   microvm.mem = lib.mkForce 256;
 
-  # Host inbox share - virtiofsd on host maps ~/vm-inbox → /mnt/host-inbox in VM.
+  # Host inbox share - virtiofsd on host maps ~/vm-inbox -> /mnt/host-inbox in VM.
   # Files decrypted here are immediately visible on the host.
+  # Note: nix-store share is provided by microvm-infra-base; this appends to it.
   microvm.shares = [
     {
       tag = "host-inbox";
@@ -290,22 +98,8 @@ in {
     };
   };
 
-  systemd.services.hostsync-agent = {
-    description = "Hostsync vsock agent (port 14506)";
-    wantedBy = ["multi-user.target"];
-    after = ["local-fs.target"];
-    serviceConfig = {
-      Type = "simple";
-      Restart = "always";
-      RestartSec = "1s";
-      ExecStart = "${pkgs.socat}/bin/socat VSOCK-LISTEN:14506,reuseaddr,fork EXEC:${handlerScript}";
-    };
-  };
-
   users.users.hostsync = {
-
     # Same uid as the host owner of its writable share (uid translation).
-
     uid = config.hydrix.microvm.hostOwner.uid;
     isNormalUser = true;
     extraGroups = ["wheel"];
@@ -313,13 +107,4 @@ in {
     home = "/home/hostsync";
   };
   services.getty.autologinUser = "hostsync";
-
-  environment.systemPackages = with pkgs; [
-    socat
-    openssl
-    python3
-    coreutils
-    gnutar
-    gzip
-  ];
 }

@@ -576,7 +576,7 @@ than inside the VM at all.
 |---|---|---|
 | router / router-stable | None - `/var/lib` is fully ephemeral | NetworkManager connections, dnsmasq leases, and VPN pin state all reset to declared config on every restart. This also means `shard purge` is no longer required after WiFi credential changes - a plain restart now gives the same clean state. |
 | builder | `/root/.cache/nix` (8GB, eval cache) | The only intentional exception. The builder doesn't keep its own nix store at all - it mounts the host's real `/nix/store` R/W via virtiofs and writes straight into it, so nothing built here is ever at risk of being lost. This one volume is pure performance (avoids 2+ min cold eval per builder start) with zero security/secrets sensitivity. |
-| files | `/storage` (opt-in, off by default) | `hydrix.files.persistence.enable` (default `false`). In-flight transfer payloads are ephemeral by design - FETCH/DELIVER/STORE are meant to be re-triggered on demand, not treated as durable storage. Set the option to `true` if you want transfers to survive a files-VM restart. |
+| files | None, and no volumes at all | A relay only: transfers stream through it and nothing is written. `shard files transfer` starts it and stops it after every transfer, so it starts clean every time. |
 | gitsync | None by default | SSH keys re-derive fresh from host secrets every boot (no need to persist) - push/pull works with no persistent state at all. `hydrix.gitsync.gh.enable` (default `false`) opts into the `gh` CLI plus a small `/var/lib/gitsync/gh-config` volume for its OAuth token, for users who'd rather authenticate with gh than manage an SSH deploy key. |
 | hostsync, usb-sandbox, vault | None | Inbox data (hostsync) and the KeepassXC database (vault) already live on the host via virtiofs, not inside the VM - the VM itself holds nothing that needs to survive a restart. |
 
@@ -657,7 +657,7 @@ any VM   -> WAN:     ALLOWED  (via NAT through router, per-network route, see Mu
 
 Exceptions are explicit: `hydrix.router.microvm.firewall.sharedSubnets` (subnets open to all), `firewall.allowedAccessTo` (scoped IP/port pairs), and connections redirected by a DNAT rule on the router itself (`ct status dnat`, e.g. `router-lan-control` port forwards), which only root on the router can create.
 
-The files VM (`microvm-files`) bypasses this intentionally by connecting directly to bridges via dedicated TAP interfaces explicitly granted per-bridge via `microvmFiles.accessFrom`. Passphrases for encrypted file transfer travel exclusively over vsock, never over bridge networks.
+The files VM (`microvm-files`) bypasses this intentionally by connecting directly to bridges via dedicated TAP interfaces explicitly granted per-bridge via `microvmFiles.accessFrom`. Keys for encrypted file transfer travel exclusively over vsock, never over bridge networks, and the files VM never holds one.
 
 ### Uplink LAN Access (`pentest-lan`)
 
@@ -863,7 +863,7 @@ When you have a working `hydrix-config` on one machine and want to bring a secon
 ├── infra/                       # Headless infrastructure VM configs
 │   ├── router/default.nix       # Router: DNS servers, firewall, extra packages
 │   ├── builder/default.nix      # Builder: lockdown-mode nix build settings
-│   ├── files/default.nix        # Files VM: accessFrom list, storage size
+│   ├── files/default.nix        # Files VM: transfer relay, per-bridge TAPs
 │   ├── gitsync/default.nix      # Git VM: enables hydrix.gitsync.agent (repos: modules/repos.nix)
 │   ├── hostsync/default.nix     # Hostsync: inbox path
 │   ├── vault/default.nix        # Vault: KeePassXC database path
@@ -3039,52 +3039,45 @@ vsock, build-time rules), so binding never needs a rebuild:
 
 The files VM (`microvm-files`, CID 212, fixed infra) is an encrypted jump host for moving files between VMs. It has direct L2 TAP connections to each bridge you grant it access to, so it can reach VMs without going through the router. Source and destination IPs are derived at runtime from the VM registry (`subnet + .10`).
 
+Nothing is written to disk in transit: the data streams from the source VM, through the files VM, into the destination as one encrypted stream, so a transfer's size is limited only by free space on the destination (checked before anything is sent). The protocol is `vm/dev/xfer.py` (`hydrix.microvm.xfer`), shared by the per-VM agent (`vm/dev/files-agent.nix`, vsock 14506) and the files VM (vsock 14505).
+
 **Security model:**
 
-- File content is **always encrypted** (AES-256-CBC via openssl) before it leaves the source VM
-- A random passphrase is generated fresh per transfer on the host and held only in host memory
-- The passphrase travels **exclusively via vsock** - it never touches a bridge network
-- SHA-256 is verified at every hop; the passphrase is only released to the destination after all checksums match
-- Source files are never modified or moved - the original path is always preserved
-- The files VM receives only ciphertext during transfer operations (it sees plaintext only during `store`, where it decrypts into its own `/storage`)
-- Port 8888 on each VM only accepts connections from the files VM's IP (`.2` on that bridge), enforced by iptables on each VM
+- The stream is `age(zstd(tar))`: X25519 key exchange and ChaCha20-Poly1305 over 64 KiB chunks, with the end of the stream authenticated, so any modified, reordered, replayed or truncated byte fails decryption
+- The host generates a fresh age identity for every operation and keeps it in memory only. The source VM gets only the public recipient. The receiving VM gets the identity over vsock, as a second line on its agent connection, never in argv, environment or a file (it reaches `age` through a pipe)
+- The files VM never holds a key: it relays ciphertext and cannot read or forge a stream (forging needs the recipient, which only the source gets)
+- Only ciphertext crosses bridge networks. Port 8888 on each VM accepts only the files VM's IP (`.2` on that bridge), by firewall and again by the helper itself; the files VM accepts no inbound connections
+- The receiver extracts into a staging directory (`<root>/.hydrix-xfer/`), creating only regular files and directories under the single top-level name the host asked for. Absolute paths, `..`, other top-level names and duplicates abort the transfer; links and special files are skipped with a warning
+- The host moves the result into place (`COMMIT`) only after the source, files VM and receiver report the same ciphertext SHA-256. An existing `<dest>/<name>` is never overwritten: the receiver refuses before anything is sent
+- Any failure, timeout (60s to connect, 120s without data) or Ctrl-C aborts every side and deletes staged data. One `shard files` operation runs at a time (host lock)
+- Source files are never modified or moved
+- The files VM is strictly a relay: no storage, no volumes (tmpfs root only). `shard files transfer` starts it when needed and stops it when the transfer ends, even if it was already running, so it starts clean every time
 
 **Transfer flow** (`shard files transfer pentest/projects/report comms/pentest/`):
 
 ```
-1. Host generates PASSPHRASE (openssl rand -base64 32), stays in host memory
+1. Host: age-keygen -> IDENTITY + RECIPIENT, transfer ID, in memory only
 
-2. Host -> pentest VM (vsock 14506): ENCRYPT <passphrase> projects/report
-   Pentest VM: tar czf -> | openssl enc -aes-256-cbc -> ~/shared/xfer.enc
-   Returns: SHA256=<hash>
+2. Host -> comms (vsock 14506): RECV <id> <name> <dest>  + IDENTITY on line 2
+   comms checks ~/pentest/report does not exist, listens on 8888
+   -> LISTENING FREE=<bytes>
 
-3. Host -> pentest VM (vsock 14506): SERVE
-   Pentest VM starts ephemeral HTTP server on port 8888
+3. Host -> pentest (vsock 14506): SEND <recipient> <path>
+   pentest listens on 8888 -> LISTENING SIZE=<bytes>   (host checks SIZE <= FREE)
 
-4. Host -> files VM (vsock 14505): FETCH <pentest-subnet>.10 xfer.enc
-   Files VM downloads ciphertext via HTTP  (IP from vm-registry.json)
-   Returns: SHA256=<hash>  <- host verifies both hashes match
+4. Host -> files VM (vsock 14505): RELAY <pentest-ip> <comms-ip>
+   files VM connects to both and pipes bytes:
+   pentest: tar | zstd | age -r RECIPIENT  ->  files VM  ->  comms: age -d | zstd -d | checked extract to staging
+   each side -> OK SHA256=<ciphertext hash>
 
-5. Host -> pentest VM (vsock 14506): SERVE_STOP
+5. Host compares the three hashes, then -> comms: COMMIT <id> <sha256>
+   comms re-checks the hash and renames staging -> ~/pentest/report
 
-6. Host -> comms VM (vsock 14506): RECEIVE_PREPARE
-   Comms VM starts one-shot HTTP upload server on port 8888 (always receives to ~/shared/)
-
-7. Host -> files VM (vsock 14505): DELIVER <comms-subnet>.10 xfer.enc
-   Files VM HTTP PUTs ciphertext to comms VM  (IP from vm-registry.json)
-   Returns: SHA256=<hash>  <- host verifies three-way match
-
-8. Host -> comms VM (vsock 14506): DECRYPT <passphrase> shared/xfer.enc pentest/
-   Comms VM decrypts + unpacks -> ~/pentest/report/, deletes shared/xfer.enc
-   Returns: OK
-
-9. Host -> pentest VM (vsock 14506): CLEANUP  (deletes ~/shared/xfer.enc)
-   Host discards passphrase from memory
+6. Host -> all three: ABORT (stops any helper, drops staging; no-op after a commit),
+   then stops the files VM
 ```
 
-**Store flow** (`shard files store pentest/projects/report`):
-
-Steps 1-4 are identical. After the files VM has the ciphertext, the host sends the passphrase via vsock and the files VM decrypts in-place into `/storage/pentest/`. Ciphertext is deleted after successful decryption.
+**Agent roots**: paths are relative to `hydrix.files.agent.root` on each VM, the user's home by default. hostsync roots it at its inbox (`~/vm-inbox` on the host), usb-sandbox at the sandbox user's home.
 
 **Setup** in `flake.nix`:
 
@@ -3110,20 +3103,14 @@ hydrix.microvmFiles.enable = true;
 shard files transfer pentest/projects/report comms/pentest/
 shard files transfer dev/src/tool pentest/tools/
 
-# Archive to files VM /storage/ (encrypted, then decrypted in-place)
-shard files store pentest/projects/report
-
-# List stored files
-shard files list
-shard files list pentest
 ```
 
 **Network layout:**
 
 ```
-Host (passphrase, orchestration)
- │  vsock 14505 → files VM (CID 212)
- │  vsock 14506 → any regular VM or usb-sandbox (ENCRYPT/SERVE/RECEIVE_PREPARE/DECRYPT/CLEANUP)
+Host (age identity, orchestration)
+ │  vsock 14505 → files VM (CID 212): RELAY/ABORT
+ │  vsock 14506 → any regular VM, hostsync or usb-sandbox: SEND/RECV/COMMIT/ABORT
  │
 Files VM (192.168.108.10 on br-files)
  ├── mv-files      → br-files       (192.168.108.10) [always]
@@ -3137,8 +3124,8 @@ Files VM (192.168.108.10 on br-files)
  └── mv-files-hsy  → br-hostsync    (192.168.214.2)  [hostsync, explicit]
 
 Profile/infra VMs: static .10 IPs on their bridge
- port 8888: ephemeral HTTP server (serve or receive), files VM IP only
- vsock 14506: vm-files-agent (receives host ENCRYPT/SERVE/RECEIVE_PREPARE/DECRYPT/CLEANUP commands)
+ port 8888: one-shot transfer listener (send or receive), files VM IP only
+ vsock 14506: vm-files-agent (receives host SEND/RECV/COMMIT/ABORT commands)
 ```
 
 The files VM's TAP list is **auto-discovered** at build time from `infra/files/meta.nix`, which reads `profiles/*/meta.nix` and includes explicit entries for infra VMs like usb-sandbox and hostsync. Adding a new profile automatically adds a new TAP after rebuilding the files VM.
@@ -3156,7 +3143,7 @@ accessFrom = [ "pentest" "browsing" "dev" "comms" ];  # lurking intentionally ex
 
 Adding a new profile to `accessFrom` is sufficient - `ifaceMap` auto-derives the TAP name, MAC, and `.2` IP from that profile's `meta.nix`. No other changes needed.
 
-**Per-VM agent** (`modules/vm/files-agent.nix`, vsock 14506) - runs inside every profile VM. Handles `ENCRYPT`, `DECRYPT`, `SERVE`, `RECEIVE_PREPARE`, `CLEANUP` on behalf of the host. Opens port 8888 exclusively to the files VM's `.2` address on the VM's own bridge subnet - that address is derived from `vmSubnet` in the VM's config, which itself comes from `meta.nix`. No hardcoded IPs anywhere in the per-VM agent.
+**Per-VM agent** (`vm/dev/files-agent.nix`, vsock 14506) - runs inside every profile VM, and in hostsync and usb-sandbox (`filesAgent = true` in their `meta.nix`). Handles `SEND`, `RECV`, `COMMIT`, `ABORT` on behalf of the host. Opens port 8888 exclusively to the files VM's `.2` address on the VM's own bridge subnet - that address is derived from `vmSubnet` in the VM's config, which itself comes from `meta.nix`. No hardcoded IPs anywhere in the per-VM agent.
 
 **What is dynamic vs explicit:**
 
@@ -3177,11 +3164,12 @@ Traffic between the files VM and profile VMs never touches the router. The files
 
 - Regular VMs have no direct host filesystem access whatsoever
 - Only hostsync can write to the host, and only to `~/vm-inbox/` - blast radius is one directory
-- Every write is host-started (`shard files transfer ... hostsync/`); the archive, authored by the
-  source VM, is unpacked with `hydrix.microvm.safeExtract` (regular files and directories only, no
-  owners or permissions), the share's virtiofsd cannot create device nodes, and `/home` is mounted
+- Every write is host-started (`shard files transfer ... hostsync/`); the stream, authored by the
+  source VM, is unpacked with checks (regular files and directories only, no owners or permissions,
+  into staging first), the share's virtiofsd cannot create device nodes, and `/home` is mounted
   `nosuid,nodev` on the host
-- Files arrive at hostsync already encrypted; the passphrase is released via vsock only after three-way SHA-256 verification passes
+- Files arrive at hostsync age-encrypted and stay in staging until the host has matched the
+  SHA-256 reported by the source, the files VM and hostsync
 - Port 8888 accepts connections only from the files VM (`192.168.214.2`), enforced by nftables
 
 **VM → Host** (`shard files transfer browsing/wallpapers/Sunset.png hostsync/wallpapers`):
@@ -3194,7 +3182,7 @@ browsing VM  →  [encrypted, br-browse]  →  files VM  →  [encrypted, br-hos
                                                                                     ~/vm-inbox/wallpapers/
 ```
 
-The standard `shard files transfer` protocol is used unmodified. hostsync's vsock agent (port 14506) is compatible with the same `RECEIVE_PREPARE` / `DECRYPT` / `CLEANUP` commands sent to any destination VM.
+The standard `shard files transfer` protocol is used unmodified: hostsync runs the same files agent as every other VM (vsock 14506), with `hydrix.files.agent.root` set to the inbox.
 
 **Host -> VM** (drop a file into `~/vm-inbox/`, then transfer out):
 
@@ -3203,7 +3191,7 @@ cp ~/somefile.txt ~/vm-inbox/
 shard files transfer hostsync/somefile.txt pentest/
 ```
 
-hostsync's agent also implements `ENCRYPT` and `SERVE`, so it can act as a transfer source.
+The same agent handles `SEND`, so hostsync can act as a transfer source.
 
 **Commands:**
 
@@ -3225,16 +3213,6 @@ hydrix.microvmHost.byName.hostsync.enable = true;
 systemd.tmpfiles.rules = let u = config.hydrix.username; in [
   "d /home/${u}/vm-inbox 0755 ${u} users -"
 ];
-```
-
-**What the files VM stores** (`/storage/` persistent qcow2, 50GB default):
-
-```
-/storage/
-├── pentest/    # Files stored from pentest VM
-├── comms/      # Files stored from comms VM
-├── dev/        # Files stored from dev VM
-└── tmp/        # In-transit blobs (cleaned after each operation)
 ```
 
 **TAP/subnet/CID assignments:**
@@ -3260,8 +3238,8 @@ usb-sandbox sits on a dedicated isolated bridge (`br-usb-sandbox`) that has no r
 
 ```
 Host
- │  vsock 14506 → usb-sandbox (CID 209)   [ENCRYPT / SERVE / RECEIVE_PREPARE / DECRYPT / CLEANUP]
- │  vsock 14505 → files VM    (CID 212)   [FETCH command]
+ │  vsock 14506 → usb-sandbox (CID 209)   [SEND / RECV / COMMIT / ABORT]
+ │  vsock 14505 → files VM    (CID 212)   [RELAY / ABORT]
  │
  │  br-usb-sandbox (192.168.209.0/24, no router, no internet)
  │   ├── usb-sandbox  (192.168.209.10)  mv-usb-sandbox TAP
@@ -3269,14 +3247,13 @@ Host
 ```
 
 **Transfer flow (USB → VM):**
-1. Host -> usb-sandbox (vsock 14506): `ENCRYPT <passphrase> usb/sda1/file` encrypts AES-256-CBC to `~/shared/xfer.enc`
-2. Host -> usb-sandbox (vsock 14506): `SERVE` starts HTTP server on port 8888
-3. Host -> files VM (vsock 14505): `FETCH 192.168.209.10 xfer.enc` files VM pulls ciphertext over br-usb-sandbox
-4. Host -> files VM (vsock 14505): `DELIVER <dest-ip> xfer.enc` files VM pushes to destination VM
-5. Host -> dest VM (vsock 14506): `DECRYPT <passphrase> ...` destination VM decrypts
+The standard transfer flow (see [Files VM](#files-vm-encrypted-inter-vm-transfer)) with usb-sandbox as the source:
+1. Host -> dest VM (vsock 14506): `RECV ...` with the age identity on line 2, dest listens on 8888
+2. Host -> usb-sandbox (vsock 14506): `SEND <recipient> usb/sda1/file`, usb-sandbox listens on 8888
+3. Host -> files VM (vsock 14505): `RELAY 192.168.209.209 <dest-ip>` streams the ciphertext across
+4. Host compares the three SHA-256 values, then `COMMIT` on the dest VM moves the file into place
 
-
-The passphrase is generated on the host and sent exclusively over vsock -> it never crosses a bridge network.
+The identity is generated on the host and sent exclusively over vsock -> it never crosses a bridge network.
 
 **Setup** in your `machines/<serial>.nix`:
 
@@ -3359,9 +3336,6 @@ lsblk
 **File transfer (from host):**
 
 ```bash
-# Archive from USB to files VM (encrypted)
-shard files store usb-sandbox/usb/sda1/<path>
-
 # Transfer to another VM
 shard files transfer usb-sandbox/usb/sda1/<path> dev/<dest>
 ```
@@ -3785,8 +3759,8 @@ All host-VM communication uses virtio-vsock. No SSH or network access to VMs. Ea
 | 14502 | vm-staging | Host -> VM | List/pull staged packages (vm-sync) |
 | 14503 | vm-colorscheme | Host -> VM | Push colorscheme updates (REFRESH) |
 | 14504 | vm-switch | Host -> VM | Live NixOS config switch (SWITCH/TEST/STATUS/PING) |
-| 14505 | files-agent | Host -> Files VM | File transfer ops (FETCH/DELIVER/STORE/LIST) |
-| 14506 | vm-files-agent | Host -> any VM | Per-VM file ops (ENCRYPT/DECRYPT/SERVE/CLEANUP) |
+| 14505 | files-agent | Host -> Files VM | Transfer relay (RELAY/ABORT) |
+| 14506 | vm-files-agent | Host -> any VM | Per-VM file ops (SEND/RECV/COMMIT/ABORT) |
 | 14506 | router-stats-server | Host -> Router | WiFi/net/WireGuard status + WiFi credential sync (see [Polling Architecture](#polling-architecture) below). Commands: `PING`, `POLL`/`STATUS`, `NET`, `WG`, `ALL`, `ADD`/`REMOVE` |
 | 14505 | pulse-vsock | VM -> Host | PulseAudio/PipeWire audio bridge, only for VMs with `audio = true` in meta.nix |
 | 14508 | waypipe-launch | Host -> VM | App launch commands (Wayland mode) |
@@ -3960,9 +3934,9 @@ own files (vault, hostsync inbox, gitsync repos) use `hydrix.microvm.ownedShareA
 squashes every guest uid/gid to `hydrix.microvm.hostOwner` (default 1000/100; those VMs' service
 users are pinned to it, and the shares set `posixAcl = false`). The host mounts
 `/home` and the repo views `nosuid,nodev` (`hydrix-home-nosuid`), so nothing a guest writes
-can carry a working setuid bit or device node. Archives that come from another VM are
-unpacked with `hydrix.microvm.safeExtract` (regular files and directories only, no owners
-or permissions).
+can carry a working setuid bit or device node. Files that come from another VM through
+`shard files` are unpacked with checks (regular files and directories only, no owners or
+permissions, into staging first; Hydrix `vm/dev/xfer.py`).
 
 | Tag | Source (Host) | Mount (VM) | Access | Purpose |
 |-----|---------------|------------|--------|---------|

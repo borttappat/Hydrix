@@ -40,8 +40,8 @@ in {
   # =========================================================================
   microvm = {
     # Ephemeral rootfs is tmpfs, sized ~50% of this by microvm-nix - needs real
-    # headroom since transient transfer blobs (~/shared/xfer.enc) land there
-    # before extraction. 4096 gives ~2GB of usable space for that.
+    # headroom since files received through `shard files transfer` land there.
+    # 4096 gives ~2GB of usable space for that.
     mem = 4096;
 
     interfaces = [
@@ -78,7 +78,7 @@ in {
   # =========================================================================
   # HOME LAYOUT
   # Files agent (vsock 14506) is imported externally via flake.nix - it owns
-  # ~/shared and the port-8888 HTTP transfer service itself.
+  # ~/shared and the port-8888 transfer listener itself.
   # =========================================================================
   systemd.tmpfiles.rules = [
     "d ${sandboxHome}     0750 ${sandboxUser} users -"

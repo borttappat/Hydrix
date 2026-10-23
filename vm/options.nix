@@ -16,33 +16,16 @@ in {
   ];
 
   options.hydrix = {
-    # virtiofsd arguments for every share a VM can write to. Keeps the host
-    # root virtiofsd from creating device nodes or file capabilities for the
-    # guest; setuid bits are neutralised host-side by nosuid mounts.
-    # Extract a .tar.gz that another VM authored. Every member must be a
-    # regular file or directory with a relative path and no "..", and it is
-    # extracted without owners or permissions. Prints "ERROR: ..." and exits
-    # non-zero otherwise. Usage: <script> ARCHIVE DEST
-    microvm.safeExtract = lib.mkOption {
+    # Streaming end-to-end encrypted transfer (age over zstd over tar), used by
+    # the per-VM files agent and the files VM. Protocol: dev/xfer.py.
+    microvm.xfer = lib.mkOption {
       type = lib.types.package;
       readOnly = true;
-      default = pkgs.writeShellScript "hydrix-safe-extract" ''
-        set -u
-        export PATH=${lib.makeBinPath [pkgs.gnutar pkgs.gzip pkgs.coreutils pkgs.gnugrep]}
-        archive=$1 dest=$2
-        types=$(tar -tvzf "$archive" 2>/dev/null | cut -c1) || { echo "ERROR: unreadable archive"; exit 1; }
-        names=$(tar -tzf "$archive" 2>/dev/null) || { echo "ERROR: unreadable archive"; exit 1; }
-        if grep -qv '^[-d]$' <<< "$types"; then
-          echo "ERROR: archive contains links or special files"
-          exit 1
-        fi
-        while IFS= read -r n; do
-          case "$n" in /*) echo "ERROR: absolute path in archive"; exit 1 ;; esac
-          case "/$n/" in */../*) echo "ERROR: '..' in archive path"; exit 1 ;; esac
-        done <<< "$names"
-        tar --no-same-owner --no-same-permissions -xzf "$archive" -C "$dest" || { echo "ERROR: extraction failed"; exit 1; }
+      default = pkgs.writeShellScript "hydrix-xfer" ''
+        export PATH=${lib.makeBinPath [pkgs.age pkgs.zstd pkgs.gnutar pkgs.coreutils]}
+        exec ${pkgs.python3}/bin/python3 ${./dev/xfer.py} "$@"
       '';
-      description = "Checked extraction for archives that come from another VM.";
+      description = "Transfer helper for `shard files` (send, recv, commit, abort, relay).";
     };
 
     # The desktop user on the host. Writable shares that hold the user's own
@@ -78,6 +61,9 @@ in {
       description = "virtiofsd extraArgs for writable shares that hold the host user's own files.";
     };
 
+    # virtiofsd arguments for every share a VM can write to. Keeps the host
+    # root virtiofsd from creating device nodes or file capabilities for the
+    # guest; setuid bits are neutralised host-side by nosuid mounts.
     microvm.writableShareArgs = lib.mkOption {
       type = lib.types.listOf lib.types.str;
       default = ["--modcaps=-mknod:-setfcap"];
