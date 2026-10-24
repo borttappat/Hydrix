@@ -11,7 +11,7 @@
 #   cursor.unfocusedHollow = false
 #   cursor.blinkTimeout    = 0            (0 = never stop blinking)
 #   cursor.blinkInterval   = 500
-#   selection.saveToClipboard = true
+#   selection.saveToClipboard = false
 #
 # Opacity is set via hydrix.graphical.ui.opacity.overlay in graphical.nix.
 #
@@ -45,6 +45,41 @@ let
   '';
   keysFile = pkgs.writeText "alacritty-keys.txt" keysText;
 
+  # One font size for every window of this machine or VM: edits font.size in the
+  # writable alacritty.toml, which live reload applies to open and new windows.
+  # Activation (rebuild, live switch, boot) resets it to the Nix-configured size.
+  baseFontSize = config.home-manager.users.${username}.programs.alacritty.settings.font.size;
+  fontSizeScript = pkgs.writeShellApplication {
+    name = "alacritty-font-size";
+    runtimeInputs = [ pkgs.gawk pkgs.coreutils ];
+    text = ''
+      file=''${ALACRITTY_FONT_FILE:-$HOME/.config/alacritty/alacritty.toml}
+      [ -f "$file" ] || exit 0
+      cur=$(awk '/^\[/ { f = ($0 == "[font]") } f && /^size *=/ { sub(/^size *= */, ""); print; exit }' "$file")
+      case "''${1:-}" in
+        up)    new=$(awk -v s="''${cur:-${toString baseFontSize}}" 'BEGIN { print s + 1 }') ;;
+        down)  new=$(awk -v s="''${cur:-${toString baseFontSize}}" 'BEGIN { print (s > 5 ? s - 1 : 4) }') ;;
+        reset) new=$(awk 'BEGIN { print ${toString baseFontSize} }') ;;
+        *) echo "usage: alacritty-font-size up|down|reset" >&2; exit 1 ;;
+      esac
+      [ "$new" = "$cur" ] && exit 0
+      tmp=$(mktemp "$file.XXXXXX")
+      trap 'rm -f "$tmp"' EXIT
+      awk -v n="$new" '
+        /^\[/ { if (f && !done) { print "size = " n; done = 1 } f = ($0 == "[font]"); if (f) seen = 1 }
+        f && /^size *=/ { if (!done) print "size = " n; done = 1; next }
+        { print }
+        END { if (!seen) printf "\n[font]\nsize = %s\n", n; else if (f && !done) print "size = " n }
+      ' "$file" > "$tmp"
+      chmod 644 "$tmp"
+      mv "$tmp" "$file"
+    '';
+  };
+  fontSizeBind = key: arg: {
+    inherit key; mods = "Control|Shift";
+    command = { program = "${fontSizeScript}/bin/alacritty-font-size"; args = [ arg ]; };
+  };
+
   viMode = "Vi|~Search";
   # home-manager's alacritty module turns every `\\` in the generated TOML into
   # `\`, so regex backslashes are doubled to survive it.
@@ -61,6 +96,14 @@ let
     binding = { inherit key; mods = "Control|Shift"; };
   };
 in {
+  system.activationScripts.alacrittyFontReset = lib.mkIf config.hydrix.graphical.enable ''
+    _file=${config.users.users.${username}.home}/.config/alacritty/alacritty.toml
+    if [ -f "$_file" ]; then
+      ${pkgs.util-linux}/bin/runuser -u ${username} -- \
+        ${pkgs.coreutils}/bin/env ALACRITTY_FONT_FILE="$_file" ${fontSizeScript}/bin/alacritty-font-size reset || true
+    fi
+  '';
+
   # ── Cursor ────────────────────────────────────────────────────────────────
   hydrix.graphical.alacritty.cursor.shape         = lib.mkDefault "Underline";
   hydrix.graphical.alacritty.cursor.blinking      = lib.mkDefault "Always";
@@ -69,16 +112,22 @@ in {
   hydrix.graphical.alacritty.cursor.blinkInterval = lib.mkDefault 500;
 
   # ── Selection ──────────────────────────────────────────────────────────────
-  hydrix.graphical.alacritty.selection.saveToClipboard = lib.mkDefault true;
+  hydrix.graphical.alacritty.selection.saveToClipboard = lib.mkDefault false;
 
   # ── Vi mode and hints ─────────────────────────────────────────────────────────
   # Lists concatenate with the framework's keyboard.bindings. Setting
   # hints.enabled replaces Alacritty's default URL hint, so it is restated (O).
   home-manager.users.${username} = lib.mkIf config.hydrix.graphical.enable {
-    home.packages = [ (pkgs.writeShellScriptBin "vikeys" "cat ${keysFile}") ];
+    home.packages = [ (pkgs.writeShellScriptBin "vikeys" "cat ${keysFile}") fontSizeScript ];
 
     programs.alacritty.settings = {
+      # Ctrl+Shift+Plus/Minus/0, global font size. Alacritty matches the character the
+      # key types with Shift held, so these depend on the layout: "?" "_" "=" for se,
+      # "+" "_" ")" for us. `alacritty --print-events` shows it for other layouts.
       keyboard.bindings = [
+        (fontSizeBind "?" "up")
+        (fontSizeBind "_" "down")
+        (fontSizeBind "=" "reset")
         { key = "Q"; mode = viMode; action = "ToggleViMode"; }
         {
           key = ":"; mods = "Shift"; mode = viMode;

@@ -433,7 +433,7 @@ in {
 
     alacritty.selection.saveToClipboard = lib.mkOption {
       type = lib.types.bool;
-      default = true;
+      default = false;
       description = "Copy selected text to the system clipboard automatically.";
     };
 
