@@ -67,7 +67,7 @@
   filesSubnet =
     if filesNetwork != null
     then filesNetwork.subnet
-    else "192.168.108";
+    else "192.168.212";
 
   # Derive the stable TAP name for a network entry.
   # All framework routerTaps follow mv-router-<abbrev>; substitute the prefix.

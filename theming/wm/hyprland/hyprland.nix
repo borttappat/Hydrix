@@ -27,6 +27,12 @@
 
   gaps = config.hydrix.graphical.ui.gaps or 10;
 
+  # Changes when a VM is added or its focusBorder changes, so home-manager
+  # restarts the units that render the registry into Hyprland rules.
+  registryHash = builtins.hashString "sha256" (builtins.toJSON (
+    config.hydrix.networking.vmRegistry // config.hydrix.networking.infraVmRegistry
+  ));
+
   clipGuardPlugin = pkgs.hyprlandPlugins.mkHyprlandPlugin {
     pluginName = "hypr-clip-guard";
     version = "0.6.0";
@@ -690,6 +696,7 @@ in
           Description = "Initialize Hyprland VM window border rules";
           After = ["hyprland-session.target"];
           PartOf = ["hyprland-session.target"];
+          X-Registry = registryHash;
         };
         Service = {
           Type = "oneshot";

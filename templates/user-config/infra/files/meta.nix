@@ -1,10 +1,10 @@
 # Infrastructure VM: encrypted inter-VM file transfer hub
-# CID 212, subnet 192.168.108.x — reserved, never use for profile VMs
+# CID 212, subnet 192.168.212.x, reserved, never use for profile VMs
 # Accessed by host via vsock port 14505 (files agent)
 {
   vsockCid      = 212;
   hasDisplay    = false;
-  subnet        = "192.168.108";
+  subnet        = "192.168.212";
   tapId         = "mv-files";
   tapMac        = "02:00:00:02:00:01";
   routerTap     = "mv-router-file";  # Router serves this subnet via extraNetworks dynamic wiring

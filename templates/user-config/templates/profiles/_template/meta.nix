@@ -11,6 +11,7 @@
   subnet    = "__SUBNET__";      # /24 prefix — matches CID last octet
   workspace = __WORKSPACE__;
   label     = "__LABEL__";
+  focusBorder = "__FOCUS_COLOR__";  # red, orange, yellow, green, cyan, blue, purple, pink, magenta
   notifyForward = false;  # true: forward VM notifications to host popups (vsock:14518)
   # audio = true;          # host audio over vsock:14505 (speakers, microphone); off unless set
   # filesAccess = false;  # keep the files VM off this bridge (no transfers in/out);

@@ -66,9 +66,13 @@ nix_attr() {
 VM_REGISTRY="/etc/hydrix/vm-registry.json"
 if [[ -f "$VM_REGISTRY" ]]; then
     mapfile -t RESERVED_CIDS < <(jq -r '.[].cid' "$VM_REGISTRY" 2>/dev/null | sort -un)
+    # Subnet third octets in use (infra VMs need not match their CID, e.g. a
+    # subnet in the profile range), so a suggested CID never reuses a subnet.
+    mapfile -t USED_OCTETS < <(jq -r '.[].subnet // empty' "$VM_REGISTRY" 2>/dev/null | cut -d. -f3 | sort -un)
 else
     # Fallback for pre-activation / fresh installs
     RESERVED_CIDS=(200 209 210 211 212 213 214)
+    USED_OCTETS=()
 fi
 declare -a USED_CIDS=() USED_WORKSPACES=()
 
@@ -98,7 +102,9 @@ for meta in "$PROFILES_DIR"/*/meta.nix; do
     [[ -f "$meta" ]] || continue
     cid=$(nix_attr "$meta" vsockCid)
     ws=$(nix_attr  "$meta" workspace)
+    subnet=$(nix_attr "$meta" subnet)
     [[ -n "$cid" ]] && USED_CIDS+=("$cid")
+    [[ -n "$subnet" ]] && USED_OCTETS+=("$(cut -d. -f3 <<< "$subnet")")
     [[ -n "$ws"  ]] && USED_WORKSPACES+=("$ws")
 done
 
@@ -117,10 +123,9 @@ next_free() {
     echo "$candidate"
 }
 
-SUGGESTED_CID=$(next_free 107 "${USED_CIDS[@]:-}" "${RESERVED_CIDS[@]}")
+SUGGESTED_CID=$(next_free 107 "${USED_CIDS[@]:-}" "${RESERVED_CIDS[@]}" "${USED_OCTETS[@]:-}")
 SUGGESTED_WORKSPACE=$((SUGGESTED_CID % 10))
 SUGGESTED_WORKSPACE=$(next_free "$SUGGESTED_WORKSPACE" "${USED_WORKSPACES[@]:-}")
-SUGGESTED_SUBNET="192.168.${SUGGESTED_CID}"
 
 # Derive interface names from profile name (max 15 chars each)
 first_seg="${PROFILE_NAME%%-*}"                      # everything before first hyphen
@@ -172,6 +177,13 @@ MEM_LOW_FLOOR=$(ask   memLowFloorMb  "$SUGGESTED_MEM_LOW_FLOOR"  "MB - elastic d
 MEM_FLOOR=$(ask       memFloorMb     "$SUGGESTED_MEM_FLOOR"      "MB - elastic daemon absolute floor, no windows open")
 CPU_LOW_FLOOR=$(ask   cpuLowFloorPct "$SUGGESTED_CPU_LOW_FLOOR"  "% - elastic daemon CPU floor while RAM still deflating")
 CPU_FLOOR=$(ask       cpuFloorPct    "$SUGGESTED_CPU_FLOOR"      "% - elastic daemon true CPU floor once RAM settled")
+
+for o in "${USED_OCTETS[@]:-}"; do
+    if [[ "${SUBNET##*.}" == "$o" ]]; then
+        err "Subnet ${SUBNET}.0/24 is already used by another VM"
+        exit 1
+    fi
+done
 
 # Validate interface name lengths
 for iface in "$BRIDGE" "$TAP_ID" "$ROUTER_TAP"; do
@@ -236,18 +248,38 @@ info "Mem/vCPU:   ${MEM}MB / ${VCPU} (floors: ${MEM_LOW_FLOOR}/${MEM_FLOOR}MB, $
 echo ""
 echo "Next: edit $PROFILE_DIR/default.nix (resources, colorscheme)"
 echo "      edit $PROFILE_DIR/packages.nix (profile packages)"
-echo ""
-echo "      Enable the VM in your machine config (machines/<serial>.nix):"
-echo "        hydrix.microvmHost.vms.\"microvm-${PROFILE_NAME}\".enable = true;"
+echo "      optional per-VM settings (autostart, secrets, encryption): hydrix.microvmHost.byName.${PROFILE_NAME}"
 echo ""
 
 # ---------------------------------------------------------------------------
-# Rebuild prompt
+# Rebuild prompts
 # ---------------------------------------------------------------------------
-printf "Rebuild now? Y/n: "
+# The host creates the bridge; the router serves the new subnet and the files
+# VM gets a TAP on the bridge, both only after a build and a restart.
+INFRA=(router)
+[[ "$(nix_attr "$PROFILE_DIR/meta.nix" filesAccess)" == "false" ]] || INFRA+=(files)
+
+printf "Rebuild host now? Y/n: "
 read -r do_rebuild
-if [[ "${do_rebuild:-Y}" =~ ^[Yy]$ ]]; then
-    rebuild
-else
-    info "Skipping rebuild. Run 'rebuild' when ready."
+if [[ ! "${do_rebuild:-Y}" =~ ^[Yy]$ ]]; then
+    info "Skipping. When ready: rebuild, shard -b ${INFRA[*]}, shard -R ${INFRA[*]}, shard -b ${PROFILE_NAME}"
+    exit 0
 fi
+rebuild || exit 1
+
+printf "Build %s now (shard -b)? Y/n: " "${INFRA[*]}"
+read -r do_infra
+if [[ ! "${do_infra:-Y}" =~ ^[Yy]$ ]]; then
+    info "Skipping. When ready: shard -b ${INFRA[*]}, shard -R ${INFRA[*]}, shard -b ${PROFILE_NAME}"
+    exit 0
+fi
+shard -b "${INFRA[@]}" || exit 1
+
+printf "Restart %s now? Networking drops briefly for every VM. y/N: " "${INFRA[*]}"
+read -r do_restart
+if [[ "${do_restart:-N}" =~ ^[Yy]$ ]]; then
+    shard -R "${INFRA[@]}" || exit 1
+else
+    info "Restart when convenient: shard -R ${INFRA[*]}"
+fi
+info "Build the VM: shard -b ${PROFILE_NAME}"
