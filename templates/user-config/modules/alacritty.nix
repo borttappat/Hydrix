@@ -148,7 +148,7 @@ in {
         (copyHint "U" urlRegex)
         {
           regex = escape urlRegex;
-          command = "xdg-open";
+          command = "${pkgs.xdg-utils}/bin/xdg-open";
           post_processing = true;
           mouse.enabled = true;
           binding = { key = "O"; mods = "Control|Shift"; };
