@@ -617,6 +617,12 @@ in {
               }
             ''}
 
+            ${lib.optionalString ffCfg.hideWindowControls ''
+              .titlebar-buttonbox-container {
+                display: none !important;
+              }
+            ''}
+
             ${lib.optionalString ffCfg.hideExtensionIcons ''
               /* Pinned extension icons; the Extensions button itself still lists them.
                  Scoped to #nav-bar: CustomizableUI reuses the same widget node when an

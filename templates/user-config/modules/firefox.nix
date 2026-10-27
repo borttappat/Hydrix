@@ -330,6 +330,7 @@ in
       # hydrix.graphical.firefox.hideAllTabsButton = lib.mkDefault true;
       # hydrix.graphical.firefox.hideSidebarLauncher = lib.mkDefault true;
       # hydrix.graphical.firefox.hideExtensionIcons = lib.mkDefault true;
+      # hydrix.graphical.firefox.hideWindowControls = lib.mkDefault true;
 
       # Startup homepage: set to your preferred URL, or leave null for about:home
       # hydrix.graphical.firefox.homepage = lib.mkDefault "https://example.com";
@@ -350,6 +351,40 @@ in
         "sidebar.installed.extensions" = lib.mkDefault {
           Value = lib.concatMapStringsSep "," (n: reg.${n}.id) (builtins.filter (n: reg ? ${n}) exts);
           Status = "user";
+        };
+      } // lib.optionalAttrs config.hydrix.graphical.firefox.verticalTabs {
+        # Toolbar layout: sidebar toggle above the tab strip, URL bar, then
+        # back and forward. The Extensions button and hamburger menu sit
+        # outside the customizable area and always follow it, in that order.
+        # Toolbar edits made in Firefox are reset at the next start.
+        # proton.toolbar.version marks the Proton migration done: on a fresh
+        # profile it would strip the never-clicked sidebar-button from this
+        # layout.
+        "browser.proton.toolbar.version" = lib.mkDefault { Value = 3; Status = "user"; };
+        "browser.uiCustomization.state" = lib.mkDefault {
+          Status = "user";
+          Value = builtins.toJSON {
+            placements = {
+              nav-bar = [
+                "sidebar-button"
+                "vertical-spacer"
+                "urlbar-container"
+                "back-button"
+                "forward-button"
+                "downloads-button"
+              ];
+              vertical-tabs = [ "tabbrowser-tabs" ];
+              TabsToolbar = [ ];
+              PersonalToolbar = [ "personal-bookmarks" ];
+              toolbar-menubar = [ "menubar-items" ];
+              widget-overflow-fixed-list = [ ];
+              unified-extensions-area = [ ];
+            };
+            seen = [ ];
+            dirtyAreaCache = [ ];
+            currentVersion = 24;
+            newElementCount = 0;
+          };
         };
       };
     })

@@ -294,6 +294,16 @@ in {
       '';
     };
 
+    firefox.hideWindowControls = lib.mkOption {
+      type = lib.types.bool;
+      default = false;
+      description = ''
+        Hide the minimize/maximize/close buttons Firefox draws in its own
+        titlebar (shown at the end of the nav bar when the tab strip is
+        hidden, as with verticalTabs).
+      '';
+    };
+
     firefox.hideExtensionIcons = lib.mkOption {
       type = lib.types.bool;
       default = false;
