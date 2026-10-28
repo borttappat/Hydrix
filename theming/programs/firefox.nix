@@ -592,6 +592,12 @@ in {
               #TabsToolbar {
                 visibility: collapse !important;
               }
+
+              /* A sidebar button placed first sits over the collapsed tab
+                 strip: center its icon on the tab icons below it. */
+              #nav-bar-customization-target > #sidebar-button:first-child {
+                padding-inline-start: calc(var(--tab-collapsed-width) / 2 - var(--toolbarbutton-padding-outer) - var(--toolbarbutton-padding-inner) - 8px) !important;
+              }
             ''}
 
             ${lib.optionalString ffCfg.hideFirefoxViewButton ''
