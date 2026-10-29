@@ -10,9 +10,14 @@
 }: let
   cfg = config.hydrix;
 in {
-  imports = map (o:
-    lib.mkRemovedOptionModule ["hydrix" "router" "wifi" o]
-    "WiFi credentials live in secrets/wifi.yaml (hydrix.secrets.wifiSecretsFile), not in the Nix store. Migrate an old modules/wifi.nix with setup-wifi-secrets, then delete the file and its imports.") ["networks" "ssid" "password"];
+  imports =
+    map (o:
+      lib.mkRemovedOptionModule ["hydrix" "router" "wifi" o]
+      "WiFi credentials live in secrets/wifi.yaml (hydrix.secrets.wifiSecretsFile), not in the Nix store. Migrate an old modules/wifi.nix with setup-wifi-secrets, then delete the file and its imports.") ["networks" "ssid" "password"]
+    ++ [
+      (lib.mkRemovedOptionModule ["hydrix" "libvirt" "console" "menuKey"]
+        "The chromeless virt-manager patch (host/libvirt/virt-manager-chromeless.patch) is self-contained and always toggles the menus with Left Alt. Change _HYDRIX_MENU_KEY in the patch to use another key.")
+    ];
 
   options.hydrix = {
     # =========================================================================
@@ -434,20 +439,10 @@ in {
           description = ''
             virt-manager VM windows (console and details) without window decoration,
             menu bar or toolbar, so they look like any other tiled window. A lone tap of
-            menuKey shows or hides the menu bar and toolbar. Patches virt-manager's
-            vmwindow.py (pure Python, nothing to compile). Leaving the console's keyboard
-            grab still uses grabKey.
-          '';
-        };
-        menuKey = lib.mkOption {
-          type = lib.types.str;
-          default = "Alt_L";
-          example = "Menu";
-          description = ''
-            Gdk key name (as `Gdk.keyval_name` reports it, e.g. Alt_L, Menu, F10) that,
-            tapped on its own, toggles the menu bar and toolbar of a chromeless VM window.
-            The key still reaches the guest, so a guest that reacts to a lone Alt tap
-            (Windows, Firefox) will see it too; pick a key the guest ignores if that matters.
+            Left Alt shows or hides the menu bar and toolbar; the tap still reaches the
+            guest, so a guest that reacts to a lone Alt tap (Windows, Firefox) sees it too.
+            Patches virt-manager's vmwindow.py (pure Python, nothing to compile). Leaving
+            the console's keyboard grab still uses grabKey.
           '';
         };
       };

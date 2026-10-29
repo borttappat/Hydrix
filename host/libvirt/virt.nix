@@ -4,18 +4,12 @@ let
   consoleCfg = config.hydrix.libvirt.console;
 
   # hydrix.libvirt.console.chromeless: VM windows without decoration, menu bar or toolbar
-  # until menuKey is tapped (virt-manager-chromeless.patch, Python only).
+  # until Left Alt is tapped (virt-manager-chromeless.patch, Python only, self-contained).
   virtManager =
     if consoleCfg.chromeless
     then
       pkgs.virt-manager.overrideAttrs (old: {
         patches = (old.patches or []) ++ [./virt-manager-chromeless.patch];
-        postPatch =
-          (old.postPatch or "")
-          + ''
-            substituteInPlace virtManager/vmwindow.py \
-              --replace-fail '@menuKey@' ${lib.escapeShellArg consoleCfg.menuKey}
-          '';
       })
     else pkgs.virt-manager;
 

@@ -5,9 +5,9 @@
  
  class vmmVMWindow(vmmGObjectUI):
 +    # Hydrix: menu bar and toolbar shown. Chromeless windows start with them
-+    # hidden; a lone tap of _HYDRIX_MENU_KEY (a Gdk key name) toggles them.
++    # hidden; a lone tap of Left Alt (_HYDRIX_MENU_KEY, a Gdk key name) toggles them.
 +    _hydrix_chrome = True
-+    _HYDRIX_MENU_KEY = "@menuKey@"
++    _HYDRIX_MENU_KEY = "Alt_L"
 +
      __gsignals__ = {
          "customize-finished": (vmmGObjectUI.RUN_FIRST, None, [object]),
