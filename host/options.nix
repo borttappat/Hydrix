@@ -14,6 +14,9 @@ in {
     map (o:
       lib.mkRemovedOptionModule ["hydrix" "router" "wifi" o]
       "WiFi credentials live in secrets/wifi.yaml (hydrix.secrets.wifiSecretsFile), not in the Nix store. Migrate an old modules/wifi.nix with setup-wifi-secrets, then delete the file and its imports.") ["networks" "ssid" "password"]
+    ++ map (o:
+      lib.mkRemovedOptionModule ["hydrix" "router" "vpn" "mullvad" o]
+      "Mullvad WireGuard confs hold private keys and no longer go through the Nix store. Run setup-mullvad-secrets (Hydrix scripts/setup-mullvad-secrets.sh, which also runs before the rebuild) to create secrets/mullvad.yaml, then list the network names in hydrix.router.vpn.mullvad.networks, use processScript (a shell filter) instead of processConfig, and add \"mullvad\" to the router's secrets.") ["bridges" "processConfig"]
     ++ [
       (lib.mkRemovedOptionModule ["hydrix" "libvirt" "console" "menuKey"]
         "The chromeless virt-manager patch (host/libvirt/virt-manager-chromeless.patch) is self-contained and always toggles the menus with Left Alt. Change _HYDRIX_MENU_KEY in the patch to use another key.")
@@ -216,59 +219,38 @@ in {
         mullvad = {
           enable = lib.mkEnableOption "Mullvad VPN integration";
 
-          bridges = lib.mkOption {
-            type = lib.types.attrsOf (lib.types.either lib.types.path (lib.types.attrsOf lib.types.path));
-            default = {};
+          networks = lib.mkOption {
+            type = lib.types.listOf lib.types.str;
+            default = [];
+            example = ["browse" "pentest"];
             description = ''
-              Map of bridge name to Mullvad WireGuard conf file(s).
-
-              Single exit node (simple format):
-                bridge = ./mullvad-bridge.conf;
-
-              Multiple exit nodes (for rotation):
-                bridge = {
-                  primary = ./mullvad-bridge-primary.conf;
-                  backup1 = ./mullvad-bridge-backup1.conf;
-                  backup2 = ./mullvad-bridge-backup2.conf;
-                };
-
-              At router boot, all tunnels connect; the primary exit is active,
-              backups are available for manual rotation via vpn-assign.
-              Conf files are deployed as-is by default; use processConfig to
-              inject Table=off, strip DNS/IPv6, etc.
-              Valid keys: pentest, comms, browse, dev, lurking
+              Networks (router network names) that exit through their own Mullvad
+              WireGuard tunnel, wg-<network>. Only the names live in Nix; the conf
+              files hold private keys and come from secrets/mullvad.yaml
+              (hydrix.secrets.mullvadSecretsFile, one key per network, the conf text
+              as its value), decrypted on the host and delivered to the router at
+              boot as /mnt/vm-secrets/mullvad/wg-<network>.conf. Add "mullvad" to the
+              router's secrets (hydrix.microvmHost.byName.router.secrets). A network
+              whose conf is missing stays blocked, never direct. setup-mullvad-secrets
+              creates the file from old store-path confs.
             '';
-            example = {
-              browse = ./mullvad-browsing.conf;
-              pentest = {
-                primary = ./mullvad-pentest.conf;
-                backup1 = ./mullvad-pentest-de.conf;
-              };
-            };
           };
 
-          processConfig = lib.mkOption {
-            type = lib.types.raw;
-            default = f: f;
+          processScript = lib.mkOption {
+            type = lib.types.lines;
+            default = "cat";
             description = ''
-              Function applied to each WireGuard .conf file path before deployment
-              to /etc/wireguard/. Use this to inject Table=off, strip DNS/IPv6,
-              add server-name comments, or apply any other transformations.
-
-              Signature: path → derivation (or path)
-              Default: identity (conf files deployed unmodified)
+              Shell filter run on the router for each delivered conf before it is
+              installed as /etc/wireguard/wg-<network>.conf: the conf on stdin, the
+              result on stdout, the network name in $NETWORK. Use it to add
+              Table = off, strip DNS or IPv6 addresses. A "# Server: <name>" line in
+              the conf names the exit node in the exit-nodes widget.
+              Default: the conf unchanged.
             '';
             example = lib.literalExpression ''
-              f: let
-                serverName = lib.removeSuffix ".conf" (builtins.baseNameOf f);
-              in pkgs.runCommand (builtins.baseNameOf f) { } '''
-                ''${pkgs.gnused}/bin/sed \
-                  -e '1i# Server: ''${serverName}' \
-                  -e '/^\[Interface\]/a Table = off' \
-                  -e '/^Address/s/,.*$//' \
-                  -e '/^DNS/d' \
-                  ''${f} > $out
-              ''';
+              '''
+                sed -e '/^\[Interface\]/a Table = off' -e '/^Address/s/,.*$//' -e '/^DNS/d'
+              '''
             '';
           };
 

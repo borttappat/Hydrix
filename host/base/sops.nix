@@ -107,6 +107,16 @@ in {
           };
         };
       })
+      (lib.mkIf (cfg.mullvadSecretsFile != null) {
+        mullvad = lib.mkDefault {
+          file = cfg.mullvadSecretsFile;
+          vmDir = "mullvad";
+          keys = lib.genAttrs config.hydrix.router.vpn.mullvad.networks (n: {
+            outFile = "wg-${n}.conf";
+            mode = "0600";
+          });
+        };
+      })
     ];
 
     # Generate one decryption service per files entry.

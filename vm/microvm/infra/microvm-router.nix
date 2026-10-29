@@ -82,13 +82,10 @@
   usePciPassthrough = wanMode == "pci-passthrough" || (wanMode == "auto" && wifiPciAddress != "");
   useEthernetWan = wanMode == "macvtap" || (wanMode == "auto" && wifiPciAddress == "");
 
-  # Mullvad VPN active when enabled and at least one bridge configured
-  hasMullvad = vpnCfg.mullvad.enable && vpnCfg.mullvad.bridges != {};
-  mullvadBridges = vpnCfg.mullvad.bridges; # attrset: bridge-name → conf-file path
-
-  # WireGuard config processing hook - user-defined via hydrix.router.vpn.mullvad.processConfig
-  # Default: identity (pass through raw conf files unmodified)
-  processConfig = vpnCfg.mullvad.processConfig;
+  # Mullvad VPN active when enabled and at least one network listed. Only the
+  # names are in Nix; the confs arrive as secrets (hydrix-mullvad-from-sops).
+  hasMullvad = vpnCfg.mullvad.enable && vpnCfg.mullvad.networks != [];
+  mullvadBridges = lib.genAttrs vpnCfg.mullvad.networks (_: true);
 
   # Named derivations so the boot-assign service can reference them in path
   vpnAssign = pkgs.writeShellScriptBin "vpn-assign" (''
@@ -681,18 +678,47 @@ in {
           in "IFACE_${varName}=${n.routerTap}\n")
           allNetworks;
       }
-      # Mullvad WireGuard conf files - processed via hydrix.router.vpn.mullvad.processConfig
-      (lib.mkIf hasMullvad (
-        lib.mapAttrs' (bridge: f: {
-          name = "wireguard/wg-${bridge}.conf";
-          value = {
-            source = processConfig f;
-            mode = "0600";
-          };
-        })
-        mullvadBridges
-      ))
     ];
+
+    # ===== Mullvad WireGuard confs from sops =====
+    # The confs hold private keys, so they never enter the Nix store (every
+    # shareStore VM can read it). The host decrypts secrets/mullvad.yaml and
+    # shares /mnt/vm-secrets/mullvad/wg-<network>.conf; this runs each through
+    # hydrix.router.vpn.mullvad.processScript into /etc/wireguard (tmpfs root).
+    # A missing conf leaves its tunnel down, and vpn-boot-assign keeps that
+    # network blocked.
+    systemd.services.hydrix-mullvad-from-sops = lib.mkIf hasMullvad {
+      description = "Install Mullvad WireGuard confs from sops secrets";
+      wantedBy = ["multi-user.target"];
+      before = ["vpn-boot-assign.service"];
+      after = ["local-fs.target" "systemd-tmpfiles-setup.service"];
+      path = [pkgs.coreutils pkgs.gnused pkgs.gawk pkgs.gnugrep];
+      serviceConfig = {
+        Type = "oneshot";
+        RemainAfterExit = true;
+        UMask = "0077";
+      };
+      script = let
+        filter = pkgs.writeShellScript "mullvad-process-conf" vpnCfg.mullvad.processScript;
+      in ''
+        SRC=/mnt/vm-secrets/mullvad
+        mkdir -p /etc/wireguard
+        for NETWORK in ${lib.escapeShellArgs vpnCfg.mullvad.networks}; do
+          conf="$SRC/wg-$NETWORK.conf"
+          if [ ! -s "$conf" ]; then
+            echo "No conf for $NETWORK in $SRC, its tunnel stays down"
+            continue
+          fi
+          if NETWORK="$NETWORK" ${filter} < "$conf" > "/etc/wireguard/wg-$NETWORK.conf.tmp"; then
+            mv "/etc/wireguard/wg-$NETWORK.conf.tmp" "/etc/wireguard/wg-$NETWORK.conf"
+            echo "Installed wg-$NETWORK.conf"
+          else
+            rm -f "/etc/wireguard/wg-$NETWORK.conf.tmp"
+            echo "processScript failed for $NETWORK, its tunnel stays down"
+          fi
+        done
+      '';
+    };
 
     # ===== Fail-closed policy routing =====
     # Installed before any interface comes up. Every network gets its own
@@ -938,8 +964,8 @@ in {
     # Generated from vpn.mullvad.bridges - no hardcoded network names.
     systemd.services.vpn-boot-assign = lib.mkIf hasMullvad {
       description = "Apply Mullvad VPN bridge assignments";
-      after = ["network-online.target" "router-firewall.service"];
-      wants = ["network-online.target"];
+      after = ["network-online.target" "router-firewall.service" "hydrix-mullvad-from-sops.service"];
+      wants = ["network-online.target" "hydrix-mullvad-from-sops.service"];
       wantedBy = ["multi-user.target"];
       path = [pkgs.wireguard-tools pkgs.iproute2 vpnAssign];
       serviceConfig = {

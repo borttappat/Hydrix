@@ -255,6 +255,19 @@ in {
       ];
     })
 
+    # Mullvad confs reach the router only as a secret (hydrix.router.vpn.mullvad.networks).
+    (let
+      mullvad = config.hydrix.router.vpn.mullvad;
+      routerSecrets = cfg.vms.${routerVmName}.secrets or [];
+    in
+      lib.mkIf (cfg.enable && mullvad.enable && mullvad.networks != []) {
+        warnings =
+          lib.optional (!(secretsCfg.enable && secretsCfg.mullvadSecretsFile != null))
+          "hydrix.router.vpn.mullvad.networks is set without hydrix.secrets.mullvadSecretsFile: the router gets no WireGuard confs and ${lib.concatStringsSep ", " mullvad.networks} stay blocked."
+          ++ lib.optional (!(lib.elem "mullvad" routerSecrets))
+          "hydrix.router.vpn.mullvad.networks is set but the router's secrets lack \"mullvad\" (hydrix.microvmHost.byName.router.secrets): ${lib.concatStringsSep ", " mullvad.networks} stay blocked.";
+      })
+
     # Always available - fallback mode and fresh installs need these to manage VMs
     {
       environment.systemPackages = [shardPkg];

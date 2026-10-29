@@ -556,6 +556,18 @@ in {
           modules/wifi.nix network list into it.
         '';
       };
+
+      mullvadSecretsFile = lib.mkOption {
+        type = lib.types.nullOr lib.types.path;
+        default = null;
+        description = ''
+          Path to the encrypted mullvad.yaml file in your hydrix-config repo: one key per
+          network in hydrix.router.vpn.mullvad.networks, the WireGuard conf text as its value.
+          Set this in your machine config: hydrix.secrets.mullvadSecretsFile = ../secrets/mullvad.yaml;
+          and add "mullvad" to the router's secrets. setup-mullvad-secrets creates it from
+          conf files.
+        '';
+      };
     };
 
     # =========================================================================

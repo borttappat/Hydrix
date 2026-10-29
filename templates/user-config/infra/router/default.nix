@@ -6,6 +6,13 @@
 # router-stats-server. hydrix.router.polling.{enableNetStats,enableWgStatus}
 # turn either piece off.
 { pkgs, ... }: {
+  # Run on the router for each Mullvad conf from secrets/mullvad.yaml (stdin to
+  # stdout): Table = off for the per-network policy routing, IPv4 address only
+  # (the router has no IPv6), no DNS (dnsmasq and the in-tunnel resolver).
+  hydrix.router.vpn.mullvad.processScript = ''
+    sed -e '/^\[Interface\]/a Table = off' -e '/^Address/s/,.*$//' -e '/^DNS/d'
+  '';
+
   hydrix.router.microvm = {
     # Extra packages available inside the router VM
     # extraPackages = [ pkgs.tcpdump pkgs.mtr ];

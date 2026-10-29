@@ -1,42 +1,52 @@
 # Mullvad VPN Configuration
 #
 # Each profile VM can route through a different Mullvad exit node.
-# The router VM manages all WireGuard tunnels and per-bridge routing.
+# The router VM manages all WireGuard tunnels and per-network routing.
+#
+# Only the network names live here. The .conf files hold private keys, so they
+# never enter the Nix store (every VM sharing the host store could read them):
+# they live in secrets/mullvad.yaml (sops), one key per network, the conf text
+# as its value, delivered to the router at boot.
 #
 # SETUP:
 #   1. Log into https://mullvad.net -> Account -> WireGuard configuration
-#   2. Select a country/city/server -> download the .conf file
-#   3. Place downloaded files in ~/hydrix-config/vpn/:
-#        vpn/mullvad-browsing.conf   <- exit node for browsing VM
-#        vpn/mullvad-pentest.conf    <- exit node for pentest VM
-#        vpn/mullvad-comms.conf      <- exit node for comms VM
-#   4. Uncomment the bridges below, mapping each to its .conf file
-#   5. Set enable = true
-#   6. Rebuild the router:
-#        shard build microvm-router && shard restart microvm-router
+#   2. Select a country/city/server -> download one .conf per network
+#   3. Put the confs in secrets/mullvad.yaml:
+#        sops secrets/mullvad.yaml
+#          browsing: |
+#            # Server: se-got-wg-001
+#            [Interface]
+#            PrivateKey = ...
+#      (setup-mullvad-secrets does this from conf files and a bridges map, then
+#      delete the plaintext confs)
+#   4. List the networks below and set enable = true
+#   5. In machines/<serial>.nix:
+#        hydrix.secrets.mullvadSecretsFile = ../secrets/mullvad.yaml;
+#        and "mullvad" in hydrix.microvmHost.byName.router.secrets
+#   6. rebuild, then shard -bR router
 #
-# Each bridge can use a DIFFERENT exit node (different country/server per VM).
-# Download one .conf per VM from Mullvad — they can share the same key pair.
-# Table = off, IPv6, and DNS lines are automatically stripped at build time
-# (configured via hydrix.router.vpn.mullvad.processConfig in infra/router/).
+# Each network can use a DIFFERENT exit node (different country/server per VM).
+# Table = off, IPv6 and DNS lines are stripped on the router at boot
+# (hydrix.router.vpn.mullvad.processScript in infra/router/). A "# Server:"
+# line names the exit node in the exit-nodes widget.
 #
 # RUNTIME MANAGEMENT (from router console, no rebuild needed):
-#   vpn-assign status                       # Show all bridge assignments
+#   vpn-assign status                       # Show all network assignments
 #   vpn-assign browsing direct              # Bypass VPN for browsing VM
 #   vpn-assign browsing wg-browsing         # Re-enable VPN for browsing VM
-#   vpn-assign --persistent pentest direct  # Persist across reboots
+#   vpn-assign browsing blocked             # Kill switch
+# Runtime assignments last until the router restarts; networks below are the boot default.
 #   vpn-assign list-mullvad                 # List configured exit nodes
 #
-# Valid bridge names match your profile names: browsing, pentest, comms, dev, lurking
-# Bridges omitted from the map go direct (no VPN, no kill switch).
+# Valid network names match your profile names: browsing, pentest, comms, dev, lurking
+# Networks not listed go direct (no VPN, no kill switch). A listed network whose
+# conf is missing stays blocked.
 {
   enable = false;
 
-  bridges = {
-    # browsing = ./mullvad-browsing.conf;
-    # pentest  = ./mullvad-pentest.conf;
-    # comms    = ./mullvad-comms.conf;
-    # lurking  = ./mullvad-lurking.conf;
-    # dev      = ./mullvad-dev.conf;
-  };
+  networks = [
+    # "browsing"
+    # "pentest"
+    # "comms"
+  ];
 }

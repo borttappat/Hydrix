@@ -120,9 +120,11 @@
 
       # ─── Mullvad VPN (optional) ────────────────────────────────────────
       # 1. mullvad.net -> Account -> WireGuard config -> select server -> download .conf
-      # 2. Place downloaded files in ~/hydrix-config/vpn/
-      # 3. Edit vpn/mullvad.nix: map bridges to .conf files, set enable = true
-      # 4. Rebuild the router: shard build microvm-router && shard restart microvm-router
+      # 2. sops secrets/mullvad.yaml: one key per network, the conf text as its value
+      #    (never the Nix store: the confs hold private keys)
+      # 3. vpn/mullvad.nix: enable = true; networks = [ ... ];
+      #    secrets.mullvadSecretsFile = ../secrets/mullvad.yaml; and "mullvad" in byName.router.secrets
+      # 4. rebuild, then shard -bR router
 
     # ─────────────────────────────────────────────────────────────────────
     # WEBCAM PASSTHROUGH (optional)

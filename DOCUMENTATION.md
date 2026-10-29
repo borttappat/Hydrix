@@ -2834,7 +2834,7 @@ hydrix.microvmHost.byName.myprofile = { autostart = false; };
 
 3. If the profile needs a Mullvad VPN tunnel, add to `machines/<serial>.nix` (or `modules/graphical.nix`):
 ```nix
-hydrix.router.vpn.mullvad.bridges.myprofile = ./mullvad-myprofile.conf;
+hydrix.router.vpn.mullvad.networks = [ "myprofile" ];   # conf as key myprofile in secrets/mullvad.yaml
 ```
 
 4. Rebuild in order - router and files VM have their TAP interfaces baked into the QEMU runner at build time, so they need a full restart to pick up the new bridge:
@@ -3670,45 +3670,56 @@ Each VM bridge can route through a separate Mullvad WireGuard exit node. The rou
 
 ### Setup
 
-1. **Download .conf files**  - mullvad.net -> Account -> WireGuard configuration -> select server -> download. One file per VM that needs VPN:
-   ```
-   ~/hydrix-config/vpn/mullvad-browsing.conf
-   ~/hydrix-config/vpn/mullvad-pentest.conf
-   ~/hydrix-config/vpn/mullvad-comms.conf
-   ```
+The conf files hold WireGuard private keys, so they never enter the Nix store (every VM
+that shares the host store could read them). Only the network names are Nix config; the
+confs live in `secrets/mullvad.yaml` (sops), are decrypted on the host and reach the router
+through its secrets share, like WiFi credentials.
+
+1. **Download .conf files**  - mullvad.net -> Account -> WireGuard configuration -> select server -> download. One file per VM that needs VPN.
    Multiple VMs can share the same Mullvad key pair \- just download separate .conf files pointing to different (or the same) servers.
 
-2. **Create `vpn/mullvad.nix`**. copy from the provided example:
+2. **Put them in `secrets/mullvad.yaml`**, one key per network, the conf text as its value:
    ```bash
-   cp ~/hydrix-config/vpn/mullvad.nix.example ~/hydrix-config/vpn/mullvad.nix
+   sops ~/hydrix-config/secrets/mullvad.yaml
    ```
-   Then edit it to map bridge names to conf files:
+   ```yaml
+   browsing: |
+     # Server: se-got-wg-001
+     [Interface]
+     PrivateKey = ...
+   ```
+   The `# Server:` line names the exit node in the exit-nodes widget. `setup-mullvad-secrets`
+   builds the file from conf files mapped in an old `bridges = { ... };` block (adding the
+   `# Server:` line from each file name). Delete the plaintext confs afterwards.
+
+3. **List the networks in `vpn/mullvad.nix`**:
    ```nix
    {
      enable = true;
-     bridges = {
-       browsing = ./mullvad-browsing.conf;
-       pentest  = ./mullvad-pentest.conf;
-       comms    = ./mullvad-comms.conf;
-     };
+     networks = [ "browsing" "pentest" "comms" ];
    }
    ```
-   Bridges omitted from the map go direct (no VPN, no kill switch).
+   Networks not listed go direct (no VPN, no kill switch). A listed network whose conf is
+   missing stays blocked.
 
-3. **Wire into machine config** - uncomment in `machines/<serial>.nix`:
+4. **Wire into machine config** (`machines/<serial>.nix`):
    ```nix
    router.vpn.mullvad = import ../vpn/mullvad.nix;
+   secrets.mullvadSecretsFile = ../secrets/mullvad.yaml;
+   microvmHost.byName.router.secrets = [ "wifi" "mullvad" ];
    ```
-   The flake also auto-includes `vpn/mullvad.nix` if it exists \- no manual wiring needed if you use the flake template as-is.
+   The flake also auto-includes `vpn/mullvad.nix` in the router build if it exists.
 
-4. **Rebuild the router:**
-   ```bash
-   shard build router && shard restart router
-   ```
+5. **Rebuild**: `rebuild`, then `shard -bR router`.
+
+At boot, `hydrix-mullvad-from-sops` on the router runs each conf through
+`hydrix.router.vpn.mullvad.processScript` (a shell filter, conf on stdin, result on stdout,
+the network in `$NETWORK`; the template's `infra/router/default.nix` adds `Table = off` and
+strips IPv6 and DNS) into `/etc/wireguard/wg-<network>.conf` on the router's tmpfs root.
 
 ### How It Works
 
-At router boot, `vpn-boot-assign` brings up a `wg-<bridge>` WireGuard interface for each entry in the bridges map and routes that bridge's traffic through it. Bridges not in the map go direct. The router uses policy routing (one table per subnet, table ID = CID) so each bridge is fully isolated, a browsing VM and a pentest VM can exit through different countries simultaneously.
+At router boot, `vpn-boot-assign` brings up a `wg-<network>` WireGuard interface for each entry in `networks` and routes that network's traffic through it. Networks not listed go direct. The router uses policy routing (one table per subnet, table ID = CID) so each bridge is fully isolated, a browsing VM and a pentest VM can exit through different countries simultaneously.
 
 **Fail closed.** `vpn-policy-init` installs every network's table before any interface comes up, each ending in an `unreachable` default. A network only reaches the WAN when its table says so:
 
@@ -3723,9 +3734,9 @@ Mullvad networks stay blocked from boot until their tunnel is up, and a tunnel t
 
 **DNS follows the traffic.** VMs use the router (`.253`) as their resolver. For tunnelled and blocked networks the router DNATs those queries to the in-tunnel resolver (`hydrix.router.vpn.mullvad.dns`, default Mullvad's `10.64.0.1`), so lookups leave through the same tunnel as the traffic, or not at all while blocked. Direct networks use the router's own resolver. `vpn-assign` keeps this redirect in step with every reassignment.
 
-The `Table = off`, IPv6, and DNS lines are automatically stripped from downloaded `.conf` files at build time so they don't interfere with the router's own routing.
+The `Table = off`, IPv6 and DNS changes the router needs are made on the router at boot by `processScript` (see Setup), so downloaded `.conf` files go into `secrets/mullvad.yaml` unchanged.
 
-New profiles are handled automatically: add the bridge entry to `mullvad.nix` and rebuild the router, no other changes needed.
+New profiles are handled automatically: add the network to `networks`, its conf to `secrets/mullvad.yaml`, then `rebuild` and `shard -bR router`.
 
 ### Runtime Management
 
@@ -3741,8 +3752,8 @@ vpn-assign list-mullvad                     # List configured exit nodes
 
 ### Adding a New VM to VPN
 
-1. Download a `.conf` file for the new VM: `vpn/mullvad-myvm.conf`
-2. Add `myvm = ./mullvad-myvm.conf;` to the `bridges` map in `vpn/mullvad.nix`
+1. Download a `.conf` file for the new VM and add it as key `myvm` in `secrets/mullvad.yaml` (`sops secrets/mullvad.yaml`), then delete the download
+2. Add `"myvm"` to `networks` in `vpn/mullvad.nix`
 3. Rebuild the router: `shard build router && shard restart router`
 
 ---
@@ -4534,7 +4545,7 @@ The script scans existing profiles for the next free CID (starts at 107), prompt
 
 1. Declare in `machines/<serial>.nix` (optional, only for non-default settings): `hydrix.microvmHost.byName.myprofile = { autostart = false; };`
 2. Customise `profiles/myprofile/default.nix` ,colorscheme, RAM/vCPUs, packages
-3. Add VPN if needed: `hydrix.router.vpn.mullvad.bridges.myprofile = ./conf;`
+3. Add VPN if needed: `"myprofile"` in `hydrix.router.vpn.mullvad.networks`, its conf as key `myprofile` in `secrets/mullvad.yaml`
 4. Rebuild in order (router and files VM have TAPs baked into their QEMU runner):
 ```bash
 rebuild                       # creates bridge, updates tapLookupScript + vm-registry

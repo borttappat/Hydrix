@@ -150,6 +150,7 @@
     # ===== WIFI =====
     wifi-sync = "wifi-sync.sh";
     setup-wifi-secrets = "setup-wifi-secrets.sh";
+    setup-mullvad-secrets = "setup-mullvad-secrets.sh";
 
     # ===== SECRETS =====
     hydrix-sops-setup = "hydrix-sops-setup.sh";
