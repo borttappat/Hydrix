@@ -68,11 +68,12 @@ let meta = import ./meta.nix; in
   # =========================================================================
   # VPN ROUTING (optional)
   # =========================================================================
-  # VPN exit node assignment happens at runtime via the host.
-  # Requires: router.vpn.mullvad = import ../vpn/mullvad.nix; in machine config.
+  # A network exits through Mullvad when its name is in networks in vpn/mullvad.nix
+  # and its conf is in secrets/mullvad.yaml. At runtime, in the router console:
   #
-  #   vpn-assign __NAME__ mullvad-se     # Route via Sweden
-  #   vpn-assign __NAME__ none           # Direct (no VPN)
+  #   vpn-assign off __NAME__      # direct, bypassing the tunnel
+  #   vpn-assign on __NAME__       # back through wg-__NAME__
+  #   vpn-assign __NAME__ blocked  # kill switch
 
   # =========================================================================
   # EXTRA PACKAGES (optional — prefer packages.nix for larger sets)

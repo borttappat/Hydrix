@@ -72,13 +72,12 @@ in {
   # =========================================================================
   # VPN ROUTING
   # =========================================================================
-  # VPN exit node assignment happens at runtime via the host — not declarative here.
-  # Requires: router.vpn.mullvad = import ../vpn/mullvad.nix; in your machine config.
+  # A network exits through Mullvad when its name is in networks in vpn/mullvad.nix
+  # and its conf is in secrets/mullvad.yaml. At runtime, in the router console:
   #
-  #   vpn-assign browse mullvad-se                  # Route via Sweden
-  #   vpn-assign browse mullvad-ch                  # Route via Switzerland
-  #   vpn-assign --persistent browse mullvad-se     # Persist across reboots
-  #   vpn-assign browse none                        # Direct (no VPN)
+  #   vpn-assign off browsing      # direct, bypassing the tunnel
+  #   vpn-assign on browsing       # back through wg-browsing
+  #   vpn-assign browsing blocked  # kill switch
 
   # =========================================================================
   # EXTRA PACKAGES

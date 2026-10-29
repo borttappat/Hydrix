@@ -3746,9 +3746,12 @@ All commands run on the host (sent to router via vsock) or from the router conso
 vpn-status                                  # Show all bridge assignments and tunnel state
 vpn-assign browsing direct                  # Bypass VPN for browsing VM
 vpn-assign browsing wg-browsing             # Re-enable VPN
-vpn-assign --persistent pentest direct      # Persist assignment across reboots
+vpn-assign browsing blocked                 # Kill switch: no traffic
+vpn-assign dev wg-browsing                  # dev exits through browsing's tunnel
 vpn-assign list-mullvad                     # List configured exit nodes
 ```
+
+Assignments are runtime state and last until the router restarts. Each boot starts from `networks` again: listed networks through their own tunnel, every other network direct.
 
 ### Adding a New VM to VPN
 
@@ -4717,7 +4720,8 @@ The credential store is `secrets/wifi.yaml` (sops), created on the first save. S
 | Command | Purpose |
 |---------|---------|
 | `vpn-assign <bridge> <wg-bridge\|direct>` | Route bridge through tunnel or direct |
-| `vpn-assign --persistent <bridge> <target>` | Persist assignment across reboots |
+| `vpn-assign <bridge> blocked` | Kill switch |
+| `vpn-assign help` | All commands and examples |
 | `vpn-assign list-mullvad` | List configured exit nodes |
 | `vpn-status` | Show all bridge assignments and tunnel state |
 
