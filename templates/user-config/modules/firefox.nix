@@ -243,10 +243,10 @@ in
       description = "Theme vimium-ff link hints from wal colors, reloaded live.";
     };
     colors = {
-      bg     = strOpt "color3";
-      border = strOpt "color8";
-      text   = strOpt "color0";
-      match  = strOpt "color1";
+      bg     = strOpt "color0";
+      border = strOpt "color4";
+      text   = strOpt "foreground";
+      match  = strOpt "color4";
       active = strOpt "foreground";
     };
     opacity = lib.mkOption {
