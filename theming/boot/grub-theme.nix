@@ -25,6 +25,28 @@ let
   titleSize = builtins.floor (cfg.fontSize * 1.6);
   hintSize  = builtins.floor (cfg.fontSize * 0.75);
 
+  # Selection box: 4px accent border, corners of radius cfg.rounding. Every
+  # piece is cut from one (2s+1)px square so corners and edges line up; s
+  # grows past the border when the radius does, keeping the inner arc.
+  selBorder = 4;
+  selRadius = cfg.rounding;
+  selPiece  = lib.max selBorder selRadius;
+  selFull   = 2 * selPiece + 1;
+  selInner  = lib.max 0 (selRadius - selBorder);
+  # roundrectangle with a zero radius draws nothing.
+  rrect = x0: x1: r:
+    if r == 0
+    then "rectangle ${toString x0},${toString x0} ${toString x1},${toString x1}"
+    else "roundrectangle ${toString x0},${toString x0} ${toString x1},${toString x1} ${toString r},${toString r}";
+  selCrops = let
+    p = toString selPiece;
+    f = toString (selPiece + 1);
+  in {
+    nw = "${p}x${p}+0+0";    n = "1x${p}+${p}+0";    ne = "${p}x${p}+${f}+0";
+    w  = "${p}x1+0+${p}";                            e  = "${p}x1+${f}+${p}";
+    sw = "${p}x${p}+0+${f}"; s = "1x${p}+${p}+${f}"; se = "${p}x${p}+${f}+${f}";
+  };
+
   # Renders the colored parts of the theme (images, theme.txt) into $1, with
   # colors from the environment. Shared by the build below and by the runtime
   # wal override (runtime-colors.nix), so both always produce the same layout.
@@ -41,14 +63,22 @@ let
       magick -size 1920x1200 "xc:$BG" PNG24:"$dir/background.png"
     ''}
 
-    # ── Selection highlight (no alpha — GRUB PNG parser is limited) ────
+    # ── Selection highlight ────────────────────────────────────────────
+    # Center opaque; border pieces 8-bit RGBA (GRUB reads no palette PNGs)
+    # so the rounded corners blend over the background.
     magick -size 64x64 "xc:$BG" \
       -fill "$ACCENT" -draw "color 0,0 reset" \
       -evaluate multiply 0.3 \
       PNG24:"$dir/select_c.png"
-    for piece in n s w e nw ne sw se; do
-      magick -size 4x4 "xc:$ACCENT" PNG24:"$dir/select_$piece.png"
-    done
+    center=$(magick "$dir/select_c.png" -format '#%[hex:p{0,0}]' info:)
+    magick -size ${toString selFull}x${toString selFull} xc:none \
+      -fill "$ACCENT" -draw "${rrect 0 (selFull - 1) selRadius}" \
+      -fill "$center" -draw "${rrect selBorder (selFull - 1 - selBorder) selInner}" \
+      -depth 8 PNG32:"$dir/select_full.png"
+    ${lib.concatStrings (lib.mapAttrsToList (piece: geo: ''
+      magick "$dir/select_full.png" -crop ${geo} +repage -depth 8 PNG32:"$dir/select_${piece}.png"
+    '') selCrops)}
+    rm "$dir/select_full.png"
 
     # ── Terminal box (styles GRUB terminal/console between menus) ──────
     # Must be large enough to tile properly across the full screen
@@ -136,6 +166,22 @@ in {
       type    = lib.types.int;
       default = 18;
       description = "Base menu font size in px (title = 1.6x, hints = 0.75x)";
+    };
+
+    rounding = lib.mkOption {
+      type = lib.types.ints.unsigned;
+      default = let
+        scale = config.hydrix.graphical.scaling.hyprInternalScale;
+      in
+        builtins.floor (config.hydrix.graphical.scaling.computed.panelRadius
+          * (if scale == null then 1.0 else scale)
+          + 0.5);
+      defaultText = lib.literalExpression "scaling.computed.panelRadius * scaling.hyprInternalScale, rounded";
+      description = ''
+        Corner radius of the selected menu entry, matching the eww panels and
+        hyprlock by default. GRUB draws at the native resolution, so this is
+        in physical px. 0 = square corners.
+      '';
     };
 
     background = lib.mkOption {
