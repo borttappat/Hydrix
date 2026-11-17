@@ -42,7 +42,7 @@
 
   lanControlBin = pkgs.writeShellScriptBin "router-lan-control" ''
     set -euo pipefail
-    export PATH=${lib.makeBinPath (with pkgs; [iproute2 nftables gawk gnugrep coreutils jq])}
+    export PATH=${lib.makeBinPath (with pkgs; [iproute2 nftables gawk gnugrep gnused coreutils jq])}
 
     STATE_FILE="${stateDir}/lan-state.json"
     LOG_FILE="${stateDir}/lan-control.log"
