@@ -7,6 +7,7 @@
     runtimeInputs = with pkgs; [
       age
       jq
+      nix-output-monitor
       socat
       openssl
       python3
@@ -96,6 +97,9 @@
       # Falls back to the default names for fresh installs / pre-activation.
       ROUTER_NAME=$(jq -r '.routerVmName // "microvm-router"' /etc/hydrix/host-config.json 2>/dev/null || echo "microvm-router")
       STABLE_ROUTER_NAME=$(jq -r '.stableRouterVmName // "microvm-router-stable"' /etc/hydrix/host-config.json 2>/dev/null || echo "microvm-router-stable")
+      # Generations each VM keeps, current included (hydrix.microvmHost.keepGenerations; 0: all)
+      KEEP_GENERATIONS=$(jq -r '.keepGenerations // 10' /etc/hydrix/host-config.json 2>/dev/null || echo 10)
+      [[ "$KEEP_GENERATIONS" =~ ^[0-9]+$ ]] || KEEP_GENERATIONS=10
       GITSYNC_GIT_PORT=$(load_port gitsyncGit 14512)
       # Reserved for parity with the documented vsock port table (gitsync-status);
       # not queried directly by this script.
@@ -299,12 +303,13 @@
           return 0
       }
 
-      # Wait for builder vsock to be ready
+      # Wait for builder vsock to be ready (default: the host builder; a tier builder by CID)
       wait_for_builder() {
           local timeout="''${1:-60}"
+          local cid="''${2:-$BUILDER_CID}"
           local elapsed=0
 
-          while ! echo "PING" | timeout 2 vsock-cmd "''${BUILDER_CID}" "''${BUILDER_STATUS_PORT}" 2>/dev/null | grep -q "PONG"; do
+          while ! echo "PING" | timeout 2 vsock-cmd "$cid" "''${BUILDER_STATUS_PORT}" 2>/dev/null | grep -q "PONG"; do
               sleep 1
               elapsed=$((elapsed + 1))
               if [[ $elapsed -ge $timeout ]]; then
@@ -314,10 +319,319 @@
           return 0
       }
 
+      # Store tiers (hydrix.builder.storeTier): a VM whose registry entry has storeTier runs
+      # from /var/lib/hydrix/stores/<tier>, written only by the VM whose buildsTier matches.
+      # The host never reads a tier store; it only checks that a built path exists there.
+      readonly TIER_STORES="/var/lib/hydrix/stores"
+      readonly TIER_VIEWS="/var/lib/hydrix/stores/views"
+      readonly HOST_CACHE="/var/lib/hydrix/caches/host"
+
+      # Registry field of the entry whose vmName matches (empty if unset)
+      registry_field() {
+          local vm_name="$1" field="$2"
+          [[ -f "$VM_REGISTRY" ]] || return 0
+          jq -r --arg v "$vm_name" --arg f "$field" \
+              'to_entries[] | select(.value.vmName == $v) | .value[$f] // empty' \
+              "$VM_REGISTRY" 2>/dev/null | head -1
+      }
+
+      vm_store_tier() { registry_field "$1" storeTier; }
+
+      # What the host builds for a VM: its runner, or for a tier VM the runner plus the
+      # kernel outputs (system.build.tierHost, microvm-profile-base.nix).
+      vm_build_attr() {
+          if [[ -n "$(vm_store_tier "$1")" ]]; then
+              echo "config.system.build.tierHost"
+          else
+              echo "config.microvm.declaredRunner"
+          fi
+      }
+
+      tier_builder() {
+          [[ -f "$VM_REGISTRY" ]] || return 0
+          jq -r --arg t "$1" 'to_entries[] | select(.value.buildsTier == $t) | .value.vmName' \
+              "$VM_REGISTRY" 2>/dev/null | head -1
+      }
+
+      # Send a build request ("BUILD <flake attr>", or "BUILDDRV <name> <drv>" to a tier
+      # builder) to a builder VM and render its progress with nom, as nh does;
+      # fails unless the builder ends with DONE. The builder streams Nix internal-json, which
+      # is untrusted: nix-log-sanitize strips control characters from it before nom or the
+      # log see it. nom reads each .drv from the host store: the host builder writes them
+      # there, and for a tier build cache_export_tier has instantiated the same graph on the
+      # host. The log replays with: nom --json < ~/.local/state/hydrix/last-build.log
+      builder_send_build() {
+          local cid="$1" request="$2" rc=0 sp sock_rc=0 interrupted=0
+          local state="''${XDG_STATE_HOME:-$HOME/.local/state}/hydrix"
+          local build_log="$state/last-build.log" raw="$state/last-build.raw" err="$state/last-build.socat"
+          mkdir -p "$state"
+          : > "$raw"
+          # The connection drains into a file at full speed, never straight into the display.
+          # In internal-json mode Nix sends bursts of small progress events once builds start;
+          # piped into the display, back-pressure dropped the vsock connection (host socat
+          # exit 1, the builder's write: Broken pipe). The display follows the file instead.
+          # shut-none: the end of our input must not reach the builder. Its listener runs
+          # with -t600, which would kill the build 600s after it saw that EOF. -T: an hour
+          # without output still ends a hung build.
+          { echo "$request"; sleep 1; } \
+              | socat -t86400 -T3600 - "VSOCK-CONNECT:''${cid}:''${BUILDER_BUILD_PORT},shut-none" \
+                  > "$raw" 2> "$err" &
+          sp=$!
+          # Ctrl+C ends the display; this also ends the connection, so the build fails cleanly
+          # and the caller still stops its builder.
+          trap 'kill "$sp" 2>/dev/null; interrupted=1' INT
+          # tee -p keeps writing the log if nom exits, so the display cannot end the build.
+          tail -n +1 -f --pid="$sp" "$raw" \
+              | python3 -u ${./lib/nix-log-sanitize.py} \
+              | tee -p "$build_log" \
+              | nom --json
+          wait "$sp" || sock_rc=$?
+          trap - INT
+          rm -f "$raw"
+          if [[ $interrupted -eq 1 ]]; then
+              log_error "Interrupted"
+              rc=130
+          elif grep -q "^ERROR" "$build_log"; then
+              rc=1
+          elif ! grep -q "^DONE" "$build_log"; then
+              rc=1
+              log_error "The builder's output ended without DONE or ERROR (socat exit ''${sock_rc})"
+              [[ -s "$err" ]] && head -n 5 "$err" | LC_ALL=C tr -d '\000-\010\013-\037\177'
+          fi
+          if [[ $rc -ne 0 ]]; then
+              log "Full build output: ''${build_log} (replay: nom --json < ''${build_log})"
+          fi
+          return "$rc"
+      }
+
+      # Build a tier VM. The host builds what it owns first (runner and kernel, tierHost),
+      # exports what the tier system shares with the host store to the host cache, then the
+      # tier builder builds the system from that cache. current moves only at the end, so a
+      # failed step leaves the VM on its previous build.
+      cmd_tier_build() {
+          local vm_name="$1" tier="$2"
+          local builder
+          builder=$(tier_builder "$tier")
+          if [[ -z "$builder" ]]; then
+              log_error "No builder owns store tier ''${tier} (buildsTier in an infra meta.nix)"
+              return 1
+          fi
+          if [[ ! -e "/var/lib/microvms/''${builder}/current" ]]; then
+              log_error "''${builder} is not built yet: shard -b ''${builder}"
+              return 1
+          fi
+
+          local start
+          start=$(timer_start)
+
+          # One host evaluation gives all three paths: the host part (tierHost: runner and
+          # kernel), the tier system and its recipe. tierSystem links the system and its
+          # closure registration (microvm-profile-base.nix); it is built (never substituted)
+          # after its whole closure is in the tier store. The host evaluates: the tier builder
+          # never sees the flake, only the exported recipes.
+          local attr="nixosConfigurations.''${vm_name}.config.system.build.tierSystem"
+          local host_part tier_system drv paths
+          log "Evaluating ''${BOLD}''${vm_name}''${NC}..."
+          if ! paths=$(nix eval --raw "''${FLAKE_DIR}#nixosConfigurations.''${vm_name}.config.system.build" \
+                  --apply 'b: b.tierHost.outPath + " " + b.tierSystem.outPath + " " + b.tierSystem.drvPath'); then
+              log_error "Evaluation failed"
+              return 1
+          fi
+          read -r host_part tier_system drv <<< "$paths"
+
+          # The runner changes only with the kernel, initrd or QEMU settings: when this exact
+          # host part is already in the host store, the host builder is not started at all.
+          log "''${BOLD}[1/4]''${NC} Host part of ''${vm_name}: runner and kernel"
+          if nix path-info "$host_part" &>/dev/null; then
+              log "Unchanged, already built: ''${host_part}"
+              vm_link "$vm_name" tier-host "$host_part"
+          else
+              _HYDRIX_TIER_FLOW=1 cmd_build "$vm_name" || return 1
+          fi
+          local runner
+          runner=$(readlink -f "/var/lib/microvms/''${vm_name}/tier-host/runner")
+          if [[ ! -x "$runner/bin/microvm-run" ]]; then
+              log_error "Host part has no runner: /var/lib/microvms/''${vm_name}/tier-host"
+              return 1
+          fi
+
+          local tier_path="''${TIER_STORES}/''${tier}''${tier_system}"
+
+          if [[ -d "$tier_path" && ! -L "$tier_path" ]]; then
+              log "''${BOLD}[2/4]''${NC} Skipped: the system is already in the ''${tier} store"
+              log "''${BOLD}[3/4]''${NC} Skipped"
+          else
+              log "''${BOLD}[2/4]''${NC} Exporting what the host already has to the host cache"
+              cache_export_tier "$vm_name" "$drv" || return 1
+
+              log "''${BOLD}[3/4]''${NC} Building the system in the ''${tier} store (''${builder})"
+              local cid started=0 rc=0 step
+              step=$(timer_start)
+              cid=$(get_cid "$builder")
+              if ! is_running "$builder"; then
+                  cmd_start "$builder" || return 1
+                  started=1
+              fi
+              log "Waiting for ''${builder}..."
+              if ! wait_for_builder 90 "$cid"; then
+                  log_error "Timeout waiting for ''${builder}"
+                  rc=1
+              else
+                  builder_send_build "$cid" "BUILDDRV ''${vm_name} ''${drv}" || rc=1
+              fi
+              [[ $started -eq 1 ]] && { cmd_stop "$builder" || true; }
+              if [[ $rc -ne 0 ]]; then
+                  log_error "Tier build failed; ''${vm_name} keeps its previous build"
+                  return 1
+              fi
+              if [[ ! -d "$tier_path" || -L "$tier_path" ]]; then
+                  log_error "Built system is missing from the ''${tier} store: ''${tier_path}"
+                  return 1
+              fi
+              log_time "System built in ''${BOLD}$(timer_end "$step")s''${NC}"
+          fi
+
+          log "''${BOLD}[4/4]''${NC} Store view, runner and app list"
+          # The view gets the new closure before current and tier-system move, so the recorded
+          # build always has a complete view (start's exact sync reads tier-system).
+          tier_view_sync "$vm_name" add "$tier_system" || return 1
+          vm_link "$vm_name" current "$runner"
+          # cmd_switch finds the system and its registration through this (tier store path).
+          printf '%s\n' "$tier_system" | sudo install -m 644 /dev/stdin "/var/lib/microvms/''${vm_name}/tier-system"
+          tier_write_apps "$vm_name" "$tier" "$tier_system"
+          gen_record "$vm_name" "$host_part" "$tier_system"
+          root_flake_inputs
+          log_success "Build complete in ''${BOLD}$(timer_end "$start")s''${NC}: $runner"
+          echo ""
+          build_apply_hint "$vm_name"
+      }
+
+      # Copy store paths and their closures into the host cache. Unsigned: tier builders read
+      # it read-only and trusted (?trusted=1, microvm-builder.nix); only host root writes it.
+      # --derivation first: copy .drv files with their recipe closures instead of outputs.
+      host_cache_copy() {
+          local copy_mode=()
+          [[ "''${1:-}" == --derivation ]] && { copy_mode=(--derivation); shift; }
+          if is_running "$BUILDER_NAME"; then
+              log_error "Stop ''${BUILDER_NAME} first (it holds the host store)"
+              return 1
+          fi
+          # A reader's Nix creates these when it opens the cache and drops the cache when it
+          # can't: the tier builders mount it read-only.
+          sudo install -d -m 755 "''${HOST_CACHE}"/{nar,realisations,log}
+          printf '%s\n' "$@" \
+              | sudo xargs -r nix copy "''${copy_mode[@]}" --to "file://''${HOST_CACHE}?compression=zstd"
+      }
+
+      # Export to the host cache what a tier VM's system can take from the host store instead
+      # of building. Walks the derivation graph from the top, as substitution does: where the
+      # host has every output a derivation is needed for, those outputs (with their closures)
+      # are exported and the walk stops there; otherwise it continues into that derivation's
+      # inputs. Nothing outside the VM's own graph reaches the cache.
+      # The recipes go too (the .drv closure, with the sources they reference): the tier builder
+      # builds from them and never evaluates the flake (BUILDDRV).
+      cache_export_tier() {
+          local vm_name="$1" drv="''${2:-}" paths=()
+          local attr="nixosConfigurations.''${vm_name}.config.system.build.tierSystem"
+          if [[ -z "$drv" ]]; then
+              drv=$(nix eval --raw "''${FLAKE_DIR}#''${attr}.drvPath") || return 1
+          fi
+          log "Exporting the build recipes of ''${vm_name}..."
+          host_cache_copy --derivation "$drv" || { log_error "Recipe export failed"; return 1; }
+          mapfile -t paths < <(nix derivation show -r "''${drv}^*" 2>/dev/null \
+              | python3 ${./lib/tier-export-walk.py} "$drv")
+          if [[ ''${#paths[@]} -eq 0 ]]; then
+              log "Nothing to export: the host has none of it"
+              return 0
+          fi
+          local before after step
+          step=$(timer_start)
+          before=$(sudo find "$HOST_CACHE" -maxdepth 1 -name '*.narinfo' | wc -l)
+          log "''${#paths[@]} paths shared with the host store, copying them with their closures..."
+          host_cache_copy "''${paths[@]}" || { log_error "Host cache export failed"; return 1; }
+          after=$(sudo find "$HOST_CACHE" -maxdepth 1 -name '*.narinfo' | wc -l)
+          log_time "Exported $((after - before)) new paths in ''${BOLD}$(timer_end "$step")s''${NC} (cache: $(sudo du -sh "$HOST_CACHE" | cut -f1))"
+      }
+
+      # Host binary cache, exported for tier builders (unsigned, read trusted and read-only).
+      # Only the host writes it; caches flow down, the host never substitutes from a tier.
+      cmd_cache() {
+          local sub="''${1:-help}"
+          [[ $# -gt 0 ]] && shift
+          case "$sub" in
+              export)
+                  local paths=() arg vm sys
+                  [[ $# -eq 0 ]] && set -- system
+                  for arg in "$@"; do
+                      case "$arg" in
+                          system)
+                              paths+=("$(readlink -f /run/current-system)")
+                              ;;
+                          /nix/store/*)
+                              paths+=("$arg")
+                              ;;
+                          *)
+                              vm=$(resolve_vm_name "$arg")
+                              if [[ -n "$(vm_store_tier "$vm")" ]]; then
+                                  cache_export_tier "$vm" || return 1
+                                  continue
+                              fi
+                              sys=$(readlink -f "/var/lib/microvms/''${vm}/current/share/microvm/system" 2>/dev/null || true)
+                              if [[ -z "$sys" ]]; then
+                                  log_error "''${vm} has no system in the host store (a tier VM, or not built)"
+                                  return 1
+                              fi
+                              paths+=("$sys")
+                              ;;
+                      esac
+                  done
+                  [[ ''${#paths[@]} -eq 0 ]] && return 0
+                  log "Exporting ''${#paths[@]} closure(s) to ''${HOST_CACHE}..."
+                  local start
+                  start=$(timer_start)
+                  host_cache_copy "''${paths[@]}" || return 1
+                  log_time "Exported in ''${BOLD}$(timer_end "$start")s''${NC}, cache: $(sudo du -sh "$HOST_CACHE" | cut -f1)"
+                  ;;
+              clear)
+                  sudo find "$HOST_CACHE" -mindepth 1 ! -name nix-cache-info -delete
+                  sudo install -d -m 755 "''${HOST_CACHE}"/{nar,realisations,log}
+                  log_success "Host cache cleared"
+                  ;;
+              status)
+                  echo "  Host cache: $(sudo du -sh "$HOST_CACHE" 2>/dev/null | cut -f1)"
+                  local d
+                  for d in "$TIER_STORES"/*/; do
+                      [[ -d "$d" ]] || continue
+                      echo "  Tier $(basename "$d"): $(sudo du -sh "$d" 2>/dev/null | cut -f1)"
+                  done
+                  ;;
+              *)
+                  echo "Usage: shard cache <export [system|<vm>|<store path>...]|clear|status>"
+                  echo "  export with no argument exports the host system closure."
+                  ;;
+          esac
+      }
+
+      # A microvm.nix runner (has bin/microvm-run), not some other build output.
+      is_microvm_runner() { [[ -x "$1/bin/microvm-run" ]]; }
+
+      # Point /var/lib/microvms/<vm>/<name> at a store path, recreating the directory
+      # structure tmpfiles would (needed after a purge).
+      vm_link() {
+          local vm_name="$1" name="$2" path="$3"
+          sudo mkdir -p "/var/lib/microvms/''${vm_name}/config"
+          sudo chown microvm:kvm "/var/lib/microvms/''${vm_name}"
+          sudo chown root:root "/var/lib/microvms/''${vm_name}/config"
+          sudo chmod 755 "/var/lib/microvms/''${vm_name}" "/var/lib/microvms/''${vm_name}/config"
+          sudo ln -sfn "$path" "/var/lib/microvms/''${vm_name}/''${name}"
+      }
+
       # Build microVM
       cmd_build() {
           local vm_name="$1"
           engagement_prompt "$vm_name" || return 1
+          # A VM built before generations existed keeps its current build as generation 1
+          gen_adopt "$vm_name"
 
           # Auto-provision the LUKS-encrypted home volume before building, if this VM
           # declares hydrix.microvm.encryption.enable and doesn't have one yet. Runs
@@ -343,10 +657,22 @@
               fi
           fi
 
-          # In lockdown mode, route through builder VM (skip if already inside builder flow)
+          # Tier VM: the system is built in its tier store first (cmd_tier_build), then
+          # the runner continues below.
+          local tier
+          tier=$(vm_store_tier "$vm_name")
+          if [[ -n "$tier" && "''${_HYDRIX_TIER_FLOW:-}" != "1" ]]; then
+              cmd_tier_build "$vm_name" "$tier"
+              return
+          fi
+
+          # In lockdown mode, route through builder VM (skip if already inside builder flow).
+          # The builder too: its existing build runs and builds the new one, since the host
+          # cannot fetch whatever a garbage collection took (sources, build tools). Only its
+          # very first build (no current yet) builds on the host.
           if [[ "''${_HYDRIX_BUILDER_FLOW:-}" != "1" ]] && \
              [[ "$(detect_current_specialisation)" == "lockdown" ]] && \
-             ! is_builder "$vm_name"; then
+             { ! is_builder "$vm_name" || [[ -e "/var/lib/microvms/''${vm_name}/current" ]]; }; then
               log "Lockdown mode, routing build through builder VM"
               cmd_builder_build "$vm_name"
               return
@@ -365,8 +691,13 @@
           local start
           start=$(timer_start)
 
+          # Lockdown: the host has no network, so never ask a substituter (an unreachable
+          # one fails the build). Everything comes from the store or builds locally.
+          local offline=()
+          [[ "$(detect_current_specialisation)" == "lockdown" ]] && offline=(--offline)
+
           local out_link="/tmp/''${vm_name}"
-          if ! nix build "''${FLAKE_DIR}#nixosConfigurations.''${vm_name}.config.microvm.declaredRunner" -o "$out_link" 2>&1; then
+          if ! nom build "''${offline[@]}" "''${FLAKE_DIR}#nixosConfigurations.''${vm_name}.$(vm_build_attr "$vm_name")" -o "$out_link"; then
               log_error "Build failed"
               return 1
           fi
@@ -375,23 +706,45 @@
           build_time=$(timer_end "$start")
           log_time "Build completed in ''${BOLD}''${build_time}s''${NC}"
 
-          # Update symlink - resolve to nix store path (systemd has PrivateTmp, can't see /tmp)
-          log "Updating symlink..."
+          # Resolve to the store path (systemd has PrivateTmp, can't see /tmp). The out-link is
+          # only a GC root until current or tier-host points at the build: dropped below, so
+          # /tmp keeps no roots that outlive the VM's own links (or its name).
           local store_path
           store_path=$(readlink -f "$out_link")
 
-          # Ensure directory structure exists with proper ownership
-          # (recreates what tmpfiles would do, needed after purge)
-          sudo mkdir -p "/var/lib/microvms/''${vm_name}/config"
-          sudo chown microvm:kvm "/var/lib/microvms/''${vm_name}"
-          sudo chown root:root "/var/lib/microvms/''${vm_name}/config"
-          sudo chmod 755 "/var/lib/microvms/''${vm_name}" "/var/lib/microvms/''${vm_name}/config"
-          sudo ln -sfn "$store_path" "/var/lib/microvms/''${vm_name}/current"
+          # Tier VM: its system is not built yet, so current stays; cmd_tier_build links it
+          # once the system is in the tier store. tier-host is a GC root for the kernel
+          # outputs (host/microvm/default.nix).
+          if [[ -n "$(vm_store_tier "$vm_name")" ]]; then
+              vm_link "$vm_name" tier-host "$store_path"
+              rm -f "$out_link" 2>/dev/null || true
+              log_success "Host part built: $store_path"
+              return 0
+          fi
+
+          # A host-store runner links its system (share/microvm/system); a tier runner does not
+          # (microvm-profile-base.nix). One without it here means the flake already puts this VM
+          # on a store tier but the host registry, which decides the route above, does not know
+          # yet: its system was never built, and linking the runner would leave a VM that
+          # cannot boot.
+          if is_microvm_runner "$store_path" && [[ ! -e "$store_path/share/microvm/system" ]]; then
+              log_error "''${vm_name} now runs from a store tier, but the host registry does not list it yet"
+              log "Run rebuild first (the registry comes from the host config), then: shard -b ''${vm_name}"
+              log "Nothing was linked; ''${vm_name} keeps its previous build."
+              return 1
+          fi
+
+          log "Updating symlink..."
+          vm_link "$vm_name" current "$store_path"
+          rm -f "$out_link" 2>/dev/null || true
+          gen_record "$vm_name" "$store_path"
+          root_flake_inputs
+          # Only tier VMs have one (cmd_tier_build); a VM moved off a tier reads its system again.
+          sudo rm -f "/var/lib/microvms/''${vm_name}/apps.tsv"
 
           log_success "Build complete: $store_path"
           echo ""
-          echo -e "  ''${DIM}To start:''${NC} shard start ''${vm_name}"
-          echo -e "  ''${DIM}To restart:''${NC} shard restart ''${vm_name}"
+          build_apply_hint "$vm_name"
       }
 
       # Start microVM
@@ -451,9 +804,689 @@
           return 0
       }
 
+      # A tier builder writes its tier store through a virtiofsd running as host root; the
+      # stores must be mounted nosuid,nodev first (hydrix-tier-stores-nosuid.service), or a
+      # builder could leave a working setuid file or device node on the host.
+      check_tier_stores() {
+          local vm_name="$1" opts
+          [[ -n "$(registry_field "$vm_name" buildsTier)" ]] || return 0
+          opts=",$(findmnt -no OPTIONS --target "$TIER_STORES" 2>/dev/null),"
+          if [[ "$opts" != *,nosuid,* || "$opts" != *,nodev,* ]]; then
+              log_error "''${TIER_STORES} is not mounted nosuid,nodev: not starting ''${vm_name}"
+              # restart: the unit stays active (RemainAfterExit), so start would do nothing.
+              log "Mount it with: sudo systemctl restart hydrix-tier-stores-nosuid"
+              return 1
+          fi
+      }
+
+      # A tier VM's store share is its own view, /var/lib/hydrix/stores/views/<vm>/nix/store:
+      # only its closure, hard-linked from the tier store (scripts/lib/tier-view.py), so it
+      # never sees another tier VM's packages, systems or recipes. "add" may run while the VM
+      # runs (nothing it booted with goes away); "exact" also drops what the closure no longer
+      # needs and runs only while the VM is stopped. The tier system defaults to the recorded
+      # last build; cmd_tier_build passes the new one before recording it.
+      tier_view_sync() {
+          local vm_name="$1" mode="$2" ts="''${3:-}" tier root reg out
+          tier=$(vm_store_tier "$vm_name")
+          [[ -n "$tier" ]] || return 0
+          root="''${TIER_STORES}/''${tier}"
+          [[ -n "$ts" ]] || ts=$(cat "/var/lib/microvms/''${vm_name}/tier-system" 2>/dev/null || true)
+          if [[ ! "$ts" =~ ^/nix/store/[a-z0-9]{32}-hydrix-tier-system$ ]]; then
+              log_error "''${vm_name} has no tier build yet: shard -b ''${vm_name}"
+              return 1
+          fi
+          reg=$(readlink "''${root}''${ts}/registration" 2>/dev/null || true)
+          if [[ -L "''${root}''${ts}" || ! "$reg" =~ ^/nix/store/[a-z0-9]{32}-closure-info$ ]]; then
+              log_error "No usable tier build for ''${vm_name} in the ''${tier} store: shard -b ''${vm_name}"
+              return 1
+          fi
+          if ! out=$(sudo ${pkgs.python3}/bin/python3 ${./lib/tier-view.py} \
+                  "$root" "''${TIER_VIEWS}/''${vm_name}/nix/store" "$reg" "$mode" 2>&1); then
+              log_error "Store view of ''${vm_name} failed:"
+              printf '%s\n' "$out" | tail -n 5 | LC_ALL=C tr -d '\000-\010\013-\037\177'
+              return 1
+          fi
+          log "Store view: $(printf '%s' "$out" | LC_ALL=C tr -d '\000-\010\013-\037\177')"
+      }
+
+      # The launcher reads a VM's .desktop entries from its system, which is not in the host
+      # store for a tier VM; tier-apps reads them from the tier store, which a tier builder
+      # writes, so it resolves every link inside it and checks each name and command.
+      tier_write_apps() {
+          local vm_name="$1" tier="$2" tier_system="$3" apps
+          if apps=$(python3 ${./lib/tier-apps.py} "''${TIER_STORES}/''${tier}" "$tier_system" "''${SUDO_USER:-$USER}"); then
+              printf '%s\n' "$apps" | sudo install -m 644 /dev/stdin "/var/lib/microvms/''${vm_name}/apps.tsv"
+              log "$(printf '%s\n' "$apps" | grep -c .) apps for the launcher"
+          else
+              log_warn "Could not list ''${vm_name}'s apps; the launcher will not show them"
+          fi
+      }
+
+      # GC roots for the flake inputs this host has fetched (lib/flake-input-roots.py): a
+      # lockdown host evaluates offline, so no garbage collection may take a source it
+      # cannot download again. Only fetched inputs: rooting all of flake.lock would fetch
+      # inputs evaluation never touches.
+      root_flake_inputs() {
+          [[ -f "''${FLAKE_DIR}/flake.lock" ]] || return 0
+          local out
+          if out=$(sudo ${pkgs.python3}/bin/python3 ${./lib/flake-input-roots.py} "${pkgs.nix}/bin" \
+                  "''${FLAKE_DIR}/flake.lock" /nix/var/nix/gcroots/hydrix-inputs 2>&1); then
+              log "$out"
+          else
+              log_warn "Could not root the flake inputs: $(printf '%s\n' "$out" | tail -n 1)"
+          fi
+      }
+
+      # After a build: a running VM keeps its system until it switches or restarts
+      build_apply_hint() {
+          local short
+          # shard -r applies it right after
+          [[ "''${_HYDRIX_APPLYING:-}" == 1 ]] && return 0
+          short=$(vm_short_name "$1")
+          if is_running "$1"; then
+              echo -e "  ''${DIM}''${short} still runs its previous system. Apply:''${NC} shard -w ''${short} (live) or shard -R ''${short} (restart)"
+          else
+              echo -e "  ''${DIM}To start:''${NC} shard -s ''${short}"
+          fi
+      }
+
+      # ===== Generations =====
+      # Every build that moves current is a generation: /var/lib/microvms/<vm>/generations/<N>/
+      # with host (the runner, or tier-host for a tier VM), system (tier VMs: the system's
+      # tier store path) and created. Each one is a GC root in the host store
+      # (/nix/var/nix/gcroots/microvm/gen-<vm>-<N>) and, for a tier VM, in its tier store
+      # (gcroots/hydrix/<vm>-gen<N>), so switching back needs no rebuild until it is purged.
+      # A running VM keeps its runner through booted and its system through its view
+      # (hardlinks), so only the generation current points at is never purged.
+      gen_dir() { echo "/var/lib/microvms/$1/generations"; }
+
+      gen_numbers() {
+          local d
+          d=$(gen_dir "$1")
+          [[ -d "$d" ]] || return 0
+          find "$d" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' 2>/dev/null \
+              | grep -E '^[0-9]+$' | sort -n || true
+      }
+
+      # The runner a generation boots: tier-host/runner for a tier build, else host itself
+      gen_runner() {
+          local g
+          g="$(gen_dir "$1")/$2"
+          if [[ -f "$g/system" ]]; then
+              readlink -f "$g/host/runner" 2>/dev/null || true
+          else
+              readlink -f "$g/host" 2>/dev/null || true
+          fi
+      }
+
+      gen_record() {
+          local vm_name="$1" host="$2" system="''${3:-}" created="''${4:-}" d last n tier
+          d=$(gen_dir "$vm_name")
+          last=$(gen_numbers "$vm_name" | tail -n 1)
+          if [[ -n "$last" && "$(readlink "$d/$last/host" 2>/dev/null || true)" == "$host" \
+                && "$(cat "$d/$last/system" 2>/dev/null || true)" == "$system" ]]; then
+              return 0
+          fi
+          n=$(( ''${last:-0} + 1 ))
+          sudo install -d -m 755 "$d/$n"
+          sudo ln -sfn "$host" "$d/$n/host"
+          if [[ -n "$system" ]]; then
+              printf '%s\n' "$system" | sudo install -m 644 /dev/stdin "$d/$n/system"
+          fi
+          [[ -n "$created" ]] || created=$(date '+%Y-%m-%d %H:%M')
+          printf '%s\n' "$created" | sudo install -m 644 /dev/stdin "$d/$n/created"
+          sudo ln -sfn "$d/$n/host" "/nix/var/nix/gcroots/microvm/gen-''${vm_name}-''${n}"
+          if [[ -n "$system" ]]; then
+              tier=$(vm_store_tier "$vm_name")
+              sudo install -d -m 755 "''${TIER_STORES}/''${tier}/nix/var/nix/gcroots/hydrix"
+              sudo ln -sfn "$system" "''${TIER_STORES}/''${tier}/nix/var/nix/gcroots/hydrix/''${vm_name}-gen''${n}"
+          fi
+          log "Recorded as generation ''${BOLD}''${n}''${NC} (shard -g list ''${vm_name})"
+          gen_prune "$vm_name"
+      }
+
+      # Remove one generation: its record and its GC roots (host store and, for a tier VM,
+      # its tier store). The space comes back at the next collection.
+      gen_drop() {
+          local vm_name="$1" n="$2" tier
+          tier=$(vm_store_tier "$vm_name")
+          sudo rm -f "/nix/var/nix/gcroots/microvm/gen-''${vm_name}-''${n}"
+          if [[ -n "$tier" ]]; then
+              sudo rm -f "''${TIER_STORES}/''${tier}/nix/var/nix/gcroots/hydrix/''${vm_name}-gen''${n}"
+          fi
+          sudo rm -rf -- "$(gen_dir "$vm_name")/''${n:?}"
+      }
+
+      # Drop the oldest generations beyond KEEP_GENERATIONS (current always stays): their
+      # records and GC roots only. The space comes back at the next collection.
+      gen_prune() {
+          local vm_name="$1" d current others drop=() a
+          [[ "$KEEP_GENERATIONS" -gt 0 ]] || return 0
+          d=$(gen_dir "$vm_name")
+          current=" $(gen_current "$vm_name" | tr '\n' ' ') $(gen_running "$vm_name") "
+          others=$(for a in $(gen_numbers "$vm_name"); do [[ "$current" == *" $a "* ]] || echo "$a"; done)
+          # current takes one of the kept places
+          local keep_others=$(( KEEP_GENERATIONS - 1 ))
+          # shellcheck disable=SC2207
+          drop=($(printf '%s\n' "$others" | grep . | head -n -"$keep_others" || true))
+          [[ ''${#drop[@]} -gt 0 ]] || return 0
+          for a in "''${drop[@]}"; do
+              gen_drop "$vm_name" "$a"
+          done
+          log "Dropped generation(s) ''${drop[*]} (keeping ''${KEEP_GENERATIONS}; space frees at the next shard -g gc)"
+      }
+
+      # A VM built before generations existed: its current build becomes generation 1.
+      gen_adopt() {
+          local vm_name="$1" dir="/var/lib/microvms/$1" host system=""
+          [[ -z "$(gen_numbers "$vm_name")" ]] || return 0
+          if [[ -n "$(vm_store_tier "$vm_name")" ]]; then
+              [[ -L "$dir/tier-host" && -f "$dir/tier-system" && -L "$dir/current" ]] || return 0
+              host=$(readlink "$dir/tier-host")
+              system=$(cat "$dir/tier-system")
+              # A VM just moved to a tier still has its host-store runner as current
+              [[ "$(readlink -f "$dir/current")" == "$(readlink -f "$host/runner")" ]] || return 0
+          else
+              [[ -L "$dir/current" ]] || return 0
+              host=$(readlink "$dir/current")
+          fi
+          [[ -e "$host" ]] || return 0
+          # Dated by when current was linked, not now
+          gen_record "$vm_name" "$host" "$system" \
+              "$(date -d "@$(stat -c %Y "$dir/current")" '+%Y-%m-%d %H:%M')"
+      }
+
+      # Generation numbers current points at (runner and, for a tier VM, system)
+      gen_current() {
+          local vm_name="$1" dir="/var/lib/microvms/$1" cur sys n
+          cur=$(readlink -f "$dir/current" 2>/dev/null || true)
+          sys=$(cat "$dir/tier-system" 2>/dev/null || true)
+          [[ -n "$(vm_store_tier "$vm_name")" ]] || sys=""
+          for n in $(gen_numbers "$vm_name"); do
+              [[ "$(gen_runner "$vm_name" "$n")" == "$cur" \
+                 && "$(cat "$(gen_dir "$vm_name")/$n/system" 2>/dev/null || true)" == "$sys" ]] && echo "$n"
+          done
+          return 0
+      }
+
+      # The registry key (browsing, pentest-task1, builder...) for a VM name, for examples
+      vm_short_name() {
+          local k
+          k=$(jq -r --arg v "$1" 'to_entries[] | select(.value.vmName == $v) | .key' "$VM_REGISTRY" 2>/dev/null | head -1)
+          echo "''${k:-$1}"
+      }
+
+      # A generation's NixOS system: from its tier store entry, or the runner's own link
+      gen_system() {
+          local vm_name="$1" n="$2" sys tier
+          sys=$(cat "$(gen_dir "$vm_name")/$n/system" 2>/dev/null || true)
+          if [[ -n "$sys" ]]; then
+              tier=$(vm_store_tier "$vm_name")
+              [[ -n "$tier" ]] && readlink "''${TIER_STORES}/''${tier}''${sys}/system" 2>/dev/null || true
+          else
+              readlink -f "$(gen_runner "$vm_name" "$n")/share/microvm/system" 2>/dev/null || true
+          fi
+      }
+
+      # The system the running VM has live (its /run/current-system, from the switch
+      # service). Untrusted reply: only a NixOS system store path is accepted.
+      vm_live_system() {
+          local cid reply live
+          is_running "$1" || return 0
+          cid=$(get_cid "$1")
+          [[ -n "$cid" ]] || return 0
+          reply=$(vsock_query "$cid" "$SWITCH_PORT" "STATUS" 3 5 2>/dev/null || true)
+          live=$(printf '%s\n' "$reply" | sed -n 's/^CURRENT //p' | head -n 1)
+          [[ "$live" =~ ^/nix/store/[a-z0-9]{32}-nixos-system-[A-Za-z0-9._-]+$ ]] && echo "$live"
+          return 0
+      }
+
+      # The generation the VM runs now: the one whose system the VM has live (the default
+      # wins when several share it). Without an answer from the VM, the one whose runner
+      # starts the running initrd. (booted can lag: microvm.nix sets it on a full start
+      # only, not when QEMU starts again after a reboot inside the VM.)
+      gen_running() {
+          local vm_name="$1" pid initrd n found="" current live
+          is_running "$vm_name" || return 0
+          current=" $(gen_current "$vm_name" | tr '\n' ' ')"
+          live=$(vm_live_system "$vm_name")
+          if [[ -n "$live" ]]; then
+              for n in $(gen_numbers "$vm_name" | sort -rn); do
+                  [[ "$(gen_system "$vm_name" "$n")" == "$live" ]] || continue
+                  if [[ "$current" == *" $n "* ]]; then
+                      echo "$n"
+                      return 0
+                  fi
+                  [[ -n "$found" ]] || found="$n"
+              done
+              [[ -z "$found" ]] || echo "$found"
+              return 0
+          fi
+          pid=$(systemctl show -p MainPID --value "microvm@''${vm_name}.service" 2>/dev/null || true)
+          [[ -n "$pid" && "$pid" != 0 && -r "/proc/$pid/cmdline" ]] || return 0
+          initrd=$(tr '\0' '\n' < "/proc/$pid/cmdline" | grep -A1 -x -- '-initrd' | tail -n 1 || true)
+          [[ "$initrd" =~ ^/nix/store/ ]] || return 0
+          for n in $(gen_numbers "$vm_name" | sort -rn); do
+              grep -qF -- "$initrd" "$(gen_runner "$vm_name" "$n")/bin/microvm-run" 2>/dev/null || continue
+              if [[ "$current" == *" $n "* ]]; then
+                  echo "$n"
+                  return 0
+              fi
+              [[ -n "$found" ]] || found="$n"
+          done
+          [[ -z "$found" ]] || echo "$found"
+      }
+
+      gen_list_one() {
+          local vm_name="$1" d nums n run sys running marks tier current
+          gen_adopt "$vm_name"
+          d=$(gen_dir "$vm_name")
+          nums=$(gen_numbers "$vm_name")
+          echo -e "''${BOLD}''${vm_name}''${NC}"
+          if [[ -z "$nums" ]]; then
+              echo "  no generations yet (recorded from the next shard -b)"
+              return 0
+          fi
+          tier=$(vm_store_tier "$vm_name")
+          current=" $(gen_current "$vm_name" | tr '\n' ' ')"
+          running=$(gen_running "$vm_name")
+          for n in $nums; do
+              run=$(gen_runner "$vm_name" "$n")
+              sys=$(cat "$d/$n/system" 2>/dev/null || true)
+              marks=""
+              [[ "$current" == *" $n "* ]] && marks+=" ''${GREEN}default''${NC}"
+              [[ "$n" == "$running" ]] && marks+=" ''${CYAN}running''${NC}"
+              [[ -e "$run" ]] || marks+=" ''${RED}runner collected''${NC}"
+              if [[ -n "$sys" && -n "$tier" && ! -d "''${TIER_STORES}/''${tier}''${sys}" ]]; then
+                  marks+=" ''${RED}system collected''${NC}"
+              fi
+              printf '  %4s  %s  runner %s' "$n" "$(cat "$d/$n/created" 2>/dev/null || echo '?')" \
+                  "$(basename "$run" | cut -c1-8)"
+              [[ -n "$sys" ]] && printf '  system %s' "$(basename "$sys" | cut -c1-8)"
+              echo -e "$marks"
+          done
+          if [[ $(printf '%s\n' "$nums" | grep -c .) -gt 1 ]]; then
+              echo -e "  ''${DIM}Switch: shard -g switch $(vm_short_name "$vm_name") <N|prev|latest>''${NC}"
+          fi
+      }
+
+      gen_list() {
+          if [[ -n "''${1:-}" ]]; then
+              gen_list_one "$1"
+              return
+          fi
+          local c vm any=0
+          for c in /var/lib/microvms/*/current; do
+              [[ -L "$c" ]] || continue
+              vm=$(basename "$(dirname "$c")")
+              gen_list_one "$vm"
+              any=1
+          done
+          [[ $any -eq 1 ]] || echo "No VM is built yet."
+      }
+
+      # Run a generation now, like booting an older entry on the host: current keeps the
+      # newest build, so every start that does not ask for one (autostart, shard -s, -R)
+      # boots the newest again. A reboot inside the VM only stops it (microvm@ restarts on
+      # failure only). With the running kernel and initrd the system switches live;
+      # otherwise (or when the VM is stopped) the generation boots once.
+      gen_switch() {
+          local vm_name="$1" n="''${2:-}" d nums short ref run sys tier latest
+          d=$(gen_dir "$vm_name")
+          gen_adopt "$vm_name"
+          nums=$(gen_numbers "$vm_name")
+          short=$(vm_short_name "$vm_name")
+          latest=$(gen_current "$vm_name" | tail -n 1)
+          case "$n" in
+              prev|previous)
+                  # The newest generation older than the one running (or the default)
+                  ref=$(gen_running "$vm_name")
+                  [[ -n "$ref" ]] || ref="$latest"
+                  n=$(for a in $nums; do
+                          if [[ -n "$ref" && "$a" -lt "$ref" ]]; then echo "$a"; fi
+                      done | tail -n 1)
+                  [[ -n "$n" ]] || { log_error "''${short} has no older generation"; return 1; }
+                  ;;
+              latest) n="$latest" ;;
+          esac
+          if [[ ! "$n" =~ ^[0-9]+$ || ! -d "$d/$n" ]]; then
+              [[ -n "$n" ]] && log_error "No generation ''${n} for ''${short}"
+              gen_list_one "$vm_name"
+              echo ""
+              echo "  shard -g switch ''${short} <N>       e.g. shard -g switch ''${short} $(printf '%s\n' "$nums" | head -n 1)"
+              echo "  shard -g switch ''${short} prev      the one before the running generation"
+              echo "  shard -g switch ''${short} latest    back to the newest (also: shard -R ''${short})"
+              return 1
+          fi
+          run=$(gen_runner "$vm_name" "$n")
+          if [[ ! -x "$run/bin/microvm-run" ]]; then
+              log_error "Generation ''${n}'s runner is no longer in the host store"
+              return 1
+          fi
+          sys=$(cat "$d/$n/system" 2>/dev/null || true)
+          tier=$(vm_store_tier "$vm_name")
+          if [[ -n "$tier" && -z "$sys" ]]; then
+              log_error "Generation ''${n} is from before ''${short} moved to the ''${tier} tier"
+              return 1
+          elif [[ -z "$tier" && -n "$sys" ]]; then
+              log_error "Generation ''${n} is a tier build; ''${short} is not on a store tier now"
+              return 1
+          fi
+
+          if is_running "$vm_name" && [[ -n "$(vm_live_system "$vm_name")" ]] \
+             && [[ "$(vm_live_system "$vm_name")" == "$(gen_system "$vm_name" "$n")" ]]; then
+              log "''${short} already runs generation ''${n}'s system: nothing to switch"
+              [[ "$n" == "$latest" ]] || log "Its next boot starts generation ''${latest}"
+              return 0
+          fi
+          if is_running "$vm_name" && gen_same_boot "$vm_name" "$run"; then
+              log "Same kernel and initrd as the running VM: switching live to generation ''${n}"
+              if [[ -n "$tier" ]]; then
+                  _HYDRIX_SWITCH_TIER_SYSTEM="$sys" cmd_switch "$vm_name" || return 1
+              else
+                  cmd_switch "$vm_name" "$(readlink -f "$run/share/microvm/system")" || return 1
+              fi
+          elif [[ "$n" == "$latest" ]]; then
+              log "Booting the newest generation (''${n})"
+              if is_running "$vm_name"; then cmd_restart "$vm_name"; else cmd_start "$vm_name"; fi
+              return
+          else
+              gen_boot_once "$vm_name" "$n" || return 1
+          fi
+          if [[ "$n" != "$latest" ]]; then
+              log_success "''${short} runs generation ''${n} until its next boot, which starts ''${latest} again"
+              echo -e "  ''${DIM}Back now: shard -g switch ''${short} latest''${NC}"
+          fi
+      }
+
+      # Boot a generation once: current and tier-system point at it while the VM starts,
+      # then back at the newest, so the next start boots the newest. The view gets the
+      # newest system back too (a later live switch to it needs no new view sync).
+      gen_boot_once() {
+          local vm_name="$1" n="$2" dir rc=0 latest_run latest_sys sys tier
+          dir="/var/lib/microvms/''${vm_name}"
+          tier=$(vm_store_tier "$vm_name")
+          latest_run=$(readlink "$dir/current")
+          latest_sys=$(cat "$dir/tier-system" 2>/dev/null || true)
+          sys=$(cat "$(gen_dir "$vm_name")/$n/system" 2>/dev/null || true)
+          log "Kernel or initrd differ (or the VM is stopped): booting generation ''${n} once"
+          if is_running "$vm_name"; then cmd_stop "$vm_name" || return 1; fi
+          vm_link "$vm_name" current "$(gen_runner "$vm_name" "$n")"
+          [[ -n "$tier" ]] && printf '%s\n' "$sys" | sudo install -m 644 /dev/stdin "$dir/tier-system"
+          # A subshell: whatever cmd_start does on failure, current goes back below
+          ( cmd_start "$vm_name" ) || rc=$?
+          vm_link "$vm_name" current "$latest_run"
+          if [[ -n "$tier" && -n "$latest_sys" ]]; then
+              printf '%s\n' "$latest_sys" | sudo install -m 644 /dev/stdin "$dir/tier-system"
+              tier_view_sync "$vm_name" add "$latest_sys" || true
+          fi
+          return $rc
+      }
+
+      # True when a runner starts the kernel and initrd the running VM was booted with
+      gen_same_boot() {
+          local vm_name="$1" runner="$2" pid args kernel initrd
+          pid=$(systemctl show -p MainPID --value "microvm@''${vm_name}.service" 2>/dev/null || true)
+          [[ -n "$pid" && "$pid" != 0 && -r "/proc/$pid/cmdline" ]] || return 1
+          args=$(tr '\0' '\n' < "/proc/$pid/cmdline")
+          kernel=$(printf '%s\n' "$args" | grep -A1 -x -- '-kernel' | tail -n 1 || true)
+          initrd=$(printf '%s\n' "$args" | grep -A1 -x -- '-initrd' | tail -n 1 || true)
+          [[ "$kernel" =~ ^/nix/store/ && "$initrd" =~ ^/nix/store/ ]] || return 1
+          grep -qF -- "$kernel" "$runner/bin/microvm-run" 2>/dev/null \
+              && grep -qF -- "$initrd" "$runner/bin/microvm-run" 2>/dev/null
+      }
+
+      # Free what purged generations held: the host store, then the tier store through its
+      # builder (the host never collects a tier store itself).
+      gen_collect() {
+          local tier="''${1:-}" out
+          if is_running "$BUILDER_NAME"; then
+              log_warn "''${BUILDER_NAME} holds the host store: host garbage collection skipped"
+          else
+              root_flake_inputs
+              log "Collecting garbage in the host store..."
+              if out=$(sudo nix-store --gc 2>&1); then
+                  log "$(printf '%s\n' "$out" | tail -n 1)"
+              else
+                  log_warn "Host garbage collection failed: $(printf '%s\n' "$out" | tail -n 1)"
+              fi
+          fi
+          [[ -n "$tier" ]] || return 0
+          gen_collect_tier "$tier"
+      }
+
+      gen_collect_tier() {
+          local tier="$1" builder cid started=0 rc=0
+          builder=$(tier_builder "$tier")
+          if [[ -z "$builder" || ! -e "/var/lib/microvms/''${builder}/current" ]]; then
+              log_warn "No built builder for the ''${tier} tier: its store was not collected"
+              return 0
+          fi
+          log "Collecting garbage in the ''${tier} store (''${builder})..."
+          cid=$(get_cid "$builder")
+          if ! is_running "$builder"; then
+              cmd_start "$builder" || return 1
+              started=1
+          fi
+          if ! wait_for_builder 90 "$cid"; then
+              log_error "Timeout waiting for ''${builder}"
+              rc=1
+          else
+              builder_send_build "$cid" "GC" || rc=1
+          fi
+          [[ $started -eq 1 ]] && { cmd_stop "$builder" || true; }
+          return $rc
+      }
+
+      # purge <vm> <N...|old> [--keep K] [--no-gc] [-f]
+      gen_purge() {
+          local vm_name="$1"
+          shift
+          local nogc=0 force=0 keep="" all=0 want=() a
+          while [[ $# -gt 0 ]]; do
+              case "$1" in
+                  --no-gc) nogc=1 ;;
+                  -f|--force) force=1 ;;
+                  --keep)
+                      keep="''${2:-}"
+                      [[ "$keep" =~ ^[0-9]+$ ]] || { log_error "--keep needs a number"; return 1; }
+                      shift
+                      ;;
+                  old) all=1 ;;
+                  *)
+                      [[ "$1" =~ ^[0-9]+$ ]] || { log_error "Not a generation number: $1"; return 1; }
+                      want+=("$1")
+                      ;;
+              esac
+              shift
+          done
+          gen_adopt "$vm_name"
+          local nums current d
+          nums=$(gen_numbers "$vm_name")
+          # The default (newest) and the one running stay
+          current=" $(gen_current "$vm_name" | tr '\n' ' ') $(gen_running "$vm_name") "
+          d=$(gen_dir "$vm_name")
+          if [[ $all -eq 0 && -z "$keep" && ''${#want[@]} -eq 0 ]]; then
+              log_error "Usage: shard -g purge <vm> <N...|old> [--keep K] [--no-gc] [-f]"
+              return 1
+          fi
+          # old or --keep K: every generation but current (and the K newest others)
+          local candidates=()
+          if [[ $all -eq 1 || -n "$keep" ]]; then
+              local others
+              others=$(for a in $nums; do [[ "$current" == *" $a "* ]] || echo "$a"; done)
+              [[ -n "$keep" && "$keep" -gt 0 ]] && others=$(printf '%s\n' "$others" | head -n -"$keep")
+              # shellcheck disable=SC2206
+              candidates=($others)
+          fi
+          for a in "''${want[@]}"; do
+              [[ -d "$d/$a" ]] || { log_error "No generation $a for ''${vm_name}"; return 1; }
+              if [[ "$current" == *" $a "* ]]; then
+                  log_error "Generation $a is the default or running one"
+                  return 1
+              fi
+              candidates+=("$a")
+          done
+          if [[ ''${#candidates[@]} -eq 0 ]]; then
+              log "Nothing to purge for ''${vm_name}"
+              return 0
+          fi
+          echo -e "Purge generations of ''${BOLD}''${vm_name}''${NC}: ''${candidates[*]}"
+          if [[ $force -eq 0 ]]; then
+              local confirm
+              read -rp "Type 'yes' to confirm: " confirm
+              [[ "$confirm" != "yes" ]] && { log "Aborted"; return 1; }
+          fi
+          local tier
+          tier=$(vm_store_tier "$vm_name")
+          for a in "''${candidates[@]}"; do
+              gen_drop "$vm_name" "$a"
+          done
+          log_success "Purged ''${#candidates[@]} generation(s) of ''${vm_name}"
+          [[ $nogc -eq 1 ]] && return 0
+          gen_collect "$tier"
+      }
+
+      # gc [vm ...] [-f]: every generation but the current one goes, for the named VMs or
+      # every built VM; then leftover roots in both stores, stopped tier VMs' views trimmed to
+      # their current system, and garbage collection in the host store and the tier stores.
+      gen_gc() {
+          local force=0 vms=() a v c t cur old plan=() tiers=() total=0
+          for a in "$@"; do
+              case "$a" in
+                  -f|--force) force=1 ;;
+                  *) vms+=("$(resolve_vm_name "$a")") ;;
+              esac
+          done
+          if [[ ''${#vms[@]} -eq 0 ]]; then
+              for c in /var/lib/microvms/*/current; do
+                  [[ -L "$c" ]] && vms+=("$(basename "$(dirname "$c")")")
+              done
+          fi
+          for v in "''${vms[@]}"; do
+              gen_adopt "$v"
+              cur=" $(gen_current "$v" | tr '\n' ' ')"
+              if [[ "$cur" == " " ]]; then
+                  [[ -n "$(gen_numbers "$v")" ]] && log_warn "$(vm_short_name "$v"): current is no recorded generation, its generations stay"
+                  continue
+              fi
+              # The one running stays too
+              cur="$cur$(gen_running "$v") "
+              old=$(for a in $(gen_numbers "$v"); do [[ "$cur" == *" $a "* ]] || echo "$a"; done | tr '\n' ' ')
+              old="''${old% }"
+              if [[ -n "$old" ]]; then
+                  plan+=("$v|$old")
+                  total=$(( total + $(wc -w <<< "$old") ))
+              fi
+              t=$(vm_store_tier "$v")
+              [[ -n "$t" && " ''${tiers[*]} " != *" $t "* ]] && tiers+=("$t")
+          done
+
+          if [[ $total -gt 0 ]]; then
+              echo -e "''${BOLD}Generations to drop''${NC} (all but the default and the running one):"
+              for a in "''${plan[@]}"; do
+                  echo "  $(vm_short_name "''${a%%|*}"): ''${a#*|}"
+              done
+              if [[ $force -eq 0 ]]; then
+                  local confirm
+                  read -rp "Type 'yes' to confirm: " confirm
+                  [[ "$confirm" != "yes" ]] && { log "Aborted"; return 1; }
+              fi
+              for a in "''${plan[@]}"; do
+                  for c in ''${a#*|}; do
+                      gen_drop "''${a%%|*}" "$c"
+                  done
+              done
+              log_success "Dropped $total generation(s)"
+          else
+              log "No old generations"
+          fi
+
+          # Leftover roots: generation roots whose generation is gone (also of deleted VMs),
+          # and a tier builder's own out-link per VM, which can hold a build no generation
+          # keeps (after a switch back). The current generation's root keeps the current build.
+          for c in /nix/var/nix/gcroots/microvm/gen-*; do
+              [[ -L "$c" ]] || continue
+              [[ -d "$(dirname "$(readlink "$c")")" ]] || sudo rm -f "$c"
+          done
+          local all_tiers
+          all_tiers=$(jq -r '[.[] | .buildsTier // empty] | unique | .[]' "$VM_REGISTRY" 2>/dev/null || true)
+          for t in $all_tiers; do
+              local roots="''${TIER_STORES}/''${t}/nix/var/nix/gcroots/hydrix" name
+              while IFS= read -r name; do
+                  [[ -n "$name" ]] || continue
+                  if [[ "$name" =~ ^(.+)-gen([0-9]+)$ ]]; then
+                      [[ -d "/var/lib/microvms/''${BASH_REMATCH[1]}/generations/''${BASH_REMATCH[2]}" ]] \
+                          || sudo rm -f "$roots/$name"
+                  elif [[ -n "$(gen_current "$name")" ]]; then
+                      sudo rm -f "$roots/$name"
+                  fi
+              done < <(sudo find "$roots" -mindepth 1 -maxdepth 1 -type l -printf '%f\n' 2>/dev/null || true)
+              [[ " ''${tiers[*]} " == *" $t "* ]] || tiers+=("$t")
+          done
+
+          # A stopped tier VM's view keeps only its current system (a running one is trimmed
+          # at its next start)
+          for v in "''${vms[@]}"; do
+              [[ -n "$(vm_store_tier "$v")" ]] || continue
+              is_running "$v" && continue
+              [[ -f "/var/lib/microvms/$v/tier-system" ]] || continue
+              tier_view_sync "$v" exact || true
+          done
+
+          gen_collect ""
+          for t in "''${tiers[@]}"; do
+              gen_collect_tier "$t" || true
+          done
+      }
+
+      cmd_generations() {
+          local action="''${1:-help}"
+          case "$action" in
+              list)
+                  if [[ -n "''${2:-}" ]]; then gen_list "$(resolve_vm_name "$2")"; else gen_list; fi
+                  ;;
+              switch)
+                  [[ -n "''${2:-}" ]] || { log_error "Usage: shard -g switch <vm> <N|prev|latest>"; return 1; }
+                  gen_switch "$(resolve_vm_name "$2")" "''${3:-}"
+                  ;;
+              gc)
+                  gen_gc "''${@:2}"
+                  ;;
+              purge)
+                  [[ -n "''${2:-}" ]] || { log_error "Usage: shard -g purge <vm> <N...|old> [--keep K] [--no-gc] [-f]"; return 1; }
+                  gen_purge "$(resolve_vm_name "$2")" "''${@:3}"
+                  ;;
+              *)
+                  echo -e "''${BOLD}shard -g''${NC} | ''${BOLD}shard generations''${NC} - A VM's builds"
+                  echo ""
+                  echo "  list [vm]                       Generations of one VM, or of every VM"
+                  echo "  switch <vm> <N|prev|latest>     Run generation N now: live when kernel and initrd"
+                  echo "                                  match the running VM, else booted once. The next"
+                  echo "                                  boot starts the default (newest) again; without N:"
+                  echo "                                  the list and examples"
+                  echo "  purge <vm> <N...|old> [-f]      Delete generations (never the current one), then"
+                  echo "        [--keep K] [--no-gc]      collect garbage in the host store and the VM's"
+                  echo "                                  tier store. old: every generation but current;"
+                  echo "                                  --keep K: also keep the K newest others"
+                  echo "  gc [vm ...] [-f]                Drop every generation but the current one (named"
+                  echo "                                  VMs, or all), leftover roots in both stores, stale"
+                  echo "                                  views; then collect the host and tier stores"
+                  echo ""
+                  echo "default: what every start boots (the newest build). running: what runs now."
+                  echo "Every shard -b that moves current records a generation in"
+                  echo "/var/lib/microvms/<vm>/generations/. Each is a GC root until purged, in the host"
+                  echo "store and, for a tier VM, in its tier store, so a switch back needs no rebuild."
+                  echo "Each VM keeps the newest ''${KEEP_GENERATIONS} (hydrix.microvmHost.keepGenerations,"
+                  echo "0: all); a build drops older ones, and their space frees at the next gc."
+                  ;;
+          esac
+      }
+
       cmd_start() {
           local vm_name="$1"
           engagement_prompt "$vm_name" || return 1
+          check_tier_stores "$vm_name" || return 1
 
           if is_running "$vm_name"; then
               log_error "''${vm_name} is already running"
@@ -479,6 +1512,7 @@
           fi
 
           ensure_unlocked "$vm_name" || return 1
+          tier_view_sync "$vm_name" exact || return 1
 
           log "Starting ''${BOLD}''${vm_name}''${NC} (CID: ''${cid})..."
           local start
@@ -743,6 +1777,17 @@
           local vm_name="$1"
           engagement_prompt "$vm_name" || return 1
 
+          # The host builder needs cmd_start/cmd_stop: they stop the host nix-daemon and
+          # remount the store read-write around it. A plain service restart skipped both.
+          if is_builder "$vm_name"; then
+              if is_running "$vm_name"; then
+                  cmd_stop "$vm_name" || return 1
+              fi
+              cmd_start "$vm_name"
+              return
+          fi
+
+          check_tier_stores "$vm_name" || return 1
           log "Restarting ''${BOLD}''${vm_name}''${NC}..."
           local start
           start=$(timer_start)
@@ -776,6 +1821,7 @@
           fi
 
           ensure_unlocked "$vm_name" || return 1
+          tier_view_sync "$vm_name" exact || return 1
 
           log "Starting service..."
           sudo systemctl start "microvm@''${vm_name}.service"
@@ -1667,6 +2713,38 @@
               return 1
           fi
 
+          # Tier VM: its system and closure registration are in the tier store, which the VM
+          # already sees through its store share (tierSystem links both, microvm-profile-base.nix).
+          # The registration is copied as is, never parsed here: it was written by the tier's
+          # builder and goes only to that tier's VM. The link targets are checked, and no
+          # directory on the way may be a symlink: root copies the file, so a link could point
+          # it at a host file.
+          local tier reg_src=""
+          tier=$(vm_store_tier "$vm_name")
+          if [[ -n "$tier" ]]; then
+              if [[ $explicit_path -eq 1 ]]; then
+                  log_error "''${vm_name} runs from a store tier: it switches to its last build (no path)"
+                  return 1
+              fi
+              local tier_root="''${TIER_STORES}/''${tier}" ts reg
+              # shard -g switch passes a generation's system; otherwise the latest build's
+              ts="''${_HYDRIX_SWITCH_TIER_SYSTEM:-}"
+              [[ -n "$ts" ]] || ts=$(cat "/var/lib/microvms/''${vm_name}/tier-system" 2>/dev/null || true)
+              path=$(readlink "''${tier_root}''${ts}/system" 2>/dev/null || true)
+              reg=$(readlink "''${tier_root}''${ts}/registration" 2>/dev/null || true)
+              reg_src="''${tier_root}''${reg}/registration"
+              if [[ ! "$ts" =~ ^/nix/store/[a-z0-9]{32}-hydrix-tier-system$ \
+                    || ! "$path" =~ ^/nix/store/[a-z0-9]{32}-nixos-system-[A-Za-z0-9._-]+$ \
+                    || ! "$reg" =~ ^/nix/store/[a-z0-9]{32}-closure-info$ \
+                    || -L "''${tier_root}''${ts}" || -L "''${tier_root}''${reg}" \
+                    || ! -f "$reg_src" || -L "$reg_src" ]]; then
+                  log_error "No usable tier build recorded for ''${vm_name}: shard -b ''${vm_name}"
+                  return 1
+              fi
+              # The running VM sees only its view: the new system goes in before the switch.
+              tier_view_sync "$vm_name" add "$ts" || return 1
+          fi
+
           local cid
           cid=$(get_cid "$vm_name")
           if [[ -z "$cid" ]]; then
@@ -1703,7 +2781,13 @@
           local reg_start
           reg_start=$(timer_start)
           local reg_output
-          if ! reg_output=$(nix-store -qR "$path" | xargs nix-store --dump-db | sudo tee "$reg_file" 2>&1 >/dev/null); then
+          if [[ -n "$reg_src" ]]; then
+              if ! reg_output=$(sudo install -m 644 "$reg_src" "$reg_file" 2>&1); then
+                  log_error "Failed to copy the tier registration for the VM"
+                  [[ -n "$reg_output" ]] && echo -e "''${DIM}''${reg_output}''${NC}"
+                  return 1
+              fi
+          elif ! reg_output=$(nix-store -qR "$path" | xargs nix-store --dump-db | sudo tee "$reg_file" 2>&1 >/dev/null); then
               log_error "Failed to register store paths for VM, home-manager activation may fail during switch"
               [[ -n "$reg_output" ]] && echo -e "''${DIM}''${reg_output}''${NC}"
               return 1
@@ -1982,7 +3066,7 @@
               *)
                   local vm_name
                   vm_name=$(resolve_vm_name "$target")
-                  echo "''${builder_flake}#nixosConfigurations.''${vm_name}.config.microvm.declaredRunner"
+                  echo "''${builder_flake}#nixosConfigurations.''${vm_name}.$(vm_build_attr "$vm_name")"
                   ;;
           esac
       }
@@ -2013,31 +3097,10 @@
               flake_target=$(resolve_builder_flake_attr "$target")
               log "Building ''${BOLD}''${target}''${NC}..."
 
-              # Stream build output live, tee to a log file for post-build error detection.
-              # $() command substitution would buffer everything until the build finishes;
-              # tee lets the while-read loop display each line as it arrives from the VM.
-              local build_log
-              build_log=$(mktemp)
-
-              { echo "BUILD $flake_target"; sleep 1; } \
-                  | socat -t600 -T900 - "VSOCK-CONNECT:''${BUILDER_CID}:''${BUILDER_BUILD_PORT}" \
-                  | LC_ALL=C tr -d '\000-\010\013-\037\177' \
-                  | tee "$build_log" \
-                  | while IFS= read -r line; do
-                      case "$line" in
-                          OK*)       log "$line" ;;
-                          RESULT\ *) log_success "Result: ''${BOLD}''${line#RESULT }''${NC}" ;;
-                          DONE*)     log_success "$line" ;;
-                          ERROR*)    log_error "$line" ;;
-                          *)         [[ -n "$line" ]] && echo "  $line" ;;
-                      esac
-                    done
-
-              if grep -q "^ERROR" "$build_log"; then
+              if ! builder_send_build "$BUILDER_CID" "BUILD $flake_target"; then
                   log_error "Build failed: ''${BOLD}''${target}''${NC}"
                   failed_targets+=("$target")
               fi
-              rm -f "$build_log"
           done
 
           # Step 3: Stop builder (restores host nix-daemon and read-only store)
@@ -2060,7 +3123,11 @@
                   log "Host config (specialisation: ''${BOLD}''${current_spec}''${NC})..."
                   local host_start
                   host_start=$(timer_start)
-                  if sudo --preserve-env=HYDRIX_BUILD_TIME,HYDRIX_BUILD_TAG nixos-rebuild build --flake "''${FLAKE_DIR}#$(detect_host_config)" --impure; then
+                  # --offline: lockdown has no network, so a path the builder did not produce
+                  # fails at once instead of retrying every substituter.
+                  local offline=()
+                  [[ "$current_spec" == "lockdown" ]] && offline=(--offline)
+                  if sudo --preserve-env=HYDRIX_BUILD_TIME,HYDRIX_BUILD_TAG nixos-rebuild build --flake "''${FLAKE_DIR}#$(detect_host_config)" --impure "''${offline[@]}"; then
                       log_time "Host build: ''${BOLD}$(timer_end "$host_start")s''${NC}"
                   else
                       log_error "Host build failed"
@@ -2162,6 +3229,69 @@
           log "Fetch complete. Builder still running - use 'builder stop' when done."
       }
 
+      # Builder: update flake inputs without host network (lockdown). The builder locks the
+      # flake anew, puts the lock file in the store it shares with the host and sends its
+      # path; the host checks it and writes flake.lock. The fetched sources are already in the
+      # host store, so the next evaluation works offline. Usage: builder update [input ...]
+      cmd_builder_update() {
+          local started=0 rc=0 lock n changes
+          local log_file="''${XDG_STATE_HOME:-$HOME/.local/state}/hydrix/last-build.log"
+          for n in "$@"; do
+              [[ "$n" =~ ^[A-Za-z0-9_-]+$ ]] || { log_error "Not an input name: $n"; return 1; }
+          done
+          if is_running "$BUILDER_NAME"; then
+              log "Builder already running"
+          else
+              cmd_start "$BUILDER_NAME" || return 1
+              started=1
+          fi
+          if ! wait_for_builder 90 "$BUILDER_CID"; then
+              log_error "Timeout waiting for ''${BUILDER_NAME}"
+              rc=1
+          else
+              log "Updating ''${BOLD}''${*:-every input}''${NC} in ''${BUILDER_NAME}..."
+              builder_send_build "$BUILDER_CID" "UPDATE $*" || rc=1
+          fi
+          [[ $started -eq 1 ]] && { cmd_stop "$BUILDER_NAME" || rc=1; }
+          [[ $rc -eq 0 ]] || { log_error "Flake update failed; flake.lock unchanged"; return 1; }
+
+          lock=$(grep -m1 '^LOCK ' "$log_file" | cut -d' ' -f2 || true)
+          if [[ -z "$lock" ]]; then
+              if grep -q '^UNCHANGED' "$log_file"; then
+                  log "flake.lock is already up to date"
+                  return 0
+              fi
+              log_error "The builder sent no lock file"
+              return 1
+          fi
+          # Untrusted reply: a store path of the expected name, holding a flake lock
+          if [[ ! "$lock" =~ ^/nix/store/[0-9a-z]{32}-flake\.lock$ || ! -f "$lock" || -L "$lock" ]]; then
+              log_error "The builder sent no usable lock file path"
+              return 1
+          fi
+          if ! jq -e '(.version == 7) and (.root | type == "string") and (.nodes | type == "object")
+                      and (.nodes[.root] | type == "object")' "$lock" >/dev/null 2>&1; then
+              log_error "The builder's lock file is not a flake lock; flake.lock unchanged"
+              return 1
+          fi
+          if cmp -s "$lock" "''${FLAKE_DIR}/flake.lock"; then
+              log "flake.lock is already up to date"
+              return 0
+          fi
+          changes=$(jq -r --slurpfile prev "''${FLAKE_DIR}/flake.lock" '
+              ($prev[0].nodes // {}) as $o
+              | .nodes | to_entries[] | select(.value.locked != null)
+              | select(($o[.key].locked // null) != .value.locked)
+              | "  \(.key): \(($o[.key].locked.rev // $o[.key].locked.narHash // "new")[0:12])"
+                + " -> \((.value.locked.rev // .value.locked.narHash // "?")[0:12])"' "$lock" 2>/dev/null \
+              | LC_ALL=C tr -d '\000-\010\013-\037\177' || true)
+          install -m 644 "$lock" "''${FLAKE_DIR}/flake.lock"
+          log_success "flake.lock updated"
+          root_flake_inputs
+          [[ -n "$changes" ]] && printf '%s\n' "$changes"
+          return 0
+      }
+
       # Builder: start alias
       cmd_builder_start() {
           cmd_start "$BUILDER_NAME"
@@ -2246,6 +3376,8 @@
           build <target>     Full workflow: start → build in VM → stop → build on host
           switch [spec]      Build + apply host config (default: preserve current spec)
           fetch <target>     Prefetch deps in builder (don't stop, don't build on host)
+          update [input...]  Update flake inputs through the builder (lockdown: no host
+                             network); writes flake.lock after checking it
           start              Start builder VM (stops host nix-daemon)
           stop               Stop builder VM (restarts host nix-daemon)
           status             Show builder and nix-daemon status
@@ -2300,6 +3432,7 @@
               build)   cmd_builder_build "$@" ;;
               switch)  cmd_builder_switch "$@" ;;
               fetch)   cmd_builder_fetch "$@" ;;
+              update)  cmd_builder_update "$@" ;;
               start)   cmd_builder_start ;;
               stop)    cmd_builder_stop ;;
               status)  cmd_builder_status ;;
@@ -3366,6 +4499,9 @@
         ''${BOLD}Task pentest VMs:''${NC}
           pentest task<N> <name>  Bind an engagement to a task slot (see: shard pentest help)
 
+        ''${BOLD}Store tiers:''${NC}
+          cache <cmd>             Host cache for tier builders: export, clear, status
+
         ''${BOLD}Encryption:''${NC}
           encrypt-setup <name>    Set up LUKS-encrypted home volume (run once, VM must be stopped)
                                   Only needed to pre-provision before a build; 'shard build' auto-sets
@@ -3377,6 +4513,8 @@
           gc [-f]                 List (and, with confirmation, delete) /var/lib/microvms/
                                   directories with no matching VM in the current flake
           backup <action>         Back up/restore a stopped VM's volumes (create/list/restore/delete)
+          -g | generations <act>  A VM's builds: list [vm], switch <vm> <N>, purge <vm> <N...|old>
+                                  (see: shard -g help)
 
       ''${BOLD}FLAGS COMBINE, IN ORDER''${NC}
           shard -bs browsing              build then start, one VM
@@ -3384,7 +4522,8 @@
                                            start(browsing), start(lurking) - flag-major
           shard -sb browsing lurking      reversed: start both, then build both
           -a and -w take an extra argument (app command / explicit path) and can't
-          be combined with other flags or multiple VM names.
+          be combined with other flags or multiple VM names. -g takes an action
+          (shard -g list|switch|purge ...) and stands alone too.
 
       ''${BOLD}MICROVM TYPES''${NC}
           browsing                 Web browsing, persistent (10GB home)
@@ -3489,6 +4628,12 @@
           # they get a dedicated fast path before any generic tokenizing runs on
           # the rest of argv - this must check "$1" literally, before flags/vms
           # are split out below.
+          # -g (generations) takes an action first: shard -g list|switch|purge ...
+          if [[ "$1" == "-g" ]]; then
+              shift
+              cmd_generations "$@"
+              return
+          fi
           if [[ "$1" == "-a" || "$1" == "-w" ]]; then
               local which="$1"
               shift
@@ -3565,7 +4710,7 @@
                       S) log "Stopping ''${BOLD}''${vm}''${NC}..."; cmd_stop "$vm"; echo "" ;;
                       r)
                           log "Rebuilding ''${BOLD}''${vm}''${NC} (build + live switch)..."
-                          cmd_build "$vm" || continue
+                          _HYDRIX_APPLYING=1 cmd_build "$vm" || continue
                           if is_running "$vm"; then
                               cmd_switch "$vm" || continue
                           else
@@ -3623,7 +4768,7 @@
                   for vm in "$@"; do
                       vm="$(resolve_vm_name "$vm")"
                       log "Rebuilding ''${BOLD}''${vm}''${NC} (build + live switch)..."
-                      cmd_build "$vm" || continue
+                      _HYDRIX_APPLYING=1 cmd_build "$vm" || continue
                       if is_running "$vm"; then
                           cmd_switch "$vm" || continue
                       else
@@ -3701,6 +4846,9 @@
               files)
                   cmd_files "$@"
                   ;;
+              cache)
+                  cmd_cache "$@"
+                  ;;
               test)
                   [[ $# -lt 1 ]] && { log_error "Usage: shard test <name>"; exit 1; }
                   cmd_test "$(resolve_vm_name "$1")"
@@ -3728,6 +4876,13 @@
                   [[ $# -lt 1 ]] && { log_error "Usage: shard encrypt-setup <name> [size_mb]"; exit 1; }
                   set -- "$(resolve_vm_name "$1")" "''${@:2}"
                   cmd_encrypt_setup "$@"
+                  ;;
+              generations|gen)
+                  cmd_generations "$@"
+                  ;;
+              root-inputs)
+                  # Internal (rebuild): GC roots for the fetched flake inputs
+                  root_flake_inputs
                   ;;
               backup)
                   [[ $# -lt 1 ]] && { cmd_backup help; exit 0; }
@@ -3757,10 +4912,38 @@
         jq -r 'keys[]' /etc/hydrix/vm-registry.json 2>/dev/null
     end
 
+    # Word subcommands only right after "shard" (fish's own check also fires after a flag)
+    function __shard_use_subcommand
+        test (count (commandline -opc)) -eq 1
+    end
+
     function __shard_first_is_flag
         set -l toks (commandline -opc)
         test (count $toks) -ge 2
         and string match -q -- '-*' $toks[2]
+        and not contains -- $toks[2] -g
+    end
+
+    # Generations (shard -g / generations / gen): action, then VM, then a generation
+    function __shard_gen_at
+        set -l toks (commandline -opc)
+        test (count $toks) -ge 2; and contains -- $toks[2] -g generations gen; or return 1
+        test (count $toks) -eq $argv[1]; or return 1
+        test (count $argv) -lt 2; or contains -- $toks[3] $argv[2..]
+    end
+
+    function __shard_gen_numbers
+        set -l toks (commandline -opc)
+        set -l vm (jq -r --arg k $toks[4] '.[$k].vmName // $k' /etc/hydrix/vm-registry.json 2>/dev/null)
+        set -l d /var/lib/microvms/$vm/generations
+        for n in (path basename $d/* 2>/dev/null | sort -n)
+            printf '%s\t%s\n' $n (cat $d/$n/created 2>/dev/null)
+        end
+        if test "$toks[3]" = switch
+            printf 'prev\tthe one before current\nlatest\tthe newest\n'
+        else
+            printf 'old\tevery generation but current\n'
+        end
     end
 
     # Short flags: combinable natively via fish's short-option completion engine.
@@ -3777,32 +4960,37 @@
     complete -c shard -s l -d Logs
     complete -c shard -s p -d Purge
     complete -c shard -s t -d Test
+    complete -c shard -s g -d 'Generations (list, switch, purge, gc)'
 
     # Word subcommands, first position only.
-    complete -c shard -n __fish_use_subcommand -a build -d 'Build microVM image'
-    complete -c shard -n __fish_use_subcommand -a start -d 'Start microVM'
-    complete -c shard -n __fish_use_subcommand -a stop -d 'Stop microVM'
-    complete -c shard -n __fish_use_subcommand -a restart -d 'Restart microVM'
-    complete -c shard -n __fish_use_subcommand -a rebuild -d 'Build + live switch'
-    complete -c shard -n __fish_use_subcommand -a switch -d 'Live switch to built config'
-    complete -c shard -n __fish_use_subcommand -a switch-status -d 'Show live vs built config'
-    complete -c shard -n __fish_use_subcommand -a app -d 'Launch app in microVM'
-    complete -c shard -n __fish_use_subcommand -a console -d 'Attach serial console'
-    complete -c shard -n __fish_use_subcommand -a status -d 'Show VM status'
-    complete -c shard -n __fish_use_subcommand -a list -d 'List all declared microVMs'
-    complete -c shard -n __fish_use_subcommand -a logs -d 'Follow VM logs'
-    complete -c shard -n __fish_use_subcommand -a builder -d 'Lockdown-mode build workflow'
-    complete -c shard -n __fish_use_subcommand -a git -d 'Git ops via gitsync VM'
-    complete -c shard -n __fish_use_subcommand -a files -d 'Encrypted inter-VM file transfer'
-    complete -c shard -n __fish_use_subcommand -a pentest -d 'Bind engagements to task slots'
-    complete -c shard -n __fish_use_subcommand -a task -d 'Alias for pentest'
-    complete -c shard -n __fish_use_subcommand -a test -d 'Full workflow smoke test'
-    complete -c shard -n __fish_use_subcommand -a purge -d 'Delete all persistent data'
-    complete -c shard -n __fish_use_subcommand -a gc -d 'Clean up orphaned VM directories'
-    complete -c shard -n __fish_use_subcommand -a backup -d 'Back up/restore VM volumes'
+    complete -c shard -n __shard_use_subcommand -a build -d 'Build microVM image'
+    complete -c shard -n __shard_use_subcommand -a start -d 'Start microVM'
+    complete -c shard -n __shard_use_subcommand -a stop -d 'Stop microVM'
+    complete -c shard -n __shard_use_subcommand -a restart -d 'Restart microVM'
+    complete -c shard -n __shard_use_subcommand -a rebuild -d 'Build + live switch'
+    complete -c shard -n __shard_use_subcommand -a switch -d 'Live switch to built config'
+    complete -c shard -n __shard_use_subcommand -a switch-status -d 'Show live vs built config'
+    complete -c shard -n __shard_use_subcommand -a app -d 'Launch app in microVM'
+    complete -c shard -n __shard_use_subcommand -a console -d 'Attach serial console'
+    complete -c shard -n __shard_use_subcommand -a status -d 'Show VM status'
+    complete -c shard -n __shard_use_subcommand -a list -d 'List all declared microVMs'
+    complete -c shard -n __shard_use_subcommand -a logs -d 'Follow VM logs'
+    complete -c shard -n __shard_use_subcommand -a builder -d 'Lockdown-mode build workflow'
+    complete -c shard -n __shard_use_subcommand -a git -d 'Git ops via gitsync VM'
+    complete -c shard -n __shard_use_subcommand -a files -d 'Encrypted inter-VM file transfer'
+    complete -c shard -n __shard_use_subcommand -a pentest -d 'Bind engagements to task slots'
+    complete -c shard -n __shard_use_subcommand -a task -d 'Alias for pentest'
+    complete -c shard -n __shard_use_subcommand -a test -d 'Full workflow smoke test'
+    complete -c shard -n __shard_use_subcommand -a purge -d 'Delete all persistent data'
+    complete -c shard -n __shard_use_subcommand -a gc -d 'Clean up orphaned VM directories'
+    complete -c shard -n __shard_use_subcommand -a backup -d 'Back up/restore VM volumes'
     complete -c shard -n "__fish_seen_subcommand_from backup; and not __fish_seen_subcommand_from create list restore delete" -a "create list restore delete"
-    complete -c shard -n __fish_use_subcommand -a encrypt-setup -d 'Set up LUKS-encrypted home volume'
-    complete -c shard -n __fish_use_subcommand -a help -d 'Show usage'
+    complete -c shard -n __shard_use_subcommand -a encrypt-setup -d 'Set up LUKS-encrypted home volume'
+    complete -c shard -n __shard_use_subcommand -a help -d 'Show usage'
+    complete -c shard -n __shard_use_subcommand -a generations -d "A VM's builds: list, switch, purge"
+    complete -c shard -n "__shard_gen_at 2" -f -a "list switch purge gc help"
+    complete -c shard -n "__shard_gen_at 3 list switch purge" -f -a "(__shard_vm_names)"
+    complete -c shard -n "__shard_gen_at 4 switch purge" -f -a "(__shard_gen_numbers)"
 
     # VM-name completion: dynamic, read live from the registry every time (no
     # rebuild/session-restart needed when VMs are added). Fires after a

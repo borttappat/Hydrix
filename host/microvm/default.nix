@@ -64,6 +64,11 @@
 
   enabledVMs = lib.filterAttrs (_: v: v.enable) allVms;
 
+  # Store tiers named in the registry (storeTier/buildsTier), see hydrix.builder.storeTier.
+  storeTiers =
+    lib.unique (lib.concatMap (v: lib.filter (t: t != null) [(v.storeTier or null) (v.buildsTier or null)])
+      (lib.attrValues config.hydrix.networking.vmRegistry));
+
   # Coupled vs decoupled split (see header comment). Names absent from
   # vmClasses (router/router-stable/builder, wired outside knownVms) count
   # as "infra".
@@ -255,6 +260,20 @@ in {
       ];
     })
 
+    # A tier VM's system is built by its tier builder (shard -b), never by the host build: a
+    # coupled one would get a runner whose system the host never built.
+    (let
+      tierVms = map (v: v.vmName) (lib.filter (v: (v.storeTier or null) != null) (lib.attrValues config.hydrix.networking.vmRegistry));
+      coupledTier = lib.filter (n: coupledVMs ? ${n}) tierVms;
+    in {
+      assertions = [
+        {
+          assertion = coupledTier == [];
+          message = "${lib.concatStringsSep ", " coupledTier}: a VM on a store tier (storeTier in meta.nix) cannot be coupled; build it with shard -b (unset coupled, or hydrix.microvmHost.coupleProfiles).";
+        }
+      ];
+    })
+
     # Mullvad confs reach the router only as a secret (hydrix.router.vpn.mullvad.networks).
     (let
       mullvad = config.hydrix.router.vpn.mullvad;
@@ -282,6 +301,8 @@ in {
           stableRouterVmName = stableRouterVmName;
           # Built by `rebuild -a` (those already built once on this machine).
           infraVms = lib.attrNames infraVMs;
+          # shard: generations each VM keeps (hydrix.microvmHost.keepGenerations)
+          keepGenerations = cfg.keepGenerations;
         };
         mode = "0644";
       };
@@ -460,14 +481,42 @@ in {
         # stay root:root.
         ++ (lib.mapAttrsToList (name: _: "z /var/lib/microvms/${name} 0755 microvm kvm -")
           enabledVMs)
+        # Tier stores and the host's export cache (hydrix.builder.storeTier, shard cache).
+        # Store directories take mode and owner only on creation (":"): the tier builder's
+        # Nix sets its own, and the store share must exist before virtiofsd starts.
+        ++ lib.optionals (storeTiers != []) ([
+            "d /var/lib/hydrix 0755 root root -"
+            "d /var/lib/hydrix/stores 0755 root root -"
+            # Per-VM store views (shard tier_view_sync): each tier VM's store share.
+            "d /var/lib/hydrix/stores/views 0755 root root -"
+            "d /var/lib/hydrix/caches 0755 root root -"
+            "d /var/lib/hydrix/caches/host 0755 root root -"
+            # Rewritten on activation: WantMassQuery lets Nix plan substitutions with it,
+            # Priority 30 puts it ahead of cache.nixos.org (40).
+            "f+ /var/lib/hydrix/caches/host/nix-cache-info 0644 root root - StoreDir: /nix/store\\nWantMassQuery: 1\\nPriority: 30\\n"
+            # Nix creates these when it opens a file:// cache; a tier builder mounts the cache
+            # read-only, so a missing one makes its Nix drop the cache with only a warning.
+            "d /var/lib/hydrix/caches/host/nar 0755 root root -"
+            "d /var/lib/hydrix/caches/host/realisations 0755 root root -"
+            "d /var/lib/hydrix/caches/host/log 0755 root root -"
+            "d /var/lib/hydrix/cache-keys 0700 root root -"
+          ]
+          ++ lib.concatMap (t: [
+            "d /var/lib/hydrix/stores/${t} :0755 :root :root -"
+            "d /var/lib/hydrix/stores/${t}/nix :0755 :root :root -"
+            "d /var/lib/hydrix/stores/${t}/nix/store :0755 :root :root -"
+          ])
+          storeTiers)
         # GC roots for every VM's runners. `shard -b` roots `current` through its out-link,
         # but nothing rooted `booted`: once a running VM was rebuilt, a garbage collection
         # could delete the runner it still runs from (and its microvm-shutdown). Nix follows
-        # one symlink from a root, so these keep both alive.
+        # one symlink from a root, so these keep both alive. tier-host (tier VMs only) keeps
+        # the kernel outputs the host built for the tier, so a GC never forces a recompile.
         ++ ["d /nix/var/nix/gcroots/microvm 0755 root root -"]
         ++ lib.concatLists (lib.mapAttrsToList (name: _: [
             "L+ /nix/var/nix/gcroots/microvm/${name} - - - - /var/lib/microvms/${name}/current"
             "L+ /nix/var/nix/gcroots/microvm/booted-${name} - - - - /var/lib/microvms/${name}/booted"
+            "L+ /nix/var/nix/gcroots/microvm/tier-host-${name} - - - - /var/lib/microvms/${name}/tier-host"
           ])
           enabledVMs)
         # Parent dir per enabled VM - virtiofsd needs this path to exist at start.
@@ -540,6 +589,17 @@ in {
           "microvm@".serviceConfig = {
             Restart = lib.mkForce "on-failure";
             ExecStop = lib.mkForce "-/var/lib/microvms/%i/booted/bin/microvm-shutdown";
+            # Lock the VM's encrypted home once it stopped cleanly: shard -S does so itself, a
+            # poweroff or reboot inside the VM did not, leaving it unlocked on the host. Not
+            # after a crash: systemd restarts the VM then, which needs the volume open.
+            ExecStopPost = [
+              "+${pkgs.writeShellScript "microvm-lock-home" ''
+                [ "''${SERVICE_RESULT:-}" = success ] || exit 0
+                m="vm-$1-home"
+                [ -b "/dev/mapper/$m" ] || exit 0
+                ${pkgs.cryptsetup}/bin/cryptsetup close "$m" || echo "Could not lock $m" >&2
+              ''} %i"
+            ];
           };
         }
 
@@ -914,6 +974,29 @@ in {
             mount --bind /home /home
             mount -o remount,bind,nosuid,nodev /home
           fi
+        '';
+      };
+    })
+
+    # Tier builders write /var/lib/hydrix/stores/<tier> the same way, through a virtiofsd
+    # running as host root, and that directory is on the root filesystem. Bind it nosuid,nodev
+    # before any VM starts. shard also refuses to start a tier builder without it.
+    (lib.mkIf (cfg.enable && storeTiers != []) {
+      systemd.services.hydrix-tier-stores-nosuid = {
+        description = "Mount the VM store tiers nosuid,nodev (tier builders write there)";
+        wantedBy = ["multi-user.target"];
+        after = ["local-fs.target" "systemd-tmpfiles-setup.service"];
+        before = ["microvms.target"];
+        serviceConfig = {
+          Type = "oneshot";
+          RemainAfterExit = true;
+        };
+        path = [pkgs.util-linux pkgs.coreutils];
+        script = ''
+          dir=/var/lib/hydrix/stores
+          mkdir -p "$dir"
+          mountpoint -q "$dir" || mount --bind "$dir" "$dir"
+          mount -o remount,bind,nosuid,nodev "$dir"
         '';
       };
     })

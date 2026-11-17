@@ -682,6 +682,10 @@ check_bases() {
 
 # Post-build tasks
 post_build() {
+    # GC roots for the flake inputs this build fetched, so no garbage collection takes a
+    # source an offline (lockdown) evaluation needs
+    shard root-inputs || true
+
     # Wait for home-manager to complete (runs async during activation)
     local hm_service="home-manager-$USER.service"
     if systemctl list-units --type=service 2>/dev/null | grep -q "$hm_service"; then
@@ -775,11 +779,15 @@ main() {
 
     # Lockdown mode: use builder VM (host has no network)
     if [[ "$current_mode" == "lockdown" ]]; then
-        # Note: flake update not supported in lockdown (no network)
-        if $UPDATE_FLAKE; then
-            err "Cannot update flake in lockdown mode (no network)"
-            err "Switch to administrative mode first: hydrix-switch admin"
-            exit 1
+        # The host has no network: the builder locks the flake anew and fetches the
+        # sources into the host store (shard builder update), which then evaluates offline.
+        # Even a path: hydrix input goes through it, since Hydrix's own inputs may change.
+        if $UPDATE_ALL_FLAKE; then
+            log "Updating all flake inputs through the builder..."
+            shard builder update || exit 1
+        elif $UPDATE_FLAKE; then
+            log "Updating hydrix flake input through the builder..."
+            shard builder update hydrix || exit 1
         fi
 
         if ! do_build_via_builder "$target_spec"; then

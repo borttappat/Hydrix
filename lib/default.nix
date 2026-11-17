@@ -143,9 +143,12 @@ in rec {
     userProfiles ? null,
     hostConfig ? {},
     userColorschemesDir ? null,
+    # A tier's own nixpkgs pin (e.g. inputs.nixpkgs-profile), so one tier can move to a
+    # newer nixpkgs before the others.
+    nixpkgs ? inputs.nixpkgs,
   }: let
-    allInputs = inputs // extraInputs;
-    nixpkgs' = inputs.nixpkgs;
+    allInputs = inputs // extraInputs // {inherit nixpkgs;};
+    nixpkgs' = nixpkgs;
   in
     nixpkgs'.lib.nixosSystem {
       inherit system;
@@ -302,11 +305,18 @@ in rec {
   # mkMicrovmBuilder - Create the MicroVM builder for lockdown mode
   # =========================================================================
   # hostUsername: Username on the host machine (for mounting ~/hydrix-config)
+  # name/cid/tapId/tapMac/storeTier: a second builder that owns a tier store
+  #   (hydrix.builder.storeTier) instead of writing the host store.
   mkMicrovmBuilder = {
     system ? "x86_64-linux",
     hostUsername, # Required: host user whose hydrix-config to mount
     modules ? [],
     extraInputs ? {},
+    name ? "microvm-builder",
+    cid ? 210,
+    tapId ? "mv-builder",
+    tapMac ? "02:00:00:02:10:01",
+    storeTier ? null,
   }: let
     allInputs = inputs // extraInputs;
     nixpkgs' = inputs.nixpkgs;
@@ -329,8 +339,9 @@ in rec {
           microvm.nixosModules.microvm
           ../vm/microvm/infra/microvm-builder.nix
           {
-            networking.hostName = "microvm-builder";
-            hydrix.builder.hostUsername = hostUsername;
+            networking.hostName = name;
+            microvm.vsock.cid = cid;
+            hydrix.builder = {inherit hostUsername tapId tapMac storeTier;};
           }
         ]
         ++ modules;

@@ -216,6 +216,18 @@
     # packages installed only via home-manager (e.g. programs.burp) ship
     # their .desktop file in the latter, not sw/share. Outputs "Name<TAB>exec"
     # pairs; exec is the bare command hypr-ws-app resolves via the VM's PATH.
+    # A tier VM's system is not in the host store; shard writes its app list at build time
+    # (/var/lib/microvms/<vm>/apps.tsv, from scripts/lib/tier-apps.py).
+    vm_app_list() {
+        local list="/var/lib/microvms/$1/apps.tsv" vm_system
+        if [[ -f "$list" ]]; then
+            ${pkgs.coreutils}/bin/cat "$list"
+            return 0
+        fi
+        vm_system=$(get_vm_system_path "$1") || return 1
+        list_vm_apps "$vm_system"
+    }
+
     list_vm_apps() {
         local vm_system="$1" dir f name exec_line bin
         for dir in \
@@ -392,9 +404,8 @@
 
         # List VM apps from .desktop entries (host-accessible via /nix/store) --
         # see list_vm_apps for why, not a raw bin/ listing.
-        local vm_system app_list selected_name selected_app
-        if vm_system=$(get_vm_system_path "$selected"); then
-            app_list=$(list_vm_apps "$vm_system")
+        local app_list selected_name selected_app
+        if app_list=$(vm_app_list "$selected"); then
             selected_name=$(echo "$app_list" | ${pkgs.coreutils}/bin/cut -f1 \
                 | ${pkgs.wofi}/bin/wofi --show dmenu \
                   $(wofi_args) \
@@ -527,6 +538,18 @@
     # packages installed only via home-manager (e.g. programs.burp) ship
     # their .desktop file in the latter, not sw/share. Outputs "Name<TAB>exec"
     # pairs; exec is the bare command hypr-ws-app resolves via the VM's PATH.
+    # A tier VM's system is not in the host store; shard writes its app list at build time
+    # (/var/lib/microvms/<vm>/apps.tsv, from scripts/lib/tier-apps.py).
+    vm_app_list() {
+        local list="/var/lib/microvms/$1/apps.tsv" vm_system
+        if [[ -f "$list" ]]; then
+            ${pkgs.coreutils}/bin/cat "$list"
+            return 0
+        fi
+        vm_system=$(get_vm_system_path "$1") || return 1
+        list_vm_apps "$vm_system"
+    }
+
     list_vm_apps() {
         local vm_system="$1" dir f name exec_line bin
         for dir in \
@@ -567,9 +590,8 @@
             [[ -z "$selected_vm" ]] && exit 0
         fi
 
-        local vm_system app_list selected_name
-        if vm_system=$(get_vm_system_path "$selected_vm"); then
-            app_list=$(list_vm_apps "$vm_system")
+        local app_list selected_name
+        if app_list=$(vm_app_list "$selected_vm"); then
             selected_name=$(echo "$app_list" | ${pkgs.coreutils}/bin/cut -f1 | wofi_pick "''${selected_vm}")
             [[ -z "$selected_name" ]] && exit 0
             selected_app=$(echo "$app_list" \

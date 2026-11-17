@@ -602,6 +602,17 @@ in {
         description = "Enable MicroVM host support.";
       };
 
+      keepGenerations = lib.mkOption {
+        type = lib.types.ints.unsigned;
+        default = 10;
+        description = ''
+          How many generations (`shard -g list`) each VM keeps, the current one included.
+          Every `shard -b` that records a new one drops the oldest beyond this (their GC
+          roots and records; `shard -g gc` or the host's own garbage collection frees the
+          space). 0 keeps every generation.
+        '';
+      };
+
       coupleProfiles = lib.mkOption {
         type = lib.types.bool;
         default = false;

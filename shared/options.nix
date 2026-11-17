@@ -363,6 +363,16 @@ in {
               default = null;
               description = "Task slot name (e.g. \"task1\") for VMs that engagements are bound to at runtime via `shard pentest`. Null for every other VM.";
             };
+            storeTier = lib.mkOption {
+              type = lib.types.nullOr lib.types.str;
+              default = null;
+              description = "Store tier this VM runs from (/var/lib/hydrix/stores/<tier>), built by the VM whose buildsTier matches. Null: the host store. Set in meta.nix; the VM's hydrix.microvm.storeSource follows it.";
+            };
+            buildsTier = lib.mkOption {
+              type = lib.types.nullOr lib.types.str;
+              default = null;
+              description = "Store tier this builder VM owns (hydrix.builder.storeTier). Set in meta.nix.";
+            };
             memCeilingMb = lib.mkOption {
               type = lib.types.nullOr lib.types.int;
               default = null;
