@@ -111,6 +111,19 @@
       description = "Share host /nix/store via virtiofs (faster rebuilds, instant startup)";
     };
 
+    storeSource = lib.mkOption {
+      type = lib.types.str;
+      default = "/nix/store";
+      example = "/var/lib/hydrix/stores/profile/nix/store";
+      description = ''
+        Host directory shared read-only as the VM's store (with shareStore). Any other value
+        than /nix/store is a tier store written by a tier builder (hydrix.builder.storeTier):
+        the VM's system is built there, and the runner the host builds no longer references
+        it, so the VM's closure never enters the host store. Such a VM applies changes by
+        restart only (no shard -r).
+      '';
+    };
+
     hostRepos = lib.mkOption {
       type = lib.types.attrsOf lib.types.str;
       default = {};
@@ -167,6 +180,27 @@
         type = lib.types.int;
         default = 20480;
         description = "Size in MB for persistent store overlay (for in-VM rebuilds). Thin-provisioned.";
+      };
+
+      storeCache = lib.mkOption {
+        type = lib.types.enum ["persistent" "ephemeral"];
+        default =
+          if config.hydrix.microvm.persistence.enable
+          then "persistent"
+          else "ephemeral";
+        defaultText = lib.literalExpression ''if persistence.enable then "persistent" else "ephemeral"'';
+        description = ''
+          What the VM's writable store layer (nix-overlay.qcow2) keeps between boots
+          (vm/microvm/store-cache.nix).
+
+          "persistent": a cache. Nix's database lives on the same volume, so whatever the
+          VM fetched or built (nix run, nix shell, nix develop, nix profile) stays valid
+          until `shard -p` deletes the volume. At each boot the shared store wins: an entry
+          in the writable layer for a path the shared store has is removed, so nothing
+          shadows the system across boots.
+
+          "ephemeral": the writable layer is emptied at each boot, before it is mounted.
+        '';
       };
     };
 

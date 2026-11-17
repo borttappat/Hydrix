@@ -39,25 +39,42 @@ in {
           DefaultDependencies = false;
           RequiresMountsFor = "${rw} ${ro}";
         };
-        serviceConfig.Type = "oneshot";
+        # The initrd can start this again after the overlay is up (the mount's Requires= pulls
+        # it in when the units are reloaded): RemainAfterExit keeps it done, and the guard
+        # below never touches the writable layer under a mounted overlay.
+        serviceConfig = {
+          Type = "oneshot";
+          RemainAfterExit = true;
+        };
         script =
-          if persistent
-          then ''
-            mkdir -p -m 0755 ${rw}/var/nix /sysroot/nix/var/nix
-            if [ -d ${rw}/store ]; then
-              for e in ${rw}/store/* ${rw}/store/.[!.]*; do
-                [ -e "$e" ] || [ -L "$e" ] || continue
-                n=''${e##*/}
-                if [ -c "$e" ] || [ -e "${ro}/$n" ] || [ -L "${ro}/$n" ]; then
-                  rm -rf -- "$e"
-                fi
-              done
-            fi
-            mount --bind ${rw}/var/nix /sysroot/nix/var/nix
           ''
-          else ''
-            rm -rf -- ${rw}/store ${rw}/work ${rw}/var
-          '';
+            while read -r _ mnt _; do
+              if [ "$mnt" = /sysroot/nix/store ]; then
+                echo "Store overlay already mounted: writable layer left as it is"
+                exit 0
+              fi
+            done < /proc/self/mounts
+          ''
+          + (
+            if persistent
+            then ''
+              mkdir -p -m 0755 ${rw}/var/nix /sysroot/nix/var/nix
+              if [ -d ${rw}/store ]; then
+                for e in ${rw}/store/* ${rw}/store/.[!.]*; do
+                  [ -e "$e" ] || [ -L "$e" ] || continue
+                  n=''${e##*/}
+                  if [ -c "$e" ] || [ -e "${ro}/$n" ] || [ -L "${ro}/$n" ]; then
+                    rm -rf -- "$e"
+                  fi
+                done
+              fi
+              mount --bind ${rw}/var/nix /sysroot/nix/var/nix
+            ''
+            else ''
+              rm -rf -- ${rw}/store ${rw}/work ${rw}/var
+              mkdir -p -m 0755 ${rw}/store ${rw}/work
+            ''
+          );
       };
     }
 
