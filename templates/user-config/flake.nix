@@ -32,6 +32,11 @@
 
     # Your NixOS channel: change to nixos-unstable, nixos-24.11, etc.
     nixpkgs.url = "github:nixos/nixpkgs/nixos-26.05";
+    # nixpkgs for the profile store tier (VMs with storeTier = "profile" in meta.nix).
+    # Same URL as nixpkgs, so both lock to the same rev and tier builds share store paths
+    # with the host cache. Canary: `nix flake update nixpkgs-profile` moves only this tier;
+    # move nixpkgs to the same rev afterwards.
+    nixpkgs-profile.url = "github:nixos/nixpkgs/nixos-26.05";
 
     # Unstable packages channel (optional, for latest versions)
     nixpkgs-unstable.url = "github:nixos/nixpkgs/nixos-unstable";
@@ -213,7 +218,7 @@
                 hydrix.networking.infraTapBridges = infraTapBridges;
                 hydrix.microvmHost.knownVms =
                   map (m: "microvm-${m._profileName}-${machineName}") discoveredMetas
-                  ++ map (m: "microvm-${m._infraName}") (builtins.filter (m: !(m.builtinVm or false)) discoveredInfra)
+                  ++ map (m: "microvm-${m._infraName}") (builtins.filter (m: !(m.builtinVm or false) || m ? buildsTier) discoveredInfra)
                   ++ map (m: "${taskVmName m}-${machineName}") discoveredTasks;
                 # Every task slot gets the secrets declared in tasks/default.nix;
                 # a machine config can still override per slot.
@@ -325,31 +330,54 @@
       in
         map (m: let
           vmName = "${taskVmName m}-${machineName}";
+          # Per-machine overrides, as for profile VMs: profileOverrides.tasks for every slot,
+          # then profileOverrides.<registry key> (pentest-task1) for one slot.
+          overrides = mc.config.hydrix.microvmHost.profileOverrides;
+          slotKey = "${taskCfg.profile}-${m.name}";
         in {
           name = vmName;
           value = hydrix.lib.mkMicroVM {
             inherit (taskCfg) profile;
             hostname = vmName;
+            # Same as profile VMs: a tier slot evaluates its tier's nixpkgs
+            nixpkgs =
+              if m.storeTier != null
+              then inputs."nixpkgs-${m.storeTier}" or nixpkgs
+              else nixpkgs;
             extraInputs = {inherit (inputs) nix-index-database hydrix;};
-            modules = [
-              {
-                hydrix.microvm = {inherit (m) vsockCid bridge tapId;};
-                hydrix.networking.vmSubnet = m.subnet;
+            modules =
+              [
+                {
+                  hydrix.microvm = {inherit (m) vsockCid bridge tapId;};
+                  hydrix.networking.vmSubnet = m.subnet;
+                }
+                (taskCfg.module or {})
+                (taskCfg.overrides.${m.name} or {})
+              ]
+              ++ nixpkgs.lib.optional (overrides ? tasks) overrides.tasks
+              ++ nixpkgs.lib.optional (overrides ? ${slotKey}) overrides.${slotKey}
+              # A tier slot's store share is its own view of the tier store, as for profile VMs
+              ++ nixpkgs.lib.optional (m.storeTier != null) {
+                hydrix.microvm.storeSource = "/var/lib/hydrix/stores/views/${vmName}/nix/store";
               }
-              (taskCfg.module or {})
-              (taskCfg.overrides.${m.name} or {})
-              vmThemeSyncModule
-              {hydrix.vmThemeSync.enable = true;}
-              {system.stateVersion = mc.config.system.stateVersion;}
-              {hydrix.microvm.notifyForward.enable = m.notifyForward;}
-              {
-                hydrix.microvm.usbPassthrough = {
-                  enable = m.usbPassthrough or false;
-                  devices = m.usbDevices or [];
-                };
-              }
-              {hydrix.microvm.audio.enable = m.audio or false;}
-            ];
+              # Opt-in only (modules/tier-kernels.nix, enable): one custom kernel per tier
+              ++ nixpkgs.lib.optionals (import ./modules/tier-kernels.nix).enable [
+                ./modules/vm-kernel.nix
+                (import ./modules/tier-kernels.nix).profile
+              ]
+              ++ [
+                vmThemeSyncModule
+                {hydrix.vmThemeSync.enable = true;}
+                {system.stateVersion = mc.config.system.stateVersion;}
+                {hydrix.microvm.notifyForward.enable = m.notifyForward;}
+                {
+                  hydrix.microvm.usbPassthrough = {
+                    enable = m.usbPassthrough or false;
+                    devices = m.usbDevices or [];
+                  };
+                }
+                {hydrix.microvm.audio.enable = m.audio or false;}
+              ];
             inherit userProfiles hostConfig userColorschemesDir;
           };
         })
@@ -446,6 +474,7 @@
             usbPassthrough = m.usbPassthrough or false;
             usbDevices = m.usbDevices or [];
             audio = m.audio or false;
+            storeTier = m.storeTier or null;
           };
         })
         discoveredMetas)
@@ -461,6 +490,7 @@
           hasDisplay = m.hasDisplay or false;
           usbPassthrough = m.usbPassthrough or false;
           usbDevices = m.usbDevices or [];
+          buildsTier = m.buildsTier or null;
         };
       }) (builtins.filter (m: m ? vsockCid) discoveredInfra))
       // builtins.listToAttrs (map (m: {
@@ -474,6 +504,7 @@
             usbDevices = m.usbDevices or [];
             hasDisplay = true;
             taskSlot = m.name;
+            inherit (m) storeTier;
           };
         })
         discoveredTasks);
@@ -554,6 +585,11 @@
           value = hydrix.lib.mkMicroVM {
             profile = m._profileName;
             hostname = name;
+            # Tier VMs evaluate their tier's nixpkgs (input nixpkgs-<tier>)
+            nixpkgs =
+              if m ? storeTier
+              then inputs."nixpkgs-${m.storeTier}" or nixpkgs
+              else nixpkgs;
             extraInputs = {inherit (inputs) nix-index-database hydrix;};
             modules =
               [
@@ -567,6 +603,17 @@
                   };
                 }
                 {hydrix.microvm.audio.enable = m.audio or false;}
+              ]
+              # A tier VM's store share is its own view of the tier store (shard
+              # tier_view_sync): only its closure, never another tier VM's.
+              ++ nixpkgs.lib.optional (m ? storeTier) {
+                hydrix.microvm.storeSource = "/var/lib/hydrix/stores/views/${name}/nix/store";
+              }
+              # Opt-in only (modules/tier-kernels.nix, enable): one custom kernel for every
+              # profile VM. Off by default: all VMs run the stock, binary-cached kernel.
+              ++ nixpkgs.lib.optionals (import ./modules/tier-kernels.nix).enable [
+                ./modules/vm-kernel.nix
+                (import ./modules/tier-kernels.nix).profile
               ]
               ++ nixpkgs.lib.optional (overrides ? ${m._profileName}) overrides.${m._profileName}
               ++ nixpkgs.lib.optional (vmCfg.encryption or false) {hydrix.microvm.encryption.enable = true;}
@@ -600,7 +647,23 @@
             ./infra/builder/default.nix
           ];
         };
-      };
+      }
+      # Tier builders: infra/<name>/meta.nix with buildsTier (builder-profile builds the
+      # profile store tier; the host builder above keeps the host store)
+      // builtins.listToAttrs (map (m: {
+        name = "microvm-${m._infraName}";
+        value = hydrix.lib.mkMicrovmBuilder {
+          inherit hostUsername;
+          name = "microvm-${m._infraName}";
+          cid = m.vsockCid;
+          inherit (m) tapId tapMac;
+          storeTier = m.buildsTier;
+          modules = [
+            ./modules/common.nix
+            (./infra + "/${m._infraName}/default.nix")
+          ];
+        };
+      }) (builtins.filter (m: m ? buildsTier) discoveredInfra));
     # Infra VMs (files, gitsync, hostsync, usb-sandbox, etc.) are auto-discovered
     # from infra/*/meta.nix; see infraVMConfigs above.
 

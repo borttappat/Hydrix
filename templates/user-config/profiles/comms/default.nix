@@ -15,17 +15,13 @@ in {
   imports = [
     # Core VM packages (editors, shell, utils)
     ../../modules/vm-packages.nix
-    # Trimmed guest kernel, off until enabled below (hydrix.vmKernel)
-    ../../modules/vm-kernel.nix
+    # Guest kernel hardening on the stock kernel (sysctls, boot parameters, module lock)
+    ../../modules/vm-hardening.nix
     # Profile-specific packages
     ./packages.nix
     # Custom packages (added via vm-sync pull)
     ./packages
   ];
-
-  # Trimmed guest kernel (modules/vm-kernel.nix): strips bluetooth, wifi, USB peripheral,
-  # sound and GPU drivers. Compiled locally on the first build, so off by default.
-  # hydrix.vmKernel.enable = true;
 
   # =========================================================================
   # VM IDENTITY & COLORS

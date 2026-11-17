@@ -11,6 +11,7 @@
   focusBorder = "yellow";
   notifyForward = true;   # host accepts this VM's notifications (vsock:14518)
   # audio = true;          # host audio over vsock:14505 (speakers, microphone); off unless set
+  storeTier = "profile";   # runs from the profile store tier, built by builder-profile
 
   mem  = 3072;             # ceiling, MB - balloon reclaims idle memory
   vcpu = 6;                # ceiling - generous headroom, balloons down properly when idle

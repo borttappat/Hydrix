@@ -23,5 +23,7 @@ in
       label = "TASK ${n}";
       focusBorder = cfg.focusBorder or (base.focusBorder or null);
       notifyForward = cfg.notifyForward or (base.notifyForward or false);
+      # Store tier of the base profile unless tasks/default.nix sets storeTier (null: host store)
+      storeTier = cfg.storeTier or (base.storeTier or null);
     })
     cfg.count

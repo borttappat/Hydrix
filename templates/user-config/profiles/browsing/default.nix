@@ -15,6 +15,8 @@ in {
   imports = [
     # Core VM packages (editors, shell, utils)
     ../../modules/vm-packages.nix
+    # Guest kernel hardening on the stock kernel (sysctls, boot parameters, module lock)
+    ../../modules/vm-hardening.nix
     # Profile-specific packages
     ./packages.nix
     # Custom packages (added via vm-sync pull)

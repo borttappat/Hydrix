@@ -15,6 +15,8 @@ in {
   imports = [
     # Core VM packages (editors, shell, utils)
     ../../modules/vm-packages.nix
+    # Guest kernel hardening on the stock kernel (sysctls, boot parameters, module lock)
+    ../../modules/vm-hardening.nix
     # Profile-specific packages
     ./packages.nix
     # Custom packages (added via vm-sync pull)
@@ -89,6 +91,12 @@ in {
   };
 
   users.users.${config.hydrix.username}.extraGroups = ["docker"];
+
+  # Kernel hardening (modules/vm-hardening.nix), loosened for development: debuggers attach
+  # to your own processes, io_uring for root only. Docker and Tailscale modules are loaded
+  # before the module lock by vm-hardening.nix.
+  boot.kernel.sysctl."kernel.yama.ptrace_scope" = 1;
+  boot.kernel.sysctl."kernel.io_uring_disabled" = 1;
 
   # =========================================================================
   # EXTRA PACKAGES

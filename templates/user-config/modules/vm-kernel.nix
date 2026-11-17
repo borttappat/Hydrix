@@ -1,11 +1,12 @@
-# Trimmed guest kernel for VMs (hydrix.vmKernel, off by default).
+# Trimmed guest kernel for VMs (hydrix.vmKernel).
 #
 # The host handles real peripherals; VMs only ever see virtio devices, so the guest kernel
-# does not need drivers for hardware it never touches. Enabling it compiles the kernel
-# locally (no binary cache), so it is opt-in per VM: import this file in the VM's
-# default.nix and set `hydrix.vmKernel.enable = true;`. Each hardware axis stays stripped
-# unless that VM really owns the hardware (a VFIO-passthrough VM keeping wireless,
-# usb-sandbox keeping USB drivers). Tweak the symbol lists below freely.
+# does not need drivers for hardware it never touches. It compiles locally (no binary
+# cache, about an hour), so it is optional and off by default, and set per tier, never per
+# VM: with modules/tier-kernels.nix's enable, flake.nix imports this file and that tier
+# kernel into every profile VM and task slot, so they all share one kernel. A hardware axis stays stripped unless some VM of the
+# tier owns that hardware (pentest's USB WiFi adapter keeps wireless and USB in the profile
+# kernel). Tweak the symbol lists below freely.
 {
   config,
   lib,
@@ -22,7 +23,7 @@ in {
     enable = lib.mkOption {
       type = lib.types.bool;
       default = false;
-      description = "Build a trimmed guest kernel (linuxPackages_latest) with bluetooth, wifi and unused peripheral drivers stripped. Compiled locally.";
+      description = "Build a trimmed guest kernel (linuxPackages_latest) with bluetooth, wifi and unused peripheral drivers stripped. Compiled locally; set per tier in modules/tier-kernels.nix, not per VM.";
     };
 
     bluetooth = lib.mkOption {
@@ -49,6 +50,11 @@ in {
       description = "Keep the sound subsystem (this VM forwards audio, e.g. over pulse-vsock).";
     };
 
+    hardened = lib.mkOption {
+      type = lib.types.bool;
+      default = false;
+      description = "Signed modules only (MODULE_SIG_FORCE, a key made and dropped inside the kernel build) and kernel lockdown in integrity mode: guest root cannot load a module the kernel was not built with, or change the running kernel (/dev/mem, kexec). Modules still load on demand. Store tier kernels set it (modules/tier-kernels.nix).";
+    };
     graphics = lib.mkOption {
       type = lib.types.bool;
       default = false;
@@ -64,6 +70,8 @@ in {
     # qemu-guest.nix already declares the actual virtio modules this VM boots
     # from, so the generic list is both wrong and unnecessary here.
     boot.initrd.includeDefaultModules = false;
+    # lockdown has to be in the LSM list NixOS builds (lsm=...) as well as in the kernel.
+    security.lsm = lib.mkIf cfg.hardened (lib.mkBefore ["lockdown"]);
 
     # mkForce: shared/core/nix.nix sets boot.kernelPackages via mkDefault for
     # every VM, same priority as a plain mkDefault here would be - conflicts.
@@ -98,6 +106,19 @@ in {
           STAGING = no; # experimental/out-of-tree driver tree
           STAGING_MEDIA = no;
           "8139TOO_8129" = no; # Realtek NIC - virtio-net only
+        }
+        # nixpkgs turns both off (the random signing key makes builds non-reproducible); a tier
+        # kernel is built once on the host and cached, so that does not matter here. The
+        # private key stays in the kernel's build tree: the dev output copies only .config
+        # and Module.symvers from it.
+        // lib.optionalAttrs cfg.hardened {
+          MODULE_SIG = yes;
+          MODULE_SIG_FORCE = yes;
+          MODULE_SIG_ALL = yes;
+          MODULE_SIG_SHA512 = yes;
+          SECURITY_LOCKDOWN_LSM = yes;
+          SECURITY_LOCKDOWN_LSM_EARLY = yes;
+          LOCK_DOWN_KERNEL_FORCE_INTEGRITY = yes;
         }
         // lib.optionalAttrs (!cfg.bluetooth) {
           BT = no;

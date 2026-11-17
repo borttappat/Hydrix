@@ -11,6 +11,9 @@
   baseCid = 115; # task1 = 115, task2 = 116, task3 = 117
   profile = "pentest"; # base profile every slot builds on (workspace/border follow it)
   secrets = []; # hydrix secrets delivered to every slot, e.g. ["burp"]
+  # Store tier: the base profile's (storeTier in its meta.nix) unless set here; null keeps
+  # slots on the host store.
+  # storeTier = null;
 
   # Applied to every slot's NixOS config.
   module = {lib, ...}: {

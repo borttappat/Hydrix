@@ -9,6 +9,7 @@
   workspace   = 6;
   label       = "LURKING";
   # audio = true;          # host audio over vsock:14505 (speakers, microphone); off unless set
+  storeTier = "profile";   # runs from the profile store tier, built by builder-profile
   focusBorder = "red";
   filesAccess = false;   # privacy: no files VM interface on this bridge; true to allow transfers
 

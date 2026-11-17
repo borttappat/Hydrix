@@ -14,6 +14,7 @@
   focusBorder = "__FOCUS_COLOR__";  # red, orange, yellow, green, cyan, blue, purple, pink, magenta
   notifyForward = false;  # true: forward VM notifications to host popups (vsock:14518)
   # audio = true;          # host audio over vsock:14505 (speakers, microphone); off unless set
+  storeTier = "profile";   # runs from the profile store tier, built by builder-profile (remove: host store)
   # filesAccess = false;  # keep the files VM off this bridge (no transfers in/out);
   #                        # the router then is the only way in (see allowedAccessTo)
 
