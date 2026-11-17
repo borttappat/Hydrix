@@ -29,6 +29,7 @@ Hydrix is an options-driven NixOS framework that provides complete network isola
 - [Notifications](#notifications)
 - [Font System](#font-system)
 - [MicroVM Management](#microvm-management)
+  - [Generations](#generations-shard--g)
   - [Task Slots](#task-slots-per-engagement-vms)
   - [Files VM (Encrypted Inter-VM Transfer)](#files-vm-encrypted-inter-vm-transfer)
   - [Hostsync VM (Host File Inbox)](#hostsync-vm-host-file-inbox)
@@ -37,6 +38,8 @@ Hydrix is an options-driven NixOS framework that provides complete network isola
   - [Builder VM](#builder-vm-lockdown-mode-builds)
 - [Vsock Communication](#vsock-communication)
 - [VM Store Sharing](#vm-store-sharing)
+  - [Store Tiers](#store-tiers)
+  - [Per-VM Store Cache](#per-vm-store-cache-persistencestorecache)
 - [Build System](#build-system)
 - [Shell](#shell)
 - [Workspace Integration](#workspace-integration)
@@ -908,23 +911,39 @@ User profiles are layered ON TOP of Hydrix base profiles. You get all base funct
 }
 ```
 
-### Trimmed Guest Kernel (`modules/vm-kernel.nix`)
+### Guest Kernel Hardening (`modules/vm-hardening.nix`)
 
-VMs only see virtio devices, so a VM can run a kernel without bluetooth, wifi, USB peripheral,
-sound and vendor GPU drivers. `modules/vm-kernel.nix` builds one from `linuxPackages_latest`.
-It is off by default: the trimmed kernel is compiled locally (not in the binary cache), once,
-then reused by every VM that enables it with the same settings. The comms, lurking and
-`_template` profiles import it already; to turn it on, uncomment in the profile's `default.nix`:
+Every template profile imports `modules/vm-hardening.nix`, which hardens the stock nixpkgs
+kernel without compiling anything (sysctls, boot parameters and a systemd unit, so a change
+only rebuilds the runner):
 
-```nix
-hydrix.vmKernel.enable = true;
-```
+| Setting | Effect |
+|---|---|
+| `hydrix.vmHardening.lockModules` (default `true`) | `kernel.modules_disabled=1` once boot finishes: no module loads afterwards, signed or not. Modules needed later go in `boot.kernelModules`; Docker's and Tailscale's are added automatically when the VM enables them |
+| `kptr_restrict=2`, `dmesg_restrict=1`, `perf_event_paranoid=2` | Kernel pointers, the kernel log and perf events for root only |
+| `unprivileged_bpf_disabled=1`, `bpf_jit_harden=2` | BPF for root only (permanently), JIT constant blinding |
+| `yama.ptrace_scope=2`, `io_uring_disabled=2` | Only root attaches to processes; no io_uring. pentest and dev loosen both to 1 |
+| `sysrq=0`, `dev.tty.ldisc_autoload=0`, `vm.unprivileged_userfaultfd=0`, `fs.protected_*`, `fs.suid_dumpable=0` | Smaller attack surface for an unprivileged guest user |
+| `security.protectKernelImage` | No kexec, no hibernation |
+| `slab_nomerge init_on_free=1 page_alloc.shuffle=1 vsyscall=none debugfs=off` | Boot parameters for features the stock kernel ships but leaves off |
 
-For another VM, add `../../modules/vm-kernel.nix` to its `imports` first. Each hardware class
-stays stripped unless the VM owns that hardware: `hydrix.vmKernel.wireless` (a VFIO WiFi VM),
-`usbPeripherals` (a VM receiving USB devices), `bluetooth`, `sound` (a VM with `audio = true`)
-and `graphics`. The module is yours: add or remove kernel symbols in its lists as needed. Apply
-with `shard -bR <vm>`.
+Sysctls apply on a live switch (`shard -r`), boot parameters and the module lock on the next
+boot (`shard -R`). Values are `lib.mkDefault`, so a profile loosens one with a plain
+assignment. A tool failing with "Operation not permitted" on a module needs that module in the
+profile's `boot.kernelModules` (pentest lists its VPN, pivoting and USB WiFi drivers). Most of
+this is reversible by root inside the VM; only `modules_disabled`, `kexec_load_disabled` and
+`unprivileged_bpf_disabled=1` are one-way until reboot.
+
+### Trimmed Guest Kernel (opt-in, per tier)
+
+VMs only see virtio devices, so they can run a kernel without bluetooth, wifi, USB peripheral,
+sound and vendor GPU drivers, with signed modules only and kernel lockdown
+(`hydrix.vmKernel.hardened`). It compiles locally (not in any binary cache, about an hour per
+kernel update), so it is off by default and only worth it with a binary cache shared between
+machines. It is set per tier, never per VM: `enable = true` in `modules/tier-kernels.nix` makes
+the flake import `modules/vm-kernel.nix` and that file's `profile` settings into every profile
+VM and task slot, so they all share one kernel. Keep a hardware class (`wireless`,
+`usbPeripherals`, ...) in the tier kernel if any VM of the tier owns that hardware.
 
 ### Flake Location Detection
 
@@ -2643,6 +2662,37 @@ shard -s <name>            | shard start <name>        # Prompts for passphrase,
 shard -S <name>            | shard stop <name>         # Stops VM and locks volume automatically
 ```
 
+### Generations (`shard -g`)
+
+Every `shard -b` that moves `current` records a generation in
+`/var/lib/microvms/<vm>/generations/<N>/` (runner, the tier system for a tier VM, date). Each
+one is a GC root in the host store and, for a tier VM, in its tier store, so going back needs
+no rebuild. A VM built before generations existed becomes generation 1 at its next build.
+
+```bash
+shard -g list [vm]                        # default: what every start boots; running: what runs now
+shard -g switch lurking prev              # or a number, or latest
+shard -g purge lurking 3 4                # chosen generations
+shard -g gc [vm ...] [-f]                 # keep only default and running, then collect
+```
+
+`current` is always the newest build, the default: every start that does not ask for a
+generation (autostart, `shard -s`, `shard -R`) boots it, and `shard -r` builds and switches to
+it, like a host's newest generation. A VM only starts from the host: a reboot or poweroff
+inside it stops it (`microvm@` restarts on failure only). `shard -g switch <vm> <N>` runs N
+until the next start: live when N's kernel and initrd match the running VM, otherwise booted
+once (`current` points at N only while the VM starts). The `running` marker comes from the VM's
+live system (its switch service), so it is right after live switches too.
+
+Each VM keeps its newest `hydrix.microvmHost.keepGenerations` (default 10, the default
+generation included; 0 keeps all): a build that records a new one drops the oldest roots.
+`shard -g gc` drops every generation but the default and the running one (all VMs, or the
+named ones), removes leftover roots in both stores (dropped or deleted generations, a tier
+builder's own per-VM out-link), trims stopped tier VMs' views to their current system, then
+collects garbage in the host store and, through each tier builder (`GC`), in the tier stores,
+which nothing else collects. `shard -g` completes actions, VM names and generation numbers in
+fish.
+
 ### Backups (`shard backup`)
 
 A backup is a copy of a stopped VM's persistent volumes, restorable later over the live ones.
@@ -2739,6 +2789,9 @@ Persistent home volumes can be LUKS-encrypted so data is locked at rest whenever
 - `shard encrypt-setup` creates a raw LUKS2 container (`home.luks`) in `/var/lib/microvms/<name>/`
 - `shard start` runs `cryptsetup luksOpen` before QEMU starts, presenting `/dev/mapper/vm-<name>-home` to the VM
 - `shard stop` runs `cryptsetup luksClose` after the VM halts - data is locked immediately
+- A VM that stops itself (poweroff or reboot inside it) is locked too: `microvm@`'s
+  `ExecStopPost` closes `vm-<vm>-home` after a clean stop. After a crash it stays open, since
+  systemd restarts the VM. So `shard -R` asks for the passphrase again
 - If the host is powered off mid-session, the container is locked automatically on reboot (the mapper device never persists across boots)
 
 **Enabling encryption for a VM:**
@@ -3907,7 +3960,10 @@ timer, and stopping candidates one at a time finds it.
 
 ## VM Store Sharing
 
-VMs share the host's `/nix/store` via virtiofs with a writable overlay, avoiding multi-gigabyte per-VM stores.
+VMs share a store via virtiofs with a writable overlay, avoiding multi-gigabyte per-VM stores.
+Infra VMs (router, builder, files, ...) share the host's `/nix/store`. Profile VMs and task
+slots whose `meta.nix` sets `storeTier = "profile"` (the template default) run from the
+profile store tier instead, see [Store Tiers](#store-tiers).
 
 ### Architecture
 
@@ -3935,6 +3991,58 @@ keep their own):
 | `"always"` | The guest keeps its cached view. Store paths never change, so it cannot go stale; a path the guest looked up before the host built it can stay invisible for a while, so test live switches (`shard -r`) once with it. |
 
 Where to set it, per VM or for all of them, and how to check it: [VM Terminal Speed](#vm-terminal-speed-opt-in-settings).
+
+### Store Tiers
+
+The host's own store holds what the host runs. Profile VM software is built into a separate
+store, `/var/lib/hydrix/stores/profile`, by the profile tier's builder VM (`infra/builder-profile`,
+`buildsTier = "profile"`, CID 216). The host never builds profile packages and never reads a
+tier store's contents; it only checks that a built path exists there.
+
+A tier build (`shard -b <vm>` for a VM with `storeTier`) runs in four steps:
+
+1. **Host part.** The host builds the runner and the kernel (`system.build.tierHost`), through
+   the host builder in lockdown. Skipped when that exact path is already built.
+2. **Export.** The host evaluates the VM (the tier builder never sees the flake or any source
+   tree) and exports to its cache (`/var/lib/hydrix/caches/host`) the build recipes and what
+   the host already has: the kernel and every output the VM shares with the host store.
+3. **Build.** builder-profile copies the recipes from the cache and builds the system into the
+   tier store, substituting from the host cache and cache.nixos.org.
+4. **View.** The VM gets its own view of the tier store,
+   `/var/lib/hydrix/stores/views/<vm>/nix/store`: hardlinks of only its closure
+   (`scripts/lib/tier-view.py`). That view is the VM's `/nix/.ro-store`, so a VM never sees
+   another VM's system or packages.
+
+The host cache is unsigned: only host root writes it, and the tier builder reads it read-only
+and trusted (`file:///mnt/cache-host?trusted=1`). Caches flow down only. The tier stores are
+mounted `nosuid,nodev` on the host (`hydrix-tier-stores-nosuid`), and a tier builder refuses to
+start without that. Each tier has its own nixpkgs input (`nixpkgs-profile`, same URL as
+`nixpkgs`), so one tier can move to a newer revision first. A tier VM cannot be coupled to the
+host build (an assertion).
+
+The launcher reads a tier VM's apps from `/var/lib/microvms/<vm>/apps.tsv`, which the build
+writes from the tier store (`scripts/lib/tier-apps.py`). `shard cache status` shows the cache
+and tier sizes, `shard cache clear` empties the cache (the next tier build exports again).
+Garbage collection of the tier store: [Generations](#generations-shard--g).
+
+### Per-VM Store Cache (`persistence.storeCache`)
+
+`hydrix.microvm.persistence.storeCache` (not to be confused with the virtiofs cache mode
+`hydrix.microvm.storeCache` above) decides what a VM's writable store layer
+(`nix-overlay.qcow2`) keeps between boots (Hydrix `vm/microvm/store-cache.nix`):
+
+- `"persistent"` (default with `persistence.enable`): a real cache. Nix's database lives on
+  the same volume, so whatever the VM fetched or built (`nix shell`, `nix run`, `nix develop`,
+  `nix profile`) stays valid until `shard -p` deletes the volume. At each boot, before the
+  overlay is mounted, entries in the writable layer for paths the shared store has are
+  removed, so nothing shadows the system across boots (garbage-collection whiteouts included);
+  after boot `nix-store --verify` drops database entries whose path vanished. The initrd comes
+  from the host, so guest root cannot skip this.
+- `"ephemeral"` (default without persistence, e.g. lurking): the writable layer is emptied at
+  each boot.
+
+The volume size is `persistence.storeOverlaySize` (pentest and task slots: 50 GB,
+thin-provisioned). Garbage collection inside the VM is manual (`nix-collect-garbage`).
 
 ### Filesystem Shares
 
@@ -4039,12 +4147,36 @@ shard builder fetch browsing
 shard builder fetch pentest
 shard builder stop                  # Stop when done
 
+# Update flake inputs without host network (rebuild -u / -U do this in lockdown)
+shard builder update                # every input
+shard builder update hydrix         # one input
+
 # Manual control
 shard builder start                 # Start builder (stops host nix-daemon)
 shard builder shell                 # Attach to builder console
 shard builder status                # Check builder state
 shard builder stop                  # Stop builder (restarts host nix-daemon)
 ```
+
+**Updating inputs from lockdown.** `shard builder update [input ...]` has the builder lock
+the flake anew (`UPDATE`; `/mnt/hydrix` is read-only in the builder), add the new lock file to
+the store it shares with the host and send its path. The host checks it (a store path of that
+name holding a version 7 flake lock), writes `flake.lock` and lists the inputs that moved. The
+fetched sources are in the host store and database already, so the host evaluates offline
+afterwards. This works for a `path:` Hydrix input and for a remote one alike, and needs no
+GitHub credentials: the builder only downloads public sources (private inputs would come
+through gitsync clones instead).
+
+**Flake input roots.** A lockdown host cannot download an input source a garbage collection
+took. `scripts/lib/flake-input-roots.py` roots every input already in the store as
+`/nix/var/nix/gcroots/hydrix-inputs/<input>` (its store path follows from the `narHash` in
+`flake.lock`; inputs evaluation never fetched, such as an unused git input, are left alone).
+`rebuild`, every `shard -b`, `shard builder update` and `shard -g gc` refresh them, and links
+for inputs the lock no longer has go.
+
+**The builder builds itself.** In lockdown, `shard -b builder` runs the builder's existing
+build to build the new one (the host could not fetch the build tools a garbage collection
+took); only the very first build, with no `current` yet, builds on the host.
 
 **Named targets:**
 
