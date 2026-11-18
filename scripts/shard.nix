@@ -1483,6 +1483,37 @@
           esac
       }
 
+      # Push waypipe mode, connect the host tunnel and report waypipe-connect's verdict: it
+      # confirms the tunnel twice, the second time a few seconds after it goes live.
+      connect_waypipe_tunnel() {
+          local vm_name="$1" cid="$2"
+          local logf="/tmp/waypipe-connect-''${vm_name}.log"
+          log "Starting VM waypipe service..."
+          vsock_query "$cid" "$DISPLAY_MODE_PORT" "waypipe" 3 5 >/dev/null 2>&1 || true
+          log "Waiting for VM to settle..."
+          sleep 10
+          pkill -f "waypipe-connect ''${vm_name}$" 2>/dev/null || true
+          sleep 0.5
+          log "Connecting host waypipe tunnel..."
+          setsid waypipe-connect "$vm_name" </dev/null >"$logf" 2>&1 &
+          disown
+          local _i
+          for _i in $(seq 1 60); do
+              sleep 0.5
+              if grep -q '^Tunnel live' "$logf" 2>/dev/null; then
+                  log_success "waypipe tunnel live"
+                  return 0
+              fi
+              if grep -qE '^Tunnel (did not confirm|lost)' "$logf" 2>/dev/null; then
+                  log_warn "waypipe tunnel not ready in the VM (waypipe-connect keeps retrying):"
+                  grep -E '^Tunnel |^  VM: ' "$logf" | tail -n 11 | sed 's/^/     /'
+                  log_warn "Full log: ''${logf}"
+                  return 0
+              fi
+          done
+          log_warn "waypipe tunnel not confirmed after 30s, see ''${logf}"
+      }
+
       cmd_start() {
           local vm_name="$1"
           engagement_prompt "$vm_name" || return 1
@@ -1594,18 +1625,8 @@
               vm_ws=$(jq -r --arg p "$profile" '.[$p].workspace // empty' \
                   /etc/hydrix/vm-registry.json 2>/dev/null)
               if [[ -n "$vm_ws" ]]; then
-                  log "Starting VM waypipe service..."
-                  vsock_query "$cid" "$DISPLAY_MODE_PORT" "waypipe" 3 5 >/dev/null 2>&1 || true
-                  log "Waiting for VM to settle..."
-                  sleep 10
-                  pkill -f "waypipe-connect ''${vm_name}$" 2>/dev/null || true
-                  sleep 0.5
-                  log "Connecting host waypipe tunnel..."
-                  setsid waypipe-connect "$vm_name" \
-                      </dev/null >"/tmp/waypipe-connect-''${vm_name}.log" 2>&1 &
-                  disown
+                  connect_waypipe_tunnel "$vm_name" "$cid"
                   _waypipe_started=1
-                  log_success "waypipe tunnel started"
               fi
           fi
 
@@ -1872,18 +1893,8 @@
               vm_ws=$(jq -r --arg p "$profile" '.[$p].workspace // empty' \
                   /etc/hydrix/vm-registry.json 2>/dev/null)
               if [[ -n "$vm_ws" ]]; then
-                  log "Starting VM waypipe service..."
-                  vsock_query "$cid" "$DISPLAY_MODE_PORT" "waypipe" 3 5 >/dev/null 2>&1 || true
-                  log "Waiting for VM to settle..."
-                  sleep 10
-                  pkill -f "waypipe-connect ''${vm_name}$" 2>/dev/null || true
-                  sleep 0.5
-                  log "Connecting host waypipe tunnel..."
-                  setsid waypipe-connect "$vm_name" \
-                      </dev/null >"/tmp/waypipe-connect-''${vm_name}.log" 2>&1 &
-                  disown
+                  connect_waypipe_tunnel "$vm_name" "$cid"
                   _waypipe_started=1
-                  log_success "waypipe tunnel started"
               fi
           fi
 

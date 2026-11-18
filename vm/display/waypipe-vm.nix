@@ -26,6 +26,9 @@
   notifyForwardPort = 14518;
   terminalDaemon = config.hydrix.microvm.terminalDaemon.enable or false;
   terminalSocket = "/run/user/1000/alacritty-daemon.sock";
+  # Mounts the tmpfs at /run/user/1000. Every service with a socket there starts after it: a
+  # mount that comes later (logind does it at the first login) hides sockets made before it.
+  runtimeDir = "user-runtime-dir@1000.service";
   # The environment apps launched through waypipe-launch get, shared with the terminal daemon
   # so its windows' shells start the same way.
   appEnv =
@@ -204,6 +207,14 @@
           echo "none"
         fi
         ;;
+      DIAG)
+        # Why STATUS says what it says, for the host's logs. Read-only.
+        _since() { systemctl show -P ActiveEnterTimestamp "$1" 2>/dev/null || true; }
+        echo "waypipe-vsock: $(systemctl is-active waypipe-vsock 2>/dev/null || true), since $(_since waypipe-vsock.service)"
+        if [[ -S /run/user/1000/waypipe-0 ]]; then echo "socket: present"; else echo "socket: missing"; fi
+        echo "runtime dir: $(${pkgs.util-linux}/bin/findmnt -n -o FSTYPE /run/user/1000 2>/dev/null || echo "not mounted"), since $(_since ${runtimeDir})"
+        journalctl -b -u waypipe-vsock -n 5 -o cat --no-pager 2>/dev/null | sed 's/^/log: /' || true
+        ;;
       stop)
         # Stop all display services — host WM is exiting; next WM will push its mode on start.
         systemctl stop waypipe-vsock waypipe-launch ${lib.optionalString audioEnabled "pulse-vsock"} 2>/dev/null || true
@@ -216,6 +227,10 @@
   '';
 in {
   boot.kernelModules = ["vmw_vsock_virtio_transport"];
+
+  # Keeps /run/user/1000 mounted from boot to shutdown: without it, logind unmounts it when the
+  # last session ends (a logout on the serial console), taking the waypipe socket with it.
+  users.users.${username}.linger = lib.mkDefault true;
 
   environment.systemPackages = [
     pkgs.waypipe
@@ -326,7 +341,8 @@ in {
   # Apps inside VM use WAYLAND_DISPLAY=waypipe-0
   systemd.services.waypipe-vsock = {
     description = "waypipe Wayland compositor proxy (vsock:${waypipePort})";
-    after = ["network.target"];
+    wants = [runtimeDir];
+    after = ["network.target" runtimeDir];
     restartIfChanged = false;
     startLimitIntervalSec = 0;
 
@@ -337,10 +353,7 @@ in {
       Restart = "always";
       RestartSec = "5s";
 
-      ExecStartPre = [
-        "+${pkgs.coreutils}/bin/install -d -m 0700 -o ${username} /run/user/1000"
-        "+${pkgs.coreutils}/bin/rm -f /run/user/1000/waypipe-0"
-      ];
+      ExecStartPre = "+${pkgs.coreutils}/bin/rm -f /run/user/1000/waypipe-0";
       ExecStart = pkgs.writeShellScript "waypipe-vsock-start" ''
         export XDG_RUNTIME_DIR="/run/user/1000"
         # Connect to host waypipe client listening on vsock:${waypipePort}.
@@ -375,7 +388,8 @@ in {
     {wantedBy = lib.mkForce [];}
     (lib.mkIf audioEnabled {
       description = "PulseAudio vsock bridge to host (port 14505)";
-      after = ["network.target"];
+      wants = [runtimeDir];
+      after = ["network.target" runtimeDir];
       startLimitIntervalSec = 0;
 
       serviceConfig = {
@@ -452,8 +466,8 @@ in {
   # Receives app launch commands from host, runs them with waypipe display.
   systemd.services.waypipe-launch = {
     description = "waypipe app launch receiver (vsock:14508)";
-    after = ["waypipe-vsock.service"];
-    wants = ["waypipe-vsock.service"];
+    after = ["waypipe-vsock.service" runtimeDir];
+    wants = ["waypipe-vsock.service" runtimeDir];
     startLimitIntervalSec = 0;
 
     serviceConfig = {
@@ -463,7 +477,6 @@ in {
       Restart = "always";
       RestartSec = "2s";
 
-      ExecStartPre = "+${pkgs.coreutils}/bin/install -d -m 0700 -o ${username} /run/user/1000";
       ExecStart = pkgs.writeShellScript "waypipe-launch-start" ''
         export XDG_RUNTIME_DIR="/run/user/1000"
         export WAYLAND_DISPLAY=waypipe-0

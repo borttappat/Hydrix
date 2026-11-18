@@ -296,6 +296,14 @@
     # A separate script, so it never shows up as a second "waypipe-connect <vm>".
     ${waypipeConnectWatch} "$VM" "$$" &
 
+    vm_cmd() {
+      printf '%s\n' "$1" | ${pkgs.socat}/bin/socat -T3 - VSOCK-CONNECT:"$CID":14509 2>/dev/null || true
+    }
+    # The VM's own account of its waypipe state. Untrusted: printable text only, a few lines.
+    log_vm_diag() {
+      vm_cmd DIAG | tr -cd '[:print:]\n' | head -n 10 | cut -c1-200 | sed 's/^/  VM: /' >&2
+    }
+
     while true; do
       _cycle=$((_cycle + 1))
       _t_cycle_start=$(date +%s.%N)
@@ -365,11 +373,35 @@
       echo "[timing] cycle $_cycle: TOTAL $(echo "$_t_status - $_t_cycle_start" | ${pkgs.bc}/bin/bc)s"
 
       if [[ "$_tunnel_ok" -eq 1 ]]; then
-        echo "Tunnel live: $VM (CID $CID, port $PORT)"
-        ${pkgs.libnotify}/bin/notify-send -u normal "waypipe" \
-          "$LABEL connected - WS''${VM_WS:-?} ready" 2>/dev/null || true
+        # The socket can still vanish just after the first STATUS (something in the VM
+        # remounting its runtime dir), so check again once the VM's boot has settled.
+        _lost=0
+        for _d in 2 3; do
+          sleep "$_d"
+          if ! kill -0 "$WAYPIPE_PID" 2>/dev/null; then
+            _lost=2
+            break
+          fi
+          if [[ "$(vm_cmd STATUS)" != "waypipe" ]]; then
+            _lost=1
+            break
+          fi
+        done
+        if [[ "$_lost" -eq 1 ]]; then
+          echo "Tunnel lost in the VM after going live: $VM (STATUS no longer waypipe), reconnecting" >&2
+          log_vm_diag
+          kill "$WAYPIPE_PID" 2>/dev/null || true
+        elif [[ "$_lost" -eq 2 ]]; then
+          echo "Tunnel lost right after going live: $VM (waypipe exited), reconnecting" >&2
+          log_vm_diag
+        else
+          echo "Tunnel live: $VM (CID $CID, port $PORT)"
+          ${pkgs.libnotify}/bin/notify-send -u normal "waypipe" \
+            "$LABEL connected - WS''${VM_WS:-?} ready" 2>/dev/null || true
+        fi
       else
-        echo "Tunnel did not confirm within 15s: $VM" >&2
+        echo "Tunnel did not confirm within 15s: $VM (last STATUS: ''${ST:-no reply})" >&2
+        log_vm_diag
       fi
 
       # 5. Wait for waypipe to exit (VM disconnected or error).
@@ -486,18 +518,27 @@
     # Poll STATUS - waypipe-connect is expected to be running (started by shard start).
     # Do not auto-start it here; that is shard start's responsibility.
     log "Waiting for waypipe to become ready in $VM_NAME..."
+    vm_cmd() {
+      printf '%s\n' "$1" | ${pkgs.socat}/bin/socat -T3 - VSOCK-CONNECT:"$CID":14509 2>/dev/null || true
+    }
     READY=0
-    for i in $(seq 1 20); do
-      VM_STATUS=$(printf 'STATUS\n' \
-        | ${pkgs.socat}/bin/socat -T3 - VSOCK-CONNECT:"$CID":14509 2>/dev/null || true)
-      if [[ "$VM_STATUS" == "waypipe" ]]; then
+    for i in $(seq 1 26); do
+      if [[ "$(vm_cmd STATUS)" == "waypipe" ]]; then
         READY=1
         break
+      fi
+      # Still not ready after 3s: "waypipe" restarts the VM's waypipe server when its socket
+      # is missing; waypipe-connect then reconnects on its own.
+      if [[ "$i" -eq 6 ]]; then
+        log "waypipe not ready in $VM_NAME after 3s, asking the VM to repair it"
+        vm_cmd waypipe >/dev/null
       fi
       sleep 0.5
     done
     if [[ "$READY" -eq 0 ]]; then
-      err "waypipe not ready in $VM_NAME - is waypipe-connect running? (shard start $VM_NAME)"
+      DIAG=$(vm_cmd DIAG | tr -cd '[:print:]\n' | head -n 3 | cut -c1-120)
+      log "VM diagnosis: $DIAG"
+      err "waypipe not ready in $VM_NAME. VM: ''${DIAG:-no reply}. Try: shard -R $VM_NAME"
     fi
 
     log "WS$WS → $VM_NAME (CID $CID): $*"

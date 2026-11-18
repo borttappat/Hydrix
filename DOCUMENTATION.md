@@ -3831,7 +3831,7 @@ All host-VM communication uses virtio-vsock. No SSH or network access to VMs. Ea
 | 14506 | router-stats-server | Host -> Router | WiFi/net/WireGuard status + WiFi credential sync (see [Polling Architecture](#polling-architecture) below). Commands: `PING`, `POLL`/`STATUS`, `NET`, `WG`, `ALL`, `ADD`/`REMOVE` |
 | 14505 | pulse-vsock | VM -> Host | PulseAudio/PipeWire audio bridge, only for VMs with `audio = true` in meta.nix |
 | 14508 | waypipe-launch | Host -> VM | App launch commands (Wayland mode) |
-| 14509 | display-mode | Host -> VM | Display mode selector / readiness gate: `PING`/`waypipe-reconnect`/`STATUS`/`stop` |
+| 14509 | display-mode | Host -> VM | Display mode selector / readiness gate: `PING`/`waypipe-reconnect`/`STATUS`/`DIAG`/`stop` |
 | 14510 | builder-build | Host -> Builder | Send build commands |
 | 14511 | builder-status | Host -> Builder | Query builder status |
 | 14518 | vm-notify-relay | VM -> Host | Forwards `org.freedesktop.Notifications` calls to a host popup. Opt-in per VM via `notifyForward = true` in the profile's `meta.nix`, which drives both `hydrix.microvm.notifyForward.enable` and the host's per-CID allowlist |
@@ -4598,7 +4598,7 @@ The `display-mode` service on each VM accepts these commands:
 
 Three systemd services run in each graphical profile VM:
 
-**`display-mode.service`** - runs as root, listens on vsock:14509. Handles mode switching and readiness signalling. Accepts: `PING` (returns `OK`), `STATUS` (returns `waypipe`/`none`), `waypipe` (starts/restarts waypipe-vsock + waypipe-launch), `waypipe-reconnect` (restarts waypipe-vsock if socket missing, leaves running apps alive otherwise), `stop` (stops all display services, leaves VM in neutral state ready for next start), `JOURNAL_WAYPIPE` (returns waypipe-vsock journal for remote diagnostics).
+**`display-mode.service`** - runs as root, listens on vsock:14509. Handles mode switching and readiness signalling. Accepts: `PING` (returns `OK`), `STATUS` (returns `waypipe`/`none`), `waypipe` (starts waypipe-vsock + waypipe-launch, restarts them only when the socket is missing, so running apps stay), `waypipe-reconnect` (always restarts both; waypipe-connect sends it for a fresh host listener), `stop` (stops all display services, leaves VM in neutral state ready for next start), `DIAG` (read-only: waypipe-vsock state, whether the socket exists, the `/run/user/1000` mount and when each started, the last waypipe-vsock journal lines). waypipe-vsock, waypipe-launch and pulse-vsock start after `user-runtime-dir@1000.service`, and the user lingers, so the tmpfs logind mounts at `/run/user/1000` is in place before any socket is made there and stays until shutdown; a later mount would hide the sockets while the services keep running.
 
 Runs as root because starting/stopping system services requires it. STATUS returns `"waypipe"` only when both `/run/user/1000/waypipe-0` exists AND `waypipe-vsock` is active - checking the socket file alone is insufficient since it can persist after the service crashes.
 
@@ -4627,7 +4627,7 @@ disabling it: [VM Terminal Speed](#vm-terminal-speed-opt-in-settings).
 1. Looks up the VM's CID and registry key from `/etc/hydrix/vm-registry.json`
 2. Kills any stale waypipe process on the per-VM port
 3. Starts `hydrix-secctx` (security context for `hydrix-<key>`), then the patched `waypipe --vsock --socket CID:PORT --title-prefix "[<label>] " client` in the sandboxed unit (label: the key, or `<profile>-<engagement>` for a bound task slot), with only the security-context socket (listening for that VM's outbound connection only)
-4. Sends `waypipe-reconnect` to the VM via vsock:14509 and waits for `STATUS` to confirm the tunnel
+4. Sends `waypipe-reconnect` to the VM via vsock:14509 and waits for `STATUS` to confirm the tunnel, then checks `STATUS` again 2s and 5s later. A failed check writes the VM's `DIAG` reply to the log (`/tmp/waypipe-connect-<vm>.log`, lines `  VM: ...`), and a tunnel lost after the first check is reconnected. `shard -s`/`-R` wait for this verdict and print it (`waypipe tunnel live`, or the failure with the `VM:` lines)
 5. Restart loop: if waypipe exits, restarts it automatically - requires `waypipe client || true` so the `set -euo pipefail` wrapper does not exit on non-zero waypipe exit
 6. A watcher ends the script, and with it the listener, as soon as `microvm@<vm>` stops, however it stopped (`shard -S`, a shutdown inside the VM, a crash). Changes to these flags apply when the listener restarts: `shard -R <vm>`
 
@@ -4635,7 +4635,7 @@ disabling it: [VM Terminal Speed](#vm-terminal-speed-opt-in-settings).
 1. Detects focused workspace via `hyprctl activeworkspace -j`
 2. Looks up which VM owns that workspace in `vm-registry.json`
 3. If `waypipe-connect` is not running for that VM, starts it and waits for the tunnel
-4. Polls vsock:14509 `STATUS` up to 20s until it returns `"waypipe"`
+4. Polls vsock:14509 `STATUS` up to 13s until it returns `"waypipe"`; after 3s it sends `waypipe`, which restarts the VM's waypipe server if its socket is missing. A failure notification includes the start of the VM's `DIAG` reply
 5. Sends the command to vsock:14508 (`waypipe-launch`)
 
 **`vm-push-display-mode`** - pushes `waypipe` mode to all running profile VMs via vsock:14509. Called at Hyprland startup so VMs already running when the compositor starts get pinged immediately.
