@@ -8,6 +8,7 @@
 # CID 213 — gap between files (212) and hostsync (214), reserved 2xx infra range.
 {
   vsockCid   = 213;
+  storeTier  = "infra"; # runs from the infra store tier, built by builder-infra (remove: host store)
   hasDisplay = false;
   subnet     = "192.168.213"; # for vm-registry lookup; no actual TAP/bridge
   label      = "VAULT";

@@ -7,6 +7,7 @@
 # CID 209 reserved for infrastructure use (2xx range)
 {
   vsockCid   = 209;
+  storeTier  = "infra"; # runs from the infra store tier, built by builder-infra (remove: host store)
   hasDisplay = false;
   filesAgent = true;  # opt into the shared files-transfer agent (vm/dev/files-agent.nix)
   usbPassthrough = true;  # host can hand whole USB devices to this VM (usb attach <busid> usb-sandbox)

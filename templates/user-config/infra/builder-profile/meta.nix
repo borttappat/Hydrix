@@ -1,7 +1,8 @@
 # Infrastructure VM: builder for the profile store tier
 # Builds profile VMs whose meta.nix sets storeTier = "profile" into
-# /var/lib/hydrix/stores/profile, never into the host store. Its own system runs
-# from the host store (read-only); it can run while the host nix-daemon does.
+# /var/lib/hydrix/stores/profile, never into the host store. Its own system boots from a
+# view of its closure in the host store (read-only); it can run while the host
+# nix-daemon does.
 # Uses mkMicrovmBuilder (not mkInfraVm), builtinVm = true
 {
   vsockCid = 216;

@@ -453,7 +453,12 @@
               };
             }
           ]
-          ++ nixpkgs.lib.optional (m.filesAgent or false) "${hydrix}/vm/dev/files-agent.nix";
+          ++ nixpkgs.lib.optional (m.filesAgent or false) "${hydrix}/vm/dev/files-agent.nix"
+          # storeTier in meta.nix: the VM's store is its own view of that tier store, as for
+          # profile VMs (infra tier, built by builder-infra).
+          ++ nixpkgs.lib.optional (m ? storeTier) {
+            hydrix.microvm.storeSource = "/var/lib/hydrix/stores/views/microvm-${m._infraName}/nix/store";
+          };
       };
     }) (builtins.filter (m: !(m.builtinVm or false)) discoveredInfra));
 
@@ -490,6 +495,7 @@
           hasDisplay = m.hasDisplay or false;
           usbPassthrough = m.usbPassthrough or false;
           usbDevices = m.usbDevices or [];
+          storeTier = m.storeTier or null;
           buildsTier = m.buildsTier or null;
         };
       }) (builtins.filter (m: m ? vsockCid) discoveredInfra))
@@ -648,8 +654,8 @@
           ];
         };
       }
-      # Tier builders: infra/<name>/meta.nix with buildsTier (builder-profile builds the
-      # profile store tier; the host builder above keeps the host store)
+      # Tier builders: infra/<name>/meta.nix with buildsTier (builder-profile and
+      # builder-infra build their store tiers; the host builder above keeps the host store)
       // builtins.listToAttrs (map (m: {
         name = "microvm-${m._infraName}";
         value = hydrix.lib.mkMicrovmBuilder {

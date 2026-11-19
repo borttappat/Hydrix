@@ -3,6 +3,7 @@
 # Accessed by host via vsock port 14505 (files agent)
 {
   vsockCid      = 212;
+  storeTier     = "infra"; # runs from the infra store tier, built by builder-infra (remove: host store)
   hasDisplay    = false;
   subnet        = "192.168.212";
   tapId         = "mv-files";

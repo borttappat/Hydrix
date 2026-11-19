@@ -7,6 +7,7 @@
 # CID 211 reserved for infrastructure use (2xx range)
 {
   vsockCid   = 211;
+  storeTier  = "infra"; # runs from the infra store tier, built by builder-infra (remove: host store)
   hasDisplay = false;
   bridge     = "br-builder";
   tapId     = "mv-gitsync";

@@ -6,6 +6,7 @@
 # No internet access - isolated to the hostsync bridge only.
 {
   vsockCid   = 214;
+  storeTier  = "infra"; # runs from the infra store tier, built by builder-infra (remove: host store)
   hasDisplay = false;
   subnet     = "192.168.214";
   tapId    = "mv-hostsync";
