@@ -34,6 +34,9 @@
   vmName = config.networking.hostName;
   tier = config.hydrix.builder.storeTier;
   tierMode = tier != null;
+  # A tier builder's own store: a copy of its closure from the host store (shard
+  # builder_view_sync), never the whole host store.
+  ownStoreView = "/var/lib/hydrix/stores/views/${vmName}/nix/store";
 in {
   imports = [
     # The host cache is unsigned now (read with ?trusted=1, see nix.settings below)
@@ -71,8 +74,9 @@ in {
       default = null;
       example = "profile";
       description = ''
-        Build into a tier store instead of the host store. The builder then sees the host
-        /nix/store read-only (its own system only), builds into the host directory
+        Build into a tier store instead of the host store. The builder then sees a copy of
+        its own closure from the host store, read-only (shard builder_view_sync, at
+        /var/lib/hydrix/stores/views/<builder>), builds into the host directory
         /var/lib/hydrix/stores/<tier> (a chroot store at /mnt/store) and never needs the
         host nix-daemon stopped. VMs read the tier store through hydrix.microvm.storeSource.
       '';
@@ -136,8 +140,10 @@ in {
         "chardev:console"
       ];
 
-      # Tier builder: own system from the host store (read-only), overlay upper on tmpfs
+      # Tier builder: own system from its store view (read-only), overlay upper on tmpfs
       writableStoreOverlay = lib.mkIf tierMode "/nix/.rw-store";
+      # microvm.nix takes only a share from "/nix/store" for the store; the view is not one.
+      storeOnDisk = lib.mkIf tierMode (lib.mkForce false);
 
       # ===== Shared Filesystems =====
       # Host store mode: R/W mounts of the host's actual nix store; the host
@@ -149,7 +155,7 @@ in {
             [
               {
                 tag = "host-nix-store";
-                source = "/nix/store";
+                source = ownStoreView;
                 mountPoint = "/nix/.ro-store";
                 proto = "virtiofs";
                 readOnly = true;
@@ -314,6 +320,10 @@ in {
       fsType = "tmpfs";
       options = ["mode=0755"];
     };
+
+    # Tier builder: the overlay's lower is its store view (see storeOnDisk above).
+    fileSystems."/nix/.ro-store" = lib.mkIf tierMode {neededForBoot = true;};
+    fileSystems."/nix/store" = lib.mkIf tierMode {overlay.lowerdir = lib.mkForce ["/nix/.ro-store"];};
 
     # ===== Writable Nix Store =====
     # By default NixOS remounts /nix/store as read-only for security

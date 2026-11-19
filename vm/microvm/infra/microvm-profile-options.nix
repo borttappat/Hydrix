@@ -111,19 +111,6 @@
       description = "Share host /nix/store via virtiofs (faster rebuilds, instant startup)";
     };
 
-    storeSource = lib.mkOption {
-      type = lib.types.str;
-      default = "/nix/store";
-      example = "/var/lib/hydrix/stores/profile/nix/store";
-      description = ''
-        Host directory shared read-only as the VM's store (with shareStore). Any other value
-        than /nix/store is a tier store written by a tier builder (hydrix.builder.storeTier):
-        the VM's system is built there, and the runner the host builds no longer references
-        it, so the VM's closure never enters the host store. Such a VM applies changes by
-        restart only (no shard -r).
-      '';
-    };
-
     hostRepos = lib.mkOption {
       type = lib.types.attrsOf lib.types.str;
       default = {};

@@ -61,6 +61,18 @@ in {
       description = "virtiofsd extraArgs for writable shares that hold the host user's own files.";
     };
 
+    microvm.storeSource = lib.mkOption {
+      type = lib.types.str;
+      default = "/nix/store";
+      example = "/var/lib/hydrix/stores/profile/nix/store";
+      description = ''
+        Host directory shared read-only as the VM's store (with shareStore). Any other value
+        than /nix/store is a tier store written by a tier builder (hydrix.builder.storeTier):
+        the VM's system is built there, and the runner the host builds no longer references
+        it, so the VM's closure never enters the host store (vm/microvm/store-tier.nix).
+      '';
+    };
+
     # virtiofsd arguments for every share a VM can write to. Keeps the host
     # root virtiofsd from creating device nodes or file capabilities for the
     # guest; setuid bits are neutralised host-side by nosuid mounts.

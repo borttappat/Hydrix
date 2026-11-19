@@ -491,14 +491,22 @@
               log_time "System built in ''${BOLD}$(timer_end "$step")s''${NC}"
           fi
 
-          log "''${BOLD}[4/4]''${NC} Store view, runner and app list"
+          if is_headless "$vm_name"; then
+              log "''${BOLD}[4/4]''${NC} Store view and runner"
+          else
+              log "''${BOLD}[4/4]''${NC} Store view, runner and app list"
+          fi
           # The view gets the new closure before current and tier-system move, so the recorded
           # build always has a complete view (start's exact sync reads tier-system).
           tier_view_sync "$vm_name" add "$tier_system" || return 1
           vm_link "$vm_name" current "$runner"
           # cmd_switch finds the system and its registration through this (tier store path).
           printf '%s\n' "$tier_system" | sudo install -m 644 /dev/stdin "/var/lib/microvms/''${vm_name}/tier-system"
-          tier_write_apps "$vm_name" "$tier" "$tier_system"
+          if is_headless "$vm_name"; then
+              sudo rm -f "/var/lib/microvms/''${vm_name}/apps.tsv"
+          else
+              tier_write_apps "$vm_name" "$tier" "$tier_system"
+          fi
           gen_record "$vm_name" "$host_part" "$tier_system"
           root_flake_inputs
           log_success "Build complete in ''${BOLD}$(timer_end "$start")s''${NC}: $runner"
@@ -827,9 +835,19 @@
       # last build; cmd_tier_build passes the new one before recording it.
       tier_view_sync() {
           local vm_name="$1" mode="$2" ts="''${3:-}" tier root reg out
+          if [[ -n "$(registry_field "$vm_name" buildsTier)" ]]; then
+              builder_view_sync "$vm_name" "$mode"
+              return
+          fi
           tier=$(vm_store_tier "$vm_name")
           [[ -n "$tier" ]] || return 0
           root="''${TIER_STORES}/''${tier}"
+          if [[ -z "$ts" && ! -e "/var/lib/microvms/''${vm_name}/tier-system" ]] \
+              && [[ -e "/var/lib/microvms/''${vm_name}/current/share/microvm/system" ]]; then
+              # Moved to a tier, not rebuilt yet: its host-store build still boots as before.
+              log "''${vm_name} runs its host-store build until shard -b ''${vm_name} moves it to the ''${tier} store"
+              return 0
+          fi
           [[ -n "$ts" ]] || ts=$(cat "/var/lib/microvms/''${vm_name}/tier-system" 2>/dev/null || true)
           if [[ ! "$ts" =~ ^/nix/store/[a-z0-9]{32}-hydrix-tier-system$ ]]; then
               log_error "''${vm_name} has no tier build yet: shard -b ''${vm_name}"
@@ -842,6 +860,34 @@
           fi
           if ! out=$(sudo ${pkgs.python3}/bin/python3 ${./lib/tier-view.py} \
                   "$root" "''${TIER_VIEWS}/''${vm_name}/nix/store" "$reg" "$mode" 2>&1); then
+              log_error "Store view of ''${vm_name} failed:"
+              printf '%s\n' "$out" | tail -n 5 | LC_ALL=C tr -d '\000-\010\013-\037\177'
+              return 1
+          fi
+          log "Store view: $(printf '%s' "$out" | LC_ALL=C tr -d '\000-\010\013-\037\177')"
+      }
+
+      # A tier builder's own store share (microvm-builder.nix): a copy of its runner's closure
+      # from the host store, so it never sees the rest of the host store. Copied, not linked:
+      # hard links cannot leave the /nix/store mount (on btrfs the copies are reflinks).
+      # Root reads the closure: the host nix-daemon may be stopped for the host builder.
+      builder_view_sync() {
+          local vm_name="$1" mode="$2" runner closure list out rc=0
+          runner=$(readlink -f "/var/lib/microvms/''${vm_name}/current" 2>/dev/null || true)
+          if [[ ! "$runner" =~ ^/nix/store/[a-z0-9]{32}- ]]; then
+              log_error "''${vm_name} is not built yet: shard -b ''${vm_name}"
+              return 1
+          fi
+          if ! closure=$(sudo nix-store -qR "$runner"); then
+              log_error "Could not read the closure of ''${vm_name}: ''${runner}"
+              return 1
+          fi
+          list=$(mktemp)
+          printf '%s\n' "$closure" > "$list"
+          out=$(sudo ${pkgs.python3}/bin/python3 ${./lib/tier-view.py} \
+              --copy "$list" "''${TIER_VIEWS}/''${vm_name}/nix/store" "$mode" 2>&1) || rc=$?
+          rm -f "$list"
+          if [[ $rc -ne 0 ]]; then
               log_error "Store view of ''${vm_name} failed:"
               printf '%s\n' "$out" | tail -n 5 | LC_ALL=C tr -d '\000-\010\013-\037\177'
               return 1
@@ -4729,7 +4775,7 @@
                           fi
                           echo ""
                           ;;
-                      R) log "Restarting ''${BOLD}''${vm}''${NC}..."; cmd_restart "$vm"; echo "" ;;
+                      R) cmd_restart "$vm"; echo "" ;;
                       W) cmd_switch_status "$vm" ;;
                       c) cmd_console "$vm" ;;
                       i) cmd_status "$vm" ;;
@@ -4810,7 +4856,6 @@
                   [[ $# -lt 1 ]] && { log_error "Usage: shard restart <name1> [name2] ..."; exit 1; }
                   for vm in "$@"; do
                       vm="$(resolve_vm_name "$vm")"
-                      log "Restarting ''${BOLD}''${vm}''${NC}..."
                       cmd_restart "$vm"
                       echo ""
                   done

@@ -22,6 +22,8 @@ in {
     ./vault-agent.nix
     # Git VM: push/pull hydrix.repos entries for the host (opt-in, infra/gitsync)
     ./gitsync-agent.nix
+    # Tier store (storeSource other than /nix/store, storeTier in meta.nix)
+    ../store-tier.nix
   ];
 
   config = {
@@ -66,7 +68,7 @@ in {
       shares = [
         {
           tag = "nix-store";
-          source = "/nix/store";
+          source = config.hydrix.microvm.storeSource;
           mountPoint = "/nix/.ro-store";
           proto = "virtiofs";
           # Host-enforced (virtiofsd --readonly): the guest's own ro mount
@@ -93,7 +95,8 @@ in {
         }
       ];
 
-      # No writableStoreOverlay is set - /nix/store stays read-only in these VMs.
+      # No writableStoreOverlay is set - /nix/store stays read-only in these VMs (on a
+      # store tier, store-tier.nix adds one with its upper on the tmpfs root).
       # Ephemeral by default: any state a VM needs to survive restarts must come
       # from an explicit volume or virtiofs share declared in its own default.nix.
       volumes = [];

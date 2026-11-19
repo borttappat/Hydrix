@@ -85,8 +85,12 @@
   decoupledVMs = lib.filterAttrs (name: vmCfg: !(isCoupled name vmCfg)) enabledVMs;
   decoupledAutostartVMs = lib.filterAttrs (_: v: v.autostart) decoupledVMs;
   infraVMs = lib.filterAttrs (name: _: vmClass name == "infra") enabledVMs;
+  # VMs on a store tier (storeTier in meta.nix): their system is built by their tier builder
+  # (shard -b), never by a Nix build on the host.
+  tierVms = map (v: v.vmName) (lib.filter (v: (v.storeTier or null) != null) (lib.attrValues config.hydrix.networking.vmRegistry));
   # Built and linked once on a fresh install (hydrix-firstboot-vms, prebuilt by the installer).
-  firstbootVMs = coupledVMs // infraVMs // decoupledAutostartVMs;
+  # Tier VMs are left out: a runner alone cannot boot them (shard -b once the tier builder is).
+  firstbootVMs = lib.filterAttrs (name: _: !(lib.elem name tierVms)) (coupledVMs // infraVMs // decoupledAutostartVMs);
 
   # Filter VMs that have any secrets to provision
   vmsWithSecrets = lib.filterAttrs (_: v: v.enable && v.secrets != []) allVms;
@@ -263,7 +267,6 @@ in {
     # A tier VM's system is built by its tier builder (shard -b), never by the host build: a
     # coupled one would get a runner whose system the host never built.
     (let
-      tierVms = map (v: v.vmName) (lib.filter (v: (v.storeTier or null) != null) (lib.attrValues config.hydrix.networking.vmRegistry));
       coupledTier = lib.filter (n: coupledVMs ? ${n}) tierVms;
     in {
       assertions = [

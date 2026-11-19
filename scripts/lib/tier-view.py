@@ -1,6 +1,7 @@
 """Keep a tier VM's store view: the VM sees only its own closure, not the whole tier store.
 
 Usage (as root): tier-view.py <tier root> <view store dir> <closure dir> add|exact
+                 tier-view.py --copy <paths file> <view store dir> add|exact
 
 <closure dir> is the system's closure-info in the tier store (in-store path, e.g.
 /nix/store/...-closure-info). Its store-paths list, plus the closure-info itself (the
@@ -15,14 +16,22 @@ plain store path name, nothing is looked up outside <tier root>/nix/store, symli
 recreated as symlinks and never followed, and anything but files, directories and
 symlinks is skipped. A path appears in the view only once complete (built under a
 temporary name, then renamed).
+
+--copy builds a tier builder's view of its own closure in the host store: <paths file>
+lists the store paths (nix-store -qR of its runner, from the host). The host /nix/store is
+a separate mount, which hard links cannot cross, so files are copied: reflinked where the
+filesystem can (btrfs), plain copies otherwise.
 """
 
+import fcntl
 import os
 import re
 import shutil
 import stat
 import sys
 
+FICLONE = 0x40049409
+COPY = False
 NAME = re.compile(r"^[0-9a-z]{32}-[A-Za-z0-9+._?=-]+$")
 STORE = "/nix/store/"
 
@@ -40,13 +49,26 @@ def name_of(path):
     return name if NAME.match(name) else None
 
 
+def clone(src, dst, mode):
+    """Copy a file, as a reflink when the filesystem shares extents."""
+    with open(src, "rb") as fi, open(dst, "xb") as fo:
+        try:
+            fcntl.ioctl(fo.fileno(), FICLONE, fi.fileno())
+        except OSError:
+            shutil.copyfileobj(fi, fo, 1 << 20)
+    os.chmod(dst, mode & 0o555)
+
+
 def copy_tree(src, dst):
     """Recreate src at dst: directories, hard-linked files, symlinks; never follows links."""
     st = os.lstat(src)
     if stat.S_ISLNK(st.st_mode):
         os.symlink(os.readlink(src), dst)
     elif stat.S_ISREG(st.st_mode):
-        os.link(src, dst, follow_symlinks=False)
+        if COPY:
+            clone(src, dst, stat.S_IMODE(st.st_mode))
+        else:
+            os.link(src, dst, follow_symlinks=False)
     elif stat.S_ISDIR(st.st_mode):
         os.mkdir(dst, 0o700)
         for entry in os.listdir(src):
@@ -66,23 +88,31 @@ def remove(path):
 
 
 def main():
-    if len(sys.argv) != 5 or sys.argv[4] not in ("add", "exact"):
-        die("usage: tier-view.py <tier root> <view store dir> <closure dir> add|exact")
-    root, view, closure, mode = sys.argv[1:]
-    src_store = os.path.join(root, "nix/store")
-
-    closure_name = name_of(closure)
-    if closure_name is None or not closure_name.endswith("-closure-info"):
-        die(f"not a closure-info path: {closure}")
-    closure_dir = os.path.join(src_store, closure_name)
-    listing = os.path.join(closure_dir, "store-paths")
-    for p in (closure_dir, listing):
-        if os.path.islink(p):
-            die(f"refusing a symlink: {p}")
+    global COPY
+    usage = ("usage: tier-view.py <tier root> <view store dir> <closure dir> add|exact\n"
+             "       tier-view.py --copy <paths file> <view store dir> add|exact")
+    if len(sys.argv) == 5 and sys.argv[1] == "--copy" and sys.argv[4] in ("add", "exact"):
+        COPY = True
+        _, listing, view, mode = sys.argv[1:]
+        src_store = STORE.rstrip("/")
+        wanted = set()
+    elif len(sys.argv) == 5 and sys.argv[4] in ("add", "exact"):
+        root, view, closure, mode = sys.argv[1:]
+        src_store = os.path.join(root, "nix/store")
+        closure_name = name_of(closure)
+        if closure_name is None or not closure_name.endswith("-closure-info"):
+            die(f"not a closure-info path: {closure}")
+        closure_dir = os.path.join(src_store, closure_name)
+        listing = os.path.join(closure_dir, "store-paths")
+        for p in (closure_dir, listing):
+            if os.path.islink(p):
+                die(f"refusing a symlink: {p}")
+        wanted = {closure_name}
+    else:
+        die(usage)
     with open(listing, "rb") as fh:
         lines = fh.read().decode("utf-8", "replace").splitlines()
 
-    wanted = {closure_name}
     for line in lines:
         if not line.strip():
             continue
@@ -101,7 +131,7 @@ def main():
     for name in sorted(wanted - present):
         src = os.path.join(src_store, name)
         if not os.path.lexists(src):
-            die(f"missing from the tier store: {name}")
+            die(f"missing from {src_store}: {name}")
         tmp = os.path.join(view, f".tmp-{name}")
         copy_tree(src, tmp)
         os.rename(tmp, os.path.join(view, name))

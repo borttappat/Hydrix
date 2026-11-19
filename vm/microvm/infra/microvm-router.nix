@@ -324,6 +324,8 @@ in {
     ./vm-switch.nix
     # Serial console follows the attached terminal's size
     ../../common/serial-console.nix
+    # Tier store (storeSource other than /nix/store)
+    ../store-tier.nix
   ];
 
   config = {
@@ -438,7 +440,7 @@ in {
         # Share host /nix/store via virtiofs
         {
           tag = "nix-store";
-          source = "/nix/store";
+          source = config.hydrix.microvm.storeSource;
           mountPoint = "/nix/.ro-store";
           proto = "virtiofs";
           # Host-enforced (virtiofsd --readonly): the guest's own ro mount

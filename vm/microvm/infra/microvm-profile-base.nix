@@ -21,10 +21,6 @@
   ...
 }: let
   vmName = config.hydrix.vm.storeName;
-  # The VM's store is a tier store, not the host's (see storeSource).
-  tierStore = config.hydrix.microvm.shareStore && config.hydrix.microvm.storeSource != "/nix/store";
-  # Same derivation as microvm.nix's regInfo (store-disk.nix), built in the tier store.
-  tierRegInfo = pkgs.closureInfo {rootPaths = [config.system.build.toplevel];};
   vmCollectInterval = config.hydrix.vmMetrics.vmCollectInterval;
 
   # Compiled metrics server, zero shell/binary execs at runtime.
@@ -57,6 +53,8 @@ in {
     ../usb-passthrough.nix
     # Writable store layer: a cache until purge, or wiped each boot (persistence.storeCache)
     ../store-cache.nix
+    # Tier store (storeSource other than /nix/store): overlay lower, tierSystem, tierHost
+    ../store-tier.nix
     # Base system modules
     ../../common/users-vm.nix
     ../../../host/base/networking.nix
@@ -303,51 +301,6 @@ in {
     # Keep system.switch.enable for potential future use
     microvm.optimize.enable = false;
     system.switch.enable = true;
-
-    # ===== Tier store (storeSource other than /nix/store) =====
-    # microvm.nix only treats a share with source "/nix/store" as the store, so the
-    # overlay lower, its boot ordering and storeOnDisk are set here. init= and the closure
-    # registration (regInfo=, loaded into the guest's Nix database at boot) lose their
-    # string context and the runner gets no system symlink: the host builds the runner
-    # without realising the system. The tier builder builds system.build.tierSystem,
-    # which holds both, into the tier store.
-    microvm.storeOnDisk = lib.mkIf tierStore (lib.mkForce false);
-    microvm.systemSymlink = lib.mkIf tierStore false;
-    microvm.kernelParams = lib.mkIf tierStore (lib.mkForce (config.boot.kernelParams
-      ++ ["init=${builtins.unsafeDiscardStringContext config.system.build.toplevel}/init"]
-      ++ lib.optional (config.microvm.registerClosure && config.nix.enable)
-      "regInfo=${builtins.unsafeDiscardStringContext tierRegInfo}/registration"));
-    system.build.tierSystem = lib.mkIf tierStore (pkgs.linkFarm "hydrix-tier-system" [
-      {
-        name = "system";
-        path = config.system.build.toplevel;
-      }
-      {
-        name = "registration";
-        path = tierRegInfo;
-      }
-    ]);
-    # What the host builds for a tier VM, before the tier build: the runner, and the kernel
-    # outputs the tier system links (the runner holds only bzImage). The kernel is compiled
-    # on the host, and shard exports it to the host cache for the tier builder.
-    system.build.tierHost = lib.mkIf tierStore (pkgs.linkFarm "hydrix-tier-host" [
-      {
-        name = "runner";
-        path = config.microvm.declaredRunner;
-      }
-      {
-        name = "kernel";
-        path = config.boot.kernelPackages.kernel;
-      }
-      {
-        name = "kernel-modules";
-        path = config.boot.kernelPackages.kernel.modules;
-      }
-    ]);
-    fileSystems = lib.mkIf tierStore {
-      "/nix/.ro-store".neededForBoot = true;
-      "/nix/store".overlay.lowerdir = lib.mkForce ["/nix/.ro-store"];
-    };
 
     # ===== MicroVMs run headless =====
     # GUI apps are forwarded to host via waypipe
