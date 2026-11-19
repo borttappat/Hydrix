@@ -37,6 +37,10 @@
 # reloads them when they change, so new colors reach open windows live. Opt
 # out per VM with e.g.
 #   hydrix.graphical.firefox.vimiumHints.enable = false;
+#
+# Opt-in: walDuckduckgo sets DuckDuckGo's own appearance cookies from wal
+# colors through the same script (the service writes ddg-cookies.json), so it
+# works on a fresh profile without pywalfox's DuckDuckGo toggle.
 
 { config, lib, pkgs, ... }:
 
@@ -71,12 +75,15 @@ let
   hints    = config.hydrix.graphical.firefox.vimiumHints;
   ui       = config.hydrix.graphical.firefox.vimiumUi;
   menus    = config.hydrix.graphical.firefox.walMenus;
+  ddg      = config.hydrix.graphical.firefox.walDuckduckgo;
+  zoom     = config.hydrix.graphical.firefox.defaultZoom;
   username = config.hydrix.username;
   # Same profile path the Hydrix firefox launcher uses.
   chromeDir   = "/home/${username}/.mozilla/firefox/default/chrome";
   hintCssPath = "${chromeDir}/vimium-hints.css";
   uiCssPath   = "${chromeDir}/vimium-ui.css";
   menuCssPath = "${chromeDir}/wal-menus.css";
+  ddgJsonPath = "${chromeDir}/ddg-cookies.json";
   hintSel     = "#vimium-hint-marker-container div.internal-vimium-hint-marker";
 
   # Firefox autoconfig (mozilla.cfg, privileged). Registers the generated
@@ -87,13 +94,49 @@ let
   walCssPaths = lib.optional hints.enable hintCssPath
     ++ lib.optional ui.enable uiCssPath
     ++ lib.optional menus.enable menuCssPath;
+  walThemed = walCssPaths != [ ] || ddg.enable || zoom != null;
+  # The same script also writes DuckDuckGo's appearance cookies from
+  # ddg-cookies.json when walDuckduckgo is on. DuckDuckGo keeps each setting as
+  # a first-party cookie named after its key without the "k" (k7 -> "7"),
+  # value in hex without "#". Explicit color cookies win over the theme's own
+  # values, so "ae" = "d" (dark) fills in everything we don't set. Expiry is
+  # in milliseconds; read as seconds it is still far in the future.
+  # defaultZoom is Firefox's own "Default zoom" setting, a global content
+  # preference rather than a pref, set again at every startup.
   walCssReload = pkgs.writeText "firefox-wal-css-reload.js" ''
     try {
       const { classes: Cc, interfaces: Ci } = Components;
       const sss = Cc["@mozilla.org/content/style-sheet-service;1"].getService(Ci.nsIStyleSheetService);
       const io = Cc["@mozilla.org/network/io-service;1"].getService(Ci.nsIIOService);
       const sheets = ${builtins.toJSON walCssPaths}.map(path => ({ path, mtime: 0, uri: null }));
+      const zoom = ${builtins.toJSON (if zoom == null then null else zoom / 100.0)};
+      const ddg = { path: ${builtins.toJSON (if ddg.enable then ddgJsonPath else null)}, mtime: 0 };
+      const pollDdg = () => {
+        if (!ddg.path) return;
+        try {
+          const f = Cc["@mozilla.org/file/local;1"].createInstance(Ci.nsIFile);
+          f.initWithPath(ddg.path);
+          const mtime = f.exists() ? f.lastModifiedTime : 0;
+          if (!mtime || mtime === ddg.mtime) return;
+          ddg.mtime = mtime;
+          const fis = Cc["@mozilla.org/network/file-input-stream;1"].createInstance(Ci.nsIFileInputStream);
+          fis.init(f, -1, 0, 0);
+          const sis = Cc["@mozilla.org/scriptableinputstream;1"].createInstance(Ci.nsIScriptableInputStream);
+          sis.init(fis);
+          const cookies = JSON.parse(sis.read(sis.available()));
+          sis.close();
+          const cm = Cc["@mozilla.org/cookiemanager;1"].getService(Ci.nsICookieManager);
+          const expiry = Date.now() + 365 * 86400000;
+          for (const [name, value] of Object.entries(cookies)) {
+            try {
+              cm.add("duckduckgo.com", "/", name, value, true, false, false, expiry, {},
+                Ci.nsICookie.SAMESITE_LAX, Ci.nsICookie.SCHEME_HTTPS, false);
+            } catch (e) {}
+          }
+        } catch (e) {}
+      };
       const poll = () => {
+        pollDdg();
         for (const s of sheets) {
           try {
             const f = Cc["@mozilla.org/file/local;1"].createInstance(Ci.nsIFile);
@@ -111,6 +154,12 @@ let
       const timer = Cc["@mozilla.org/timer;1"].createInstance(Ci.nsITimer);
       Cc["@mozilla.org/observer-service;1"].getService(Ci.nsIObserverService).addObserver({
         observe() {
+          if (zoom !== null) {
+            try {
+              Cc["@mozilla.org/content-pref/service;1"].getService(Ci.nsIContentPrefService2)
+                .setGlobal("browser.content.full-zoom", zoom, null);
+            } catch (e) {}
+          }
           poll();
           timer.initWithCallback({ notify: poll }, 1000, Ci.nsITimer.TYPE_REPEATING_SLACK);
         },
@@ -229,6 +278,26 @@ let
     EOF
     mv "${menuCssPath}.tmp" "${menuCssPath}"
     ''}
+    ${lib.optionalString ddg.enable ''
+    ${pkgs.jq}/bin/jq -c --argjson p ${toString ddg.hoverMix} '
+      def key($k): (.colors[$k] // .special[$k]) | ltrimstr("#") | ascii_downcase;
+      def dec: explode | map(if . >= 97 then . - 87 else . - 48 end) | .[0] * 16 + .[1];
+      def hex: [(. / 16 | floor), (. % 16)] | map("0123456789abcdef"[.:. + 1]) | add;
+      def mix($a; $b): [0, 2, 4] | map(. as $i
+        | ($a[$i:$i + 2] | dec) as $x | ($b[$i:$i + 2] | dec) as $y
+        | ($x + ($y - $x) * $p / 100 | round) | hex) | add;
+      {
+        "ae": "d",
+        "7":  key("${ddg.colors.bg}"),
+        "j":  key("${ddg.colors.header}"),
+        "9":  key("${ddg.colors.title}"),
+        "8":  key("${ddg.colors.text}"),
+        "x":  key("${ddg.colors.link}"),
+        "aa": key("${ddg.colors.visited}"),
+        "21": mix(key("${ddg.colors.hover}"); key("foreground"))
+      }' "$colors" > "${ddgJsonPath}.tmp"
+    mv "${ddgJsonPath}.tmp" "${ddgJsonPath}"
+    ''}
   '';
 
   # Color roles take a wal key: "color0".."color15", "background", "foreground".
@@ -302,6 +371,43 @@ in
     };
   };
 
+  options.hydrix.graphical.firefox.defaultZoom = lib.mkOption {
+    type = lib.types.nullOr (lib.types.ints.between 30 500);
+    default = null;
+    example = 110;
+    description = ''
+      Default page zoom in percent (Settings > General > Default zoom), set at
+      every startup. Scales web content only, on top of the compositor scale;
+      per-site zoom still works. Null leaves Firefox's own setting alone.
+    '';
+  };
+
+  options.hydrix.graphical.firefox.walDuckduckgo = {
+    enable = lib.mkOption {
+      type = lib.types.bool;
+      default = false;
+      description = ''
+        Theme DuckDuckGo from wal colors through its own appearance settings
+        (first-party cookies), set at startup and whenever wal colors change.
+        Leave pywalfox's DuckDuckGo toggle off alongside this.
+      '';
+    };
+    colors = {
+      bg      = strOpt "background";
+      header  = strOpt "background";
+      title   = strOpt "foreground";
+      text    = strOpt "color15";
+      link    = strOpt "color4";
+      visited = strOpt "color5";
+      hover   = strOpt "background";
+    };
+    hoverMix = lib.mkOption {
+      type = lib.types.ints.between 0 100;
+      default = 10;
+      description = "Percent of foreground mixed into the hover/module background, so it stands out from the page.";
+    };
+  };
+
   config = lib.mkMerge [
     {
       # Install Firefox on the host system (it's always on in VMs)
@@ -324,6 +430,10 @@ in
       hydrix.graphical.firefox.verticalTabs = lib.mkDefault true;
       hydrix.graphical.firefox.uidensity = lib.mkDefault 1;  # 0=normal, 1=compact, 2=touch
       hydrix.graphical.firefox.search.default = lib.mkDefault "ddg";
+      # Default page zoom in percent, e.g. to match terminal text sizes
+      # hydrix.graphical.firefox.defaultZoom = lib.mkDefault 110;
+      # DuckDuckGo in wal colors (per profile is fine too)
+      # hydrix.graphical.firefox.walDuckduckgo.enable = lib.mkDefault true;
 
       # Toolbar decluttering: each hides one element, independent of the others
       # hydrix.graphical.firefox.hideFirefoxViewButton = lib.mkDefault true;
@@ -352,6 +462,10 @@ in
           Value = lib.concatMapStringsSep "," (n: reg.${n}.id) (builtins.filter (n: reg ? ${n}) exts);
           Status = "user";
         };
+        # No speech-dispatcher in VMs: Web Speech still fails, just without an
+        # infobar on every page that probes it.
+        "media.webspeech.synth.dont_notify_on_error" = lib.mkDefault { Value = true; Status = "user"; };
+        "browser.translations.automaticallyPopup" = lib.mkDefault { Value = false; Status = "user"; };
       } // lib.optionalAttrs config.hydrix.graphical.firefox.verticalTabs {
         # Toolbar layout: sidebar toggle above the tab strip, URL bar, then
         # back and forward. The Extensions button and hamburger menu sit
@@ -389,7 +503,7 @@ in
       };
     })
 
-    (lib.mkIf (config.programs.firefox.enable && walCssPaths != [ ]) {
+    (lib.mkIf (config.programs.firefox.enable && walThemed) {
       hydrix.graphical.firefox.package = lib.mkDefault
         (pkgs.firefox.override { extraPrefsFiles = [ walCssReload ]; });
 
