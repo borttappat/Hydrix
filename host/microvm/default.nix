@@ -592,6 +592,10 @@ in {
           "microvm@".serviceConfig = {
             Restart = lib.mkForce "on-failure";
             ExecStop = lib.mkForce "-/var/lib/microvms/%i/booted/bin/microvm-shutdown";
+            # The GC root links below (gcroots/microvm/{,booted-,tier-host-}<vm>) dangle while
+            # their target is missing, and nh clean deletes dangling roots. Recreate them at each
+            # start, so a running VM's runner is rooted again before anything collects.
+            ExecStartPre = ["+${pkgs.systemd}/bin/systemd-tmpfiles --create --prefix=/nix/var/nix/gcroots/microvm"];
             # Lock the VM's encrypted home once it stopped cleanly: shard -S does so itself, a
             # poweroff or reboot inside the VM did not, leaving it unlocked on the host. Not
             # after a crash: systemd restarts the VM then, which needs the volume open.
