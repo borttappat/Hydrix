@@ -11,16 +11,86 @@ usage: flake-input-roots.py <nix bin dir> <flake.lock> <roots dir>
 The roots directory then holds exactly one link per fetched input of this lock file;
 links for inputs the lock no longer has are removed, so their old sources become
 collectable after an update.
+
+The same goes for sources a profile fetches during evaluation, pinned by narHash in its
+own files (profiles/<profile>/**/*.nix, next to flake.lock): no lock file of this flake lists
+them, and evaluating that profile offline needs them as much as an input. Two forms:
+builtins.fetchTree { ... narHash = "..."; } (vm-sync packages), rooted as
+pin-<profile>-<file>-<n>, and builtins.getFlake "<ref>?narHash=..." (a flake only that
+profile uses, so other users of the config never fetch it), rooted with the inputs of its
+own flake.lock as pin-<profile>-<file>-<n>[-<input>].
 """
+import glob
 import json
 import os
 import re
 import subprocess
 import sys
+import urllib.parse
 
 NAME = re.compile(r"^[A-Za-z0-9_.-]+$")
 SRI = re.compile(r"^sha256-[A-Za-z0-9+/]{43}=$")
 STORE_PATH = re.compile(r"^/nix/store/[0-9a-z]{32}-source$")
+FETCH_TREE = re.compile(r"builtins\.fetchTree\s*\{(.*?)\}", re.S)
+NAR_HASH = re.compile(r'narHash\s*=\s*"([^"]+)"')
+GET_FLAKE = re.compile(r'builtins\.getFlake\s+"([^"]+)"')
+
+
+def profile_pins(flake_dir):
+    """(name, narHash, is_flake) for every source a profile file pins by narHash."""
+    pins = []
+    for path in sorted(glob.glob(os.path.join(flake_dir, "profiles/*/**/*.nix"), recursive=True)):
+        rel = os.path.relpath(path, os.path.join(flake_dir, "profiles"))
+        profile = rel.split(os.sep, 1)[0]
+        stem = os.path.splitext(os.path.basename(path))[0]
+        try:
+            with open(path) as f:
+                text = f.read()
+        except OSError:
+            continue
+        found = [(m.start(), m.group(1), False) for m in FETCH_TREE.finditer(text)]
+        found += [(m.start(), m.group(1), True) for m in GET_FLAKE.finditer(text)]
+        for n, (_, body, is_flake) in enumerate(sorted(found)):
+            if is_flake:
+                query = urllib.parse.parse_qs(urllib.parse.urlsplit(body).query)
+                nar = (query.get("narHash") or [""])[0]
+            else:
+                m = NAR_HASH.search(body)
+                nar = m.group(1) if m else ""
+            name = f"pin-{profile}-{stem}-{n}"
+            if SRI.match(nar) and NAME.match(name):
+                pins.append((name, nar, is_flake))
+    return pins
+
+
+def store_paths(nix_bin, wanted):
+    """name -> store path, for the narHashes already fetched into the store."""
+    paths = {}
+    if not wanted:
+        return paths
+    names = list(wanted)
+    hashes = run(nix_bin, "nix", "--extra-experimental-features", "nix-command",
+                 "hash", "convert", "--hash-algo", "sha256", "--to", "nix32",
+                 *[wanted[n] for n in names])
+    for name, h in zip(names, hashes):
+        path = run(nix_bin, "nix-store", "--print-fixed-path", "--recursive",
+                   "sha256", h, "source")[0]
+        if STORE_PATH.match(path) and os.path.isdir(path) and not os.path.islink(path):
+            paths[name] = path
+    return paths
+
+
+def lock_hashes(lock_file):
+    """input name -> narHash of every locked input in a flake.lock."""
+    with open(lock_file) as f:
+        lock = json.load(f)
+    root = lock.get("root")
+    out = {}
+    for name, node in lock.get("nodes", {}).items():
+        nar = (node.get("locked") or {}).get("narHash")
+        if name != root and nar and NAME.match(name) and SRI.match(nar):
+            out[name] = nar
+    return out
 
 
 def run(nix_bin, *args):
@@ -31,27 +101,20 @@ def run(nix_bin, *args):
 
 def main():
     nix_bin, lock_file, roots = sys.argv[1:4]
-    with open(lock_file) as f:
-        lock = json.load(f)
-    root = lock.get("root")
-    wanted = {}
-    for name, node in lock.get("nodes", {}).items():
-        nar = (node.get("locked") or {}).get("narHash")
-        if name == root or not nar or not NAME.match(name) or not SRI.match(nar):
-            continue
-        wanted[name] = nar
+    wanted = lock_hashes(lock_file)
+    inputs = len(wanted)
+    pins = profile_pins(os.path.dirname(os.path.abspath(lock_file)))
+    wanted.update({name: nar for name, nar, _ in pins})
+    paths = store_paths(nix_bin, wanted)
 
-    paths = {}
-    if wanted:
-        names = list(wanted)
-        hashes = run(nix_bin, "nix", "--extra-experimental-features", "nix-command",
-                     "hash", "convert", "--hash-algo", "sha256", "--to", "nix32",
-                     *[wanted[n] for n in names])
-        for name, h in zip(names, hashes):
-            path = run(nix_bin, "nix-store", "--print-fixed-path", "--recursive",
-                       "sha256", h, "source")[0]
-            if STORE_PATH.match(path) and os.path.isdir(path) and not os.path.islink(path):
-                paths[name] = path
+    # A pinned flake's own inputs: from its flake.lock, once its source is in the store.
+    nested = {}
+    for name, _, is_flake in pins:
+        sub_lock = os.path.join(paths.get(name, ""), "flake.lock")
+        if is_flake and name in paths and os.path.isfile(sub_lock) and not os.path.islink(sub_lock):
+            nested.update({f"{name}-{i}": nar for i, nar in lock_hashes(sub_lock).items()})
+    paths.update(store_paths(nix_bin, nested))
+    pin_names = {name for name, _, _ in pins} | set(nested)
 
     os.makedirs(roots, mode=0o755, exist_ok=True)
     for entry in os.listdir(roots):
@@ -67,7 +130,11 @@ def main():
             os.unlink(tmp)
         os.symlink(path, tmp)
         os.replace(tmp, link)
-    print(f"{len(paths)} of {len(wanted)} flake inputs rooted (the rest are not fetched)")
+    rooted_pins = sum(1 for n in paths if n in pin_names)
+    msg = f"{len(paths) - rooted_pins} of {inputs} flake inputs rooted (the rest are not fetched)"
+    if pin_names:
+        msg += f", {rooted_pins} of {len(pin_names)} profile pins"
+    print(msg)
 
 
 if __name__ == "__main__":
