@@ -2926,6 +2926,8 @@ Infrastructure VMs fall into two categories:
 | `microvm-files` | 212 | Encrypted inter-VM file transfer |
 | `microvm-vault` | 213 | Offline KeePassXC password database (`hydrix.passwords`) |
 | `microvm-hostsync` | 214 | Secure host file inbox/outbox via virtiofs |
+| `microvm-builder-profile` | 216 | Builds the profile store tier |
+| `microvm-builder-infra` | 217 | Builds the infra store tier |
 
 ### Tor Hardening (lurking profile example)
 
@@ -3994,10 +3996,29 @@ Where to set it, per VM or for all of them, and how to check it: [VM Terminal Sp
 
 ### Store Tiers
 
-The host's own store holds what the host runs. Profile VM software is built into a separate
-store, `/var/lib/hydrix/stores/profile`, by the profile tier's builder VM (`infra/builder-profile`,
-`buildsTier = "profile"`, CID 216). The host never builds profile packages and never reads a
-tier store's contents; it only checks that a built path exists there.
+The host's own store holds what the host runs. VM software is built into separate stores,
+one per tier, each by its own builder VM:
+
+| Tier | Store | Builder | VMs (`storeTier` in `meta.nix`) |
+|------|-------|---------|-------------------------------|
+| profile | `/var/lib/hydrix/stores/profile` | `infra/builder-profile` (CID 216) | profile VMs, task slots |
+| infra | `/var/lib/hydrix/stores/infra` | `infra/builder-infra` (CID 217) | files, gitsync, hostsync, usb-sandbox, vault (`mkInfraVm` VMs) |
+
+The host never builds tier packages and never reads a tier store's contents; it only checks
+that a built path exists there. Three VMs stay on the host store on purpose: the host
+`builder` (it writes the host store and builds everything else, tier builders included),
+the tier builders themselves (a builder cannot build its own tier before it exists), and
+`router-stable`, the break-glass router: when a router build or a tier is broken, it still
+boots from what the host has and gives the builders network to repair it. The regular router
+stays on the host store too for now (its per-machine registry name is not resolved for tiers
+yet).
+
+A tier builder boots from a view of its own closure, not the whole host store:
+`/var/lib/hydrix/stores/views/<builder>/nix/store`, which `shard` refreshes at every start
+from `nix-store -qR` of the builder's runner (`tier-view.py --copy`). The files are copies,
+since hard links cannot leave the `/nix/store` mount; on btrfs they are reflinks and cost no
+space, elsewhere the first start copies the closure (about 1 to 2 GB) and later starts only
+the paths that changed.
 
 A tier build (`shard -b <vm>` for a VM with `storeTier`) runs in four steps:
 
@@ -4006,7 +4027,7 @@ A tier build (`shard -b <vm>` for a VM with `storeTier`) runs in four steps:
 2. **Export.** The host evaluates the VM (the tier builder never sees the flake or any source
    tree) and exports to its cache (`/var/lib/hydrix/caches/host`) the build recipes and what
    the host already has: the kernel and every output the VM shares with the host store.
-3. **Build.** builder-profile copies the recipes from the cache and builds the system into the
+3. **Build.** The tier builder (builder-profile, builder-infra) copies the recipes from the cache and builds the system into the
    tier store, substituting from the host cache and cache.nixos.org.
 4. **View.** The VM gets its own view of the tier store,
    `/var/lib/hydrix/stores/views/<vm>/nix/store`: hardlinks of only its closure
@@ -4016,9 +4037,17 @@ A tier build (`shard -b <vm>` for a VM with `storeTier`) runs in four steps:
 The host cache is unsigned: only host root writes it, and the tier builder reads it read-only
 and trusted (`file:///mnt/cache-host?trusted=1`). Caches flow down only. The tier stores are
 mounted `nosuid,nodev` on the host (`hydrix-tier-stores-nosuid`), and a tier builder refuses to
-start without that. Each tier has its own nixpkgs input (`nixpkgs-profile`, same URL as
-`nixpkgs`), so one tier can move to a newer revision first. A tier VM cannot be coupled to the
-host build (an assertion).
+start without that. A tier can have its own nixpkgs input (`nixpkgs-<tier>`, e.g.
+`nixpkgs-profile`, same URL as `nixpkgs`), so it can move to a newer revision first; without one
+(the infra tier) it follows `nixpkgs` and shares most of its closure with the host through the
+cache. A tier VM cannot be coupled to the host build (an assertion), and a fresh install's
+`hydrix-firstboot-vms` leaves tier VMs out: build them with `shard -b` once their tier
+builder is built.
+
+Infra VMs on a tier have no writable store layer of their own; `vm/microvm/store-tier.nix`
+gives them an overlay with its upper on the tmpfs root (microvm.nix mounts a store share that
+is not `/nix/store` only through an overlay), so nothing persists. A VM moved to a tier keeps
+booting its last host-store build until its first `shard -b` (`shard -s` says so).
 
 The launcher reads a tier VM's apps from `/var/lib/microvms/<vm>/apps.tsv`, which the build
 writes from the tier store (`scripts/lib/tier-apps.py`). `shard cache status` shows the cache
@@ -4172,7 +4201,14 @@ took. `scripts/lib/flake-input-roots.py` roots every input already in the store 
 `/nix/var/nix/gcroots/hydrix-inputs/<input>` (its store path follows from the `narHash` in
 `flake.lock`; inputs evaluation never fetched, such as an unused git input, are left alone).
 `rebuild`, every `shard -b`, `shard builder update` and `shard -g gc` refresh them, and links
-for inputs the lock no longer has go.
+for inputs the lock no longer has go. Sources a profile fetches during evaluation are
+rooted too when they carry a `narHash` (`profiles/<profile>/**/*.nix`, as
+`pin-<profile>-<file>-<n>`): vm-sync's `builtins.fetchTree` pins, and
+`builtins.getFlake "<ref>?narHash=..."` for a flake only that profile uses, with the inputs of
+its own `flake.lock`. That keeps such a flake out of the config's inputs (nobody without the
+profile fetches it) and still safe offline. A fetch without a `narHash` is not rooted: a
+garbage collection takes it and the offline host can no longer evaluate that VM;
+`shard builder fetch <vm>` brings it back.
 
 **The builder builds itself.** In lockdown, `shard -b builder` runs the builder's existing
 build to build the new one (the host could not fetch the build tools a garbage collection

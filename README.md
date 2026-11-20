@@ -66,7 +66,7 @@ Things being actively worked on or not yet verified. Checked off once resolved a
 - **Standalone libvirt VMs** (Windows etc.) - attached to router-served bridges (`hydrix.libvirt.defaultBridge`), so they get the same DHCP, isolation and VPN options as microVMs. `deploy-windows` creates a Windows 11 VM ready for the SPICE guest tools (virtio-win CD attached), `libvirt-tune <vm>` brings any VM to the same display and USB defaults, and `hydrix.libvirt.console.chromeless` gives their windows no menus or decoration
 
 - **Builder VM** - builds host and VM closures from inside a locked-down nix environment with internet via router VM; also updates flake inputs from lockdown (`shard builder update`, `rebuild -u`), so administrative mode is never needed for updates
-- **Store tiers** - profile VMs and task slots run from their own store, built by a profile builder VM (`builder-profile`), never from the host's store; each VM sees only its own closure (a per-VM view), and the host keeps only what it runs itself. See [DOCUMENTATION.md § Store Tiers](DOCUMENTATION.md#store-tiers)
+- **Store tiers** - profile VMs and task slots run from the profile store (built by `builder-profile`), the infra VMs (files, gitsync, hostsync, usb-sandbox, vault) from the infra store (built by `builder-infra`), never from the host's store; each VM sees only its own closure (a per-VM view), the tier builders only their own, and the host keeps only what it runs itself. The host builder and the fallback router `router-stable` stay on the host store. See [DOCUMENTATION.md § Store Tiers](DOCUMENTATION.md#store-tiers)
 - **VM generations** - every build is a generation; `shard -g` lists, switches (live when possible, otherwise booted once), purges and garbage-collects them across the host and tier stores, while every start boots the newest
 - **Per-VM store cache** - what a persistent VM fetches with `nix shell`/`run`/`develop` stays cached until `shard -p`; ephemeral VMs start from an empty store layer
 - **Gitsync VM** - push and pull git repos from lockdown mode without host internet
@@ -319,7 +319,10 @@ shard builder update            # update flake inputs (rebuild -u does this in l
 A profile VM on the profile store tier (`storeTier = "profile"`) is built the same way,
 `shard -b browsing`: the host builds the runner, exports what it already has to its cache, and
 `builder-profile` builds the system into the tier store. Build `builder-profile` once first
-(`shard -b builder-profile`; a fresh install does this on first boot).
+(`shard -b builder-profile`; a fresh install does this on first boot). Infra VMs with
+`storeTier = "infra"` work the same way through `builder-infra` (`shard -b builder-infra`
+once, then `shard -bR vault`); until its first tier build, a VM keeps booting its old
+host-store build.
 
 Generations, rollback and cleanup:
 
