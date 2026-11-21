@@ -421,6 +421,13 @@
               return 1
           fi
 
+          # The host evaluates: impossible while the host builder holds the store (its
+          # nix-daemon is stopped then).
+          if is_running "$BUILDER_NAME"; then
+              log_error "''${BUILDER_NAME} is running and holds the host store: shard builder stop, then build again"
+              return 1
+          fi
+
           local start
           start=$(timer_start)
 
@@ -3233,57 +3240,40 @@
           log_success "Build complete: ''${BOLD}''${label}''${NC} in ''${BOLD}''${total_time}s''${NC}"
       }
 
-      # Builder: fetch only (prefetch deps, don't stop builder or build on host)
+      # Builder: fetch a target's sources and dependencies into the host store (the builder
+      # builds it, the host does not). Stops the builder again if this started it: while it
+      # runs the host nix-daemon is down, so nothing on the host can evaluate. For several
+      # fetches in a row, shard builder start first; a builder already running stays up.
       cmd_builder_fetch() {
-          local target="$1"
+          local target="$1" started=0 rc=0
           [[ -z "$target" ]] && { log_error "Usage: shard builder fetch <target>"; return 1; }
 
           local flake_target
           flake_target=$(resolve_builder_flake_attr "$target")
           log "Target: ''${BOLD}''${target}''${NC} → ''${flake_target}"
 
-          # Start builder if not running
           if ! is_running "$BUILDER_NAME"; then
               log "Starting builder..."
               cmd_start "$BUILDER_NAME" || return 1
+              started=1
           else
               log "Builder already running"
           fi
 
-          # Prefetch via vsock
           log "Fetching in builder VM..."
-          local fetch_output
-          # Use -t600 to wait up to 10 minutes for remote to close after we send command
-          fetch_output=$(vsock_query "$BUILDER_CID" "$BUILDER_BUILD_PORT" "BUILD $flake_target" 600 900 2>&1)
+          builder_send_build "$BUILDER_CID" "BUILD $flake_target" || rc=1
 
-          # Parse and display output
-          while IFS= read -r line; do
-              case "$line" in
-                  OK*)
-                      log "$line"
-                      ;;
-                  RESULT\ *)
-                      log_success "Result: ''${BOLD}''${line#RESULT }''${NC}"
-                      ;;
-                  DONE*)
-                      log_success "$line"
-                      ;;
-                  ERROR*)
-                      log_error "$line"
-                      ;;
-                  *)
-                      [[ -n "$line" ]] && echo "  $line"
-                      ;;
-              esac
-          done <<< "$fetch_output"
-
-          if echo "$fetch_output" | grep -q "^ERROR"; then
+          echo ""
+          if [[ $started -eq 1 ]]; then
+              cmd_stop "$BUILDER_NAME" || true
+          else
+              log "Builder still running (it was before this fetch): shard builder stop when done"
+          fi
+          if [[ $rc -ne 0 ]]; then
               log_error "Fetch failed"
               return 1
           fi
-
-          echo ""
-          log "Fetch complete. Builder still running - use 'builder stop' when done."
+          log_success "Fetch complete: ''${target}"
       }
 
       # Builder: update flake inputs without host network (lockdown). The builder locks the
