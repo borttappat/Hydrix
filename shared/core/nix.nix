@@ -16,6 +16,11 @@
     download-buffer-size = lib.mkDefault 524288000;
     max-jobs = lib.mkDefault "auto";
     cores = lib.mkDefault 0;
+    # GC keeps the build-time dependencies (stdenv, ShellCheck, texinfo, ...) of every live
+    # derivation, so a rebuild after a collection does not fetch them again (offline, the
+    # builder would). They go with the last generation that needs them.
+    keep-outputs = lib.mkDefault true;
+    keep-derivations = lib.mkDefault true;
 
     substituters = [
       "https://cache.nixos.org"
