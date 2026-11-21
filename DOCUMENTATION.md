@@ -4000,16 +4000,23 @@ one per tier, each by its own builder VM:
 | Tier | Store | Builder | VMs (`storeTier` in `meta.nix`) |
 |------|-------|---------|-------------------------------|
 | profile | `/var/lib/hydrix/stores/profile` | `infra/builder-profile` (CID 216) | profile VMs, task slots |
-| infra | `/var/lib/hydrix/stores/infra` | `infra/builder-infra` (CID 217) | files, gitsync, hostsync, usb-sandbox, vault (`mkInfraVm` VMs) |
+| infra | `/var/lib/hydrix/stores/infra` | `infra/builder-infra` (CID 217) | router, files, gitsync, hostsync, usb-sandbox, vault |
 
 The host never builds tier packages and never reads a tier store's contents; it only checks
 that a built path exists there. Three VMs stay on the host store on purpose: the host
 `builder` (it writes the host store and builds everything else, tier builders included),
 the tier builders themselves (a builder cannot build its own tier before it exists), and
 `router-stable`, the break-glass router: when a router build or a tier is broken, it still
-boots from what the host has and gives the builders network to repair it. The regular router
-stays on the host store too for now (its per-machine registry name is not resolved for tiers
-yet).
+boots from what the host has and gives the builders network to repair it.
+
+The router on the infra tier (`storeTier` in `infra/router/meta.nix`; the flake gives the
+regular or corp router its view, `routerTierModule`) is built by builder-infra, which needs
+network, so the router's boot autostart falls back: when the router has no build yet (a fresh
+install, where firstboot leaves tier VMs out) or does not start, it starts `router-stable`
+instead. Then `shard -b builder-infra router`, `shard -S router-stable`, `shard -s router`.
+Updating a working router is `shard -bR router` as for any VM (the running router gives
+builder-infra network while it builds the new one); `shard -g switch router prev` goes back
+to the previous build.
 
 A tier builder boots from a view of its own closure, not the whole host store:
 `/var/lib/hydrix/stores/views/<builder>/nix/store`, which `shard` refreshes at every start
