@@ -3467,8 +3467,9 @@
           host_config=$(detect_host_config)
           local switch_cmd="sudo --preserve-env=HYDRIX_BUILD_TIME,HYDRIX_BUILD_TAG nixos-rebuild switch --flake ''${FLAKE_DIR}#''${host_config} --impure"
           # The builder's toplevel is final (built with this build's time and tag): switch to
-          # it by path instead of evaluating the flake once more.
-          [[ -n "$HOST_TOPLEVEL" ]] && switch_cmd="sudo nixos-rebuild switch --store-path ''${HOST_TOPLEVEL}"
+          # it by path instead of evaluating the flake once more. --no-reexec: without a flake,
+          # nixos-rebuild would first build its own newest version from <nixpkgs/nixos>.
+          [[ -n "$HOST_TOPLEVEL" ]] && switch_cmd="sudo nixos-rebuild switch --no-reexec --store-path ''${HOST_TOPLEVEL}"
           if [[ "$target_spec" != "lockdown" ]]; then
               switch_cmd="$switch_cmd --specialisation ''${target_spec}"
           fi
