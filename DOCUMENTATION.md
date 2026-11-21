@@ -481,11 +481,9 @@ shard builder build host          # Build host config
 shard builder switch
 shard builder switch administrative  # Switch to specific specialisation
 
-# Prefetch only (keep builder running for batch operations)
-shard builder fetch browsing
+# Fetch a target's sources and dependencies; stops the builder again (while it runs the host
+# nix-daemon is down). Several in a row: shard builder start first, then stop when done
 shard builder fetch pentest
-shard builder fetch host
-shard builder stop               # Stop when done
 
 # Manual control
 shard builder start       # Start builder (stops host nix-daemon)
@@ -4171,10 +4169,9 @@ shard builder build browsing pentest dev
 shard builder switch                 # Switches to current specialisation
 shard builder switch administrative  # Switch to specific specialisation
 
-# Prefetch only (keep builder running for batch operations)
-shard builder fetch browsing
+# Fetch a target's sources and dependencies (stops the builder again; for several in a row,
+# shard builder start first, then shard builder stop)
 shard builder fetch pentest
-shard builder stop                  # Stop when done
 
 # Update flake inputs without host network (rebuild -u / -U do this in lockdown)
 shard builder update                # every input
