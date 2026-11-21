@@ -561,6 +561,41 @@ in {
                 fi
                 rm -rf "$lockdir"
                 ;;
+              FETCH)
+                # FETCH <kind>=<ref> ...: sources the host's profiles pin by narHash but fetch
+                # only during evaluation (builtins.getFlake, builtins.fetchTree), so no lock
+                # file lists them (flake-input-roots.py --list-fetch). Each goes into the store
+                # shared with the host, which then evaluates those profiles offline: a pinned
+                # flake with every input of its own lock (nix flake archive), anything else as
+                # a source tree (nix flake prefetch). github refs with a full rev only.
+                if [[ -z "$rest" ]]; then
+                  echo "ERROR usage: FETCH flake=<ref>|tree=<ref> ..."
+                  exit 0
+                fi
+                failed=0
+                # $rest unquoted: one argument per ref (each checked below)
+                # shellcheck disable=SC2086
+                for item in $rest; do
+                  if [[ ! "$item" =~ ^(flake|tree)=github:[A-Za-z0-9._-]+/[A-Za-z0-9._-]+/[0-9a-f]{40}\?narHash=sha256-[A-Za-z0-9%]+$ ]]; then
+                    echo "ERROR not a pinned github source: $item"
+                    failed=1
+                    continue
+                  fi
+                  kind=''${item%%=*}
+                  ref=''${item#*=}
+                  echo "OK fetching $ref"
+                  if [[ "$kind" == flake ]]; then
+                    ${pkgs.nix}/bin/nix flake archive "$ref" --log-format internal-json -v 2>&1 || failed=1
+                  else
+                    ${pkgs.nix}/bin/nix flake prefetch "$ref" --log-format internal-json -v 2>&1 || failed=1
+                  fi
+                done
+                if [[ $failed -eq 0 ]]; then
+                  echo "DONE"
+                else
+                  echo "ERROR fetching pinned sources failed"
+                fi
+                ;;
             ''}
               PING)
                 echo "PONG"
@@ -571,7 +606,7 @@ in {
                 echo "Commands: ${
               if tierMode
               then "BUILDDRV <name> <drv>, GC"
-              else "BUILD <flake>, PREFETCH <flake>, UPDATE [input ...]"
+              else "BUILD <flake>, PREFETCH <flake>, UPDATE [input ...], FETCH <kind>=<ref> ..."
             }, PING"
                 ;;
             esac

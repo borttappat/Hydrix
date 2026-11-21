@@ -439,11 +439,39 @@
           local attr="nixosConfigurations.''${vm_name}.config.system.build.tierSystem"
           local host_part tier_system drv paths
           log "Evaluating ''${BOLD}''${vm_name}''${NC}..."
-          if ! paths=$(nix eval --raw "''${FLAKE_DIR}#nixosConfigurations.''${vm_name}.config.system.build" \
-                  --apply 'b: b.tierHost.outPath + " " + b.tierSystem.outPath + " " + b.tierSystem.drvPath'); then
+          local eval_err eval_rc=0
+          eval_err=$(mktemp)
+          paths=$(nix eval --raw "''${FLAKE_DIR}#nixosConfigurations.''${vm_name}.config.system.build" \
+                  --apply 'b: b.tierHost.outPath + " " + b.tierSystem.outPath + " " + b.tierSystem.drvPath' \
+                  2> "$eval_err") || eval_rc=$?
+          cat "$eval_err" >&2
+          if [[ $eval_rc -ne 0 ]]; then
+              # Offline (lockdown), evaluation can need a source the host never fetched (a
+              # pin added since the last shard builder update, or one without a narHash):
+              # the host builder fetches it, then this build runs once more.
+              if [[ "$(detect_current_specialisation)" == "lockdown" && -z "''${_HYDRIX_FETCH_RETRIED:-}" ]] \
+                 && grep -qE 'unable to download|Could not resolve host' "$eval_err"; then
+                  rm -f "$eval_err"
+                  log_warn "Evaluating ''${vm_name} needs a source this offline host does not have"
+                  local answer=y
+                  if [[ -t 0 ]]; then
+                      read -r -p "Fetch it through ''${BUILDER_NAME} and build again? [Y/n] " answer || answer=n
+                  else
+                      answer=n
+                  fi
+                  if [[ ! "$answer" =~ ^[Nn] ]]; then
+                      cmd_builder_fetch "$vm_name" || return 1
+                      _HYDRIX_FETCH_RETRIED=1 cmd_tier_build "$vm_name" "$tier"
+                      return
+                  fi
+                  log "Fetch it, then build again: shard builder fetch $(vm_short_name "$vm_name")"
+                  return 1
+              fi
+              rm -f "$eval_err"
               log_error "Evaluation failed"
               return 1
           fi
+          rm -f "$eval_err"
           read -r host_part tier_system drv <<< "$paths"
 
           # The runner changes only with the kernel, initrd or QEMU settings: when this exact
@@ -3286,6 +3314,12 @@
           for n in "$@"; do
               [[ "$n" =~ ^[A-Za-z0-9_-]+$ ]] || { log_error "Not an input name: $n"; return 1; }
           done
+          # Sources profiles fetch during evaluation (getFlake/fetchTree pins with a narHash):
+          # no lock lists them, and without them the offline host cannot evaluate those
+          # profiles. Listed now, while the host nix-daemon still runs (the builder stops it).
+          local unchanged=0 pins=()
+          mapfile -t pins < <(python3 ${./lib/flake-input-roots.py} --list-fetch \
+              "${pkgs.nix}/bin" "''${FLAKE_DIR}/flake.lock" 2> >(sed 's/^/  /' >&2))
           if is_running "$BUILDER_NAME"; then
               log "Builder already running"
           else
@@ -3298,14 +3332,24 @@
           else
               log "Updating ''${BOLD}''${*:-every input}''${NC} in ''${BUILDER_NAME}..."
               builder_send_build "$BUILDER_CID" "UPDATE $*" || rc=1
+              # Read the reply now: the fetch below writes the same log.
+              lock=$(grep -m1 '^LOCK ' "$log_file" | cut -d' ' -f2 || true)
+              grep -q '^UNCHANGED' "$log_file" && unchanged=1
+              if [[ $rc -eq 0 ]]; then
+                  if [[ ''${#pins[@]} -gt 0 ]]; then
+                      log "Fetching ''${#pins[@]} pinned source(s) that profiles use during evaluation..."
+                      builder_send_build "$BUILDER_CID" "FETCH ''${pins[*]}" \
+                          || log_warn "Some pinned sources were not fetched; a build that needs one offers to fetch it"
+                  fi
+              fi
           fi
           [[ $started -eq 1 ]] && { cmd_stop "$BUILDER_NAME" || rc=1; }
           [[ $rc -eq 0 ]] || { log_error "Flake update failed; flake.lock unchanged"; return 1; }
 
-          lock=$(grep -m1 '^LOCK ' "$log_file" | cut -d' ' -f2 || true)
           if [[ -z "$lock" ]]; then
-              if grep -q '^UNCHANGED' "$log_file"; then
+              if [[ $unchanged -eq 1 ]]; then
                   log "flake.lock is already up to date"
+                  root_flake_inputs
                   return 0
               fi
               log_error "The builder sent no lock file"

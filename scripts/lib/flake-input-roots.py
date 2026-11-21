@@ -7,6 +7,13 @@ this roots only those already in the store: each locked input's store path follo
 its narHash (fixed-output, recursive sha256, name "source").
 
 usage: flake-input-roots.py <nix bin dir> <flake.lock> <roots dir>
+       flake-input-roots.py --list-fetch <nix bin dir> <flake.lock>
+
+--list-fetch prints, one per line, the profile pins a lockdown host cannot evaluate yet: their
+source is not in the store, or (a pinned flake) one of its own locked inputs is not.
+"flake=<ref>" is a pinned flake (fetched with every input of its lock), "tree=<ref>" any other
+source. Only github sources with a full rev are listed (the builder fetches nothing else);
+others go to stderr as a warning. shard builder update hands the list to the builder (FETCH).
 
 The roots directory then holds exactly one link per fetched input of this lock file;
 links for inputs the lock no longer has are removed, so their old sources become
@@ -36,8 +43,27 @@ NAR_HASH = re.compile(r'narHash\s*=\s*"([^"]+)"')
 GET_FLAKE = re.compile(r'builtins\.getFlake\s+"([^"]+)"')
 
 
+GITHUB_REF = re.compile(r"^github:[A-Za-z0-9._-]+/[A-Za-z0-9._-]+/[0-9a-f]{40}$")
+ATTR = re.compile(r'(\w+)\s*=\s*"([^"]*)"\s*;')
+
+
+def fetch_ref(body, nar, is_flake):
+    """A github flake reference the builder can fetch with this narHash, or None."""
+    if is_flake:
+        base = urllib.parse.urlsplit(body)
+        base = f"{base.scheme}:{base.path}" if base.scheme else ""
+    else:
+        attrs = dict(ATTR.findall(body))
+        base = ""
+        if attrs.get("type") == "github" and attrs.get("owner") and attrs.get("repo"):
+            base = f"github:{attrs['owner']}/{attrs['repo']}/{attrs.get('rev', '')}"
+    if not GITHUB_REF.match(base):
+        return None
+    return f"{base}?narHash={urllib.parse.quote(nar, safe='')}"
+
+
 def profile_pins(flake_dir):
-    """(name, narHash, is_flake) for every source a profile file pins by narHash."""
+    """(name, narHash, is_flake, ref) for every source a profile file pins by narHash."""
     pins = []
     for path in sorted(glob.glob(os.path.join(flake_dir, "profiles/*/**/*.nix"), recursive=True)):
         rel = os.path.relpath(path, os.path.join(flake_dir, "profiles"))
@@ -59,7 +85,7 @@ def profile_pins(flake_dir):
                 nar = m.group(1) if m else ""
             name = f"pin-{profile}-{stem}-{n}"
             if SRI.match(nar) and NAME.match(name):
-                pins.append((name, nar, is_flake))
+                pins.append((name, nar, is_flake, fetch_ref(body, nar, is_flake)))
     return pins
 
 
@@ -99,22 +125,51 @@ def run(nix_bin, *args):
     return out.split()
 
 
+def nested_inputs(pins, paths):
+    """name-input -> narHash for every input locked by a pinned flake already in the store."""
+    nested = {}
+    for name, _, is_flake, _ in pins:
+        sub_lock = os.path.join(paths.get(name, ""), "flake.lock")
+        if is_flake and name in paths and os.path.isfile(sub_lock) and not os.path.islink(sub_lock):
+            nested.update({f"{name}-{i}": nar for i, nar in lock_hashes(sub_lock).items()})
+    return nested
+
+
+def list_fetch(nix_bin, lock_file):
+    pins = profile_pins(os.path.dirname(os.path.abspath(lock_file)))
+    paths = store_paths(nix_bin, {name: nar for name, nar, _, _ in pins})
+    nested = nested_inputs(pins, paths)
+    have = store_paths(nix_bin, nested)
+    listed = set()
+    for name, _, is_flake, ref in pins:
+        missing = name not in paths or (
+            is_flake and any(k.startswith(name + "-") and k not in have for k in nested))
+        if not missing:
+            continue
+        if ref is None:
+            print(f"{name}: not a github source with a full rev, fetch it by hand", file=sys.stderr)
+            continue
+        line = f"{'flake' if is_flake else 'tree'}={ref}"
+        if line not in listed:
+            listed.add(line)
+            print(line)
+
+
 def main():
+    if sys.argv[1:2] == ["--list-fetch"]:
+        list_fetch(*sys.argv[2:4])
+        return
     nix_bin, lock_file, roots = sys.argv[1:4]
     wanted = lock_hashes(lock_file)
     inputs = len(wanted)
     pins = profile_pins(os.path.dirname(os.path.abspath(lock_file)))
-    wanted.update({name: nar for name, nar, _ in pins})
+    wanted.update({name: nar for name, nar, _, _ in pins})
     paths = store_paths(nix_bin, wanted)
 
     # A pinned flake's own inputs: from its flake.lock, once its source is in the store.
-    nested = {}
-    for name, _, is_flake in pins:
-        sub_lock = os.path.join(paths.get(name, ""), "flake.lock")
-        if is_flake and name in paths and os.path.isfile(sub_lock) and not os.path.islink(sub_lock):
-            nested.update({f"{name}-{i}": nar for i, nar in lock_hashes(sub_lock).items()})
+    nested = nested_inputs(pins, paths)
     paths.update(store_paths(nix_bin, nested))
-    pin_names = {name for name, _, _ in pins} | set(nested)
+    pin_names = {name for name, _, _, _ in pins} | set(nested)
 
     os.makedirs(roots, mode=0o755, exist_ok=True)
     for entry in os.listdir(roots):
