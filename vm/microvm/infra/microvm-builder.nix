@@ -448,7 +448,34 @@ in {
                 echo "ERROR a tier builder builds exported derivations only: BUILDDRV <name> <drv>"
               ''
               else ''
+                # BUILD <flake attr>, optionally followed by a line
+                # "ENV [time=YYYY-MM-DD_HH:MM] [tag=<tag>]": the host's HYDRIX_BUILD_TIME/TAG
+                # (host/specialisations.nix reads them with builtins.getEnv), so the toplevel
+                # built here is the one the host switches to. A second line keeps the first one
+                # valid for builders that predate it; they never read it.
                 flake="$rest"
+                opts=""
+                if read -r -t 2 kw envopts && [[ "$kw" == "ENV" ]]; then
+                  opts="$envopts"
+                fi
+                impure=()
+                for opt in $opts; do
+                  case "$opt" in
+                    time=*)
+                      t="''${opt#time=}"
+                      [[ "$t" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}_[0-9]{2}:[0-9]{2}$ ]] || { echo "ERROR bad time: $t"; exit 0; }
+                      export HYDRIX_BUILD_TIME="''${t/_/ }"
+                      impure=(--impure)
+                      ;;
+                    tag=*)
+                      t="''${opt#tag=}"
+                      [[ "$t" =~ ^[a-zA-Z0-9:_.-]+$ ]] || { echo "ERROR bad tag: $t"; exit 0; }
+                      export HYDRIX_BUILD_TAG="$t"
+                      impure=(--impure)
+                      ;;
+                    *) echo "ERROR unknown BUILD option: $opt"; exit 0 ;;
+                  esac
+                done
                 echo "OK building $flake"
 
                 # Brief pause for network stack, then let nix handle retries
@@ -456,13 +483,16 @@ in {
 
                 # Run nix build - stream progress to vsock for the host to render with nom.
                 # --log-format internal-json -v: what nom --json parses (as nh uses it).
-                # 2>&1: merge stderr (nix progress) into stdout so socat carries it all.
-                if ${pkgs.nix}/bin/nix build "$flake" --no-link --no-write-lock-file \
-                     --log-format internal-json -v 2>&1; then
-                  echo "DONE"
+                # 2>&1 first: stderr (nix progress) goes to socat, stdout (the out paths) to a
+                # file, reported as "DONE <path>" so the host can use the build without evaluating.
+                outs=$(mktemp)
+                if ${pkgs.nix}/bin/nix build "$flake" --no-link --no-write-lock-file "''${impure[@]}" \
+                     --print-out-paths --log-format internal-json -v 2>&1 > "$outs"; then
+                  echo "DONE $(head -n 1 "$outs")"
                 else
                   echo "ERROR build failed"
                 fi
+                rm -f "$outs"
               ''
             }
                 ;;

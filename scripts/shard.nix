@@ -216,6 +216,8 @@
       # Infra VM CIDs, resolved from registry (infra/*/meta.nix in hydrix-config).
       # Fallback to reserved defaults for pre-activation / fresh installs.
       BUILDER_CID=$(get_cid "$BUILDER_NAME" 2>/dev/null || true); BUILDER_CID="''${BUILDER_CID:-210}"
+      # Host toplevel the builder reported (cmd_builder_build), switched to by cmd_builder_switch.
+      HOST_TOPLEVEL=""
       GITSYNC_CID=$(get_cid "$GITSYNC_NAME" 2>/dev/null || true); GITSYNC_CID="''${GITSYNC_CID:-211}"
 
       # Get static IP for a VM (subnet.<own CID>, matches hydrix.microvm.staticIp's
@@ -3184,14 +3186,31 @@
           # Step 2: Build all targets in one builder session
           # Eval cache is warm after the first build - subsequent targets skip the 2+ min eval
           local failed_targets=()
+          HOST_TOPLEVEL=""
           for target in "''${targets[@]}"; do
-              local flake_target
+              local flake_target request
               flake_target=$(resolve_builder_flake_attr "$target")
+              request="BUILD $flake_target"
               log "Building ''${BOLD}''${target}''${NC}..."
 
-              if ! builder_send_build "$BUILDER_CID" "BUILD $flake_target"; then
+              # The host toplevel carries rebuild's build time and tag (GRUB entries): the
+              # builder evaluates with them, so its toplevel is final and the host never
+              # evaluates the flake itself (see the ENV line in microvm-builder.nix). Every
+              # request carries the line, empty for VMs, so the builder never waits for it.
+              local env_line="ENV"
+              if [[ "$target" == "host" ]]; then
+                  [[ -n "''${HYDRIX_BUILD_TIME:-}" ]] && env_line+=" time=''${HYDRIX_BUILD_TIME/ /_}"
+                  [[ -n "''${HYDRIX_BUILD_TAG:-}" ]] && env_line+=" tag=''${HYDRIX_BUILD_TAG}"
+              fi
+              request+=$'\n'"$env_line"
+
+              if ! builder_send_build "$BUILDER_CID" "$request"; then
                   log_error "Build failed: ''${BOLD}''${target}''${NC}"
                   failed_targets+=("$target")
+              elif [[ "$target" == "host" ]]; then
+                  # Builder output is untrusted: take only a plain toplevel path from it.
+                  HOST_TOPLEVEL=$(grep -m 1 -oE '^DONE /nix/store/[0-9a-z]{32}-nixos-system-[A-Za-z0-9._+-]+$' \
+                      "''${XDG_STATE_HOME:-$HOME/.local/state}/hydrix/last-build.log" | cut -d' ' -f2)
               fi
           done
 
@@ -3215,6 +3234,21 @@
                   log "Host config (specialisation: ''${BOLD}''${current_spec}''${NC})..."
                   local host_start
                   host_start=$(timer_start)
+                  # The builder evaluated with this build's time and tag and reported the
+                  # toplevel: nothing left to evaluate here, cmd_builder_switch switches to it.
+                  if [[ -n "$HOST_TOPLEVEL" ]] && nix-store --check-validity "$HOST_TOPLEVEL" 2>/dev/null; then
+                      log_success "Host toplevel: ''${HOST_TOPLEVEL}"
+                      echo ""
+                      log "To apply:"
+                      if [[ "$current_spec" == "lockdown" ]]; then
+                          echo "  rebuild"
+                      else
+                          echo "  rebuild ''${current_spec}"
+                      fi
+                      continue
+                  fi
+                  HOST_TOPLEVEL=""
+                  # A builder without "DONE <path>" (not rebuilt since): evaluate here.
                   # --offline: lockdown has no network, so a path the builder did not produce
                   # fails at once instead of retrying every substituter.
                   local offline=()
@@ -3367,6 +3401,8 @@
           fi
           if cmp -s "$lock" "''${FLAKE_DIR}/flake.lock"; then
               log "flake.lock is already up to date"
+              # Pinned sources may have been fetched all the same: root them now.
+              root_flake_inputs
               return 0
           fi
           changes=$(jq -r --slurpfile prev "''${FLAKE_DIR}/flake.lock" '
@@ -3430,6 +3466,9 @@
           local host_config
           host_config=$(detect_host_config)
           local switch_cmd="sudo --preserve-env=HYDRIX_BUILD_TIME,HYDRIX_BUILD_TAG nixos-rebuild switch --flake ''${FLAKE_DIR}#''${host_config} --impure"
+          # The builder's toplevel is final (built with this build's time and tag): switch to
+          # it by path instead of evaluating the flake once more.
+          [[ -n "$HOST_TOPLEVEL" ]] && switch_cmd="sudo nixos-rebuild switch --store-path ''${HOST_TOPLEVEL}"
           if [[ "$target_spec" != "lockdown" ]]; then
               switch_cmd="$switch_cmd --specialisation ''${target_spec}"
           fi
