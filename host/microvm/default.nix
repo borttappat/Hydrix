@@ -102,6 +102,11 @@
   stableRouterEnabled =
     builtins.hasAttr stableRouterVmName allVms && allVms.${stableRouterVmName}.enable;
 
+  # A router on a store tier is built by its tier builder, which needs network first: at boot
+  # the router's autostart starts router-stable (host store) when the router has no build yet
+  # (a fresh install) or does not start (a broken build).
+  routerFallback = name: name == routerVmName && stableRouterEnabled && lib.elem name tierVms;
+
   # Router TAP interface to bridge mapping
   # TAP names must be max 15 chars (Linux limit)
   # Framework infrastructure TAPs are hardcoded; profile TAPs are generated
@@ -927,7 +932,11 @@ in {
             description = "Autostart decoupled microVM ${name}";
             wantedBy = ["multi-user.target"];
             after = ["network.target" "microvms.target"];
-            unitConfig.ConditionPathExists = "/var/lib/microvms/${name}/current";
+            # The router may fall back to router-stable (below), so either build will do.
+            unitConfig.ConditionPathExists =
+              if routerFallback name
+              then ["|/var/lib/microvms/${name}/current" "|/var/lib/microvms/${stableRouterVmName}/current"]
+              else "/var/lib/microvms/${name}/current";
             # shard calls sudo; root needs the setuid wrapper on PATH too.
             path = [pkgs.systemd "/run/wrappers"];
             serviceConfig = {
@@ -937,11 +946,24 @@ in {
               # $SUDO_USER/$USER, neither of which exist for a root systemd
               # service with no login session, set it explicitly.
               Environment = "HYDRIX_FLAKE_DIR=${config.hydrix.paths.configDir}";
-              ExecStart = "${pkgs.writeShellScript "hydrix-microvm-autostart-${name}" ''
-                set -e
-                systemctl is-active --quiet "microvm@${name}.service" && exit 0
-                exec ${shardPkg}/bin/shard start "${name}"
-              ''}";
+              ExecStart = "${pkgs.writeShellScript "hydrix-microvm-autostart-${name}" (
+                if routerFallback name
+                then ''
+                  systemctl is-active --quiet "microvm@${name}.service" && exit 0
+                  systemctl is-active --quiet "microvm@${stableRouterVmName}.service" && exit 0
+                  if [ -e "/var/lib/microvms/${name}/current" ] && ${shardPkg}/bin/shard start "${name}"; then
+                    exit 0
+                  fi
+                  echo "${name} is not built or did not start: starting ${stableRouterVmName} instead" >&2
+                  systemctl stop "microvm@${name}.service" 2>/dev/null || true
+                  exec ${shardPkg}/bin/shard start "${stableRouterVmName}"
+                ''
+                else ''
+                  set -e
+                  systemctl is-active --quiet "microvm@${name}.service" && exit 0
+                  exec ${shardPkg}/bin/shard start "${name}"
+                ''
+              )}";
             };
           })
         decoupledAutostartVMs)

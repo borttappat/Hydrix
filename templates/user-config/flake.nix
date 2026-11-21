@@ -537,6 +537,15 @@
       ./infra/router-stable/default.nix
     ];
 
+    # storeTier in infra/router/meta.nix: the router boots from its own view of that tier
+    # store, like the other infra VMs. router-stable never does: it is the fallback that must
+    # boot from the host store (and the router's autostart starts it when the router has no
+    # build yet or does not start).
+    routerTierModule = vmName:
+      nixpkgs.lib.optional ((import ./infra/router/meta.nix) ? storeTier) {
+        hydrix.microvm.storeSource = "/var/lib/hydrix/stores/views/${vmName}/nix/store";
+      };
+
     perMachineRouterConfigs = builtins.listToAttrs (map (machineName: let
       mc = builtins.getAttr machineName machineConfigs;
     in {
@@ -558,7 +567,8 @@
           ++ [
             {hydrix.router.persistence = mc.config.hydrix.router.persistence;}
             {hydrix.router.microvm.firewall.allowedAccessTo = mc.config.hydrix.router.microvm.firewall.allowedAccessTo;}
-          ];
+          ]
+          ++ routerTierModule "microvm-router-${machineName}";
       };
     }) (builtins.attrNames machineConfigs));
 
