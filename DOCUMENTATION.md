@@ -4200,6 +4200,16 @@ afterwards. This works for a `path:` Hydrix input and for a remote one alike, an
 GitHub credentials: the builder only downloads public sources (private inputs would come
 through gitsync clones instead).
 
+The same run fetches what no lock lists: the narHash-pinned sources profiles use during
+evaluation (see Flake input roots below). `flake-input-roots.py --list-fetch` names the ones
+missing from the host store, and the builder fetches them (`FETCH`: a pinned flake with every
+input of its own lock through `nix flake archive`, a source tree through `nix flake prefetch`;
+github refs with a full rev only). After `rebuild -u`/`-U` or `shard builder update` the host
+evaluates every profile offline, as `nix flake update` leaves an online machine. A tier build
+that still hits a missing source in lockdown (a pin added since the update, a fetch without a
+narHash) asks `Fetch it through microvm-builder and build again?` and retries once; without a
+terminal it fails with `shard builder fetch <vm>`.
+
 **Flake input roots.** A lockdown host cannot download an input source a garbage collection
 took. `scripts/lib/flake-input-roots.py` roots every input already in the store as
 `/nix/var/nix/gcroots/hydrix-inputs/<input>` (its store path follows from the `narHash` in
