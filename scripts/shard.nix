@@ -3175,6 +3175,27 @@
           local total_start
           total_start=$(timer_start)
 
+          # Step 0: evaluate the host here, while the host nix-daemon still runs (the builder
+          # stops it). The host reads its sources from its own disk, where the builder reads
+          # them over virtiofs at about half the speed; the builder then only builds the .drv.
+          # A source missing offline (a new input or pin not fetched yet) fails the evaluation:
+          # the builder then evaluates the flake itself, since it can fetch.
+          local host_drv=""
+          if [[ " ''${targets[*]} " == *" host "* ]] && ! is_running "$BUILDER_NAME"; then
+              local eval_offline=() eval_start
+              [[ "$(detect_current_specialisation)" == "lockdown" ]] && eval_offline=(--offline)
+              log "Evaluating host..."
+              eval_start=$(timer_start)
+              if host_drv=$(nix eval --raw --impure "''${eval_offline[@]}" \
+                      "''${FLAKE_DIR}#nixosConfigurations.$(detect_host_config).config.system.build.toplevel.drvPath") \
+                  && [[ "$host_drv" =~ ^/nix/store/[0-9a-z]{32}-nixos-system-[A-Za-z0-9._+-]+\.drv$ ]]; then
+                  log_time "Host evaluated in ''${BOLD}$(timer_end "$eval_start")s''${NC}"
+              else
+                  host_drv=""
+                  log_warn "Host evaluation failed, the builder evaluates the flake instead"
+              fi
+          fi
+
           # Step 1: Start builder if not running
           if ! is_running "$BUILDER_NAME"; then
               log "Starting builder..."
@@ -3185,7 +3206,7 @@
 
           # Step 2: Build all targets in one builder session
           # Eval cache is warm after the first build - subsequent targets skip the 2+ min eval
-          local failed_targets=()
+          local failed_targets=() host_local=false
           HOST_TOPLEVEL=""
           for target in "''${targets[@]}"; do
               local flake_target request
@@ -3193,12 +3214,24 @@
               request="BUILD $flake_target"
               log "Building ''${BOLD}''${target}''${NC}..."
 
-              # The host toplevel carries rebuild's build time and tag (GRUB entries): the
-              # builder evaluates with them, so its toplevel is final and the host never
-              # evaluates the flake itself (see the ENV line in microvm-builder.nix). Every
-              # request carries the line, empty for VMs, so the builder never waits for it.
+              # The host toplevel carries rebuild's build time and tag (GRUB entries): when the
+              # builder evaluates it, it gets them on the ENV line (microvm-builder.nix), so its
+              # toplevel is final either way. Every request carries the line, empty when there
+              # is nothing to pass, so the builder never waits for it.
               local env_line="ENV"
-              if [[ "$target" == "host" ]]; then
+              if [[ "$target" == "host" && -n "$host_drv" ]]; then
+                  # Evaluated above, with the time and tag already in it. The builder only
+                  # fetches what the build needs (FETCHDRV); the host builds it in step 4, after
+                  # the builder stops: its sandbox setup is several times faster than the
+                  # builder's over virtiofs (hydrix-config investigations/builder-drv-overhead).
+                  if builder_send_build "$BUILDER_CID" "FETCHDRV ''${host_drv}"; then
+                      host_local=true
+                      continue
+                  fi
+                  # A builder without FETCHDRV, or a failed fetch: it builds everything instead.
+                  log_warn "Fetching for the host failed, the builder builds the host instead"
+                  request="BUILD ''${host_drv}^*"
+              elif [[ "$target" == "host" ]]; then
                   [[ -n "''${HYDRIX_BUILD_TIME:-}" ]] && env_line+=" time=''${HYDRIX_BUILD_TIME/ /_}"
                   [[ -n "''${HYDRIX_BUILD_TAG:-}" ]] && env_line+=" tag=''${HYDRIX_BUILD_TAG}"
               fi
@@ -3234,6 +3267,26 @@
                   log "Host config (specialisation: ''${BOLD}''${current_spec}''${NC})..."
                   local host_start
                   host_start=$(timer_start)
+                  if $host_local; then
+                      # The builder fetched everything this needs: build it here, offline in
+                      # lockdown, so a path it missed fails at once instead of trying every
+                      # substituter.
+                      log "Building host..."
+                      local out_file offline=()
+                      out_file=$(mktemp)
+                      [[ "$current_spec" == "lockdown" ]] && offline=(--offline)
+                      nix build "''${host_drv}^*" "''${offline[@]}" --no-link --print-out-paths \
+                          --log-format internal-json -v 2>&1 > "$out_file" | nom --json
+                      if [[ ''${PIPESTATUS[0]} -ne 0 ]]; then
+                          rm -f "$out_file"
+                          log_error "Host build failed (a path missing offline: shard builder fetch host)"
+                          host_failed=true
+                          continue
+                      fi
+                      HOST_TOPLEVEL=$(head -n 1 "$out_file")
+                      rm -f "$out_file"
+                      log_time "Host build: ''${BOLD}$(timer_end "$host_start")s''${NC}"
+                  fi
                   # The builder evaluated with this build's time and tag and reported the
                   # toplevel: nothing left to evaluate here, cmd_builder_switch switches to it.
                   if [[ -n "$HOST_TOPLEVEL" ]] && nix-store --check-validity "$HOST_TOPLEVEL" 2>/dev/null; then

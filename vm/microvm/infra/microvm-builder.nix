@@ -497,6 +497,55 @@ in {
             }
                 ;;
 
+              ${lib.optionalString (!tierMode) ''
+              FETCHDRV)
+                # FETCHDRV <drv>: the host evaluated <drv> and builds it itself once this builder
+                # stops, so this VM only does what needs network. A dry run splits the closure
+                # into paths to fetch (substitutes) and derivations to build; of those only the
+                # fixed-output ones (source fetches, with whatever they need) are built here.
+                # The host builds the rest several times faster than this VM, whose sandbox setup
+                # pays for every input path over virtiofs (hydrix-config
+                # investigations/builder-drv-overhead).
+                read -r drv _ <<< "$rest"
+                if [[ ! "$drv" =~ ^/nix/store/[0-9a-z]{32}-[A-Za-z0-9+._?=-]+\.drv$ ]]; then
+                  echo "ERROR usage: FETCHDRV </nix/store/...drv>"
+                  exit 0
+                fi
+                echo "OK fetching for $drv"
+                sleep 2
+                plan=$(mktemp)
+                if ! ${pkgs.nix}/bin/nix build "$drv^*" --dry-run 2> "$plan"; then
+                  tail -n 20 "$plan"
+                  rm -f "$plan"
+                  echo "ERROR dry run failed"
+                  exit 0
+                fi
+                mapfile -t fetch < <(${pkgs.gawk}/bin/awk '/will be fetched/{s=1;next} /will be built/{s=0;next} s && /^ +\/nix\/store\//{print $1}' "$plan")
+                mapfile -t built < <(${pkgs.gawk}/bin/awk '/will be built/{s=1;next} /will be fetched/{s=0;next} s && /^ +\/nix\/store\/.*\.drv$/{print $1}' "$plan")
+                rm -f "$plan"
+                fods=()
+                if [[ ''${#built[@]} -gt 0 ]]; then
+                  mapfile -t fods < <(${pkgs.nix}/bin/nix derivation show "''${built[@]}" \
+                    | ${pkgs.jq}/bin/jq -r '(.derivations // .) | to_entries[]
+                        | select(any(.value.outputs[]; .hash != null))
+                        | .key | if startswith("/") then . else "/nix/store/" + . end')
+                fi
+                echo "Fetching ''${#fetch[@]} paths and ''${#fods[@]} sources; $((''${#built[@]} - ''${#fods[@]})) derivations left for the host"
+                rc=0
+                if [[ ''${#fetch[@]} -gt 0 ]]; then
+                  ${pkgs.nix}/bin/nix build --no-link "''${fetch[@]}" --log-format internal-json -v 2>&1 || rc=1
+                fi
+                if [[ $rc -eq 0 && ''${#fods[@]} -gt 0 ]]; then
+                  ${pkgs.nix}/bin/nix build --no-link "''${fods[@]/%/^*}" --log-format internal-json -v 2>&1 || rc=1
+                fi
+                if [[ $rc -eq 0 ]]; then
+                  echo "DONE"
+                else
+                  echo "ERROR fetching failed"
+                fi
+                ;;
+            ''}
+
               ${lib.optionalString tierMode ''
               BUILDDRV)
                 # BUILDDRV <name> <drv>: the host evaluated <name> and exported <drv> with its
@@ -636,7 +685,7 @@ in {
                 echo "Commands: ${
               if tierMode
               then "BUILDDRV <name> <drv>, GC"
-              else "BUILD <flake>, PREFETCH <flake>, UPDATE [input ...], FETCH <kind>=<ref> ..."
+              else "BUILD <flake>, FETCHDRV <drv>, PREFETCH <flake>, UPDATE [input ...], FETCH <kind>=<ref> ..."
             }, PING"
                 ;;
             esac
