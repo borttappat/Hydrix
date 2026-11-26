@@ -25,6 +25,13 @@ in {
     # vi key bindings on (framework default)
     hydrix.graphical.fish.viKeyBindings = lib.mkDefault true;
 
+    # No completions generated from man pages at build time: one derivation per system
+    # package (about 250 on the host), rebuilt whenever fish, python or stdenv changes. fish
+    # and the packages bring their own for everything in daily use; the rest (coreutils,
+    # alsa, virt-*, qemu-img, socat, nixos-rebuild, ...) come back at runtime with
+    # fish_update_completions, into ~/.cache.
+    programs.fish.generateCompletions = lib.mkDefault false;
+
     home-manager.users.${username} = {
       lib,
       pkgs,
