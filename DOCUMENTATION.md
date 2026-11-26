@@ -440,6 +440,9 @@ rebuild fallback                # Requires reboot (kernel params change)
 5. Builder stops, host nix-daemon restarts
 6. Host builds instant (all deps cached in store)
 
+The host configuration (`rebuild` in lockdown) differs: the host evaluates it and builds it
+itself; the builder only fetches (see "How it works" under Builder VM).
+
 ```bash
 shard builder build browsing   # Fetch/build in builder VM
 shard builder build host       # Build host config
@@ -520,6 +523,26 @@ targets resolve it automatically. See
    sandbox (see below)
 5. **Stop**: Outputs written to host's `/nix/store`, Builder stops
 6. **Switch**: Host nix-daemon restarts, host builds instant (all deps cached)
+
+**The host target** (`rebuild` in lockdown, `shard builder build host`, `shard builder
+switch`) is evaluated and built on the host; the builder only does what needs network:
+
+1. **Evaluate**: the host evaluates its toplevel `.drv` while its nix-daemon still runs
+   (`--impure`, for the GRUB build time and tag, and `--offline`)
+2. **Fetch**: the builder gets `FETCHDRV <drv>`: a dry run splits the closure into paths to
+   substitute and derivations to build; it fetches the paths and builds only the
+   fixed-output derivations (source fetches) among the latter
+3. **Build**: the builder stops, the host builds the rest offline (`nix build <drv>^*`)
+4. **Switch**: `nixos-rebuild switch --no-reexec --store-path <toplevel>`, no evaluation
+
+The host builds because the builder's sandbox setup pays for every input path over virtiofs:
+a derivation with a system closure as input costs about 3s more there than on the host, and a
+host build has hundreds of them (units, `etc`, `system-path`, per specialisation). Fallbacks:
+a host evaluation that fails offline (a source not fetched yet) leaves evaluation to the
+builder, which gets the build time and tag on an `ENV` line after `BUILD` and replies
+`DONE <toplevel>`; a failed `FETCHDRV` (or a builder without it) builds everything in the
+builder. VM targets keep the flow above: they are small, and tier systems build in their tier
+builders.
 
 **Sandboxed builds.** The builder holds the host's `/nix/store` and `/nix/var/nix`
 read-write, so root inside it would reach the host. Every build therefore runs in Nix's
@@ -4255,6 +4278,17 @@ shard builder build browsing
 6. Builder stops, /nix/store remounted R/O
 7. Host nix-daemon restarts
 8. Host builds packages instantly (all deps already in store)
+```
+
+```
+shard builder build host   (rebuild in lockdown)
+
+1. Host evaluates the toplevel .drv (its nix-daemon still runs)
+2. Host nix-daemon stops, builder starts
+3. FETCHDRV <drv>: builder fetches substitutes and builds source fetches only
+4. Builder stops, host nix-daemon restarts
+5. Host builds the rest offline
+6. nixos-rebuild switch --no-reexec --store-path <toplevel>
 ```
 
 **Local flake inputs (`localInputs`):**
