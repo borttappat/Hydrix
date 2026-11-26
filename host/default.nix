@@ -22,5 +22,6 @@
     ./usb.nix           # USB storage block, usb attach CLI, static VM devices
     ./passwords.nix       # Password frontends (vault, vault-pick) over the vault VM or host
     ./repos.nix           # hydrix.repos: host clones (ensure-repos), git boundary guards
+    ./clock.nix           # Clock never goes back past the last known time (late RTC reset)
   ];
 }
